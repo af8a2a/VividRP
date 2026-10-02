@@ -17,6 +17,7 @@ Texture2D<float2> _ReprojectedHistoryMeta;
 Texture2D<float4> _ReprojectedResurrectionColor;
 Texture2D<float2> _ReprojectedResurrectionMeta;
 Texture2D<float> _RejectionMask;
+Texture2D<float2> _HistoryWeightControl;
 
 RWTexture2D<float> _TSROutputPreExposure;
 RWTexture2D<float4> _UpdatedHistoryColor;
@@ -34,6 +35,13 @@ float4 _OutputSize;
 float4 _TSRParams;
 
 static const float TSR_RESURRECTION_PERSISTENT_FRAMES = 6.0;
+
+// UE ComputeSampleWeigth, evaluated on our existing Catmull-Rom input grid.
+float TSR_InputAlignment(float factor, float2 delta)
+{
+    float x2 = saturate(factor * factor * dot(delta, delta));
+    return saturate((0.9 * x2 - 1.9) * x2 + 1.0);
+}
 
 [numthreads(8, 8, 1)]
 void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -65,51 +73,54 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float2 motion = _DilatedMotion[renderCoord];
     float velocityPixels = length(motion * float2(renderSize));
     float velocityFactor = saturate((velocityPixels - 0.5) * (1.0 / 7.5));
-    float staticMoire = lumaInstability
-        * saturate(1.0 - velocityFactor * 2.0)
-        * saturate(1.0 - reprojectionBoundary * 2.0);
-    float waveStaticMoire = TSR_WaveActiveAverageOrSelf(staticMoire);
-    staticMoire = max(staticMoire, waveStaticMoire * 0.35);
-    float movingMoire = saturate(lumaInstability - staticMoire);
-    float updateInstability = max(max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage), movingMoire);
-    float waveUpdateInstability = TSR_WaveActiveMaxOrSelf(updateInstability);
-    bool waveHasRejectedNeighbor = TSR_WaveActiveAnyTrueOrSelf(accepted < 0.5);
-    updateInstability = max(updateInstability, waveUpdateInstability * 0.2);
-    updateInstability = max(updateInstability, waveHasRejectedNeighbor ? movingMoire * 0.15 : 0.0);
-
+    // Retained only for the legacy resurrection path and diagnostics. Primary
+    // history validity has one owner below; reprojection no longer decays it.
+    float updateInstability = max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage);
     float maxSampleCount = max(_TSRParams.y, 1.0);
-    float boundarySampleCount = lerp(maxSampleCount, min(maxSampleCount, 4.0), reprojectionBoundary);
-    float thinGeometrySampleCount = lerp(boundarySampleCount, min(boundarySampleCount, 3.0), thinGeometryCoverage);
-    float antiFlickerSampleCount = lerp(
-        thinGeometrySampleCount,
-        max(thinGeometrySampleCount, min(maxSampleCount, 12.0)),
-        staticMoire);
-    float recoveryRate = lerp(1.0, 0.35, updateInstability);
-    float rejectionRetention = lerp(0.0, 0.35, updateInstability);
-    float rejectedSampleCount = max(1.0, min(previousSampleCount * rejectionRetention, antiFlickerSampleCount));
-    float sampleCount = accepted > 0.5
-        ? min(previousSampleCount + recoveryRate, antiFlickerSampleCount)
-        : rejectedSampleCount;
+    float hysteresis = rcp(maxSampleCount);
+    float2 inputPosition = TSR_OutputUV(pixelCoord, outputSize) * float2(renderSize);
+    float2 inputDelta = frac(inputPosition) - 0.5;
+    float inputToHistoryFactor = max((float)outputSize.x / renderSize.x, 1.0);
+    float coarseContribution = TSR_InputAlignment(1.0, inputDelta) * hysteresis;
+    float idealContribution = TSR_InputAlignment(inputToHistoryFactor, inputDelta) * hysteresis;
+    float previousValidity = accepted > 0.5 ? saturate(previousSampleCount / maxSampleCount) : 0.0;
+    float2 control = saturate(_HistoryWeightControl[pixelCoord]);
     if (stationaryShadingChange)
-        sampleCount = min(sampleCount, 4.0);
-    float historyWeight = accepted > 0.5
-        ? saturate(previousSampleCount / max(sampleCount, 1.0))
-        : 0.0;
-    float velocityWeightClamp = lerp(0.96, 0.18, velocityFactor);
+        control.y = 1.0;
+    // UE defaults: rejection retains two samples, motion retains four samples.
+    float rejectionClamp = 1.0 - min(2.0 / maxSampleCount, 1.0);
+    previousValidity = min(previousValidity, 1.0 - rejectionClamp * control.y);
+    float minBlend = 1.0 - control.x;
+    float refiningBlend = idealContribution / max(previousValidity + idealContribution, 1e-8);
+    float coarseRejected = minBlend > 0.0 ? min(coarseContribution * control.x / minBlend, 1.0) : 1.0;
+    float coarseRefining = refiningBlend > 0.0 ? min(coarseContribution * (1.0 - refiningBlend) / refiningBlend, 1.0) : 1.0;
+    float refining = coarseRejected >= coarseRefining ? saturate(previousValidity * maxSampleCount) : 0.0;
+    float kernelLerp = accepted > 0.5 ? saturate(control.x * 16.0 - 13.0) * refining : 0.0;
+    float currentWeight = TSR_InputAlignment(lerp(1.0, inputToHistoryFactor, kernelLerp), inputDelta) * hysteresis;
+    float rejectionContribution = currentWeight > 0.0 ? currentWeight : coarseContribution;
+    // Explicit endpoint avoids 0/0 and infinity in the fully trusted case.
+    float previousWeight = minBlend > 0.0
+        ? min(rejectionContribution * control.x / minBlend, previousValidity)
+        : previousValidity;
+    previousWeight = min(previousWeight, 1.0 - currentWeight);
 #if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
-    float initialHistoryWeight = historyWeight;
+    float initialHistoryWeight = previousWeight / max(currentWeight + previousWeight, 1e-8);
 #endif
-    float boundaryWeightClamp = lerp(0.96, 0.45, reprojectionBoundary);
-    float thinGeometryWeightClamp = lerp(0.96, 0.28, thinGeometryCoverage);
-    float moireWeightFloor = accepted > 0.5 ? staticMoire * 0.45 : 0.0;
-    float weightRelaxation = max(max(reprojectionBoundary * 0.5, thinGeometryCoverage * 0.65), movingMoire * 0.4);
-    historyWeight = min(historyWeight, min(min(velocityWeightClamp, boundaryWeightClamp), thinGeometryWeightClamp));
-    historyWeight = max(historyWeight, moireWeightFloor);
-    historyWeight *= saturate(1.0 - weightRelaxation);
-    // A confirmed lighting change needs a faster response, while retaining some
-    // temporal filtering if stationary subpixel coverage was mistaken for lighting.
-    if (stationaryShadingChange)
-        historyWeight = min(historyWeight, 0.75);
+    float outputVelocity = length(motion * float2(outputSize));
+    float maxMovingValidity = 1.0 - (1.0 - min(4.0 / maxSampleCount, 1.0)) * saturate(outputVelocity);
+    float currentLuma = max(dot(currentColor, float3(1.0, 2.0, 1.0)), 0.0);
+    float historyLuma = max(dot(historyColor, float3(1.0, 2.0, 1.0)), 0.0);
+    float contrastValidity = abs(currentLuma - historyLuma) / max(max(currentLuma, historyLuma), 1e-8);
+    previousWeight = min(previousWeight, max(maxMovingValidity, contrastValidity));
+    float outputValidity = saturate(currentWeight + previousWeight);
+    // Keep the public metadata in sample-count units, with UE's upward 8-bit
+    // validity quantization. Color uses the unquantized contribution weights.
+    float sampleCount = ceil(outputValidity * 255.0) * (maxSampleCount / 255.0);
+    float historyToneWeight = max(0.0001, rcp(historyLuma + 4.0));
+    float currentToneWeight = max(0.0001, rcp(currentLuma + 4.0));
+    float historyContribution = previousWeight * historyToneWeight;
+    float currentContribution = currentWeight * currentToneWeight;
+    float historyWeight = historyContribution / max(historyContribution + currentContribution, 1e-8);
     float3 result = TSR_BlendColorVALU(currentColor, historyColor, historyWeight);
 
     float resurrectionFrames = resurrectionMeta.x;
@@ -137,7 +148,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         ? resurrectionAgeWeight * saturate(1.0 - updateInstability * 0.65) * 0.35
         : 0.0;
     result = lerp(result, resurrectionColor, resurrectionWeight);
-    sampleCount = max(sampleCount, min(resurrectionFrames, 4.0) * resurrectionWeight);
+    // Resurrection is a separate color fallback, not evidence of primary validity.
 
     // Expire stale shading as well as blocking it in this frame, so a later
     // disocclusion cannot recover the lighting that was just rejected.

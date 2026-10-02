@@ -69,7 +69,9 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float4 reprojectedColor = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
     float exposureCorrection = TSR_HistoryExposureCorrection();
     _ReprojectedHistoryColor[pixelCoord] = float4(reprojectedColor.rgb * exposureCorrection, reprojectedColor.a);
-    _ReprojectedHistoryMeta[pixelCoord] = float2(historyMeta.x * historyConfidence, historyMeta.y);
+    // Preserve continuous validity; UpdateHistory owns contribution reduction.
+    // The legacy resurrection lifetime still uses its separate confidence below.
+    _ReprojectedHistoryMeta[pixelCoord] = historyMeta;
     float3 resurrectionColor = TSR_SampleCatmullRom(_ResurrectionColor, historyUV, previousSize).rgb * exposureCorrection;
     // Count shading changes on the stable output grid. Point-quantizing each
     // jitter delta would accumulate a drift even for a stationary camera.

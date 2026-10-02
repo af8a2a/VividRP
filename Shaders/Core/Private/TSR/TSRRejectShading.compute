@@ -25,13 +25,14 @@ RWTexture2D<float4> _OutputInputShadingGuide;
 RWTexture2D<float4> _OutputHistoryShadingGuide;
 Texture2D<float4> _PreviousShadingGuide;
 Texture2D<float2> _ShadingGuideMetadata;
-Texture2D<float2> _ShadingGuideConfidence;
+Texture2D<float4> _ShadingGuideConfidence;
 RWTexture2D<float2> _OutputShadingGuideMetadata;
-RWTexture2D<float2> _OutputShadingGuideConfidence;
+RWTexture2D<float4> _OutputShadingGuideConfidence;
 RWTexture2D<float4> _CurrentShadingGuide;
 
 RWTexture2D<float4> _AcceptedHistoryColor;
 RWTexture2D<float> _RejectionMask;
+RWTexture2D<float2> _HistoryWeightControl;
 
 #if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
 RWTexture2D<float4> _HistoryLossDiagnostics;
@@ -237,7 +238,8 @@ void CSPropagateShadingConfidence(uint3 groupId : SV_GroupID, uint3 tid : SV_Gro
     float rejectionBlend=min(factor.x,min(factor.y,factor.z));
     float2 metadata=_ShadingGuideMetadata[coord];
     float disableClamp=metadata.y<0.0?0.0:min(clampBlend,min(metadata.x,historyUncertainty));
-    _OutputShadingGuideConfidence[coord]=float2(rejectionBlend,disableClamp);
+    // B carries DecreaseValidityMultiplier, independent of uncertainty-limited G.
+    _OutputShadingGuideConfidence[coord]=float4(rejectionBlend,disableClamp,metadata.y<0.0?1.0:1.0-clampBlend,0.0);
     bool validGuide;float4 previous=TSR_LoadPreviousGuide(coord,validGuide);
     float resolutionRatio=(_OutputSize.x*_OutputSize.y)/(_RenderSize.x*_RenderSize.y);
     float theoreticalBlend=rcp(1.0+_TSRParams.y/max(resolutionRatio,1.0));
@@ -346,7 +348,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     // A geometric silhouette changes subpixel coverage even while stationary.
     // Preserve its accumulation; confirm lighting on continuous receiving surfaces.
     bool continuousReceiver = depthError <= receiverDepthScale * 0.02;
-    if (!hasSignificantMotion && continuousReceiver && historyMeta.x > 0.5)
+    if (!hasSignificantMotion && continuousReceiver && historyMeta.x > 0.0)
     {
         // Confirm a stationary shading change across three consecutive frames.
         // A signed direction alone cannot distinguish a run of stochastic samples
@@ -406,7 +408,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         pendingShadingChange = candidateChange && !stationaryShadingChange ? (float)(direction * 4u + count) : 0.0;
     }
 
-    bool accepted = historyMeta.x > 0.5
+    bool accepted = historyMeta.x > 0.0
         && motionPixels <= motionLimit
         && !depthRejected
         && !colorRejected;
@@ -416,7 +418,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     // Nonnegative alpha carries pending confirmation state. Moving rejection (-1)
     // discards primary history; stationary lighting (-2) shortens its accumulation.
     float shadingState = stationaryShadingChange ? -2.0
-        : (historyMeta.x > 0.5 && colorRejected ? -1.0 : pendingShadingChange);
+        : (historyMeta.x > 0.0 && colorRejected ? -1.0 : pendingShadingChange);
     // Only relax a mature, stationary history on a continuous receiver. Existing
     // luma instability is a noise hint, not evidence that a lighting change is safe.
     // Pending confirmation also blocks relaxation, before lighting is confirmed.
@@ -467,10 +469,21 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     _AcceptedHistoryColor[pixelCoord] = float4(accepted ? historyColor : currentColor, shadingState);
     _RejectionMask[pixelCoord] = accepted ? 1.0 : 0.0;
+    // UE HistoryRejectionOutput R/B: continuous shading confidence and validity
+    // reduction. The binary geometry mask remains separate for spatial AA.
+    float2 weightControl = float2(1.0, 0.0);
+#if defined(VIVID_TSR_PAIRED_GUIDES)
+    weightControl = saturate(_ShadingGuideConfidence[renderCoord].xz);
+#endif
+    // The legacy confirmation remains authoritative when low-frequency guides
+    // are disabled or hide a coherent lighting change inside their neighborhood.
+    if (stationaryShadingChange)
+        weightControl.y = 1.0;
+    _HistoryWeightControl[pixelCoord] = accepted ? weightControl : float2(0.0, 1.0);
 #if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
     // Bits: valid, significant motion, motion limit, depth rejection, color
     // rejection, stationary confirmation, pending confirmation, stable history.
-    uint reasons = (historyMeta.x > 0.5 ? 1u : 0u)
+    uint reasons = (historyMeta.x > 0.0 ? 1u : 0u)
         | (hasSignificantMotion ? 2u : 0u) | (motionPixels > motionLimit ? 4u : 0u)
         | (depthRejected ? 8u : 0u) | (colorRejected ? 16u : 0u)
         | (stationaryShadingChange ? 32u : 0u) | (pendingShadingChange > 0.0 ? 64u : 0u)

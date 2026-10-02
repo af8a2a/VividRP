@@ -70,6 +70,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReprojectedResurrectionColorId = Shader.PropertyToID("_ReprojectedResurrectionColor");
         private static readonly int ReprojectedResurrectionMetaId = Shader.PropertyToID("_ReprojectedResurrectionMeta");
         private static readonly int AcceptedHistoryColorId = Shader.PropertyToID("_AcceptedHistoryColor");
+        private static readonly int HistoryWeightControlId = Shader.PropertyToID("_HistoryWeightControl");
         private static readonly int RejectionMaskId = Shader.PropertyToID("_RejectionMask");
         private static readonly int CurrentFrameColorId = Shader.PropertyToID("_CurrentFrameColor");
         private static readonly int SpatialAntiAliasedColorId = Shader.PropertyToID("_SpatialAntiAliasedColor");
@@ -106,6 +107,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTextureDesc m_HistoryShadingGuideDescriptor = new();
         private readonly RenderGraphTextureDesc m_GuideMetadataDescriptor = new();
         private readonly RenderGraphTextureDesc m_GuideConfidenceDescriptor = new();
+        private readonly RenderGraphTextureDesc m_HistoryWeightControlDescriptor = new();
         private readonly RenderGraphTextureDesc m_RejectionMaskDescriptor = new();
         private readonly RenderGraphTextureDesc m_SpatialAntiAliasedColorDescriptor =
             RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
@@ -270,7 +272,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var guideMetadata = enablePairedGuides ? renderGraph.CreateTexture(ConfigureColorDescriptor(
                 m_GuideMetadataDescriptor, "TSR_GuideMetadata", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat)) : default;
             var guideConfidence = enablePairedGuides ? renderGraph.CreateTexture(ConfigureColorDescriptor(
-                m_GuideConfidenceDescriptor, "TSR_GuideConfidence", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat)) : default;
+                m_GuideConfidenceDescriptor, "TSR_GuideConfidence", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat)) : default;
+            var historyWeightControl = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                m_HistoryWeightControlDescriptor, "TSR_HistoryWeightControl", outputSize.x, outputSize.y,
+                GraphicsFormat.R16G16_SFloat));
             var rejectionMask = renderGraph.CreateTexture(
                 ConfigureColorDescriptor(
                     m_RejectionMaskDescriptor,
@@ -347,6 +352,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.PreviousShadingGuide = handles.PreviousShadingGuide;
                 passData.CurrentShadingGuide = handles.CurrentShadingGuide;
                 passData.RejectionMask = rejectionMask;
+                passData.HistoryWeightControl = historyWeightControl;
                 passData.SpatialAntiAliasedColor = spatialAntiAliasedColor;
                 passData.PreviousHistoryColor = handles.PreviousHistoryColor;
                 passData.CurrentHistoryColor = handles.CurrentHistoryColor;
@@ -397,6 +403,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     builder.UseTexture(passData.CurrentShadingGuide, AccessFlags.ReadWrite);
                 }
                 builder.UseTexture(passData.RejectionMask, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.HistoryWeightControl, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.SpatialAntiAliasedColor, AccessFlags.ReadWrite);
                 var previousAccess = passData.ResetHistory
                     ? AccessFlags.ReadWrite
@@ -654,6 +661,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(shader, kernel, ShadingGuideConfidenceId, data.GuideConfidence);
             }
             cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
+            cmd.SetComputeTextureParam(shader, kernel, HistoryWeightControlId, data.HistoryWeightControl);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
         }
@@ -683,6 +691,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionMetaId, data.ReprojectedResurrectionMeta);
             cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
+            cmd.SetComputeTextureParam(shader, kernel, HistoryWeightControlId, data.HistoryWeightControl);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedHistoryColorId, data.CurrentHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedHistoryMetaId, data.CurrentHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedResurrectionColorId, data.CurrentResurrectionColor);
@@ -1091,6 +1100,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle PreviousShadingGuide;
             public TextureHandle CurrentShadingGuide;
             public TextureHandle RejectionMask;
+            public TextureHandle HistoryWeightControl;
             public TextureHandle SpatialAntiAliasedColor;
             public TextureHandle PreviousHistoryColor;
             public TextureHandle CurrentHistoryColor;

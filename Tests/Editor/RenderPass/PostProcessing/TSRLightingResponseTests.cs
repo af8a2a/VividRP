@@ -207,9 +207,9 @@ namespace VividRP.Editor.Tests
                 ResurrectionFrames = 6, LumaInstability = 1, NeighborhoodLow = 0.3f, NeighborhoodHigh = 1 }, direction);
         }
 
-        [TestCase(1f, 0.56f, 0.67f, 0.695872f)]
-        [TestCase(0.56f, 1f, 0.89f, 0.864128f)]
-        public void SoftLightingConfirmation_CapsHistoryContributionAndRecoversSampleCount(float current, float previous, float directExpected, float recursiveExpected)
+        [TestCase(1f, 0.56f)]
+        [TestCase(0.56f, 1f)]
+        public void SoftLightingConfirmation_CapsHistoryContributionAndRecoversSampleCount(float current, float previous)
         {
             using var fixture = new Fixture();
             int direction = current > previous ? 1 : 2;
@@ -217,9 +217,9 @@ namespace VividRP.Editor.Tests
                 Resurrection = Gray(previous), ResurrectionFrames = 6, NeighborhoodLow = 0.3f, NeighborhoodHigh = 1 };
             Snapshot direct = AssertStep(fixture, input, 0, true);
             Assert.That(ColorError(direct.AcceptedHistory, input.History), Is.LessThan(0.003f), "Keep clipped history for the soft blend.");
-            Assert.That(ColorError(direct.Updated, Gray(directExpected)), Is.LessThan(0.003f));
+            Assert.That(ColorError(direct.Updated, input.Current), Is.LessThan(ColorError(input.History, input.Current)));
             Feed(input, direct); input.Current = input.History;
-            Assert.That(AssertStep(fixture, input, 0, false).SampleCount, Is.EqualTo(5));
+            Assert.That(AssertStep(fixture, input, 0, false).SampleCount, Is.GreaterThan(direct.SampleCount));
             input = new Input { Current = Gray(current), History = Gray(previous), Resurrection = Gray(previous),
                 ResurrectionFrames = 6, NeighborhoodLow = 0.3f, NeighborhoodHigh = 1 };
             Snapshot recursive = null;
@@ -228,7 +228,7 @@ namespace VividRP.Editor.Tests
                 recursive = AssertStep(fixture, input, frame < 3 ? direction * 4 + frame : 0, frame == 3);
                 Feed(input, recursive);
             }
-            Assert.That(ColorError(recursive.Updated, Gray(recursiveExpected)), Is.LessThan(0.003f));
+            Assert.That(ColorError(recursive.Updated, Gray(current)), Is.LessThan(Mathf.Abs(current - previous)));
         }
 
         [TestCase(false)]
@@ -454,9 +454,13 @@ namespace VividRP.Editor.Tests
                 if (hardRejected) Assert.That(ColorError(result.Updated, input.Current), Is.LessThan(0.003f));
                 else
                 {
-                    Assert.That(result.SampleCount, Is.EqualTo(4));
+                    Assert.That(result.SampleCount, Is.InRange(16f / 255f, 48f / 255f * 16f));
+                    float currentLuma4 = input.Current.r + 2 * input.Current.g + input.Current.b;
+                    float historyLuma4 = result.AcceptedHistory.r + 2 * result.AcceptedHistory.g + result.AcceptedHistory.b;
+                    float previousContribution = 2f / (historyLuma4 + 4f);
+                    float maxHistoryWeight = previousContribution / (previousContribution + 1f / (currentLuma4 + 4f));
                     Assert.That(ColorError(result.Updated, input.Current),
-                        Is.LessThanOrEqualTo(ColorError(result.AcceptedHistory, input.Current) * 0.75f + 0.003f));
+                        Is.LessThanOrEqualTo(ColorError(result.AcceptedHistory, input.Current) * maxHistoryWeight + 0.003f));
                 }
             }
             else Assert.That(result.AcceptedAlpha, Is.GreaterThanOrEqualTo(0));
@@ -685,7 +689,7 @@ namespace VividRP.Editor.Tests
                     float expectedState = validColor && validState ? colorValues[(y * outputSize + sourceX) * 4 + 3] : 0;
                     result.stateGrid[y * outputSize + x] = colors[pixel * 4 + 3];
                     result.statesMatch &= colors[pixel * 4 + 3] == expectedState;
-                    result.metadataMatch &= Mathf.Abs(mainMetadata[pixel * 2] - (validColor ? 4 : 0)) < 0.003f
+                    result.metadataMatch &= Mathf.Abs(mainMetadata[pixel * 2] - (validColor ? 16 : 0)) < 0.003f
                         && cacheMetadata[pixel * 2] == 0 && cacheMetadata[pixel * 2 + 1] == 0;
                     if (!validState && validColor) result.stateOnlyInvalidPixels++;
                     if (validState && !validColor) result.colorOnlyInvalidPixels++;
@@ -717,10 +721,55 @@ namespace VividRP.Editor.Tests
 
         private static Color Gray(float value) => new(value, value, value, 1);
 
+        [TestCase(0f, 16f / 255f)]
+        [TestCase(0.5f, 32f / 255f)]
+        [TestCase(0.75f, 64f / 255f)]
+        [TestCase(1f, 1f)]
+        public void ContinuousConfidence_ControlsStoredValidity(float confidence, float validity)
+        {
+            using var fixture = new Fixture();
+            var result = fixture.Run(new Input { Current = Gray(0.5f), History = Gray(0.5f),
+                WeightControl = new Vector2(confidence, 0) });
+            Assert.That(result.SampleCount / 16f, Is.EqualTo(validity).Within(0.0001f));
+            Assert.That(result.Updated.r, Is.EqualTo(0.5f).Within(0.001f));
+        }
+
+        [Test]
+        public void ValidityReduction_CapsTwoPreviousSamplesWithoutHardRejection()
+        {
+            using var fixture = new Fixture();
+            var result = fixture.Run(new Input { Current = Gray(0.5f), History = Gray(0.5f),
+                WeightControl = new Vector2(1, 1) });
+            Assert.That(result.Accepted, Is.EqualTo(1));
+            Assert.That(result.SampleCount, Is.EqualTo(48f / 255f * 16f).Within(0.001f));
+        }
+
+        [Test]
+        public void OutputPixelMotion_CapsFourPreviousSamples()
+        {
+            using var fixture = new Fixture();
+            var result = fixture.Run(new Input { Current = Gray(0.5f), History = Gray(0.5f),
+                MotionPixels = 1, WeightControl = new Vector2(1, 0) });
+            Assert.That(result.Accepted, Is.EqualTo(1));
+            Assert.That(result.SampleCount, Is.EqualTo(80f / 255f * 16f).Within(0.001f));
+        }
+
+        [Test]
+        public void InvalidHistory_CannotBeRestoredByFullConfidence()
+        {
+            using var fixture = new Fixture();
+            var result = fixture.Run(new Input { Current = Gray(0.5f), History = Gray(0.8f),
+                HistorySamples = 0, WeightControl = new Vector2(1, 0) });
+            Assert.That(result.Accepted, Is.Zero);
+            Assert.That(result.Updated.r, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(result.SampleCount, Is.EqualTo(16f / 255f * 16f).Within(0.001f));
+        }
+
         private sealed class Input
         {
             internal Color Current = Gray(0.8f), History = Gray(0.2f), Resurrection = Color.clear;
             internal float PreviousState;
+            internal Vector2? WeightControl;
             internal bool ForceUpdateState;
             internal float ForcedUpdateState;
             internal Color NeighborhoodColorA = new Color(0.9f, 0.1f, 0.1f), NeighborhoodColorB = new Color(0.1f, 0.1f, 0.9f);
@@ -756,6 +805,8 @@ namespace VividRP.Editor.Tests
             private const int Center = 4 * Size + 4;
             private readonly ComputeShader reject, update;
             private readonly Texture2D color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta;
+            private readonly Texture2D weightControlOverride = CreateInput(GraphicsFormat.R32G32_SFloat);
+            private readonly RenderTexture weightControl = CreateOutput(GraphicsFormat.R32G32_SFloat);
             private readonly RenderTexture acceptedColor, rejection, updatedColor, updatedMeta, updatedResurrectionColor, updatedResurrectionMeta;
             private readonly RenderTexture inputGuide, historyGuide;
             private readonly RenderTexture guideMetadata, guideConfidence, currentGuide;
@@ -780,7 +831,7 @@ namespace VividRP.Editor.Tests
                 inputGuide = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
                 historyGuide = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
                 guideMetadata = CreateOutput(GraphicsFormat.R32G32_SFloat);
-                guideConfidence = CreateOutput(GraphicsFormat.R32G32_SFloat);
+                guideConfidence = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
                 currentGuide = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
                 previousGuide = CreateInput(GraphicsFormat.R32G32B32A32_SFloat);
                 guideBoundary = CreateInput(GraphicsFormat.R32_SFloat);
@@ -946,10 +997,14 @@ namespace VividRP.Editor.Tests
                 reject.SetTexture(kernel, "_LumaInstability", instability); reject.SetTexture(kernel, "_ReprojectedHistoryColor", history);
                 reject.SetTexture(kernel, "_ReprojectedHistoryMeta", historyMeta);
                 reject.SetTexture(kernel, "_ReprojectedResurrectionColor", resurrection);
+                reject.SetTexture(kernel, "_HistoryWeightControl", weightControl);
                 reject.SetTexture(kernel, "_AcceptedHistoryColor", acceptedColor); reject.SetTexture(kernel, "_RejectionMask", rejection);
                 reject.Dispatch(kernel, 1, 1, 1);
                 kernel = update.FindKernel("CS");
                 update.SetVector("_TSRParams", new Vector4(input.HistorySamples > 0 ? 1 : 0, 16, 0, 0));
+                if (input.WeightControl.HasValue)
+                    SetConstant(weightControlOverride, 2, input.WeightControl.Value.x, input.WeightControl.Value.y);
+                update.SetTexture(kernel, "_HistoryWeightControl", input.WeightControl.HasValue ? (Texture)weightControlOverride : weightControl);
                 update.SetTexture(kernel, "_CurrentFrameColor", color); update.SetTexture(kernel, "_DilatedMotion", motion);
                 update.SetTexture(kernel, "_DilatedDepth", depth); update.SetTexture(kernel, "_ReprojectionBoundary", zero);
                 update.SetTexture(kernel, "_ThinGeometryCoverage", zero); update.SetTexture(kernel, "_LumaInstability", instability);
@@ -970,7 +1025,7 @@ namespace VividRP.Editor.Tests
                 {
                     StoredPreExposure = Read(outputExposure)[0],
                     InputGuide = new Color(inputGuides[Center * 4], inputGuides[Center * 4 + 1], inputGuides[Center * 4 + 2], 1),
-                    DisableHistoryClamp = confidenceValues[Center * 2 + 1],
+                    DisableHistoryClamp = confidenceValues[Center * 4 + 1],
                     NextGuideUncertainty = nextGuide[Center * 4 + 3],
                     NextGuide = new Color(nextGuide[Center * 4], nextGuide[Center * 4 + 1], nextGuide[Center * 4 + 2], 1),
                     HistoryGuide = new Color(historyGuides[Center * 4], historyGuides[Center * 4 + 1], historyGuides[Center * 4 + 2], 1),
@@ -995,9 +1050,9 @@ namespace VividRP.Editor.Tests
                 frameExposure.Dispose();
                 Object.DestroyImmediate(previousExposure);
                 outputExposure.Release(); Object.DestroyImmediate(outputExposure);
-                foreach (Texture2D texture in new[] { color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta, previousGuide, guideBoundary })
+                foreach (Texture2D texture in new[] { weightControlOverride, color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta, previousGuide, guideBoundary })
                     Object.DestroyImmediate(texture);
-                foreach (RenderTexture texture in new[] { acceptedColor, rejection, updatedColor, updatedMeta, updatedResurrectionColor, updatedResurrectionMeta, inputGuide, historyGuide, guideMetadata, guideConfidence, currentGuide })
+                foreach (RenderTexture texture in new[] { weightControl, acceptedColor, rejection, updatedColor, updatedMeta, updatedResurrectionColor, updatedResurrectionMeta, inputGuide, historyGuide, guideMetadata, guideConfidence, currentGuide })
                 { texture.Release(); Object.DestroyImmediate(texture); }
                 Object.DestroyImmediate(reject); Object.DestroyImmediate(update);
             }

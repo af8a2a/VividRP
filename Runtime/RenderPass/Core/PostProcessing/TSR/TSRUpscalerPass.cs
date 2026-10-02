@@ -14,6 +14,13 @@ namespace VividRP.Runtime.RenderPass.Core
         // Opt-in diagnostics: issue readbacks on the same command buffer after TSR.
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture, Texture, Texture, Texture> EditorTemporalCapture;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture, Texture, Texture, Texture> EditorHistoryCapture;
+        // The selected camera uses diagnostic kernels only while subscribed.
+        // Outputs: rejection reason bits/metrics, blend weights, updated history.
+        internal static Camera EditorHistoryLossCaptureCamera;
+        internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture> EditorHistoryLossCapture;
+        private static readonly int HistoryLossDiagnosticsId = Shader.PropertyToID("_HistoryLossDiagnostics");
+        private readonly RenderGraphTextureDesc m_RejectDiagnosticsDescriptor = new();
+        private readonly RenderGraphTextureDesc m_UpdateDiagnosticsDescriptor = new();
 #endif
         private const int CameraStateExpirationFrames = 400;
         private const int KernelThreadGroupSize = 8;
@@ -263,6 +270,22 @@ namespace VividRP.Runtime.RenderPass.Core
 #if UNITY_EDITOR
                 passData.Camera = cameraData.camera;
                 passData.FrameIndex = cameraData.frameIndex;
+                passData.CaptureHistoryLoss = EditorHistoryLossCapture != null
+                    && EditorHistoryLossCaptureCamera == cameraData.camera
+                    && shaders.RejectDiagnosticsKernel >= 0 && shaders.UpdateDiagnosticsKernel >= 0;
+                passData.RejectDiagnostics = default;
+                passData.UpdateDiagnostics = default;
+                if (passData.CaptureHistoryLoss)
+                {
+                    passData.RejectDiagnostics = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                        m_RejectDiagnosticsDescriptor, "TSR_RejectDiagnostics", outputSize.x, outputSize.y,
+                        GraphicsFormat.R32G32B32A32_SFloat));
+                    passData.UpdateDiagnostics = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                        m_UpdateDiagnosticsDescriptor, "TSR_UpdateDiagnostics", outputSize.x, outputSize.y,
+                        GraphicsFormat.R32G32B32A32_SFloat));
+                    builder.UseTexture(passData.RejectDiagnostics, AccessFlags.WriteAll);
+                    builder.UseTexture(passData.UpdateDiagnostics, AccessFlags.WriteAll);
+                }
 #endif
                 passData.Shaders = shaders;
                 passData.Source = sourceTexture.innerHandle;
@@ -437,6 +460,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 data.ReprojectedHistoryColor.ResolveTexture(), data.AcceptedHistoryColor.ResolveTexture(),
                 data.SpatialAntiAliasedColor.ResolveTexture(), data.ReprojectedResurrectionColor.ResolveTexture(),
                 data.ReprojectedHistoryMeta.ResolveTexture(), data.DepthError.ResolveTexture());
+            if (data.CaptureHistoryLoss)
+                EditorHistoryLossCapture?.Invoke(cmd, data.Camera, data.FrameIndex,
+                    data.RejectDiagnostics.ResolveTexture(), data.UpdateDiagnostics.ResolveTexture(),
+                    data.CurrentHistoryColor.ResolveTexture());
 #endif
             data.State.MarkHistoryWritten();
         }
@@ -483,6 +510,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var shader = data.Shaders.RejectShading;
             var kernel = data.Shaders.RejectShadingKernel;
+#if UNITY_EDITOR
+            if (data.CaptureHistoryLoss)
+            {
+                kernel = data.Shaders.RejectDiagnosticsKernel;
+                cmd.SetComputeTextureParam(shader, kernel, HistoryLossDiagnosticsId, data.RejectDiagnostics);
+            }
+#endif
             SetCommonConstants(cmd, shader, data);
             cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
             cmd.SetComputeTextureParam(shader, kernel, InputDepthId, data.Depth);
@@ -503,6 +537,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var shader = data.Shaders.UpdateHistory;
             var kernel = data.Shaders.UpdateHistoryKernel;
+#if UNITY_EDITOR
+            if (data.CaptureHistoryLoss)
+            {
+                kernel = data.Shaders.UpdateDiagnosticsKernel;
+                cmd.SetComputeTextureParam(shader, kernel, HistoryLossDiagnosticsId, data.UpdateDiagnostics);
+            }
+#endif
             SetCommonConstants(cmd, shader, data);
             cmd.SetComputeTextureParam(shader, kernel, CurrentFrameColorId, data.SpatialAntiAliasedColor);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
@@ -813,6 +854,10 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly int UpdateHistoryKernel;
             public readonly int ResolveHistoryKernel;
             public readonly int SharpenKernel;
+#if UNITY_EDITOR
+            public readonly int RejectDiagnosticsKernel;
+            public readonly int UpdateDiagnosticsKernel;
+#endif
 
             public ShaderSet(VividRPCoreResources resources)
             {
@@ -830,6 +875,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 UpdateHistoryKernel = FindKernel(UpdateHistory);
                 ResolveHistoryKernel = FindKernel(ResolveHistory);
                 SharpenKernel = FindKernel(Sharpen);
+#if UNITY_EDITOR
+                RejectDiagnosticsKernel = RejectShading != null && RejectShading.HasKernel("CSHistoryDiagnostics")
+                    ? RejectShading.FindKernel("CSHistoryDiagnostics") : -1;
+                UpdateDiagnosticsKernel = UpdateHistory != null && UpdateHistory.HasKernel("CSHistoryDiagnostics")
+                    ? UpdateHistory.FindKernel("CSHistoryDiagnostics") : -1;
+#endif
             }
 
             public bool IsValid =>
@@ -862,6 +913,9 @@ namespace VividRP.Runtime.RenderPass.Core
 #if UNITY_EDITOR
             public Camera Camera;
             public int FrameIndex;
+            public bool CaptureHistoryLoss;
+            public TextureHandle RejectDiagnostics;
+            public TextureHandle UpdateDiagnostics;
 #endif
             public CameraState State;
             public ShaderSet Shaders;

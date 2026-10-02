@@ -1,5 +1,6 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSHistoryDiagnostics VIVID_TSR_HISTORY_DIAGNOSTICS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
@@ -21,6 +22,11 @@ RWTexture2D<float4> _UpdatedHistoryColor;
 RWTexture2D<float2> _UpdatedHistoryMeta;
 RWTexture2D<float4> _UpdatedResurrectionColor;
 RWTexture2D<float2> _UpdatedResurrectionMeta;
+
+#if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
+RWTexture2D<float4> _HistoryLossDiagnostics;
+#define CS CSHistoryDiagnostics
+#endif
 
 float4 _RenderSize;
 float4 _OutputSize;
@@ -84,6 +90,9 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         ? saturate(previousSampleCount / max(sampleCount, 1.0))
         : 0.0;
     float velocityWeightClamp = lerp(0.96, 0.18, velocityFactor);
+#if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
+    float initialHistoryWeight = historyWeight;
+#endif
     float boundaryWeightClamp = lerp(0.96, 0.45, reprojectionBoundary);
     float thinGeometryWeightClamp = lerp(0.96, 0.28, thinGeometryCoverage);
     float moireWeightFloor = accepted > 0.5 ? staticMoire * 0.45 : 0.0;
@@ -141,4 +150,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _UpdatedResurrectionMeta[pixelCoord] = nextResurrectionFrames > 0.5
         ? float2(nextResurrectionFrames, nextResurrectionDepth)
         : 0.0;
+#if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
+    _HistoryLossDiagnostics[pixelCoord] = float4(historyWeight, initialHistoryWeight, resurrectionWeight, updateInstability);
+#endif
 }

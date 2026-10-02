@@ -1,5 +1,6 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSHistoryDiagnostics VIVID_TSR_HISTORY_DIAGNOSTICS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
@@ -18,6 +19,11 @@ Texture2D<float4> _ReprojectedResurrectionColor;
 
 RWTexture2D<float4> _AcceptedHistoryColor;
 RWTexture2D<float> _RejectionMask;
+
+#if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
+RWTexture2D<float4> _HistoryLossDiagnostics;
+#define CS CSHistoryDiagnostics
+#endif
 
 float4 _RenderSize;
 float4 _OutputSize;
@@ -180,4 +186,14 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     _AcceptedHistoryColor[pixelCoord] = float4(accepted ? historyColor : currentColor, shadingState);
     _RejectionMask[pixelCoord] = accepted ? 1.0 : 0.0;
+#if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
+    // Bits: valid, significant motion, motion limit, depth rejection, color
+    // rejection, stationary confirmation, pending confirmation, stable history.
+    uint reasons = (historyMeta.x > 0.5 ? 1u : 0u)
+        | (hasSignificantMotion ? 2u : 0u) | (motionPixels > motionLimit ? 4u : 0u)
+        | (depthRejected ? 8u : 0u) | (colorRejected ? 16u : 0u)
+        | (stationaryShadingChange ? 32u : 0u) | (pendingShadingChange > 0.0 ? 64u : 0u)
+        | (stableHistory ? 128u : 0u);
+    _HistoryLossDiagnostics[pixelCoord] = float4(reasons, lumaInstability, depthDiff, depthTolerance);
+#endif
 }

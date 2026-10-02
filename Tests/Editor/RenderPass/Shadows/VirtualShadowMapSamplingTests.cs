@@ -583,14 +583,19 @@ namespace VividRP.Editor.Tests
                 return result;
             }
 
-            internal void MarkScreen(Texture depth, Texture normal, int frame, bool resetAge)
+            internal void MarkScreen(Texture depth, Texture normal, int frame, bool resetAge, bool ue = false)
             {
                 int clear = Shader.FindKernel(resetAge ? "VSMPrototypeResetReceiverFeedback" : "VSMPrototypeClearReceiverRequests");
                 if (resetAge) Shader.SetBuffer(clear, "_VSMPrototypePageMetadata", Metadata);
                 Shader.SetBuffer(clear, "_VSMPageRequestFlags", RequestFlags);
                 Shader.SetBuffer(clear, "_VSMPagePressureRW", Pressure);
                 Shader.Dispatch(clear, 1, 1, 1);
-                int mark = Shader.FindKernel("VSMMarkReceiverPages");
+                int mark = Shader.FindKernel(ue ? "VSMMarkReceiverPagesUE" : "VSMMarkReceiverPages");
+                if (ue)
+                {
+                    Shader.SetInt("_CSMOutputWidth", depth.width);
+                    Shader.SetInt("_CSMOutputHeight", depth.height);
+                }
                 Shader.SetBuffer(mark, "_VSMPagePressure", Pressure);
                 Shader.SetInt("_CSMFrameIndex", frame);
                 Shader.SetInt("_VSMPrototypeFeedbackFrameIndex", frame);
@@ -600,7 +605,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetTexture(mark, "_DepthTexture", depth);
                 Shader.SetTexture(mark, "_GBuffer1", normal);
                 // No physical pool or page-table binding: cold start must work.
-                Shader.Dispatch(mark, 1, 1, 1);
+                Shader.Dispatch(mark, ue ? (depth.width + 15) / 16 : 1, ue ? (depth.height + 15) / 16 : 1, 1);
                 Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData);
             }
 
@@ -1671,6 +1676,106 @@ namespace VividRP.Editor.Tests
             bool requestedPreferred = false;
             for (int i = 4; i < 8; i++) requestedPreferred |= (f.RequestData[i] & 1u) != 0;
             Assert.That(requestedPreferred, Is.True);
+        }
+
+        [TestCase(1f, 0f, true)]
+        [TestCase(-1f, 0f, false)]
+        [TestCase(0f, 0f, true)]
+        [TestCase(-.08f, 0f, true)]
+        [TestCase(-.12f, 0f, false)]
+        [TestCase(-.4f, 60f, true)]
+        [TestCase(-.6f, 60f, false)]
+        [TestCase(-1f, 180f, true)]
+        public void UEReceiverMarking_BackfaceUsesSourceAngleAndNormalTolerance(
+            float ndotl, float angularDiameter, bool expected)
+        {
+            using var f = new Fixture(allocator: true);
+            var depth = new Texture2D(17, 3, TextureFormat.RFloat, false, true);
+            var normal = new Texture2D(17, 3, TextureFormat.RGBAFloat, false, true);
+            try
+            {
+                var depths = new float[51]; var normals = new Color[51];
+                // N = +Z, L dot N is the supplied value; independently vary L.
+                Vector3 lightDirection = new Vector3(Mathf.Sqrt(1 - ndotl * ndotl), 0, ndotl);
+                for (int i = 0; i < depths.Length; i++) { depths[i] = .5f; normals[i] = new Color(.5f, .5f, 0, 0); }
+                depth.SetPixelData(depths, 0); depth.Apply(); normal.SetPixels(normals); normal.Apply();
+                f.Shader.SetVector("_VSMMarkingLight", VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(
+                    Quaternion.LookRotation(-lightDirection), angularDiameter));
+                f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
+                // Fixture leaves SMRT disabled: a large source still needs its correct angular tolerance.
+                f.Upload();
+                f.Shader.SetInt("_VSMCullBackfacingPixels", 0);
+                f.MarkScreen(depth, normal, 0, true, ue: true);
+                var baseline = (uint[])f.RequestData.Clone();
+                var baselineMasks = new uint2[12]; f.ReceiverMasks.Requests.GetData(baselineMasks);
+                Assert.That(Array.Exists(baseline, x => x != 0u), Is.True);
+                Assert.That(Array.Exists(baselineMasks, x => math.any(x != 0u)), Is.True);
+                f.Shader.SetInt("_VSMCullBackfacingPixels", 1);
+                f.MarkScreen(depth, normal, 1, false, ue: true);
+                var actualMasks = new uint2[12]; f.ReceiverMasks.Requests.GetData(actualMasks);
+                Assert.That(f.RequestData, Is.EqualTo(expected ? baseline : new uint[12]));
+                Assert.That(actualMasks, Is.EqualTo(expected ? baselineMasks : new uint2[12]));
+                for (int i = 0; i < depths.Length; i++) depths[i] = SystemInfo.usesReversedZBuffer ? 0 : 1;
+                depth.SetPixelData(depths, 0); depth.Apply();
+                f.MarkScreen(depth, normal, 2, false, ue: true);
+                f.ReceiverMasks.Requests.GetData(actualMasks);
+                Assert.That(f.RequestData, Is.EqualTo(new uint[12]), "Sky clears previous demand.");
+                Assert.That(actualMasks, Is.EqualTo(new uint2[12]));
+            }
+            finally { Object.DestroyImmediate(depth); Object.DestroyImmediate(normal); }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void UEReceiverMarking_MixedNormalsMatchDepthRemovalAcrossWaveAndViewportEdges(bool edgeOnly)
+        {
+            using var f = new Fixture(allocator: true);
+            var depth = new Texture2D(17, 17, TextureFormat.RFloat, false, true);
+            // Packed GBuffer format is renderable, but Unity cannot create it as
+            // a CPU-writable Texture2D. Blit a float upload into the real format.
+            var upload = new Texture2D(17, 17, TextureFormat.RGBAFloat, false, true);
+            var normal = new RenderTexture(new RenderTextureDescriptor(17, 17)
+            {
+                graphicsFormat = GraphicsFormat.A2B10G10R10_UNormPack32,
+                depthStencilFormat = GraphicsFormat.None, msaaSamples = 1,
+            });
+            try
+            {
+                Assert.That(normal.Create(), Is.True);
+                var depths = new float[289]; var normals = new Color[289];
+                var keep = new bool[289];
+                for (int y = 0; y < 17; y++) for (int x = 0; x < 17; x++)
+                {
+                    int i = y * 17 + x;
+                    keep[i] = edgeOnly ? (x == 16 && y == 16) : ((x / 2 + y / 2) % 3 != 0);
+                    depths[i] = .5f;
+                    // +Z and -Z. Both oct encodings are valid, including (0,0).
+                    normals[i] = keep[i] ? new Color(.5f, .5f, 0, 0) : new Color(0, 0, 0, 0);
+                }
+                depth.SetPixelData(depths, 0); depth.Apply(); upload.SetPixels(normals); upload.Apply();
+                Graphics.Blit(upload, normal);
+                f.Shader.SetVector("_VSMMarkingLight", new Vector4(0, 0, 1, 0));
+                f.Shader.SetInt("_VSMReceiverMaskEnabled", 1);
+                f.Shader.SetInt("_VSMCullBackfacingPixels", 1);
+                f.Upload();
+                f.MarkScreen(depth, normal, 0, true, ue: true);
+                var actual = (uint[])f.RequestData.Clone();
+                var actualMasks = new uint2[12]; f.ReceiverMasks.Requests.GetData(actualMasks);
+                Assert.That(Array.Exists(actual, x => x != 0u), Is.True, "Final strided pixel must be included.");
+                for (int i = 0; i < depths.Length; i++)
+                    if (!keep[i]) depths[i] = SystemInfo.usesReversedZBuffer ? 0 : 1;
+                depth.SetPixelData(depths, 0); depth.Apply();
+                f.Shader.SetInt("_VSMCullBackfacingPixels", 0);
+                f.MarkScreen(depth, normal, 1, false, ue: true);
+                var expectedMasks = new uint2[12]; f.ReceiverMasks.Requests.GetData(expectedMasks);
+                Assert.That(actual, Is.EqualTo(f.RequestData));
+                Assert.That(actualMasks, Is.EqualTo(expectedMasks));
+            }
+            finally
+            {
+                normal.Release(); Object.DestroyImmediate(normal);
+                Object.DestroyImmediate(depth); Object.DestroyImmediate(upload);
+            }
         }
 
         [TestCase(0, 0)]

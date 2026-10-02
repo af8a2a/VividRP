@@ -48,6 +48,8 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapScreenDensity = new(false);
         [Tooltip("UE pool-pressure LOD bias: target 85% capacity, fast reduction, recovery after 10 frames below the threshold, maximum +2 levels. Sampling keeps its desired level and falls back to resident parents.")]
         public BoolParameter virtualShadowMapPagePressure = new(true);
+        [Tooltip("UE CullBackfacingPixels: skip receiver requests facing away from the directional light, with source-angle coverage and a minimum 0.1 dot-product tolerance.")]
+        public BoolParameter virtualShadowMapCullBackfacingPixels = new(true);
         [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
         [Tooltip("UE distance-based clipmap LOD bias. -1 requests finer levels; +1 requests coarser levels. Includes horizontal viewport/projection normalization; total bias is clamped to zero to preserve coverage. Does not change resident projection sizes.")]

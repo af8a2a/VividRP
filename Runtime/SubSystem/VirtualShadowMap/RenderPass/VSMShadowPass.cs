@@ -108,6 +108,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultReceiverDepth, m_DefaultReceiverNormal;
 
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
 
 
         private static readonly int CSMInvViewProjMatrixId = Shader.PropertyToID("_CSMInvViewProjMatrix");
@@ -148,7 +149,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Matrix4x4 m_ReceiverViewProjection;
 
-        private Vector4 m_ReceiverQuality, m_ReceiverParameters, m_ReceiverSMRTParameters;
+        private Vector4 m_ReceiverQuality, m_ReceiverParameters, m_ReceiverSMRTParameters, m_MarkingLight;
+        private bool m_CullBackfacingPixels;
 
         private int m_ReceiverWidth, m_ReceiverHeight;
 
@@ -371,6 +373,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReceiverHeight = cameraData.actualHeight;
                 m_ReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(settings, cameraData, clipmaps.Resolution);
                 m_ReceiverSMRTParameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, angularDiameter);
+                m_MarkingLight = VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(clipmaps.Rotation, angularDiameter);
+                m_CullBackfacingPixels = settings.virtualShadowMapCullBackfacingPixels.value;
                 m_ReceiverParameters = new Vector4(0,
                     shadowData.depthBias, shadowData.slopeScaleDepthBias,
                     0);
@@ -478,6 +482,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapPrototypeRuntime.PageReceiverMasksId,
                     VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
                 cmd.SetComputeTextureParam(shader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.MarkingLightId, m_MarkingLight);
+                cmd.SetComputeIntParam(shader, VirtualShadowMapReceiverQuality.CullBackfacingPixelsId,
+                    m_CullBackfacingPixels ? 1 : 0);
                 cmd.SetComputeMatrixParam(shader, CSMInvViewProjMatrixId, m_ReceiverViewProjection.inverse);
                 cmd.SetComputeMatrixParam(shader, VirtualShadowMapReceiverQuality.ViewProjectionId, m_ReceiverViewProjection);
                 cmd.SetComputeVectorParam(shader, VirtualShadowMapReceiverQuality.ParametersId, m_ReceiverQuality);

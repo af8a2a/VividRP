@@ -47,6 +47,32 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void UEReceiverMarking_DefaultAndLightParametersAreIndependentOfSMRTAndAllocateNothing()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                Assert.That(settings.virtualShadowMapCullBackfacingPixels.value, Is.True);
+                settings.virtualShadowMapSMRT.value = false;
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 60), Is.EqualTo(Vector4.zero));
+                var rotation = Quaternion.Euler(35, 120, 10);
+                Vector3 towardLight = -(rotation * Vector3.forward);
+                Vector4 value = VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(rotation, 60);
+                Assert.That(Vector3.Distance((Vector3)value, towardLight), Is.LessThan(1e-6));
+                Assert.That(value.w, Is.EqualTo(.5f).Within(1e-6));
+                Assert.That(VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(rotation, -10).w, Is.Zero);
+                Assert.That(VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(rotation, 200).w, Is.EqualTo(1));
+                for (int i = 0; i < 32; i++) VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(rotation, 60);
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 1024; i++) value = VirtualShadowMapReceiverQuality.BuildMarkingLightParameters(rotation, 60);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(value.w, Is.EqualTo(.5f).Within(1e-6));
+            }
+            finally { Object.DestroyImmediate(settings); }
+        }
+
         private static float ConvertInterCascadeBorder(float interCascadeBorder, float previousCascadeRelativeRange, float cascadeRelativeRange)
         {
             float rangeBorder = cascadeRelativeRange > 0.0f

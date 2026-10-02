@@ -11,6 +11,16 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly int ParametersId = Shader.PropertyToID("_VSMReceiverQuality");
         internal static readonly int ViewProjectionId = Shader.PropertyToID("_VSMReceiverViewProjection");
         internal static readonly int SMRTParametersId = Shader.PropertyToID("_VSMSMRTParameters");
+        internal static readonly int MarkingLightId = Shader.PropertyToID("_VSMMarkingLight");
+        internal static readonly int CullBackfacingPixelsId = Shader.PropertyToID("_VSMCullBackfacingPixels");
+
+        internal static Vector4 BuildMarkingLightParameters(Quaternion lightRotation, float angularDiameter)
+        {
+            Vector3 direction = lightRotation * Vector3.back;
+            // UE directional SourceRadius is sin(half angle), even with SMRT off.
+            return new Vector4(direction.x, direction.y, direction.z,
+                Mathf.Sin(Mathf.Clamp(angularDiameter, 0, 180) * (0.5f * Mathf.Deg2Rad)));
+        }
 
         internal static readonly int SMRTSampleIndexOffsetId = Shader.PropertyToID("_VSMSMRTSampleIndexOffset");
 

@@ -28,6 +28,33 @@ uint2 VividVSMDecodePageWindow(uint tag)
         ? uint2((tag >> 8u) & 15u, (tag >> 12u) & 15u) : uint2(1u, 1u);
 }
 
+// UE VirtualShadowMapPageAccessCommon.ush page-table ABI. Cache metadata and
+// physical owners retain their own slot+1 sentinel; these entries never do.
+#define VIVID_VSM_PAGE_TABLE_VALID 0x80000000u
+#define VIVID_VSM_PAGE_TABLE_RENDER 0x40000000u
+#define VIVID_VSM_PAGE_TABLE_LOD_MASK 0x03f00000u
+uint2 VividVSMPageTableAddress(uint entry) { return uint2(entry & 1023u, (entry >> 10u) & 1023u); }
+uint VividVSMPageTableLOD(uint entry) { return (entry >> 20u) & 63u; }
+bool VividVSMPageTableIsNative(uint entry)
+{
+    return (entry & (VIVID_VSM_PAGE_TABLE_VALID | VIVID_VSM_PAGE_TABLE_LOD_MASK)) == VIVID_VSM_PAGE_TABLE_VALID;
+}
+bool VividVSMPageTableIsRenderable(uint entry) { return (entry & VIVID_VSM_PAGE_TABLE_RENDER) != 0u; }
+uint VividVSMPageTableSlot(uint entry, uint rowSize)
+{
+    uint2 address = VividVSMPageTableAddress(entry);
+    return address.y * rowSize + address.x;
+}
+uint VividVSMEncodePageTable(uint2 address, uint lodOffset)
+{
+    return VIVID_VSM_PAGE_TABLE_VALID | (lodOffset << 20u) | (address.y << 10u) | address.x;
+}
+uint VividVSMEncodeNativePage(uint slot, uint rowSize, bool renderable)
+{
+    return VividVSMEncodePageTable(uint2(slot % rowSize, slot / rowSize), 0u)
+        | (renderable ? VIVID_VSM_PAGE_TABLE_RENDER : 0u);
+}
+
 // 8x8 receiver cells per page, packed as two row-major 32-bit masks. Endpoints
 // are inclusive texels; mask quantization expands coverage, never contracts it.
 uint2 VividVSMReceiverMaskRect(uint2 low, uint2 high, uint pageSize)

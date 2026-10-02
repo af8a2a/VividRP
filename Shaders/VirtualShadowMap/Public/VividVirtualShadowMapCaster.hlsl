@@ -51,9 +51,6 @@ bool VividTryResolveVSMPhysicalTexel(
         1);
     const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
-    const uint physicalPagesPerRow = (uint)max(
-        _VSMPrototypePhysicalPagesPerRow,
-        1);
     const uint2 virtualTexel = VividVSMRasterPositionToVirtualTexel(
         positionCS.xy,
         virtualResolution);
@@ -65,7 +62,7 @@ bool VividTryResolveVSMPhysicalTexel(
         + virtualPage.y * pagesPerAxis
         + virtualPage.x;
     const uint encodedPhysicalPage = _VSMPrototypePageTable[pageTableIndex];
-    if (encodedPhysicalPage == 0u)
+    if (!VividVSMPageTableIsRenderable(encodedPhysicalPage))
         return false;
     if ((_VSMPrototypePageMetadata[pageTableIndex].x & kVividVSMPageDeferred) != 0u)
         return false;
@@ -75,10 +72,7 @@ bool VividTryResolveVSMPhysicalTexel(
         return false;
     }
 
-    const uint physicalPageIndex = encodedPhysicalPage - 1u;
-    const uint2 physicalPage = uint2(
-        physicalPageIndex % physicalPagesPerRow,
-        physicalPageIndex / physicalPagesPerRow);
+    const uint2 physicalPage = VividVSMPageTableAddress(encodedPhysicalPage);
     physicalTexel = physicalPage * pageSize + texelInPage;
     return true;
 }
@@ -117,16 +111,14 @@ bool VividTryResolveVSMPagePhysicalTexel(
 {
     physicalTexel = 0u;
     uint encodedPage = _VSMPrototypePageTable[virtualPageIndex];
-    if (encodedPage == 0u)
+    if (!VividVSMPageTableIsRenderable(encodedPage))
         return false;
     if ((_VSMPrototypePageMetadata[virtualPageIndex].x & kVividVSMPageDeferred) != 0u)
         return false;
     if ((_VSMPrototypePageMetadata[virtualPageIndex].x
             & (_VSMPrototypeCasterLayer == 0 ? kVividVSMPageDirty : kVividVSMPageDynamicDirty)) == 0u)
         return false;
-    uint slot = encodedPage - 1u;
-    uint rowSize = (uint)_VSMPrototypePhysicalPagesPerRow;
-    physicalTexel = uint2(slot % rowSize, slot / rowSize) * (uint)_VSMPrototypePageSize
+    physicalTexel = VividVSMPageTableAddress(encodedPage) * (uint)_VSMPrototypePageSize
         + (uint2)positionCS.xy;
     return true;
 }

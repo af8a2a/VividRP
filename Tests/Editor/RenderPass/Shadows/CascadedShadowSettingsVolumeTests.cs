@@ -661,7 +661,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer.Target.Structured,
                 counterData.Length,
                 sizeof(uint));
-            pageTable.SetData(pageTableData);
+            VirtualShadowMapPageTableTestData.UploadSlots(shader, pageTable, pageTableData);
             metadata.SetData(metadataData);
             owners.SetData(ownerData);
             counters.SetData(counterData);
@@ -676,7 +676,7 @@ namespace VividRP.Editor.Tests
             shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
             DispatchVSMAllocation(shader, kernel, pageTableData.Length, metadata, demand);
 
-            pageTable.GetData(pageTableData);
+            VirtualShadowMapPageTableTestData.ReadSlots(pageTable, pageTableData);
             metadata.GetData(metadataData);
             owners.GetData(ownerData);
             counters.GetData(counterData);
@@ -702,7 +702,7 @@ namespace VividRP.Editor.Tests
             DispatchVSMAllocation(shader, kernel, pageTableData.Length, metadata, demand);
             counters.GetData(counterData);
             Assert.That(counterData, Is.EqualTo(new uint[] { 2u, 0u, 0u, 0u }));
-            var retained = new uint[pageTableData.Length]; pageTable.GetData(retained);
+            var retained = new uint[pageTableData.Length]; VirtualShadowMapPageTableTestData.ReadSlots(pageTable, retained);
             Assert.That(retained, Is.EqualTo(pageTableData));
         }
 
@@ -751,7 +751,7 @@ namespace VividRP.Editor.Tests
                 using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, Marshal.SizeOf<TestPageMetadata>());
                 using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(uint));
                 using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint));
-                table.SetData(pageData);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, pageData);
                 metadata.SetData(metaData);
                 owners.SetData(ownerData);
                 int kernel = shader.FindKernel(cached ? "VSMAllocatePagesCached" : "VSMPrototypeAllocatePages");
@@ -764,7 +764,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
                 DispatchVSMAllocation(shader, kernel, pageCount, metadata, demand);
-                table.GetData(pageData);
+                VirtualShadowMapPageTableTestData.ReadSlots(table, pageData);
                 metadata.GetData(metaData);
                 owners.GetData(ownerData);
                 counters.GetData(counterData);
@@ -839,7 +839,7 @@ namespace VividRP.Editor.Tests
                     GraphicsBuffer.Target.Structured, ownerData.Length, sizeof(uint));
                 using var counters = new GraphicsBuffer(
                     GraphicsBuffer.Target.Structured, counterData.Length, sizeof(uint));
-                pageTable.SetData(pageTableData);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, pageTable, pageTableData);
                 owners.SetData(ownerData);
                 counters.SetData(counterData);
                 int allocateKernel = shader.FindKernel("VSMPrototypeAllocatePages");
@@ -852,6 +852,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(allocateKernel, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(allocateKernel, "_VSMPrototypeAllocatorCounters", counters);
                 shader.SetBuffer(finalizeKernel, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(finalizeKernel, "_VSMPrototypeWritablePageTable", pageTable);
 
                 for (int frameIndex = 0; frameIndex < frames.Length; frameIndex++)
                 {
@@ -873,7 +874,7 @@ namespace VividRP.Editor.Tests
                     metadata.SetData(metadataData);
                     shader.SetInt("_VSMPrototypeFeedbackFrameIndex", (int)feedbackFrame);
                     DispatchVSMAllocation(shader, allocateKernel, pageTableData.Length, metadata, demand);
-                    pageTable.GetData(pageTableData);
+                    VirtualShadowMapPageTableTestData.ReadSlots(pageTable, pageTableData);
                     metadata.GetData(metadataData);
                     owners.GetData(ownerData);
                     counters.GetData(counterData);
@@ -1003,6 +1004,9 @@ namespace VividRP.Editor.Tests
                     }
                     int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                     shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                using var publishedTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                    shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
+                    shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", publishedTable);
                     shader.Dispatch(finalize, 1, 1, 1);
                     metadata.GetData(metadataData);
                     for (int pageIndex = 0; pageIndex < metadataData.Length; pageIndex++)
@@ -1128,13 +1132,14 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
                 using var pageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
-                pageTable.SetData(new uint[metadata.count]);
-                shader.SetBuffer(build, "_VSMPrototypePageTable", pageTable);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, pageTable, new uint[metadata.count]);
+                shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", pageTable);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
                 int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", pageTable);
                 var dispatch = new uint[6]; var entries = new uint[capacity * 2];
                 var expected = new System.Collections.Generic.List<int>(capacity);
                 int completed = 0;
@@ -1267,7 +1272,7 @@ namespace VividRP.Editor.Tests
                     case 11: data[10].x |= (1u << 12) | (1u << 13); break;
                     case 12: mapping[10] = data[10].y = 9; break;
                 }
-                metadata.SetData(data); owners.SetData(owner); table.SetData(mapping); requests.SetData(demands);
+                metadata.SetData(data); owners.SetData(owner); VirtualShadowMapPageTableTestData.UploadSlots(shader, table, mapping); requests.SetData(demands);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", 8);
                 shader.SetInt("_VSMPrototypePageTableEntryCount", 12);
                 shader.SetInt("_VSMProjectionCount", 6);
@@ -1278,7 +1283,7 @@ namespace VividRP.Editor.Tests
                 int build = shader.FindKernel("VSMBuildPageWorkLists");
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
-                shader.SetBuffer(build, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(build, "_VSMPageRequestFlags", requests);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
@@ -1324,7 +1329,7 @@ namespace VividRP.Editor.Tests
                     data[page] = new uint4(slot == 5 ? 10u : 6u, mapping[page], 0, 0);
                     demands[page] = 1u | roles[slot];
                 }
-                owners.SetData(owner); table.SetData(mapping); requests.SetData(demands);
+                owners.SetData(owner); VirtualShadowMapPageTableTestData.UploadSlots(shader, table, mapping); requests.SetData(demands);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", 8);
                 shader.SetInt("_VSMPrototypePageTableEntryCount", 12);
                 shader.SetInt("_VSMProjectionCount", 6);
@@ -1333,11 +1338,12 @@ namespace VividRP.Editor.Tests
                 int build = shader.FindKernel("VSMBuildPageWorkLists"), finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
-                shader.SetBuffer(build, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(build, "_VSMPageRequestFlags", requests);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", table);
                 var dispatch = new uint[6]; var actualRequests = new uint[12];
                 for (int frame = 1; frame <= 24; frame++)
                 {
@@ -1406,8 +1412,8 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
                 using var pageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
-                pageTable.SetData(new uint[metadata.count]);
-                shader.SetBuffer(build, "_VSMPrototypePageTable", pageTable);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, pageTable, new uint[metadata.count]);
+                shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", pageTable);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
@@ -1508,7 +1514,7 @@ namespace VividRP.Editor.Tests
                 masks.SetData(requestedMasks);
                 completed.SetData(oldMasks);
                 requestFlags.SetData(new uint[16]);
-                table.SetData(new uint[16]);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, new uint[16]);
                 for (int i = 0; i < 4; i++)
                 {
                     meta[i] = new uint4(10 | dirty[i], (uint)i + 1, 1, 8);
@@ -1538,7 +1544,7 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMReceiverMaskEnabled", 1);
                 int build = shader.FindKernel("VSMBuildPageWorkLists");
                 shader.SetBuffer(build, "_VSMPageRequestFlags", requestFlags);
-                shader.SetBuffer(build, "_VSMPrototypePageTable", table);
+                shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
@@ -1632,6 +1638,7 @@ namespace VividRP.Editor.Tests
                     shader.Dispatch(occ, 16, 1, 1);
                 int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(finalize, "_VSMPageReceiverMasks", masks);
                 shader.SetBuffer(finalize, "_VSMPhysicalReceiverMasks", completed);
                 shader.Dispatch(finalize, 1, 1, 1);
@@ -1890,7 +1897,7 @@ namespace VividRP.Editor.Tests
                 using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, Marshal.SizeOf<TestPageMetadata>());
                 using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, sizeof(uint));
                 using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint));
-                table.SetData(tableData);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, tableData);
                 metadata.SetData(metadataData);
                 owners.SetData(ownerData);
                 counters.SetData(counterData);
@@ -1931,7 +1938,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(allocate, "_VSMPrototypePhysicalPageOwners", owners);
                 shader.SetBuffer(allocate, "_VSMPrototypeAllocatorCounters", counters);
                 DispatchVSMAllocation(shader, allocate, 8, metadata, demand);
-                table.GetData(tableData);
+                VirtualShadowMapPageTableTestData.ReadSlots(table, tableData);
                 metadata.GetData(metadataData);
                 owners.GetData(ownerData);
                 counters.GetData(counterData);
@@ -2208,7 +2215,7 @@ namespace VividRP.Editor.Tests
             using var meshlets = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, Marshal.SizeOf<VividMeshlet>());
             var requestData = new uint4[requestCapacity + 4];
             for (int i = 0; i < requestData.Length; i++) requestData[i] = new uint4(0xeeeeeeeeu);
-            table.SetData(tableData); metadata.SetData(metadataData); owners.SetData(ownerData);
+            VirtualShadowMapPageTableTestData.UploadSlots(shader, table, tableData); metadata.SetData(metadataData); owners.SetData(ownerData);
             sources.SetData(sourceData); sourceArgs.SetData(sourceArgsData); requests.SetData(requestData);
             instances.SetData(new[] { new VividInstanceData { ObjectToWorldMatrix = float4x4.identity } });
             meshlets.SetData(meshletData);

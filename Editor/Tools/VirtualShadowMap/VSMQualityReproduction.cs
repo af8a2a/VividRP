@@ -381,7 +381,6 @@ namespace VividRP.Editor
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[6], VirtualShadowMapPrototypeRuntime.PageTable);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_Ids[7], VirtualShadowMapPrototypeRuntime.PageMetadata);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, s_RequestFlagsId, VirtualShadowMapPrototypeRuntime.PageRequestFlags);
-            cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapPrototypeRuntime.SamplingPageTableId, VirtualShadowMapPrototypeRuntime.SamplingPageTable);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.PageOffsetsId, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, VirtualShadowMapProjectionSet.BufferId, VirtualShadowMapPrototypeRuntime.Projections.Buffer);
             cmd.SetComputeIntParam(m_Compute, VirtualShadowMapProjectionSet.CountId, VirtualShadowMapPrototypeRuntime.Projections.Count);

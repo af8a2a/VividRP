@@ -8,6 +8,32 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
 {
+    internal static class VirtualShadowMapPageTableTestData
+    {
+        internal static uint EncodeSlot(uint slotPlusOne, uint row = 4, bool renderable = true)
+        {
+            if (slotPlusOne == 0) return 0;
+            uint slot = slotPlusOne - 1;
+            return (renderable ? 0xc0000000u : 0x80000000u) | ((slot / row) << 10) | slot % row;
+        }
+
+        internal static void UploadSlots(ComputeShader shader, GraphicsBuffer table, uint[] slots, uint row = 4)
+        {
+            var entries = new uint[slots.Length];
+            for (int i = 0; i < slots.Length; i++) entries[i] = EncodeSlot(slots[i], row);
+            shader.SetInt("_VSMPrototypePhysicalPagesPerRow", (int)row);
+            table.SetData(entries);
+        }
+
+        internal static void ReadSlots(GraphicsBuffer table, uint[] slots, uint row = 4)
+        {
+            table.GetData(slots);
+            for (int i = 0; i < slots.Length; i++)
+                slots[i] = (slots[i] & 0x83f00000u) == 0x80000000u
+                    ? ((slots[i] >> 10) & 1023u) * row + (slots[i] & 1023u) + 1u : 0u;
+        }
+    }
+
     // Legacy cases explicitly test complete pages. Bind disabled, valid resources
     // rather than inheriting a live Editor compute asset's production settings.
     internal sealed class VirtualShadowMapReceiverMaskTestBuffers : IDisposable
@@ -116,7 +142,7 @@ namespace VividRP.Editor.Tests
                 inputs.SetData(points);
                 // Only one of 64 cells is marked. This must not trim coverage.
                 masks.SetData(new[] { new uint2(1, 0) });
-                table.SetData(new uint[] { 1 });
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, new uint[] { 1 });
                 int kernel = shader.FindKernel("ResolveReceiverMaskedCaster");
                 shader.SetBuffer(kernel, "_VSMPrototypePageTable", table);
                 shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
@@ -265,6 +291,9 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(prepare, "_VSMPageRequestFlags", flags);
                 shader.SetBuffer(prepare, "_VSMAllocationRequests", requests);
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                using var publishedTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
+                shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", publishedTable);
                 flags.SetData(new uint[] { 1, 1 });
                 var data = new[] { new uint4(10, 1, 1, 0), new uint4(10, 2, 1, 0) };
                 metadata.SetData(data);

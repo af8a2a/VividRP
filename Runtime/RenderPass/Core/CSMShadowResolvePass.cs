@@ -512,7 +512,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PossibleMappedLevels, AccessFlags.Read);
-                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.SamplingPageTable, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer, AccessFlags.Read);
                 m_VirtualShadowMapPrototypePageMetadata = PassRecorder.ImportBufferForPass(
                     this,
@@ -859,8 +858,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
         {
             BlueNoise.Instance?.Bind(cmd, m_ResolveCompute, kernel);
-            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.SamplingPageTableId,
-                VirtualShadowMapPrototypeRuntime.SamplingPageTable);
             cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapProjectionSet.PageOffsetsId,
                 VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
             cmd.SetComputeBufferParam(m_ResolveCompute, kernel, VirtualShadowMapPrototypeRuntime.PossibleMappedLevelsId,

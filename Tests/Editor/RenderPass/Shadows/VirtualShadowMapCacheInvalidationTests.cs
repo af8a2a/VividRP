@@ -265,7 +265,7 @@ namespace VividRP.Editor.Tests
             {
                 var pages = new uint4[16]; var mappings = new uint[16];
                 for (int i = 0; i < 16; i++) { pages[i].x = Allocated | Cached; mappings[i] = mapped ? (uint)i + 1u : 0u; }
-                metadata.SetData(pages); table.SetData(mappings);
+                metadata.SetData(pages); VirtualShadowMapPageTableTestData.UploadSlots(shader, table, mappings);
                 shader.SetInt("_VSMInvalidateUseHZB", enabled ? 1 : 0);
                 shader.SetInt("_VSMHZBHistoryValid", history ? 1 : 0);
                 shader.Dispatch(prepare, 1, 1, 1);

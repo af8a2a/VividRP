@@ -261,7 +261,7 @@ Shader "Hidden/VividRP/VSMDebug"
 
                 uint4 metadata = _VSMPrototypePageMetadata[index];
                 uint flags = metadata.w | _VSMPageRequestFlags[index];
-                bool allocated = _VSMPrototypePageTable[index] != 0u && (metadata.x & 2u) != 0u;
+                bool allocated = metadata.y != 0u && (metadata.x & 2u) != 0u;
                 uint dirtyMask = kVSMPageDirty | kVSMPageDynamicDirty;
                 uint state = !allocated ? 8u : ((flags & dirtyMask) != 0u ? 6u : ((flags & 8u) != 0u ? 7u : 5u));
                 if ((flags & 64u) != 0u) state = 9u;
@@ -282,7 +282,7 @@ Shader "Hidden/VividRP/VSMDebug"
                     color = float3(1.0, 0.6, 0.0);
                 if (mode == 12u) color = VSMDebugRequestColor(flags);
                 if (mode == 13u && allocated)
-                    color = VSMDebugIndexColor(_VSMPrototypePageTable[index] - 1u);
+                    color = VSMDebugIndexColor(metadata.y - 1u);
                 if (mode == 14u && allocated)
                 {
                     uint age = _VSMDebugFrameIndex >= metadata.z ? _VSMDebugFrameIndex - metadata.z : 0u;

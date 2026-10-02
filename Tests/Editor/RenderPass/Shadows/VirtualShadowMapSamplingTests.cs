@@ -102,7 +102,7 @@ namespace VividRP.Editor.Tests
             {
                 // Both slots already belong to current demand, even though the
                 // new requests have a higher legacy priority. Neither may evict.
-                table.SetData(new uint[] { 1, 2, 0, 0 });
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, new uint[] { 1, 2, 0, 0 });
                 metadata.SetData(new[] { new uint4(2, 1, 1, 0), new uint4(2, 2, 1, 0), default, default });
                 owners.SetData(new uint[] { 1, 2 });
                 requests.SetData(new uint[] { 1, 1, 513, 513 });
@@ -127,7 +127,7 @@ namespace VividRP.Editor.Tests
                     shader.SetBuffer(kernel, "_VSMPhysicalReceiverMasks", masks);
                     shader.Dispatch(kernel, 1, 1, 1);
                 }
-                var mapping = new uint[4]; table.GetData(mapping);
+                var mapping = new uint[4]; VirtualShadowMapPageTableTestData.ReadSlots(table, mapping);
                 CollectionAssert.AreEqual(new uint[] { 1, 2, 0, 0 }, mapping);
                 var list = new uint[12]; lists.GetData(list);
                 Assert.That((int)list[8], Is.EqualTo(-2)); // Signed underflow remains observable.
@@ -170,7 +170,7 @@ namespace VividRP.Editor.Tests
                 for (int i = 0; i < capacity; i++) ls[i] = (uint)i;
                 Array.Fill(ls, guard, capacity * 4 + 4, 16);
                 Array.Fill(w, guard, capacity * 2, 16);
-                table.SetData(t); metadata.SetData(m); owners.SetData(o); lists.SetData(ls); work.SetData(w);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, t, 128); metadata.SetData(m); owners.SetData(o); lists.SetData(ls); work.SetData(w);
                 pressure.SetData(new uint4[3]);
                 string[] names = { "VSMResetPhysicalPageListsUE", "VSMUpdatePhysicalPagesUE",
                     "VSMPackAvailablePagesUE", "VSMAppendEmptyPhysicalPagesUE", "VSMAllocateNewPageMappingsUE",
@@ -237,7 +237,14 @@ namespace VividRP.Editor.Tests
                     shader.Dispatch(kernels[5], (capacity + 63) / 64, 1, 1);
                     shader.Dispatch(kernels[6], 1, 1, 1);
                     shader.Dispatch(kernels[7], (capacity + 63) / 64, 1, 1);
-                    table.GetData(t); metadata.GetData(m); owners.GetData(o); lists.GetData(ls);
+                    VirtualShadowMapPageTableTestData.ReadSlots(table, t, 128); metadata.GetData(m); owners.GetData(o); lists.GetData(ls);
+                    for (int page = 0; page < pages; page++)
+                    {
+                        bool deferred = (m[page].x & 131072u) != 0;
+                        Assert.That(t[page], Is.EqualTo(deferred ? 0u : m[page].y), "Deferred cache ownership is not a sampling mapping");
+                        // This state machine oracle tracks resident ownership, not aliases.
+                        t[page] = (m[page].x & 2u) != 0 ? m[page].y : 0u;
+                    }
                     work.GetData(w); args.GetData(a); counters.GetData(c);
                     Assert.That(Enumerable.Range(0, capacity).Select(x => (uint)x).SequenceEqual(ls.Take(capacity).OrderBy(x => x)), Is.True, label + " LRU permutation including duplicates");
                     Assert.That((int)ls[4 * capacity], Is.EqualTo(available - missing), label + " signed overflow");
@@ -395,7 +402,6 @@ namespace VividRP.Editor.Tests
             internal readonly GraphicsBuffer Owners = new(GraphicsBuffer.Target.Structured, 16, 4);
             internal readonly GraphicsBuffer Counters = new(GraphicsBuffer.Target.Structured, 4, 4);
             internal readonly GraphicsBuffer Pressure = new(GraphicsBuffer.Target.Structured, 3, 16);
-            private readonly GraphicsBuffer m_SamplingTable = new(GraphicsBuffer.Target.Structured, 12, 4);
             private readonly GraphicsBuffer m_PageOffsets = new(GraphicsBuffer.Target.Structured, 9, 8);
             private readonly GraphicsBuffer m_Projections = new(GraphicsBuffer.Target.Structured, 3, 160);
             // Integer pools support Load/Store, not filtered Sample. Texture2D's
@@ -425,11 +431,17 @@ namespace VividRP.Editor.Tests
                 m_PageOffsets.SetData(offsets);
                 int build = Shader.FindKernel("VSMPropagateMappedClipmaps");
                 Shader.SetBuffer(build, "_VSMClipmapPageOffsets", m_PageOffsets);
-                Shader.SetBuffer(build, "_VSMSamplingPageTableRW", m_SamplingTable);
-                Shader.SetBuffer(build, "_VSMPrototypePageTable", Table);
-                Shader.SetBuffer(build, "_VSMPrototypePageMetadata", Metadata);
+                // These manually seeded fixtures have not rastered their dirty
+                // pages. Publish only completed mappings, as production finalize
+                // does after its work/deferred selection.
+                var entries = new uint[12];
+                for (int i = 0; i < entries.Length; i++)
+                    if (MetadataData[i].y == TableData[i] && (MetadataData[i].x & (2u | 4u | 32768u)) == 2u)
+                        entries[i] = VirtualShadowMapPageTableTestData.EncodeSlot(TableData[i], renderable: false);
+                Table.SetData(entries);
+                Shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", Table);
                 Shader.Dispatch(build, 1, 1, 1);
-                Shader.SetBuffer(kernel, "_VSMSamplingPageTable", m_SamplingTable);
+                Shader.SetBuffer(kernel, "_VSMPrototypePageTable", Table);
                 Shader.SetBuffer(kernel, "_VSMClipmapPageOffsets", m_PageOffsets);
                 Shader.SetTexture(kernel, "_VSMSTBNScalar", m_BlueNoise.VSMSTBNScalar);
                 Shader.SetTexture(kernel, "_VSMSTBNVec2", m_BlueNoise.VSMSTBNVec2);
@@ -512,7 +524,7 @@ namespace VividRP.Editor.Tests
 
             internal void Upload()
             {
-                Table.SetData(TableData); Metadata.SetData(MetadataData); Owners.SetData(OwnerData);
+                VirtualShadowMapPageTableTestData.UploadSlots(Shader, Table, TableData); Metadata.SetData(MetadataData); Owners.SetData(OwnerData);
                 RequestFlags.SetData(RequestData);
                 Counters.SetData(new uint[4]); m_Projections.SetData(ProjectionData);
                 m_StaticUpload.SetData(StaticData); m_DynamicUpload.SetData(DynamicData);
@@ -631,7 +643,7 @@ namespace VividRP.Editor.Tests
                 Shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", Owners);
                 Shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", Counters);
                 DispatchAllocation(Shader, kernel, Metadata, Pressure, RequestFlags);
-                Table.GetData(TableData); Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData); Owners.GetData(OwnerData);
+                VirtualShadowMapPageTableTestData.ReadSlots(Table, TableData); Metadata.GetData(MetadataData); RequestFlags.GetData(RequestData); Owners.GetData(OwnerData);
             }
 
             internal float4 RunDiagnostic(float4 receiver, int mode, bool footprint = false,
@@ -695,7 +707,7 @@ namespace VividRP.Editor.Tests
             {
                 ReceiverMasks.Dispose();
                 Table.Dispose(); Metadata.Dispose(); Owners.Dispose(); Counters.Dispose(); m_Projections.Dispose();
-                Pressure.Dispose(); RequestFlags.Dispose(); m_SamplingTable.Dispose(); m_PageOffsets.Dispose();
+                Pressure.Dispose(); RequestFlags.Dispose(); m_PageOffsets.Dispose();
                 m_StaticUpload.Dispose(); m_DynamicUpload.Dispose();
                 m_PhysicalPool.Release(); Object.DestroyImmediate(m_PhysicalPool);
                 m_Static.Release(); m_Dynamic.Release();
@@ -2249,7 +2261,7 @@ namespace VividRP.Editor.Tests
                     pages[i] = (levels - 1 - indices[i] / perLevel) * perLevel + indices[i] % perLevel;
                     demands[pages[i]] = i == 0 ? 257u : 513u;
                 }
-                table.SetData(mappings); metadata.SetData(data); owners.SetData(new uint[4]); counters.SetData(new uint[4]);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, mappings); metadata.SetData(data); owners.SetData(new uint[4]); counters.SetData(new uint[4]);
                 int kernel = shader.FindKernel("VSMPrototypeAllocatePages");
                 shader.SetInt("_VSMProjectionCount", levels);
                 shader.SetInt("_VSMPrototypePageTableEntryCount", count);
@@ -2263,7 +2275,7 @@ namespace VividRP.Editor.Tests
                 pressure.SetData(new uint4[3]);
                 requestFlags.SetData(demands);
                 DispatchAllocation(shader, kernel, metadata, pressure, requestFlags);
-                table.GetData(mappings); metadata.GetData(data);
+                VirtualShadowMapPageTableTestData.ReadSlots(table, mappings); metadata.GetData(data);
                 var counts = new uint[4]; counters.GetData(counts);
                 Assert.That(counts, Is.EqualTo(new uint[] { 4, 6, 4, 2 }));
                 for (int i = 0; i < pages.Length; i++)

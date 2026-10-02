@@ -119,7 +119,8 @@ bool VSMInvalidationPageOccluded(uint index, uint2 page)
 {
     if (_VSMInvalidateUseHZB == 0 || _VSMHZBHistoryValid == 0 || g_VSMInvalidationDepth >= 1.0) return false;
     uint encoded = _VSMHZBPreviousTable[index];
-    if (encoded == 0u || encoded > (uint)_VSMPrototypePhysicalPageCapacity) return false;
+    if (!VividVSMPageTableIsNative(encoded)
+        || VividVSMPageTableSlot(encoded, (uint)_VSMPrototypePhysicalPagesPerRow) >= (uint)_VSMPrototypePhysicalPageCapacity) return false;
     // Per-page clamped hierarchical test. Expand to whole intersecting texels;
     // empty/missing history stays visible. Invalidation always uses STATIC HZB.
     uint resolution = (uint)_VSMPrototypeVirtualResolution;
@@ -133,9 +134,7 @@ bool VSMInvalidationPageOccluded(uint index, uint2 page)
     uint2 origin = page * size;
     uint2 lo = max(baseLow >> mip, origin) - origin;
     uint2 hi = min(baseHigh >> mip, origin + size - 1u) - origin;
-    uint slot = encoded - 1u;
-    uint2 physical = uint2(slot % (uint)_VSMPrototypePhysicalPagesPerRow,
-        slot / (uint)_VSMPrototypePhysicalPagesPerRow) * size;
+    uint2 physical = VividVSMPageTableAddress(encoded) * size;
     float farthest = 1.0;
     for (uint y = lo.y; y <= hi.y; y++)
     for (uint x = lo.x; x <= hi.x; x++)

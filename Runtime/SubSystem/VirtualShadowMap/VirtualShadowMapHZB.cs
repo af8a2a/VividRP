@@ -111,6 +111,16 @@ namespace VividRP.Runtime.VirtualShadowMap
             cmd.DispatchCompute(compute, s_Reset, 1, 1, 1);
         }
 
+        internal static void InvalidateHistory() => s_Valid = false;
+
+        internal static void BindInvalidation(CommandBuffer cmd, ComputeShader compute, int kernel)
+        {
+            cmd.SetComputeIntParam(compute, ValidId, Enabled && s_Valid
+                && s_Generation == VirtualShadowMapPrototypeRuntime.Projections.Generation ? 1 : 0);
+            cmd.SetComputeTextureParam(compute, kernel, TextureId, Texture);
+            cmd.SetComputeBufferParam(compute, kernel, TableId, PreviousTable);
+        }
+
         internal static void Build(CommandBuffer cmd, int slice)
         {
             if (!Enabled) return;

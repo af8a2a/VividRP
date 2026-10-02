@@ -6,6 +6,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.VirtualShadowMap;
 
 namespace VividRP.Runtime.PrimitiveScene
 {
@@ -16,6 +17,9 @@ namespace VividRP.Runtime.PrimitiveScene
         // CPU shadow draw-set classification; does not change authoring Static or GPU layout.
         internal const VividPrimitiveFlags ShadowCacheStaticFlag = (VividPrimitiveFlags)(1u << 8);
         internal const uint ShadowCacheFramesStaticThreshold = 100;
+        internal uint FramesStaticThreshold { get; set; } = ShadowCacheFramesStaticThreshold;
+        internal uint ShadowInvalidationEpoch { get; private set; }
+        internal VividPrimitiveGpuTable<VirtualShadowMapInvalidationSource> ShadowInvalidationTable { get; } = new();
         private readonly List<uint> m_LastShadowInvalidatedFrame = new();
         private readonly List<bool> m_PendingShadowCacheInvalidation = new();
 
@@ -244,6 +248,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 SetShadowCacheStatic(handle.Index, false);
                 m_LastShadowInvalidatedFrame[handle.Index] = (uint)Math.Max(m_PreparedFrameIndex, 0);
                 m_PendingShadowCacheInvalidation[handle.Index] = false;
+                UpdateShadowInvalidationSource(handle.Index);
                 m_ChangedPrimitiveCount++;
                 bool isStaticShadowCaster = IsStaticShadowCaster(
                     PrimitiveTable[handle.Index].Flags,
@@ -310,6 +315,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 Generation = nextGeneration,
                 CustomDataAddress = InvalidIndex,
             });
+            ShadowInvalidationTable.Set(handle.Index, default);
             TransformTable.Set(handle.Index, default);
             PreviousTransformTable.Set(handle.Index, default);
             m_ChangedPrimitiveCount++;
@@ -389,6 +395,7 @@ namespace VividRP.Runtime.PrimitiveScene
         internal void InvalidateAllShadows()
         {
             ThrowIfDisposed();
+            ShadowInvalidationEpoch++;
             IncrementStaticShadowRevision();
             RequireFullStaticShadowInvalidation();
             IncrementDynamicShadowRevision();
@@ -705,6 +712,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 PreviousObjectToWorldMatrix = objectToWorld,
             });
             AddCullRecord(handle, descriptor, sectionOffset, sectionCount);
+            UpdateShadowInvalidationSource(primitiveSlot);
             return handle;
         }
 
@@ -1203,10 +1211,31 @@ namespace VividRP.Runtime.PrimitiveScene
             => (flags & (VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled | ShadowCacheStaticFlag))
                 == VividPrimitiveFlags.Valid && (passMask & VividInstancePassMask.Shadows) != 0;
 
+        private void UpdateShadowInvalidationSource(int slot)
+        {
+            var primitive = PrimitiveTable[slot];
+            var cull = m_ActiveCullRecords[m_PrimitiveSlotToActiveIndex[slot]];
+            uint revision = slot < ShadowInvalidationTable.Count ? ShadowInvalidationTable[slot].State.x + 1u : 1u;
+            bool active = (primitive.Flags & (VividPrimitiveFlags.Valid | VividPrimitiveFlags.Disabled))
+                == VividPrimitiveFlags.Valid && (cull.PassMask & VividInstancePassMask.Shadows) != 0;
+            uint flags = active ? VirtualShadowMapInvalidationSource.Active : 0u;
+            if ((primitive.Flags & ShadowCacheStaticFlag) != 0) flags |= VirtualShadowMapInvalidationSource.Static;
+            // The meshlet bridge currently publishes sourceMesh.bounds, not a
+            // conservative animated envelope. Do not silently trust it for skinning.
+            if ((primitive.Flags & VividPrimitiveFlags.Skinned) != 0)
+                flags |= VirtualShadowMapInvalidationSource.Deformable | VirtualShadowMapInvalidationSource.Unbounded;
+            ShadowInvalidationTable.Set(slot, new VirtualShadowMapInvalidationSource
+            {
+                BoundsMin = primitive.WorldBoundsMin, BoundsMax = primitive.WorldBoundsMax,
+                State = new uint4(revision, primitive.Generation, flags, cull.CameraLayerMask)
+            });
+        }
+
         private void QueueShadowCacheInvalidation(int slot)
         {
             m_LastShadowInvalidatedFrame[slot] = (uint)Math.Max(m_PreparedFrameIndex, 0);
             m_PendingShadowCacheInvalidation[slot] = true;
+            UpdateShadowInvalidationSource(slot);
         }
 
         private void SetShadowCacheStatic(int slot, bool isStatic)
@@ -1220,6 +1249,7 @@ namespace VividRP.Runtime.PrimitiveScene
             var cull = m_ActiveCullRecords[active];
             cull.Flags = flags;
             m_ActiveCullRecords[active] = cull;
+            UpdateShadowInvalidationSource(slot);
             IncrementSceneRevision(); // Invalidate shadow draw-set query caches.
         }
 
@@ -1233,7 +1263,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 bool pending = m_PendingShadowCacheInvalidation[slot];
                 uint age = frame >= last ? frame - last : uint.MaxValue;
                 bool wantStatic = !pending && (cull.Flags & VividPrimitiveFlags.Skinned) == 0
-                    && age > ShadowCacheFramesStaticThreshold;
+                    && age > FramesStaticThreshold;
                 bool wasStatic = (cull.Flags & ShadowCacheStaticFlag) != 0;
                 m_PendingShadowCacheInvalidation[slot] = false;
                 if (wantStatic == wasStatic) continue;

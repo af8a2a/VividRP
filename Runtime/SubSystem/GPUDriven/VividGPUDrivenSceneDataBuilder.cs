@@ -291,10 +291,6 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererDatabase database,
             VividPrimitiveSceneAdapter adapter)
         {
-            if (primitiveScene.StaticShadowInvalidationRequiresFullRefresh
-                && primitiveScene.DynamicShadowInvalidationRequiresFullRefresh)
-                return;
-
             bool requiresFullRefresh = m_ShadowChangesRequireFullRefresh;
             foreach (EntityId sourceId in m_ChangedShadowSourceIds)
             {

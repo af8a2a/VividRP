@@ -86,6 +86,7 @@ void VSMCompleteProductionFeedback(uint3 id : SV_DispatchThreadID)
 int _VSMRasterWindowPages;
 #include "VSMPageCulling.hlsl"
 #include "VSMHZB.hlsl"
+#include "VSMCacheInvalidation.hlsl"
 #if defined(VIVID_VSM_COMPACT_VIEWS)
 #include "VSMViewCompaction.hlsl"
 RWStructuredBuffer<uint> _VSMPageCullDispatchArgsRW;

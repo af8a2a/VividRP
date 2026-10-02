@@ -172,7 +172,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool m_VirtualShadowMapStaticPoolNeedsFullRefresh;
 
-        private int m_VirtualShadowMapStaticInvalidationBoundsCount;
 
         private bool m_DynamicPoolNeedsFullRefresh;
 
@@ -181,6 +180,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DynamicInvalidationBoundsCount;
 
         private uint m_DynamicShadowRevision;
+        private bool m_UseGPUCacheInvalidation;
 
         private VirtualShadowMapPrototypeCacheKey m_VirtualShadowMapPrototypeCacheKey;
 
@@ -324,7 +324,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VirtualShadowMapPrototypeActive = false;
             m_VirtualShadowMapStaticPoolNeedsCacheRefresh = false;
             m_VirtualShadowMapStaticPoolNeedsFullRefresh = false;
-            m_VirtualShadowMapStaticInvalidationBoundsCount = 0;
             m_DynamicPoolNeedsFullRefresh = false;
             m_HasUntrackedDynamicCasters = false;
             m_DynamicInvalidationBoundsCount = 0;
@@ -386,16 +385,23 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
                 nativeCmd.SetGlobalInt(VSMUnityRasterEnabledId, 0);
+                if (m_UseGPUCacheInvalidation)
+                {
+                    SetVirtualShadowMapPageManagementParameters(nativeCmd);
+                    VirtualShadowMapCacheInvalidation.Record(nativeCmd, m_VirtualShadowMapStaticPoolNeedsFullRefresh);
+                }
                 RecordVirtualShadowMapLayout(nativeCmd);
                 if (!TryPrepareMeshletShadowDraws(nativeCmd, out var meshletContext))
                 {
                     VirtualShadowMapPerformanceThrottle.CompleteFrame(false);
+                    VirtualShadowMapCacheInvalidation.AbortFrame();
                     VirtualShadowMapPrototypeRuntime.MarkFallback(VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed);
                     return;
                 }
                 if (m_HasMeshletShadowCasters && !meshletContext.VirtualTextureReady)
                 {
                     VirtualShadowMapPerformanceThrottle.CompleteFrame(false);
+                    VirtualShadowMapCacheInvalidation.AbortFrame();
                     VirtualShadowMapPrototypeRuntime.MarkFallback(VirtualShadowMapPrototypeFallbackReason.VirtualTextureUnavailable);
                     return;
                 }
@@ -405,8 +411,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ShadowData.virtualShadowMapRendered = RecordReceiverPageRequests(nativeCmd)
                     && DrawVirtualShadowMapPrototypePages(nativeCmd, in meshletContext, out fallbackReason);
                 VirtualShadowMapPerformanceThrottle.CompleteFrame(m_ShadowData.virtualShadowMapRendered);
+                if (m_ShadowData.virtualShadowMapRendered && m_UseGPUCacheInvalidation)
+                    VirtualShadowMapCacheInvalidation.CompleteFrame();
                 if (!m_ShadowData.virtualShadowMapRendered)
+                {
+                    VirtualShadowMapCacheInvalidation.AbortFrame();
                     VirtualShadowMapPrototypeRuntime.MarkFallback(fallbackReason);
+                }
             }
         }
 
@@ -534,6 +545,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareVirtualShadowMapPrototype(VividCameraData cameraData)
         {
+            m_UseGPUCacheInvalidation = false;
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             bool prototypeEnabled = settings != null
                 && settings.enableVirtualShadowMapPrototype.value;
@@ -705,50 +717,34 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VirtualShadowMapStaticPoolNeedsFullRefresh =
                 VirtualShadowMapPrototypeRuntime.RequiresFullStaticCacheRefresh(
                     m_VirtualShadowMapPrototypeCacheKey);
-            if (m_VirtualShadowMapStaticPoolNeedsCacheRefresh
-                && !m_VirtualShadowMapStaticPoolNeedsFullRefresh
-                && gpuDrivenSystem != null)
+            if (gpuDrivenSystem != null)
             {
-                VividPrimitiveScene primitiveScene = gpuDrivenSystem.PrimitiveScene;
-                NativeArray<VividStaticShadowInvalidationBounds> invalidationBounds =
-                    primitiveScene.PendingStaticShadowInvalidationBounds;
-                if (primitiveScene.StaticShadowInvalidationRequiresFullRefresh
-                    || invalidationBounds.Length == 0)
+                VirtualShadowMapCacheInvalidation.Prepare(gpuDrivenSystem.PrimitiveScene,
+                    m_VirtualShadowMapPageManagementCompute, (uint)cameraData.camera.cullingMask,
+                    settings.virtualShadowMapCacheInvalidateUseHZB.value,
+                    settings.virtualShadowMapCacheDeformableMeshesInvalidate.value);
+                m_UseGPUCacheInvalidation = true;
+                if (VirtualShadowMapCacheInvalidation.NeedsFullRefresh)
                 {
                     m_VirtualShadowMapStaticPoolNeedsFullRefresh = true;
+                    m_VirtualShadowMapStaticPoolNeedsCacheRefresh = true;
                 }
-                else if (!VirtualShadowMapPrototypeRuntime
-                    .UploadStaticInvalidationBounds(invalidationBounds))
-                {
-                    VirtualShadowMapPrototypeRuntime.MarkFallback(
-                        VirtualShadowMapPrototypeFallbackReason.ResourceUnavailable);
-                    return;
-                }
-                else
-                {
-                    m_VirtualShadowMapStaticInvalidationBoundsCount =
-                        invalidationBounds.Length;
-                }
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapCacheInvalidation.Sources, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapCacheInvalidation.States, AccessFlags.ReadWrite);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapCacheInvalidation.Queue, AccessFlags.ReadWrite);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapCacheInvalidation.Args, AccessFlags.ReadWrite);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapCacheInvalidation.DispatchArgs, AccessFlags.ReadWrite);
             }
-
             VividPrimitiveScene dynamicScene = gpuDrivenSystem?.PrimitiveScene;
             m_DynamicShadowRevision = dynamicScene?.DynamicShadowRevision ?? 0u;
             m_HasUntrackedDynamicCasters = (m_HasUnityShadowCasters
                 && (VirtualShadowMapUnityCasterCompatibility.HasUnboundedCasters
-                    || !VividShadowData.IsBoundsUsable(m_ShadowData.unityShadowCasterBounds)))
-                || (dynamicScene?.HasUnboundedDynamicShadowCasters((uint)cameraData.camera.cullingMask) ?? false);
+                    || !VividShadowData.IsBoundsUsable(m_ShadowData.unityShadowCasterBounds)));
             m_DynamicPoolNeedsFullRefresh = VirtualShadowMapPrototypeRuntime.RequiresFullDynamicCacheRefresh(
                 m_VirtualShadowMapPrototypeCacheKey, m_HasUntrackedDynamicCasters)
-                || (dynamicScene?.DynamicShadowInvalidationRequiresFullRefresh ?? false);
+                || (m_UseGPUCacheInvalidation && VirtualShadowMapCacheInvalidation.NeedsFullRefresh);
             m_DynamicInvalidationBoundsCount = 0;
             NativeArray<VividStaticShadowInvalidationBounds> dynamicBounds = default;
-            if (!m_DynamicPoolNeedsFullRefresh && dynamicScene != null
-                && VirtualShadowMapPrototypeRuntime.DynamicShadowRevision != m_DynamicShadowRevision)
-            {
-                dynamicBounds = dynamicScene.PendingDynamicShadowInvalidationBounds;
-                if (dynamicBounds.Length == 0)
-                    m_DynamicPoolNeedsFullRefresh = true;
-            }
             if (!m_DynamicPoolNeedsFullRefresh)
             {
                 dynamicBounds = VirtualShadowMapPrototypeRuntime.BuildDynamicInvalidationBounds(
@@ -779,13 +775,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 this,
                 VirtualShadowMapPrototypeRuntime.AllocatorCounters,
                 AccessFlags.ReadWrite);
-            if (m_VirtualShadowMapStaticInvalidationBoundsCount > 0)
-            {
-                PassRecorder.ImportBufferForPass(
-                    this,
-                    VirtualShadowMapPrototypeRuntime.StaticInvalidationBounds,
-                    AccessFlags.Read);
-            }
             m_VirtualShadowMapPrototypeActive = true;
             VirtualShadowMapPrototypeRuntime.MarkReady(
                 m_VirtualShadowMapStaticPoolNeedsCacheRefresh);
@@ -1255,54 +1244,14 @@ namespace VividRP.Runtime.RenderPass.Core
             bool staticCacheHit = !m_VirtualShadowMapStaticPoolNeedsCacheRefresh
                 && !VirtualShadowMapPrototypeRuntime.RequiresStaticCacheRefresh(
                     m_VirtualShadowMapPrototypeCacheKey);
-            if (!staticCacheHit)
+            if (m_VirtualShadowMapStaticPoolNeedsFullRefresh)
             {
                 using var invalidationScope = new ProfilingScope(nativeCmd, VSMProfiling.Invalidate);
-                bool requiresFullRefresh =
-                    m_VirtualShadowMapStaticPoolNeedsFullRefresh
-                    || VirtualShadowMapPrototypeRuntime
-                        .RequiresFullStaticCacheRefresh(
-                            m_VirtualShadowMapPrototypeCacheKey)
-                    || m_VirtualShadowMapStaticInvalidationBoundsCount <= 0;
-                if (requiresFullRefresh)
-                {
-                    nativeCmd.SetComputeBufferParam(
-                        m_VirtualShadowMapPageManagementCompute,
-                        m_VirtualShadowMapMarkAllAllocatedPagesDirtyKernel,
-                        VSMPrototypePageMetadataId,
-                        pageMetadata);
-                    SetVirtualShadowMapPageManagementParameters(nativeCmd);
-                    nativeCmd.DispatchCompute(
-                        m_VirtualShadowMapPageManagementCompute,
-                        m_VirtualShadowMapMarkAllAllocatedPagesDirtyKernel,
-                        CoreUtils.DivRoundUp(pageTableEntryCount, 64),
-                        1,
-                        1);
-                }
-                else
-                {
-                    nativeCmd.SetComputeBufferParam(
-                        m_VirtualShadowMapPageManagementCompute,
-                        m_VirtualShadowMapInvalidateStaticPagesKernel,
-                        VSMPrototypePageMetadataId,
-                        pageMetadata);
-                    nativeCmd.SetComputeBufferParam(
-                        m_VirtualShadowMapPageManagementCompute,
-                        m_VirtualShadowMapInvalidateStaticPagesKernel,
-                        VSMPrototypeStaticInvalidationBoundsId,
-                        VirtualShadowMapPrototypeRuntime.StaticInvalidationBounds);
-                    nativeCmd.SetComputeIntParam(
-                        m_VirtualShadowMapPageManagementCompute,
-                        VSMPrototypeStaticInvalidationBoundsCountId,
-                        m_VirtualShadowMapStaticInvalidationBoundsCount);
-                    SetVirtualShadowMapPageManagementParameters(nativeCmd);
-                    nativeCmd.DispatchCompute(
-                        m_VirtualShadowMapPageManagementCompute,
-                        m_VirtualShadowMapInvalidateStaticPagesKernel,
-                        m_VirtualShadowMapStaticInvalidationBoundsCount,
-                        VirtualShadowMapPrototypeRuntime.Projections.Count,
-                        1);
-                }
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute,
+                    m_VirtualShadowMapMarkAllAllocatedPagesDirtyKernel, VSMPrototypePageMetadataId, pageMetadata);
+                SetVirtualShadowMapPageManagementParameters(nativeCmd);
+                nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute,
+                    m_VirtualShadowMapMarkAllAllocatedPagesDirtyKernel, CoreUtils.DivRoundUp(pageTableEntryCount, 64), 1, 1);
             }
 
             using (new ProfilingScope(nativeCmd, VSMProfiling.DynamicInvalidate))

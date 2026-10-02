@@ -796,6 +796,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static void ReleaseResources()
         {
             VirtualShadowMapHZB.ReleaseResources();
+            VirtualShadowMapCacheInvalidation.Dispose();
             Projections.Dispose();
             ReleaseAllocatedResources();
             s_VirtualResolution = 0;

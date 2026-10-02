@@ -1432,3 +1432,8 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMUpdatePerformanceThrottle
 #pragma kernel VSMPrepareRasterFeedback
 #pragma kernel VSMCaptureRasterFeedback
+
+#pragma kernel VSMResetInvalidationQueue
+#pragma kernel VSMUpdateInvalidationInstances
+#pragma kernel VSMPrepareInvalidationQueue
+#pragma kernel VSMProcessInvalidationQueue

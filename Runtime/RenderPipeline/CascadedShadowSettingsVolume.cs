@@ -24,6 +24,12 @@ namespace VividRP.Runtime
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
         public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, VirtualShadowMap.VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount);
+        [Tooltip("UE Cache.InvalidateUseHZB: reject invalidation pages hidden by previous static shadow depth. Invalid history always invalidates conservatively.")]
+        public BoolParameter virtualShadowMapCacheInvalidateUseHZB = new(true);
+        [Tooltip("UE Cache.DeformableMeshesInvalidate: invalidate deformable casters every rendered frame, even without transform changes. Disabling this accepts stale deformation shadows.")]
+        public BoolParameter virtualShadowMapCacheDeformableMeshesInvalidate = new(true);
+        [Tooltip("UE Cache.FramesStaticThreshold: promote a primitive after more than this many frames without invalidation. Independent of its authoring Static flag.")]
+        public MinIntParameter virtualShadowMapCacheFramesStaticThreshold = new(100, 0);
         // Retain serialized legacy fields; UE allocation never applies these quotas.
         [HideInInspector]
         public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(0, 0, 1024);

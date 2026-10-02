@@ -42,6 +42,10 @@ namespace VividRP.Runtime.PrimitiveScene
 
             using (s_SyncMarker.Auto())
             {
+                var shadowSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+                primitiveScene.FramesStaticThreshold = (uint)Mathf.Max(0,
+                    shadowSettings?.virtualShadowMapCacheFramesStaticThreshold.value
+                        ?? (int)VividPrimitiveScene.ShadowCacheFramesStaticThreshold);
                 primitiveScene.BeginFrame(frameIndex);
                 database.ConsumePrimitiveChanges(m_Changes, out bool journalRequiresFullResync);
                 bool fullResync = m_RequiresFullResync || journalRequiresFullResync;

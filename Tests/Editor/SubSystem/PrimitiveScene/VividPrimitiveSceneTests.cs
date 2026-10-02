@@ -793,33 +793,76 @@ namespace VividRP.Editor.Tests
             scene.BeginFrame(10);
             var descriptor = CreateDescriptor(source); // No authoring Static flag needed.
             var handle = scene.RegisterOrUpdate(descriptor);
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.EqualTo(VividPrimitiveFlags.None));
             scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
             scene.AcknowledgeDynamicShadowInvalidations(scene.DynamicShadowRevision);
             scene.RegisterOrUpdate(CreateDescriptor(source, objectToWorld: Matrix4x4.Translate(Vector3.right)));
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.EqualTo(VividPrimitiveFlags.None));
             Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
             Assert.That(scene.PendingDynamicShadowInvalidationBounds.Length, Is.EqualTo(1));
             scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
             scene.AcknowledgeDynamicShadowInvalidations(scene.DynamicShadowRevision);
             scene.BeginFrame(110); // UE requires strictly more than 100 frames.
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.EqualTo(VividPrimitiveFlags.None));
             scene.BeginFrame(111);
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.EqualTo(VividPrimitiveFlags.None));
             Assert.That(scene.PendingStaticShadowInvalidationBounds.Length, Is.EqualTo(1));
             Assert.That(scene.PendingDynamicShadowInvalidationBounds.Length, Is.EqualTo(1));
             scene.InvalidateShadowCaster(source); // Safe while submitted draw sets are in use.
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.EqualTo(VividPrimitiveFlags.None));
             scene.BeginFrame(112);
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.EqualTo(VividPrimitiveFlags.None));
             scene.BeginFrame(211);
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.EqualTo(VividPrimitiveFlags.None));
             scene.BeginFrame(212);
-            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.Zero);
+            Assert.That(scene.PrimitiveTable[handle.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Not.EqualTo(VividPrimitiveFlags.None));
             scene.Remove(source);
             var replacement = scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Reused slot"), flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.Skinned));
             scene.BeginFrame(1000);
-            Assert.That(scene.PrimitiveTable[replacement.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.Zero);
+            Assert.That(scene.PrimitiveTable[replacement.Index].Flags & VividPrimitiveScene.ShadowCacheStaticFlag, Is.EqualTo(VividPrimitiveFlags.None));
+        }
+
+        [Test]
+        public void ShadowInvalidationSources_TrackContentGenerationsRemovalAndConfigurableAge()
+        {
+            using var scene = new VividPrimitiveScene { FramesStaticThreshold = 2 };
+            var entity = CreateEntity("GPU invalidation state");
+            scene.BeginFrame(10);
+            var descriptor = CreateDescriptor(entity);
+            var handle = scene.RegisterOrUpdate(descriptor);
+            uint revision = scene.ShadowInvalidationTable[handle.Index].State.x;
+            scene.RegisterOrUpdate(descriptor);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.x, Is.EqualTo(revision));
+            scene.InvalidateShadowCaster(entity);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.x, Is.GreaterThan(revision));
+            scene.BeginFrame(11);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.z & 2u, Is.Zero);
+            scene.BeginFrame(12);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.z & 2u, Is.Zero);
+            scene.BeginFrame(13);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.z & 2u, Is.Not.Zero);
+            scene.Remove(entity);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.z & 1u, Is.Zero);
+            var next = scene.RegisterOrUpdate(CreateDescriptor(CreateEntity("Slot reuse")));
+            Assert.That(next.Index, Is.EqualTo(handle.Index));
+            Assert.That(scene.ShadowInvalidationTable[next.Index].State.y, Is.Not.EqualTo(handle.Generation));
+        }
+
+        [Test]
+        public void ShadowInvalidationSources_CPUQueueOverflowDoesNotDiscardGPUChanges()
+        {
+            using var scene = new VividPrimitiveScene();
+            var entity = CreateEntity("Repeated content changes");
+            var handle = scene.RegisterOrUpdate(CreateDescriptor(entity));
+            scene.AcknowledgeStaticShadowInvalidations(scene.StaticShadowRevision);
+            uint epoch = scene.ShadowInvalidationEpoch;
+            uint revision = scene.ShadowInvalidationTable[handle.Index].State.x;
+            for (int i = 0; i < 2048; i++) scene.InvalidateShadowCaster(entity);
+            Assert.That(scene.StaticShadowInvalidationRequiresFullRefresh, Is.True);
+            Assert.That(scene.ShadowInvalidationTable[handle.Index].State.x, Is.EqualTo(revision + 2048u));
+            Assert.That(scene.ShadowInvalidationEpoch, Is.EqualTo(epoch));
+            scene.InvalidateAllShadows();
+            Assert.That(scene.ShadowInvalidationEpoch, Is.Not.EqualTo(epoch));
         }
 
         [Test]

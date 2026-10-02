@@ -1436,3 +1436,7 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMUpdateInvalidationInstances
 #pragma kernel VSMPrepareInvalidationQueue
 #pragma kernel VSMProcessInvalidationQueue
+
+// Throttle-only variants keep cluster accounting out of the disabled hot path.
+#pragma kernel VSMCullMeshletsToPagesThrottle VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB VIVID_VSM_CLUSTER_FEEDBACK
+#pragma kernel VSMPostCullMeshletsToPagesThrottle VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB VIVID_VSM_CLUSTER_FEEDBACK

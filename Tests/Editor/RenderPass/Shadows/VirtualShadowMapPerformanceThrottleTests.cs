@@ -29,6 +29,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(VirtualShadowMapReceiverQuality.BuildParameters(settings).z, Is.EqualTo(1));
                 for (int i = 0; i < 32; i++) VirtualShadowMapPerformanceThrottle.Prepare(settings, shader);
                 var feedback = VirtualShadowMapPerformanceThrottle.Feedback;
+                var clusterCounts = VirtualShadowMapPerformanceThrottle.ClusterCounts;
                 long before = GC.GetAllocatedBytesForCurrentThread();
                 for (int i = 0; i < 512; i++)
                 {
@@ -38,6 +39,7 @@ namespace VividRP.Editor.Tests
                 long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
                 Assert.That(bytes, Is.Zero);
                 Assert.That(VirtualShadowMapPerformanceThrottle.Feedback, Is.SameAs(feedback));
+                Assert.That(VirtualShadowMapPerformanceThrottle.ClusterCounts, Is.SameAs(clusterCounts));
                 Assert.That(settings.virtualShadowMapPageUpdateBudget.value, Is.Zero);
                 Assert.That(settings.virtualShadowMapRasterVertexBudget.value, Is.Zero);
                 settings.virtualShadowMapThrottleLoadBudget.value = 0;
@@ -171,55 +173,106 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GPURasterFeedback_CountsSubmittedWindowsAndOverflowInstancesAcrossFourPasses()
+        public void GPURasterFeedback_CountsCulledClustersAcrossFourPassesAndResetsScratch()
         {
-            int lists = (int)VividRendererListID.Count;
+            int lists = (int)VividRendererListID.Count, levels = VirtualShadowMapClipmapLayout.MaxLevels;
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath));
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, lists * 2 * 4, 4);
-            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 32, 16);
-            using var rasterPages = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var counts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VirtualShadowMapPerformanceThrottle.ClusterCountEntries, 4);
             using var feedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 8);
-            using var dispatch = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 3, 4);
             try
             {
-                var indirect = new uint[lists * 2 * 4];
-                indirect[0] = indirect[4] = indirect[lists * 4] = 384;
-                indirect[1] = 2; indirect[3] = 0;
-                indirect[5] = 5; indirect[7] = 8; // unsent material list, must not count
-                indirect[lists * 4 + 1] = 21; indirect[lists * 4 + 3] = 32; // 3 records x 7 raster instances
-                args.SetData(indirect);
-                var data = new uint4[32];
-                data[0] = new uint4(0, 0, 0, 0x80004400); // level 0 tagged window
-                data[1] = new uint4(0, 0, 16, 1); // level 1 single page
-                data[31] = new uint4(0, 0, 0, 15);
-                data[30] = new uint4(0, 0, 16, 31);
-                data[29] = new uint4(0, 0, 32, 47);
-                requests.SetData(data); rasterPages.SetData(new uint[] { 7 }); feedback.SetData(new uint2[4]);
-                shader.SetInt("_VSMPrototypePagesPerAxis", 4);
+                var clusters = new uint[counts.count];
+                clusters[0] = 2; clusters[1] = 1;
+                clusters[levels] = 999; // Unsent material list must not contribute.
+                clusters[lists * levels] = 5; clusters[lists * levels + 1] = 9; clusters[lists * levels + 2] = 6;
+                feedback.SetData(new uint2[4]);
+                shader.SetInt("_VSMProjectionCount", 3);
                 shader.SetInt("_VSMRasterFeedbackDrawMask", 1 | (1 << lists));
                 int prepare = shader.FindKernel("VSMPrepareRasterFeedback"), capture = shader.FindKernel("VSMCaptureRasterFeedback");
-                foreach (int kernel in new[] { prepare, capture })
-                {
-                    shader.SetBuffer(kernel, "_VSMPrototypeMeshletPageIndirectArgs", args);
-                    shader.SetBuffer(kernel, "_VSMPrototypeMeshletRasterPages", rasterPages);
-                    shader.SetBuffer(kernel, "_VSMRasterFeedbackRW", feedback);
-                }
-                shader.SetBuffer(prepare, "_VSMRasterFeedbackArgs", dispatch);
-                shader.SetBuffer(capture, "_VSMPrototypeMeshletPageRequests", requests);
+                shader.SetBuffer(prepare, "_VSMRasterClusterCountsRW", counts);
+                shader.SetBuffer(capture, "_VSMRasterClusterCountsRW", counts);
+                shader.SetBuffer(capture, "_VSMRasterFeedbackRW", feedback);
                 for (int pass = 1; pass <= 4; pass++)
                 {
-                    shader.Dispatch(prepare, 1, 1, 1);
-                    shader.DispatchIndirect(capture, dispatch, 0);
+                    counts.SetData(clusters);
+                    shader.Dispatch(capture, 1, 1, 1);
                     var result = new uint2[4]; feedback.GetData(result);
-                    CollectionAssert.AreEqual(new[] { new uint2((uint)(23 * pass), 0), new uint2((uint)(8 * pass), 0),
-                        new uint2((uint)(8 * pass), 0), new uint2((uint)(7 * pass), 0) }, result);
+                    CollectionAssert.AreEqual(new[] { new uint2((uint)(23 * pass), 0), new uint2((uint)(7 * pass), 0),
+                        new uint2((uint)(10 * pass), 0), new uint2((uint)(6 * pass), 0) }, result);
+                    shader.Dispatch(prepare, (counts.count + 63) / 64, 1, 1);
+                    var cleared = new uint[counts.count]; counts.GetData(cleared);
+                    Assert.That(cleared, Is.EqualTo(new uint[counts.count]));
+                    shader.Dispatch(capture, 1, 1, 1); feedback.GetData(result);
+                    Assert.That(result[0].x, Is.EqualTo(23 * pass), "Empty post pass must not reuse main counts");
                 }
-                shader.SetInt("_VSMRasterFeedbackDrawMask", 0);
-                shader.Dispatch(prepare, 1, 1, 1);
-                var groups = new uint[3]; dispatch.GetData(groups);
-                Assert.That(groups[0], Is.Zero);
+                counts.SetData(clusters); shader.SetInt("_VSMRasterFeedbackDrawMask", 0);
+                shader.Dispatch(capture, 1, 1, 1);
                 var unchanged = new uint2[4]; feedback.GetData(unchanged);
                 Assert.That(unchanged[0].x, Is.EqualTo(92));
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(0, 7, false)]
+        [TestCase(1, 7, false)]
+        [TestCase(4, 7, false)]
+        [TestCase(5, 7, false)]
+        [TestCase(9, 37, false)]
+        [TestCase(9, 91, false)]
+        [TestCase(9, 37, true)]
+        public void GPUClusterWindows_CountNonemptyWindowsWithoutOverflowPadding(int activeWindows, int fanout, bool dynamic)
+        {
+            const int axis = 12, level = 2, pages = axis * axis * 3;
+            int lists = (int)VividRendererListID.Count;
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
+            using var counts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VirtualShadowMapPerformanceThrottle.ClusterCountEntries, 4);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 16);
+            using var masks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 8);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, lists * 2 * 4, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 16);
+            using var raster = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
+            using var outputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
+            try
+            {
+                var entries = new uint[pages]; var state = new uint4[pages]; var mask = new uint2[pages];
+                for (int i = 0; i < 9; i++)
+                {
+                    int page = level * axis * axis + i / 3 * 4 * axis + i % 3 * 4;
+                    // One candidate in each window. Clean pages, holes and deferred
+                    // pages must not create cluster records; static ignores masks.
+                    entries[page] = i < activeWindows ? 0xc0000000u : 0u;
+                    state[page] = new uint4(i < activeWindows ? 2u | 4u | 32768u : 2u | 8u, 1, 0, 0);
+                    mask[page] = new uint2(i % 2 == 0 ? uint.MaxValue : 0u, 0);
+                    entries[page + 1] = 0xc0000000u;
+                    state[page + 1] = new uint4(2u | 4u | 32768u | 131072u, 1, 0, 0);
+                }
+                table.SetData(entries); metadata.SetData(state); masks.SetData(mask);
+                var indirect = new uint[lists * 2 * 4]; indirect[lists * 4 + 3] = 16;
+                args.SetData(indirect); counts.SetData(new uint[counts.count]); raster.SetData(new uint[] { (uint)fanout });
+                inputs.SetData(new[] { new Vector4(0, 0, 11, 11), new Vector4(0, 0, 1535, 1535) });
+                int kernel = shader.FindKernel("InspectVSMClusterWindowFeedback");
+                shader.SetInt("_VSMPrototypePagesPerAxis", axis); shader.SetInt("_VSMPrototypePageSize", 128);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", pages); shader.SetInt("_VSMPrototypeCasterLayer", dynamic ? 1 : 0);
+                shader.SetInt("_VSMReceiverMaskEnabled", 1); shader.SetInts("_SamplingPixel", level, 0);
+                shader.SetBuffer(kernel, "_VSMPrototypePageTable", table); shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(kernel, "_VSMPageReceiverMasks", masks); shader.SetBuffer(kernel, "_VSMRasterClusterCountsRW", counts);
+                shader.SetBuffer(kernel, "_VSMPrototypeMeshletPageIndirectArgs", args);
+                shader.SetBuffer(kernel, "_VSMPrototypeMeshletPageRequests", requests); shader.SetBuffer(kernel, "_VSMPrototypeMeshletRasterPages", raster);
+                shader.SetBuffer(kernel, "_SamplingInputs", inputs); shader.SetBuffer(kernel, "_SamplingResults", outputs);
+                shader.Dispatch(kernel, 1, 1, 1);
+                int expected = dynamic ? (activeWindows + 1) / 2 : activeWindows;
+                var actual = new uint[counts.count]; counts.GetData(actual);
+                var expectedCounts = new uint[counts.count];
+                expectedCounts[(expected > 4 ? lists * VirtualShadowMapClipmapLayout.MaxLevels : 0) + level] = (uint)expected;
+                Assert.That(actual, Is.EqualTo(expectedCounts));
+                args.GetData(indirect);
+                Assert.That(indirect[1], Is.EqualTo(expected <= 4 ? expected : 0));
+                Assert.That(indirect[lists * 4 + 1], Is.EqualTo(expected > 4 ? fanout : 0));
+                var result = new float2[1]; outputs.GetData(result);
+                Assert.That(result[0], Is.EqualTo(new float2(expected <= 4 ? 1 : 0, expected)));
             }
             finally { Object.DestroyImmediate(shader); }
         }

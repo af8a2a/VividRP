@@ -1,3 +1,4 @@
+using VividRP.Runtime.GPUDriven;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -12,7 +13,10 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static readonly Unity.Mathematics.uint2[] s_ZeroFeedback = new Unity.Mathematics.uint2[Entries + 1];
         private static readonly GraphicsBuffer[] s_Throttle = new GraphicsBuffer[2];
         internal static GraphicsBuffer Feedback { get; private set; }
-        internal static GraphicsBuffer DispatchArgs { get; private set; }
+        internal const int ClusterCountEntries = Entries * (int)VividRendererListID.Count * 2;
+        internal static GraphicsBuffer ClusterCounts { get; private set; }
+        internal static int CullKernel { get; private set; }
+        internal static int PostCullKernel { get; private set; }
         internal static GraphicsBuffer Current => s_Throttle[s_Current];
         internal static GraphicsBuffer Previous => s_Throttle[1 - s_Current];
         internal static bool Enabled { get; private set; }
@@ -27,15 +31,12 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static readonly int s_PrevId = Shader.PropertyToID("_VSMPrevThrottle");
         private static readonly int s_OutId = Shader.PropertyToID("_VSMThrottleRW");
         private static readonly int s_FeedbackId = Shader.PropertyToID("_VSMRasterFeedbackRW");
-        private static readonly int s_ArgsId = Shader.PropertyToID("_VSMRasterFeedbackArgs");
+        private static readonly int s_ClusterCountsId = Shader.PropertyToID("_VSMRasterClusterCountsRW");
         private static readonly int s_ProjectionId = Shader.PropertyToID("_VSMThrottleProjectionsRW");
         private static readonly int s_PreviousValidId = Shader.PropertyToID("_VSMThrottlePreviousValid");
         private static readonly int s_EntriesValidId = Shader.PropertyToID("_VSMThrottleEntriesValid");
         private static readonly int s_ParametersId = Shader.PropertyToID("_VSMThrottleParameters");
         private static readonly int s_DrawMaskId = Shader.PropertyToID("_VSMRasterFeedbackDrawMask");
-        private static readonly int s_DrawArgsId = Shader.PropertyToID("_VSMPrototypeMeshletPageIndirectArgs");
-        private static readonly int s_RequestsId = Shader.PropertyToID("_VSMPrototypeMeshletPageRequests");
-        private static readonly int s_RasterPagesId = Shader.PropertyToID("_VSMPrototypeMeshletRasterPages");
 
         internal static bool Prepare(CascadedShadowSettingsVolume settings, ComputeShader shader)
         {
@@ -52,7 +53,9 @@ namespace VividRP.Runtime.VirtualShadowMap
                 if (shader == null || !shader.HasKernel("VSMProcessPreviousPerformance")
                     || !shader.HasKernel("VSMUpdatePerformanceThrottle")
                     || !shader.HasKernel("VSMPrepareRasterFeedback")
-                    || !shader.HasKernel("VSMCaptureRasterFeedback"))
+                    || !shader.HasKernel("VSMCaptureRasterFeedback")
+                    || !shader.HasKernel("VSMCullMeshletsToPagesThrottle")
+                    || !shader.HasKernel("VSMPostCullMeshletsToPagesThrottle"))
                 {
                     Disable();
                     return false;
@@ -62,6 +65,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 s_Update = shader.FindKernel("VSMUpdatePerformanceThrottle");
                 s_PrepareFeedback = shader.FindKernel("VSMPrepareRasterFeedback");
                 s_CaptureFeedback = shader.FindKernel("VSMCaptureRasterFeedback");
+                CullKernel = shader.FindKernel("VSMCullMeshletsToPagesThrottle");
+                PostCullKernel = shader.FindKernel("VSMPostCullMeshletsToPagesThrottle");
             }
             if (Feedback != null && Feedback.IsValid()) return true;
             for (int i = 0; i < 2; i++)
@@ -72,8 +77,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
             Feedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Entries + 1, 8) { name = "VSMRasterFeedback" };
             Feedback.SetData(s_ZeroFeedback);
-            DispatchArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 3, 4)
-            { name = "VSMRasterFeedbackDispatch" };
+            ClusterCounts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, ClusterCountEntries, sizeof(uint))
+            { name = "VSMRasterClusterCounts" };
             s_Completed = false;
             return true;
         }
@@ -109,22 +114,21 @@ namespace VividRP.Runtime.VirtualShadowMap
             cmd.DispatchCompute(s_Shader, s_Update, 1, 1, 1);
             s_Completed = false;
         }
-        internal static void Capture(CommandBuffer cmd, GraphicsBuffer requests, GraphicsBuffer args, uint submittedMask)
+        internal static void BeginCull(CommandBuffer cmd, int kernel)
+        {
+            if (!Enabled) return;
+            cmd.SetComputeBufferParam(s_Shader, s_PrepareFeedback, s_ClusterCountsId, ClusterCounts);
+            cmd.DispatchCompute(s_Shader, s_PrepareFeedback, (ClusterCountEntries + 63) / 64, 1, 1);
+            cmd.SetComputeBufferParam(s_Shader, kernel, s_ClusterCountsId, ClusterCounts);
+        }
+        internal static void Capture(CommandBuffer cmd, uint submittedMask)
         {
             if (!Enabled || submittedMask == 0) return;
             using var scope = new ProfilingScope(cmd, s_FeedbackSampler);
             cmd.SetComputeIntParam(s_Shader, s_DrawMaskId, unchecked((int)submittedMask));
-            for (int i = 0; i < 2; i++)
-            {
-                int kernel = i == 0 ? s_PrepareFeedback : s_CaptureFeedback;
-                cmd.SetComputeBufferParam(s_Shader, kernel, s_DrawArgsId, args);
-                cmd.SetComputeBufferParam(s_Shader, kernel, s_FeedbackId, Feedback);
-                cmd.SetComputeBufferParam(s_Shader, kernel, s_RasterPagesId, VirtualShadowMapPrototypeRuntime.MeshletRasterPages);
-            }
-            cmd.SetComputeBufferParam(s_Shader, s_PrepareFeedback, s_ArgsId, DispatchArgs);
-            cmd.DispatchCompute(s_Shader, s_PrepareFeedback, 1, 1, 1);
-            cmd.SetComputeBufferParam(s_Shader, s_CaptureFeedback, s_RequestsId, requests);
-            cmd.DispatchCompute(s_Shader, s_CaptureFeedback, DispatchArgs, 0);
+            cmd.SetComputeBufferParam(s_Shader, s_CaptureFeedback, s_ClusterCountsId, ClusterCounts);
+            cmd.SetComputeBufferParam(s_Shader, s_CaptureFeedback, s_FeedbackId, Feedback);
+            cmd.DispatchCompute(s_Shader, s_CaptureFeedback, 1, 1, 1);
         }
         internal static void CompleteFrame(bool success)
         {
@@ -138,7 +142,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             Disable();
             for (int i = 0; i < 2; i++) { s_Throttle[i]?.Dispose(); s_Throttle[i] = null; }
             Feedback?.Dispose(); Feedback = null;
-            DispatchArgs?.Dispose(); DispatchArgs = null;
+            ClusterCounts?.Dispose(); ClusterCounts = null;
             s_Shader = null;
         }
     }

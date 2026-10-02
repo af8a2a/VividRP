@@ -218,6 +218,16 @@ bool VSMCasterHierarchyOverlaps(uint level, uint2 low, uint2 high)
         _VSMPrototypeCasterLayer != 0 && _VSMReceiverMaskEnabled != 0, low, high);
 }
 
+RWStructuredBuffer<uint> _VSMRasterClusterCountsRW;
+
+void RecordVSMRasterClusters(uint draw, uint level, uint count)
+{
+#if defined(VIVID_VSM_CLUSTER_FEEDBACK)
+    if (count != 0u)
+        InterlockedAdd(_VSMRasterClusterCountsRW[draw * VIVID_VSM_RASTER_MAX_LEVELS + level], count);
+#endif
+}
+
 void AppendVSMPageMeshletRequest(
     uint rendererListIndex,
     VividMeshletRenderRequestPacked sourceRequest,
@@ -239,6 +249,29 @@ void AppendVSMPageMeshletRequest(
             sourceRequest.MeshletID,
             virtualPageIndex,
             cascadeIndex);
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    RecordVSMRasterClusters(rendererListIndex, virtualPageIndex / (axis * axis), 1u);
+}
+
+void AppendVSMLargePageMeshletRequest(uint rendererListIndex,
+    VividMeshletRenderRequestPacked sourceRequest, uint level, uint2 minPage, uint2 maxPage, uint clusters)
+{
+    uint fanout = _VSMPrototypeMeshletRasterPages[0];
+    if (fanout == 0u) return;
+    uint draw = rendererListIndex + VIVIDRENDERERLISTID_COUNT;
+    uint address = GetVSMPageDrawArgsAddress(draw);
+    uint firstInstance;
+    _VSMPrototypeMeshletPageIndirectArgs.InterlockedAdd(
+        address + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET, fanout, firstInstance);
+    uint end = _VSMPrototypeMeshletPageIndirectArgs.Load(address + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    _VSMPrototypeMeshletPageRequests[end - 1u - firstInstance / fanout] = uint4(
+        sourceRequest.InstanceID_LOD, sourceRequest.MeshletID,
+        level * axis * axis + minPage.y * axis + minPage.x,
+        level * axis * axis + maxPage.y * axis + maxPage.x);
+    // One logical HW cluster per nonempty raster window, as EmitVisibleCluster.
+    // The compatibility fanout also submits unrelated windows and padded lanes.
+    RecordVSMRasterClusters(draw, level, clusters);
 }
 
 // Choose the first relevant page as the unique owner of a fixed-grid window.
@@ -426,8 +459,9 @@ bool VSMCasterOverlapsReceiverMask(uint page, uint2 coord, uint2 low, uint2 high
 // source request: never leave a partial front submission that Finalize could
 // mistake for complete page contents. Front and back still share 4 slots/source.
 bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPacked sourceRequest,
-    uint level, uint2 minPage, uint2 maxPage, uint2 minTexel, uint2 maxTexel)
+    uint level, uint2 minPage, uint2 maxPage, uint2 minTexel, uint2 maxTexel, out uint clusterCount)
 {
+    clusterCount = 0u;
     uint2 windows[kVSMMaxPagesPerMeshletRequest]; // origin page, encoded level/extent
     uint count = 0u;
     uint axis = (uint)_VSMPrototypePagesPerAxis;
@@ -454,11 +488,17 @@ bool TryAppendVSMPageWindows(uint rendererListIndex, VividMeshletRenderRequestPa
                 }
             }
             if (!nonempty) continue;
+#if !defined(VIVID_VSM_CLUSTER_FEEDBACK)
             if (count == kVSMMaxPagesPerMeshletRequest) return false;
-            windows[count++] = uint2(level * axis * axis + clippedLow.y * axis + clippedLow.x,
-                VividVSMEncodePageWindow(level, clippedHigh - clippedLow + 1u));
+#endif
+            if (count < kVSMMaxPagesPerMeshletRequest)
+                windows[count] = uint2(level * axis * axis + clippedLow.y * axis + clippedLow.x,
+                    VividVSMEncodePageWindow(level, clippedHigh - clippedLow + 1u));
+            count++;
         }
     }
+    clusterCount = count;
+    if (count > kVSMMaxPagesPerMeshletRequest) return false;
     for (uint i = 0u; i < count; i++)
         AppendVSMPageMeshletRequest(rendererListIndex, sourceRequest, windows[i].x, windows[i].y);
     return true;
@@ -506,11 +546,16 @@ void ProcessVSMPageMeshlet(VividMeshletRenderRequestPacked sourceRequest,
     // Explicit branch: HLSL logical operators do not short-circuit UAV writes.
     [branch] if (_VSMRasterWindowPages > 1)
     {
+        uint clusters;
         if (TryAppendVSMPageWindows(rendererListIndex, sourceRequest, cascadeIndex,
-                minPage, maxPage, minTexel, maxTexel)) return;
+                minPage, maxPage, minTexel, maxTexel, clusters)) return;
+        // A failed staged append already found more than four nonempty windows.
+        AppendVSMLargePageMeshletRequest(rendererListIndex, sourceRequest, cascadeIndex, minPage, maxPage, clusters);
+        return;
     }
     if (coveredPageCount > kVSMMaxPagesPerMeshletRequest)
     {
+        uint clusters = 0u;
         for (uint pageY = minPage.y; pageY <= maxPage.y; pageY++)
         {
             for (uint pageX = minPage.x; pageX <= maxPage.x; pageX++)
@@ -523,27 +568,15 @@ void ProcessVSMPageMeshlet(VividMeshletRenderRequestPacked sourceRequest,
                     || !VSMCasterOverlapsReceiverMask(virtualPageIndex, uint2(pageX, pageY), minTexel, maxTexel))
                     continue;
 
-                const uint rasterPageCount = _VSMPrototypeMeshletRasterPages[0];
-                if (rasterPageCount == 0u)
-                    return;
-                const uint argsAddress = GetVSMPageDrawArgsAddress(
-                    rendererListIndex + VIVIDRENDERERLISTID_COUNT);
-                uint firstInstance;
-                _VSMPrototypeMeshletPageIndirectArgs.InterlockedAdd(
-                    argsAddress + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET,
-                    rasterPageCount,
-                    firstInstance);
-                const uint requestEnd = _VSMPrototypeMeshletPageIndirectArgs.Load(
-                    argsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
-                _VSMPrototypeMeshletPageRequests[
-                    requestEnd - 1u - firstInstance / rasterPageCount] = uint4(
-                        sourceRequest.InstanceID_LOD,
-                        sourceRequest.MeshletID,
-                        cascadeIndex * pagesPerCascade + minPage.y * pagesPerAxis + minPage.x,
-                        cascadeIndex * pagesPerCascade + maxPage.y * pagesPerAxis + maxPage.x);
+                clusters++;
+#if !defined(VIVID_VSM_CLUSTER_FEEDBACK)
+                AppendVSMLargePageMeshletRequest(rendererListIndex, sourceRequest, cascadeIndex, minPage, maxPage, clusters);
                 return;
+#endif
             }
         }
+        if (clusters != 0u)
+            AppendVSMLargePageMeshletRequest(rendererListIndex, sourceRequest, cascadeIndex, minPage, maxPage, clusters);
         return;
     }
 
@@ -2041,3 +2074,12 @@ void VSMClearReceiverRequestsUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeCl
 void VSMResetReceiverFeedbackUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeResetReceiverFeedback(id); }
 
 #include "VSMPerformanceThrottle.hlsl"
+
+#if defined(VIVID_VSM_CLUSTER_FEEDBACK)
+[numthreads(64, 1, 1)]
+void VSMCullMeshletsToPagesThrottle(uint3 id : SV_DispatchThreadID) { RunVSMCullMeshletsToPages(id); }
+#if defined(VIVID_VSM_SHADOW_HZB)
+[numthreads(64, 1, 1)]
+void VSMPostCullMeshletsToPagesThrottle(uint3 id : SV_DispatchThreadID) { VSMPostCullMeshletsToPagesHZB(id); }
+#endif
+#endif

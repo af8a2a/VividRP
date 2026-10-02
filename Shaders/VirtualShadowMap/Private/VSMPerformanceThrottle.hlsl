@@ -1,12 +1,12 @@
 // UE VirtualShadowMapThrottle.usf: previous raster load -> per-VSM resolution bias.
-// Vivid has HW meshlet raster only. Counts are submitted raster instances, not vertices.
+// Vivid has HW meshlet raster only: one cluster per nonempty culled window.
+// Overflow fanout and padding are transport details, not additional clusters.
 // Header 0: total HW/SW, max HW/SW. Header 1.x: global intensity.
 // Entry [2 + level]: HW, SW, intensity bits, applied bias bits.
 StructuredBuffer<uint4> _VSMPrevThrottle;
 RWStructuredBuffer<uint4> _VSMThrottleRW;
 RWStructuredBuffer<uint2> _VSMRasterFeedbackRW; // total, then per-level HW/SW
 RWStructuredBuffer<VividVSMProjection> _VSMThrottleProjectionsRW;
-RWByteAddressBuffer _VSMRasterFeedbackArgs;
 int _VSMThrottlePreviousValid, _VSMThrottleEntriesValid;
 float4 _VSMThrottleParameters; // load budget, history weight, max compute bias, time strength (-1 = load)
 uint _VSMRasterFeedbackDrawMask;
@@ -73,39 +73,31 @@ void VSMUpdatePerformanceThrottle(uint lane : SV_DispatchThreadID)
     _VSMThrottleProjectionsRW[lane] = projection;
 }
 
-[numthreads(1, 1, 1)]
+// Reset per submission: main/post and static/dynamic reuse the same scratch.
+// This kernel runs BEFORE culling. Capture runs AFTER the matching draws.
+[numthreads(64, 1, 1)]
 void VSMPrepareRasterFeedback(uint3 id : SV_DispatchThreadID)
 {
-    uint maxRecords = 0u, totalHW = 0u;
-    uint fanout = _VSMPrototypeMeshletRasterPages[0];
-    for (uint draw = 0u; draw < VIVIDRENDERERLISTID_COUNT * 2u; draw++)
-    {
-        if ((_VSMRasterFeedbackDrawMask & (1u << draw)) == 0u) continue;
-        uint instances = _VSMPrototypeMeshletPageIndirectArgs.Load(
-            GetVSMPageDrawArgsAddress(draw) + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
-        totalHW += instances;
-        uint records = draw < VIVIDRENDERERLISTID_COUNT ? instances : instances / max(fanout, 1u);
-        maxRecords = max(maxRecords, records);
-    }
-    _VSMRasterFeedbackRW[0] += uint2(totalHW, 0u);
-    _VSMRasterFeedbackArgs.Store3(0u, uint3((maxRecords + 63u) / 64u, VIVIDRENDERERLISTID_COUNT * 2u, 1u));
+    if (id.x < VIVIDRENDERERLISTID_COUNT * 2u * VIVID_VSM_RASTER_MAX_LEVELS)
+        _VSMRasterClusterCountsRW[id.x] = 0u;
 }
 
+groupshared uint g_VSMRasterTotalClusters;
 [numthreads(64, 1, 1)]
-void VSMCaptureRasterFeedback(uint3 id : SV_DispatchThreadID)
+void VSMCaptureRasterFeedback(uint lane : SV_GroupIndex)
 {
-    uint draw = id.y;
-    if ((_VSMRasterFeedbackDrawMask & (1u << draw)) == 0u) return;
-    uint address = GetVSMPageDrawArgsAddress(draw);
-    uint count = _VSMPrototypeMeshletPageIndirectArgs.Load(address + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET);
-    uint start = _VSMPrototypeMeshletPageIndirectArgs.Load(address + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
-    bool overflow = draw >= VIVIDRENDERERLISTID_COUNT;
-    uint weight = overflow ? _VSMPrototypeMeshletRasterPages[0] : 1u;
-    if (id.x >= count / max(weight, 1u)) return;
-    uint4 request = _VSMPrototypeMeshletPageRequests[overflow ? start - 1u - id.x : start + id.x];
-    uint axis = (uint)_VSMPrototypePagesPerAxis;
-    uint level = request.z / (axis * axis);
-    // Large-record fanout really issues every raster-list instance, including VS rejects.
-    // Charge that HW work to its source VSM, including main + post and static + dynamic.
-    InterlockedAdd(_VSMRasterFeedbackRW[1u + level].x, weight);
+    if (lane == 0u) g_VSMRasterTotalClusters = 0u;
+    GroupMemoryBarrierWithGroupSync();
+    if (lane < (uint)_VSMProjectionCount)
+    {
+        uint clusters = 0u;
+        for (uint draw = 0u; draw < VIVIDRENDERERLISTID_COUNT * 2u; draw++)
+            if ((_VSMRasterFeedbackDrawMask & (1u << draw)) != 0u)
+                clusters += _VSMRasterClusterCountsRW[draw * VIVID_VSM_RASTER_MAX_LEVELS + lane];
+        // Each lane owns one VSM entry; all four raster submissions accumulate.
+        _VSMRasterFeedbackRW[1u + lane] += uint2(clusters, 0u);
+        InterlockedAdd(g_VSMRasterTotalClusters, clusters);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0u) _VSMRasterFeedbackRW[0] += uint2(g_VSMRasterTotalClusters, 0u);
 }

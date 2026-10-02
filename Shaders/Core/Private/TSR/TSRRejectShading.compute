@@ -42,6 +42,34 @@ float TSR_ReconstructionDepthError(int2 coord, int2 renderSize, float depthError
     return depthError;
 }
 
+void TSR_NeighborhoodShadingChange(int2 renderCoord, int2 renderSize,
+    out float3 historyMean, out float3 deltaMean, out float3 deltaStddev)
+{
+    historyMean = 0.0;
+    deltaMean = 0.0;
+    float3 deltaSecondMoment = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 coord = clamp(renderCoord + int2(x, y), int2(0, 0), renderSize - 1);
+            // History is already reprojected onto the current output grid. Use
+            // the same input footprint even when render and output sizes differ.
+            float2 uv = (float2(coord) + 0.5) / float2(renderSize);
+            float3 history = TSR_RGBToYCoCg(_ReprojectedHistoryColor.SampleLevel(sampler_LinearClamp, uv, 0).rgb);
+            float3 delta = TSR_RGBToYCoCg(_InputColor[coord].rgb) - history;
+            historyMean += history;
+            deltaMean += delta;
+            deltaSecondMoment += delta * delta;
+        }
+    }
+    historyMean *= 1.0 / 9.0;
+    deltaMean *= 1.0 / 9.0;
+    deltaStddev = sqrt(max(deltaSecondMoment * (1.0 / 9.0) - deltaMean * deltaMean, 0.0));
+}
+
 [numthreads(8, 8, 1)]
 void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -105,8 +133,8 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (!hasSignificantMotion && continuousReceiver && historyMeta.x > 0.5)
     {
         // Confirm a stationary shading change across three consecutive frames.
-        // A signed direction distinguishes persistent lighting from alternating
-        // subpixel detail and stochastic samples. State uses the otherwise unused
+        // A signed direction alone cannot distinguish a run of stochastic samples
+        // from lighting. Require spatial evidence as well. State uses the unused
         // resurrection alpha; reproject it with point sampling, not color filtering.
         float3 delta = currentYCoCg - historyYCoCgForDiff;
         uint direction;
@@ -135,6 +163,27 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
             // overlapping samples protect the surrounding reconstruction footprint.
             float reconstructionDepthError = TSR_ReconstructionDepthError(renderCoord, renderSize, depthError);
             candidateChange = reconstructionDepthError <= receiverDepthScale * 0.02;
+        }
+        if (candidateChange)
+        {
+            float3 historyMean, neighborhoodDelta, deltaStddev;
+            TSR_NeighborhoodShadingChange(renderCoord, renderSize, historyMean, neighborhoodDelta, deltaStddev);
+            float3 neighborhoodMean = historyMean + neighborhoodDelta;
+            // Test the paired color CHANGE, so stable material contrast does not
+            // mask real lighting. The two-standard-error margin is a local noise
+            // guard, not a probability bound for correlated SMRT samples.
+            float3 meanError = deltaStddev * (2.0 / 3.0);
+            float lumaScale = max(max(abs(neighborhoodMean.x), abs(historyMean.x)), 0.2);
+            if (direction <= 2u)
+            {
+                float signedDelta = direction == 1u ? neighborhoodDelta.x : -neighborhoodDelta.x;
+                candidateChange = signedDelta > max(baseLumaThreshold * 0.5 * lumaScale, meanError.x);
+            }
+            else
+            {
+                candidateChange = dot(neighborhoodDelta.yz, delta.yz) > 0.0
+                    && length(neighborhoodDelta.yz) > max(chromaThreshold * 0.5, length(meanError.yz));
+            }
         }
         uint count = continuing ? previousCount + 1u : 1u;
         stationaryShadingChange = candidateChange && count >= 3u;

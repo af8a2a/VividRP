@@ -135,14 +135,48 @@ namespace VividRP.Editor.Tests
             if (waveOps) Assume.That(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
                 || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan, Is.True);
             using var fixture = new Fixture(waveOps);
-            var input = new Input { History = Gray(0.5f) };
+            var input = new Input { History = Gray(0.5f), CoherentNeighborhood = false };
             for (int frame = 0; frame < 16; frame++)
             {
                 input.Current = Gray(frame % 2 == 0 ? 0.9f : 0.1f);
-                Snapshot result = AssertStep(fixture, input, frame % 2 == 0 ? 5 : 9, false);
+                Snapshot result = AssertStep(fixture, input, 0, false);
                 Assert.That(result.Updated.r, Is.InRange(0.45f, 0.55f));
                 Feed(input, result);
             }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SameSignStochasticRuns_DoNotConfirmWithoutANeighborhoodLightingChange(bool waveOps)
+        {
+            if (waveOps) Assume.That(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
+                || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan, Is.True);
+            using var fixture = new Fixture(waveOps);
+            // Unlike strict alternation, stochastic SMRT samples contain runs of
+            // three or more values on the same side of the accumulated history.
+            float[] sequence = { .9f, .8f, .95f, .85f, .1f, .15f, .05f, .2f, .9f, .1f, .8f, .85f, .9f };
+            var input = new Input { History = Gray(.5f), LumaInstability = 1, CoherentNeighborhood = false };
+            for (int cycle = 0; cycle < 4; cycle++)
+            {
+                foreach (float sample in sequence)
+                {
+                    input.Current = Gray(sample);
+                    Snapshot result = AssertStep(fixture, input, 0, false);
+                    Assert.That(result.SampleCount, Is.EqualTo(16));
+                    Assert.That(result.Updated.r, Is.InRange(.4f, .6f));
+                    Feed(input, result);
+                }
+            }
+        }
+
+        [Test]
+        public void UnsupportedPendingChange_ClearsInsteadOfConfirmingOnTheThirdSample()
+        {
+            using var fixture = new Fixture();
+            var input = new Input { Current = Gray(.9f), History = Gray(.5f), PreviousState = 6,
+                CoherentNeighborhood = false };
+            Snapshot result = AssertStep(fixture, input, 0, false);
+            Assert.That(result.SampleCount, Is.EqualTo(16));
         }
 
         [Test]
@@ -555,6 +589,9 @@ namespace VividRP.Editor.Tests
             internal float DepthError, MotionPixels, LumaInstability, HistorySamples = 16, HistoryDepth = 0.5f, ResurrectionFrames;
             internal float NeighborhoodLow = 0.1f, NeighborhoodHigh = 0.9f;
             internal bool ChromaPattern;
+            // Lighting response cases change a textured footprint together.
+            // Noise cases explicitly vary only the center against fixed neighbors.
+            internal bool CoherentNeighborhood = true;
         }
 
         private sealed class Snapshot
@@ -662,7 +699,15 @@ namespace VividRP.Editor.Tests
                         : Gray((x + y) % 2 == 0 ? input.NeighborhoodHigh : input.NeighborhoodLow);
                     if (pixel == Center) value = input.Current;
                     SetColor(colors, pixel, value);
-                    SetColor(histories, pixel, input.History);
+                    Color previous = input.History;
+                    if (input.CoherentNeighborhood && pixel != Center)
+                    {
+                        previous = value + input.History - input.Current;
+                        previous.r = Mathf.Max(previous.r, 0);
+                        previous.g = Mathf.Max(previous.g, 0);
+                        previous.b = Mathf.Max(previous.b, 0);
+                    }
+                    SetColor(histories, pixel, previous);
                     SetColor(resurrections, pixel, input.Resurrection);
                     resurrections[pixel * 4 + 3] = input.PreviousState;
                     if (input.ForceUpdateState) histories[pixel * 4 + 3] = input.ForcedUpdateState;

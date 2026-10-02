@@ -1,7 +1,10 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSBuildShadingGuides
+#pragma kernel CSPropagateShadingConfidence
 #pragma kernel CSHistoryDiagnostics VIVID_TSR_HISTORY_DIAGNOSTICS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile_local _ VIVID_TSR_PAIRED_GUIDES
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/TSR/TSRCommon.hlsl"
@@ -16,6 +19,16 @@ Texture2D<float> _LumaInstability;
 Texture2D<float4> _ReprojectedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 Texture2D<float4> _ReprojectedResurrectionColor;
+Texture2D<float4> _InputShadingGuide;
+Texture2D<float4> _HistoryShadingGuide;
+RWTexture2D<float4> _OutputInputShadingGuide;
+RWTexture2D<float4> _OutputHistoryShadingGuide;
+Texture2D<float4> _PreviousShadingGuide;
+Texture2D<float2> _ShadingGuideMetadata;
+Texture2D<float2> _ShadingGuideConfidence;
+RWTexture2D<float2> _OutputShadingGuideMetadata;
+RWTexture2D<float2> _OutputShadingGuideConfidence;
+RWTexture2D<float4> _CurrentShadingGuide;
 
 RWTexture2D<float4> _AcceptedHistoryColor;
 RWTexture2D<float> _RejectionMask;
@@ -28,6 +41,209 @@ RWTexture2D<float4> _HistoryLossDiagnostics;
 float4 _RenderSize;
 float4 _OutputSize;
 float4 _TSRRejectionParams;
+float4 _TSRParams;
+float4 _Jitter;
+
+// Persistent Guide is linear exposed color plus UE-style input uncertainty.
+// High uncertainty permits unclamping only when the paired signal agrees.
+// The metadata sentinel -1 is validity, never an uncertainty value.
+float4 TSR_LoadPreviousGuide(int2 coord, out bool valid)
+{
+    float2 uv = (float2(coord) + 0.5) * _RenderSize.zw;
+    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    jitterDelta.y = -jitterDelta.y;
+#endif
+    float2 historyUV = uv - _DilatedMotion[coord] + jitterDelta;
+    float2 meta = _ReprojectedHistoryMeta.SampleLevel(sampler_PointClamp, uv, 0);
+    float depth = _InputDepth[coord];
+#if UNITY_REVERSED_Z
+    float depthScale = max(depth, 1e-6);
+#else
+    float depthScale = max(1.0 - depth, 1e-6);
+#endif
+    // Render-size changes invalidate both color and Guide histories on the CPU.
+    float2 halfTexel = _RenderSize.zw * 0.5;
+    valid = _TSRParams.x > 0.5 && meta.x > 0.5
+        && all(historyUV >= halfTexel) && all(historyUV <= 1.0 - halfTexel)
+        && abs(depth - meta.y) <= min(_TSRRejectionParams.x + _DepthError[coord] * 2.0, depthScale * 0.02)
+        && _DepthError[coord] <= depthScale * 0.02;
+    if (!valid) return 0.0;
+    float4 guide = _PreviousShadingGuide.SampleLevel(sampler_LinearClamp, historyUV, 0);
+    // Do not average an unreliable metadata tap into a reliable one.
+    int2 base = int2(floor(historyUV * _RenderSize.xy - 0.5));
+    float uncertainty = 1.0;
+    [unroll] for (int y = 0; y < 2; y++)
+    [unroll] for (int x = 0; x < 2; x++)
+        uncertainty = min(uncertainty, _PreviousShadingGuide[clamp(base + int2(x,y), 0, int2(_RenderSize.xy)-1)].a);
+    return float4(guide.rgb, saturate(uncertainty));
+}
+
+// UE's SMCS comparison space. Both inputs already contain exposed linear
+// color. Only the comparison guides use this transform; accumulation stays HDR.
+float3 TSR_ShadingMeasurementColor(float3 color)
+{
+    color = max(color, 0.0);
+    float3 guide = color / (color + 0.17);
+    return guide * guide;
+}
+
+// Mutual neighborhood constraints followed by a [1 2 1] low pass. The halo
+// shrinks at each stage, producing 8x8 guides from one cooperative 14x14 load.
+groupshared float3 GuideInput0[196];
+groupshared float3 GuideHistory0[196];
+groupshared float3 GuideInput1[144];
+groupshared float3 GuideHistory1[144];
+groupshared float3 GuideInput2[100];
+groupshared float3 GuideHistory2[100];
+
+[numthreads(8, 8, 1)]
+void CSBuildShadingGuides(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID, uint lane : SV_GroupIndex)
+{
+    int2 renderSize = int2(_RenderSize.xy);
+    int2 tileOrigin = int2(groupId.xy) * 8 - 3;
+    for (uint rawIndex = lane; rawIndex < 196; rawIndex += 64)
+    {
+        int2 coord = clamp(tileOrigin + int2(rawIndex % 14, rawIndex / 14), int2(0, 0), renderSize - 1);
+        float2 uv = (float2(coord) + 0.5) / float2(renderSize);
+        GuideInput0[rawIndex] = TSR_ShadingMeasurementColor(_InputColor[coord].rgb);
+        bool validGuide;
+        float4 previousGuide = TSR_LoadPreviousGuide(coord, validGuide);
+        GuideHistory0[rawIndex] = TSR_ShadingMeasurementColor(validGuide ? previousGuide.rgb : _InputColor[coord].rgb);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint firstIndex = lane; firstIndex < 144; firstIndex += 64)
+    {
+        uint2 p = uint2(firstIndex % 12, firstIndex / 12);
+        float3 inputMin = 1.0, inputMax = 0.0, historyMin = 1.0, historyMax = 0.0;
+        [unroll] for (uint y = 0; y < 3; y++)
+        [unroll] for (uint x = 0; x < 3; x++)
+        {
+            uint at = (p.y + y) * 14 + p.x + x;
+            inputMin = min(inputMin, GuideInput0[at]); inputMax = max(inputMax, GuideInput0[at]);
+            historyMin = min(historyMin, GuideHistory0[at]); historyMax = max(historyMax, GuideHistory0[at]);
+        }
+        uint center = (p.y + 1) * 14 + p.x + 1;
+        GuideInput1[firstIndex] = clamp(GuideInput0[center], historyMin, historyMax);
+        GuideHistory1[firstIndex] = clamp(GuideHistory0[center], inputMin, inputMax);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint secondIndex = lane; secondIndex < 100; secondIndex += 64)
+    {
+        uint2 p = uint2(secondIndex % 10, secondIndex / 10);
+        float3 inputMin = 1.0, inputMax = 0.0, historyMin = 1.0, historyMax = 0.0;
+        [unroll] for (uint y = 0; y < 3; y++)
+        [unroll] for (uint x = 0; x < 3; x++)
+        {
+            uint at = (p.y + y) * 12 + p.x + x;
+            inputMin = min(inputMin, GuideInput1[at]); inputMax = max(inputMax, GuideInput1[at]);
+            historyMin = min(historyMin, GuideHistory1[at]); historyMax = max(historyMax, GuideHistory1[at]);
+        }
+        uint center = (p.y + 2) * 14 + p.x + 2;
+        // UE Clamp3x3(Input, Clamp3x3(History, Input)) and
+        // AnnihilateToGuide3x3(History, Input), respectively.
+        GuideInput2[secondIndex] = clamp(GuideInput0[center], historyMin, historyMax);
+        GuideHistory2[secondIndex] = clamp(GuideHistory0[center], inputMin, inputMax);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    // Even out-of-viewport lanes must reach every barrier above.
+    int2 outputCoord = int2(groupId.xy) * 8 + int2(groupThreadId.xy);
+    if (any(outputCoord >= renderSize)) return;
+    float3 inputMean = 0.0, historyMean = 0.0, inputMin = 1.0, inputMax = 0.0, removedDetail = 0.0;
+    [unroll] for (uint y = 0; y < 3; y++)
+    [unroll] for (uint x = 0; x < 3; x++)
+    {
+        uint2 p = groupThreadId.xy + uint2(x, y);
+        uint at = p.y * 10 + p.x;
+        float weight = (x == 1 ? 0.5 : 0.25) * (y == 1 ? 0.5 : 0.25);
+        inputMean += GuideInput2[at] * weight;
+        historyMean += GuideHistory2[at] * weight;
+        inputMin = min(inputMin, GuideInput2[at]); inputMax = max(inputMax, GuideInput2[at]);
+        removedDetail += abs(GuideInput0[(p.y + 2) * 14 + p.x + 2] - GuideInput2[at]) * weight;
+    }
+    float3 range = inputMax - inputMin;
+    // RGB = paired low-frequency colors; alpha = input range / removed detail.
+    _OutputInputShadingGuide[outputCoord] = float4(inputMean, max(range.x, max(range.y, range.z)));
+    _OutputHistoryShadingGuide[outputCoord] = float4(historyMean, max(removedDetail.x, max(removedDetail.y, removedDetail.z)));
+    bool validGuide;
+    float4 previousGuide = TSR_LoadPreviousGuide(outputCoord, validGuide);
+    // Vivid's boundary has the opposite direction to UE's ReprojectionEdge.
+    float inputUncertainty = saturate(1.0 - _ReprojectionBoundary[outputCoord]);
+    _OutputShadingGuideMetadata[outputCoord] = float2(inputUncertainty, validGuide ? previousGuide.a : -1.0);
+}
+
+// Cooperative propagation: median rejects isolated noise, the following minimum
+// spreads coherent rejection. RGB energy uses the matching median/max path.
+groupshared float4 ConfidenceInput[196];
+groupshared float4 ConfidenceRaw[144];
+groupshared float4 ConfidenceMedian[100];
+
+float4 TSR_MedianNine(float4 v[9])
+{
+    // Fixed component-wise sorting network; no data-dependent traversal.
+    [unroll] for (uint stage = 0; stage < 9; stage++)
+    [unroll] for (uint pair = 0; pair < 4; pair++)
+    {
+        uint at = 2 * pair + (stage & 1);
+        float4 lo = min(v[at], v[at+1]);
+        v[at+1] = max(v[at], v[at+1]); v[at] = lo;
+    }
+    return v[4];
+}
+
+[numthreads(8,8,1)]
+void CSPropagateShadingConfidence(uint3 groupId : SV_GroupID, uint3 tid : SV_GroupThreadID, uint lane : SV_GroupIndex)
+{
+    int2 size = int2(_RenderSize.xy), origin = int2(groupId.xy)*8;
+    for (uint inputIndex=lane; inputIndex<196; inputIndex+=64)
+        ConfidenceInput[inputIndex] = _InputShadingGuide[clamp(origin + int2(inputIndex%14,inputIndex/14)-3,0,size-1)];
+    GroupMemoryBarrierWithGroupSync();
+    for (uint rawIndex=lane; rawIndex<144; rawIndex+=64)
+    {
+        uint2 p=uint2(rawIndex%12,rawIndex/12);
+        int2 coord=clamp(origin+int2(p)-2,0,size-1);
+        uint2 center=uint2(coord-origin+3);
+        float4 input=ConfidenceInput[center.y*14+center.x], history=_HistoryShadingGuide[coord];
+        float3 lo=1.0,hi=0.0;
+        [unroll] for(uint y=0;y<3;y++) [unroll] for(uint x=0;x<3;x++)
+        { float3 v=ConfidenceInput[(center.y+y-1)*14+center.x+x-1].rgb; lo=min(lo,v);hi=max(hi,v); }
+        float error=2.0/255.0+min(history.a,input.a*0.25);
+        float3 energy=abs(clamp(history.rgb,lo-error,hi+error)-history.rgb);
+        float3 delta=max(abs(input.rgb-history.rgb),max(input.a,error).xxx);
+        float3 factor=saturate(1.0-energy/delta);
+        ConfidenceRaw[rawIndex]=float4(energy,min(factor.x,min(factor.y,factor.z)));
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for(uint medianIndex=lane;medianIndex<100;medianIndex+=64)
+    {
+        uint2 p=uint2(medianIndex%10,medianIndex/10);float4 values[9];
+        uint2 center=uint2(clamp(origin+int2(p)-1,0,size-1)-origin+2);
+        [unroll] for(uint y=0;y<3;y++) [unroll] for(uint x=0;x<3;x++)
+            values[y*3+x]=ConfidenceRaw[(center.y+y-1)*12+center.x+x-1];
+        ConfidenceMedian[medianIndex]=TSR_MedianNine(values);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    int2 coord=origin+int2(tid.xy);if(any(coord>=size))return;
+    float3 energy=0.0;float clampBlend=1.0, historyUncertainty=1.0;
+    [unroll] for(uint y=0;y<3;y++) [unroll] for(uint x=0;x<3;x++)
+    {
+        float4 v=ConfidenceMedian[(tid.y+y)*10+tid.x+x];energy=max(energy,v.rgb);clampBlend=min(clampBlend,v.a);
+        historyUncertainty=min(historyUncertainty,max(0.0,_ShadingGuideMetadata[clamp(coord+int2(x,y)-1,0,size-1)].y));
+    }
+    float4 input=_InputShadingGuide[coord],history=_HistoryShadingGuide[coord];
+    float error=2.0/255.0+min(history.a,input.a*0.25);
+    float3 delta=max(abs(input.rgb-history.rgb),max(input.a,error).xxx);
+    float3 factor=saturate(1.0-energy/delta);
+    float rejectionBlend=min(factor.x,min(factor.y,factor.z));
+    float2 metadata=_ShadingGuideMetadata[coord];
+    float disableClamp=metadata.y<0.0?0.0:min(clampBlend,min(metadata.x,historyUncertainty));
+    _OutputShadingGuideConfidence[coord]=float2(rejectionBlend,disableClamp);
+    bool validGuide;float4 previous=TSR_LoadPreviousGuide(coord,validGuide);
+    float resolutionRatio=(_OutputSize.x*_OutputSize.y)/(_RenderSize.x*_RenderSize.y);
+    float theoreticalBlend=rcp(1.0+_TSRParams.y/max(resolutionRatio,1.0));
+    float blend=validGuide?max(max(theoreticalBlend,1.0-rejectionBlend),saturate(1.0-rejectionBlend*4.0)):1.0;
+    _CurrentShadingGuide[coord]=float4(lerp(previous.rgb,max(_InputColor[coord].rgb,0.0),blend),metadata.x);
+}
 
 float TSR_ReconstructionDepthError(int2 coord, int2 renderSize, float depthError)
 {
@@ -208,25 +424,41 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         && motionPixels < 0.5 && reprojectionBoundary < 0.25
         && depthDiff <= min(depthTolerance, receiverDepthScale * 0.02)
         && shadingState == 0.0 && _ReprojectedResurrectionColor[pixelCoord].a == 0.0;
-    if (stableHistory && lumaInstability > 0.15)
+    if (stableHistory && lumaInstability > 0.15 && any(abs(historyColor - unclippedHistoryColor) > 1e-6))
     {
         float3 neighborhoodCenter = 0.5 * (clampMin + clampMax);
         float neighborhoodRange = (clampMax.x - clampMin.x) / max(abs(neighborhoodCenter.x), 0.2);
+        // Keep full clipping for flat lighting steps and histories incompatible
+        // with the neighborhood, even when temporal instability is high.
+        float noiseConfidence = smoothstep(0.15, 0.5, lumaInstability)
+            * smoothstep(0.01, 0.05, neighborhoodRange);
         float3 neighborhoodVALU = TSR_RGBToYCoCgVALU(max(TSR_YCoCgToRGB(neighborhoodCenter), 0.0));
         float3 unclippedVALU = TSR_RGBToYCoCgVALU(unclippedHistoryColor);
         float neighborhoodLumaDiff = abs(unclippedVALU.x - neighborhoodVALU.x)
             / max(max(abs(unclippedVALU.x), abs(neighborhoodVALU.x)), 0.2);
         float neighborhoodChromaDiff = length(unclippedVALU.yz - neighborhoodVALU.yz);
-        // Keep full clipping for flat lighting steps and histories incompatible
-        // with the neighborhood, even when temporal instability is high.
-        float noiseConfidence = smoothstep(0.15, 0.5, lumaInstability)
-            * smoothstep(0.01, 0.05, neighborhoodRange);
         float colorConfidence = (1.0 - smoothstep(baseLumaThreshold * 0.5, baseLumaThreshold, neighborhoodLumaDiff))
             * (1.0 - smoothstep(chromaThreshold * 0.5, chromaThreshold, neighborhoodChromaDiff));
-        float relaxation = 0.5 * noiseConfidence * colorConfidence
+        float guideConfidence = colorConfidence;
+#if defined(VIVID_TSR_PAIRED_GUIDES)
+        guideConfidence = _ShadingGuideConfidence[renderCoord].y;
+        // A textured lighting step can fit inside the low-frequency input box
+        // before the clipped center triggers temporal confirmation. Preserve the
+        // original color guard whenever the paired neighborhood change is coherent.
+        float3 pairedHistoryMean, pairedDelta, pairedDeltaStddev;
+        TSR_NeighborhoodShadingChange(renderCoord, renderSize, pairedHistoryMean, pairedDelta, pairedDeltaStddev);
+        float3 pairedMeanError = pairedDeltaStddev * (2.0 / 3.0);
+        bool coherentChange = abs(pairedDelta.x) > pairedMeanError.x
+            || length(pairedDelta.yz) > length(pairedMeanError.yz);
+        if (coherentChange)
+        {
+            guideConfidence = min(guideConfidence, colorConfidence);
+        }
+#endif
+        float relaxation = 0.5 * noiseConfidence * guideConfidence
             * saturate(1.0 - motionPixels * 2.0) * saturate(1.0 - reprojectionBoundary * 4.0);
         // Do not restore coverage from a nearby silhouette through reconstruction.
-        if (relaxation > 0.0 && any(abs(historyColor - unclippedHistoryColor) > 1e-6)
+        if (relaxation > 0.0
             && TSR_ReconstructionDepthError(renderCoord, renderSize, depthError) <= receiverDepthScale * 0.02)
         {
             historyColor = lerp(historyColor, unclippedHistoryColor, relaxation);

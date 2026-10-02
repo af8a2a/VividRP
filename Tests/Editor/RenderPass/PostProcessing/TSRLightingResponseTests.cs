@@ -108,6 +108,33 @@ namespace VividRP.Editor.Tests
             Assert.That(result.AcceptedHistory.r, Is.EqualTo(.1f).Within(.001f));
         }
 
+        [TestCase(4f, 1f)]
+        [TestCase(.25f, 1f)]
+        [TestCase(1f, 4f)]
+        public void PreExposure_ReprojectionConvertsBothHistoriesWithoutChangingState(float current, float previous)
+        {
+            var result = InspectReprojectedState(8, 0, true, false,
+                constantColor: new Color(.25f, 2f, 16f), currentPreExposure: current, previousPreExposure: previous);
+            Assert.That(result.constantColorMaxError, Is.LessThan(.0001f));
+            Assert.That(result.statePixels, Is.EqualTo(64));
+            Assert.That(result.statesMatch && result.metadataMatch, Is.True);
+        }
+
+        [TestCase(4f, 1f)]
+        [TestCase(.25f, 1f)]
+        [TestCase(1f, 4f)]
+        public void PreExposure_GuideConvertsBeforeComparisonAndPersistsCurrentScale(float current, float previous)
+        {
+            using var fixture = new Fixture();
+            var result = fixture.Run(new Input { Current = Gray(.5f), History = Gray(.5f),
+                NeighborhoodLow = .5f, NeighborhoodHigh = .5f, CurrentPreExposure = current,
+                PreviousPreExposure = previous, GuideStorageScale = previous / current, GuideUncertainty = .4f });
+            Assert.That(ColorError(result.InputGuide, result.HistoryGuide), Is.LessThan(.0001f));
+            Assert.That(result.NextGuide.r, Is.EqualTo(.5f).Within(.0001f));
+            Assert.That(result.DisableHistoryClamp, Is.EqualTo(.4f).Within(.0001f));
+            Assert.That(result.StoredPreExposure, Is.EqualTo(current).Within(.0001f));
+        }
+
         [TestCase(0f, 1f, 0f)]
         [TestCase(.25f, 1f, .25f)]
         [TestCase(1f, .4f, .4f)]
@@ -549,10 +576,12 @@ namespace VividRP.Editor.Tests
         }
 
         private static ReprojectionResult InspectReprojectedState(int outputSize, float shiftPixels, bool hasHistory, bool waveOps,
-            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null)
+            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f)
         {
             const int renderSize = 8;
             int paddedSize = (outputSize + 7) / 8 * 8;
+            using var frameExposure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            frameExposure.SetData(new[] { new Vector4(currentPreExposure, 0, 0, 0) });
             var owned = new System.Collections.Generic.List<Object>();
             var result = new ReprojectionResult { outputSize = outputSize, paddedSize = paddedSize,
                 shiftPixels = shiftPixels, hasHistory = hasHistory, waveOps = waveOps, jitterPixels = jitterPixels, phase = phase,
@@ -619,6 +648,8 @@ namespace VividRP.Editor.Tests
                 shader.SetVector("_Jitter", new Vector4(0, 0, 2 * jitterPixels.x / outputSize,
                     (SystemInfo.graphicsUVStartsAtTop ? -2 : 2) * jitterPixels.y / outputSize));
                 shader.SetVector("_TSRParams", new Vector4(hasHistory ? 1 : 0, 16, 0, 0));
+                shader.SetBuffer(kernel, "_TSRFramePreExposure", frameExposure);
+                shader.SetTexture(kernel, "_TSRPreviousPreExposure", InputTexture(1, 1, previousPreExposure));
                 shader.SetTexture(kernel, "_DilatedMotion", motion); shader.SetTexture(kernel, "_ReprojectionBoundary", boundary);
                 shader.SetTexture(kernel, "_ThinGeometryCoverage", zero); shader.SetTexture(kernel, "_LumaInstability", zero);
                 shader.SetTexture(kernel, "_HistoryColor", sourceColor); shader.SetTexture(kernel, "_HistoryMeta", historyMeta);
@@ -665,8 +696,8 @@ namespace VividRP.Editor.Tests
                             for (int c = 0; c < 3; c++)
                             {
                                 result.constantColorMaxError = Mathf.Max(result.constantColorMaxError,
-                                    Mathf.Abs(colors[pixel * 4 + c] - constantColor.Value[c]),
-                                    Mathf.Abs(mainColors[pixel * 4 + c] - constantColor.Value[c]));
+                                    Mathf.Abs(colors[pixel * 4 + c] - constantColor.Value[c] * currentPreExposure / previousPreExposure),
+                                    Mathf.Abs(mainColors[pixel * 4 + c] - constantColor.Value[c] * currentPreExposure / previousPreExposure));
                             }
                         }
                         result.statePixels++;
@@ -701,6 +732,7 @@ namespace VividRP.Editor.Tests
             // Noise cases explicitly vary only the center against fixed neighbors.
             internal bool CoherentNeighborhood = true;
             internal bool InvertHistoryPattern;
+            internal float CurrentPreExposure = 1f, PreviousPreExposure = 1f, GuideStorageScale = 1f;
             internal float GuideUncertainty = 1f, GuideInputUncertainty = 1f;
             internal bool GuideHistoryValid = true;
             internal Vector2Int GuideUnreliableOffset;
@@ -710,12 +742,16 @@ namespace VividRP.Editor.Tests
         {
             internal Color Updated, ResurrectionColor, AcceptedHistory, InputGuide, HistoryGuide;
             internal float Accepted, AcceptedAlpha, SampleCount, ResurrectionFrames, PendingState;
+            internal float StoredPreExposure;
             internal float DisableHistoryClamp, NextGuideUncertainty;
             internal Color NextGuide;
         }
 
         private sealed class Fixture : IDisposable
         {
+            private readonly GraphicsBuffer frameExposure = new(GraphicsBuffer.Target.Structured, 1, 16);
+            private readonly Texture2D previousExposure = CreateInput(GraphicsFormat.R32_SFloat);
+            private readonly RenderTexture outputExposure = CreateOutput(GraphicsFormat.R32_SFloat);
             internal const int Size = 8, PixelCount = Size * Size;
             private const int Center = 4 * Size + 4;
             private readonly ComputeShader reject, update;
@@ -749,6 +785,16 @@ namespace VividRP.Editor.Tests
                 previousGuide = CreateInput(GraphicsFormat.R32G32B32A32_SFloat);
                 guideBoundary = CreateInput(GraphicsFormat.R32_SFloat);
                 SetConstant(depth, 1, 0.5f); SetConstant(zero, 1, 0);
+                frameExposure.SetData(new[] { Vector4.one });
+                SetConstant(previousExposure, 1, 1);
+                foreach (string name in new[] { "CSBuildShadingGuides", "CSPropagateShadingConfidence" })
+                {
+                    int k = reject.FindKernel(name);
+                    reject.SetBuffer(k, "_TSRFramePreExposure", frameExposure);
+                    reject.SetTexture(k, "_TSRPreviousPreExposure", previousExposure);
+                }
+                update.SetBuffer(update.FindKernel("CS"), "_TSRFramePreExposure", frameExposure);
+                update.SetTexture(update.FindKernel("CS"), "_TSROutputPreExposure", outputExposure);
             }
 
             private static ComputeShader Load(string name, bool waveOps)
@@ -823,6 +869,8 @@ namespace VividRP.Editor.Tests
 
             internal Snapshot Run(Input input)
             {
+                frameExposure.SetData(new[] { new Vector4(input.CurrentPreExposure, 0, 0, 0) });
+                SetConstant(previousExposure, 1, input.PreviousPreExposure);
                 var colors = new float[PixelCount * 4];
                 var histories = new float[PixelCount * 4];
                 var resurrections = new float[PixelCount * 4];
@@ -852,7 +900,11 @@ namespace VividRP.Editor.Tests
                 color.SetPixelData(colors, 0); color.Apply(false, false);
                 history.SetPixelData(histories, 0); history.Apply(false, false);
                 var guideValues = (float[])histories.Clone();
-                for (int pixel = 0; pixel < PixelCount; pixel++) guideValues[pixel * 4 + 3] = input.GuideUncertainty;
+                for (int pixel = 0; pixel < PixelCount; pixel++)
+                {
+                    for (int channel = 0; channel < 3; channel++) guideValues[pixel * 4 + channel] *= input.GuideStorageScale;
+                    guideValues[pixel * 4 + 3] = input.GuideUncertainty;
+                }
                 if (input.GuideUnreliableOffset != Vector2Int.zero)
                     guideValues[((Size / 2 + input.GuideUnreliableOffset.y) * Size + Size / 2 + input.GuideUnreliableOffset.x) * 4 + 3] = 0;
                 previousGuide.SetPixelData(guideValues, 0); previousGuide.Apply(false, false);
@@ -916,6 +968,7 @@ namespace VividRP.Editor.Tests
                 float[] confidenceValues = Read(guideConfidence), nextGuide = Read(currentGuide);
                 return new Snapshot
                 {
+                    StoredPreExposure = Read(outputExposure)[0],
                     InputGuide = new Color(inputGuides[Center * 4], inputGuides[Center * 4 + 1], inputGuides[Center * 4 + 2], 1),
                     DisableHistoryClamp = confidenceValues[Center * 2 + 1],
                     NextGuideUncertainty = nextGuide[Center * 4 + 3],
@@ -939,6 +992,9 @@ namespace VividRP.Editor.Tests
 
             public void Dispose()
             {
+                frameExposure.Dispose();
+                Object.DestroyImmediate(previousExposure);
+                outputExposure.Release(); Object.DestroyImmediate(outputExposure);
                 foreach (Texture2D texture in new[] { color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta, previousGuide, guideBoundary })
                     Object.DestroyImmediate(texture);
                 foreach (RenderTexture texture in new[] { acceptedColor, rejection, updatedColor, updatedMeta, updatedResurrectionColor, updatedResurrectionMeta, inputGuide, historyGuide, guideMetadata, guideConfidence, currentGuide })

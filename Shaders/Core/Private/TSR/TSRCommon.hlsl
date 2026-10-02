@@ -3,6 +3,16 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
+// Exposure belongs to the stored TSR frame, not the auto-exposure write target.
+StructuredBuffer<float4> _TSRFramePreExposure;
+Texture2D<float> _TSRPreviousPreExposure;
+
+float TSR_CurrentPreExposure() { return max(_TSRFramePreExposure[0].x, 1e-4); }
+float TSR_HistoryExposureCorrection()
+{
+    return TSR_CurrentPreExposure() / max(_TSRPreviousPreExposure[int2(0, 0)], 1e-4);
+}
+
 #if defined(VIVID_TSR_WAVE_OPS) && defined(UNITY_COMPILER_DXC)
 #define VIVID_TSR_USE_WAVE_OPS 1
 #else

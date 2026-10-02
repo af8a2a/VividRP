@@ -76,7 +76,7 @@ float4 TSR_LoadPreviousGuide(int2 coord, out bool valid)
     [unroll] for (int y = 0; y < 2; y++)
     [unroll] for (int x = 0; x < 2; x++)
         uncertainty = min(uncertainty, _PreviousShadingGuide[clamp(base + int2(x,y), 0, int2(_RenderSize.xy)-1)].a);
-    return float4(guide.rgb, saturate(uncertainty));
+    return float4(guide.rgb * TSR_HistoryExposureCorrection(), saturate(uncertainty));
 }
 
 // UE's SMCS comparison space. Both inputs already contain exposed linear

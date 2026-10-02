@@ -18,6 +18,7 @@ Texture2D<float4> _ReprojectedResurrectionColor;
 Texture2D<float2> _ReprojectedResurrectionMeta;
 Texture2D<float> _RejectionMask;
 
+RWTexture2D<float> _TSROutputPreExposure;
 RWTexture2D<float4> _UpdatedHistoryColor;
 RWTexture2D<float2> _UpdatedHistoryMeta;
 RWTexture2D<float4> _UpdatedResurrectionColor;
@@ -42,6 +43,11 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     int2 pixelCoord = int2(dispatchThreadId.xy);
     if (any(pixelCoord >= outputSize))
         return;
+
+    // Persist the exposure after every write, including retained resurrection RGB,
+    // which was already converted by ReprojectHistory. No CPU readback is needed.
+    if (all(pixelCoord == 0))
+        _TSROutputPreExposure[int2(0, 0)] = TSR_CurrentPreExposure();
 
     int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
 

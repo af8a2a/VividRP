@@ -27,6 +27,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int CameraStateExpirationFrames = 400;
         private const int KernelThreadGroupSize = 8;
         private const string TsrWaveOpsKeyword = "VIVID_TSR_WAVE_OPS";
+        private static readonly int FramePreExposureId = Shader.PropertyToID("_TSRFramePreExposure");
+        private static readonly int PreviousPreExposureId = Shader.PropertyToID("_TSRPreviousPreExposure");
+        private static readonly int OutputPreExposureId = Shader.PropertyToID("_TSROutputPreExposure");
         private const string TsrPairedGuidesKeyword = "VIVID_TSR_PAIRED_GUIDES";
 
         private static readonly ProfilerMarker s_RecordGraphMarker =
@@ -132,7 +135,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Vector2Int requestedRenderSize,
             Vector2Int requestedOutputSize,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
-            bool forceResetHistory = false)
+            bool forceResetHistory = false, GraphicsBuffer framePreExposure = null)
         {
             using var recordGraphScope = s_RecordGraphMarker.Auto();
             if (renderGraph == null
@@ -318,6 +321,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
 #endif
                 passData.Shaders = shaders;
+                passData.FramePreExposure = renderGraph.ImportBuffer(framePreExposure ?? VividAutoExposureSystem.GetOrCreateDefaultExposureBuffer());
+                passData.PreviousPreExposure = handles.PreviousPreExposure;
+                passData.CurrentPreExposure = handles.CurrentPreExposure;
                 passData.Source = sourceTexture.innerHandle;
                 passData.Depth = depthTexture.innerHandle;
                 passData.MotionVectors = motionTexture.innerHandle;
@@ -363,6 +369,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.Sharpness = additionalData != null ? additionalData.tsrSharpness : 0.2f;
                 passData.EnableWaveOps = SupportsWaveOps();
 
+                builder.UseBuffer(passData.FramePreExposure, AccessFlags.Read);
+                builder.UseTexture(passData.PreviousPreExposure, resetHistory ? AccessFlags.ReadWrite : AccessFlags.Read);
+                builder.UseTexture(passData.CurrentPreExposure, AccessFlags.Write);
                 builder.UseTexture(passData.Source, AccessFlags.Read);
                 builder.UseTexture(passData.Depth, AccessFlags.Read);
                 builder.UseTexture(passData.MotionVectors, AccessFlags.Read);
@@ -526,11 +535,18 @@ namespace VividRP.Runtime.RenderPass.Core
             data.State.MarkHistoryWritten();
         }
 
+        private static void BindPreExposure(CommandBuffer cmd, PassData data, ComputeShader shader, int kernel)
+        {
+            cmd.SetComputeBufferParam(shader, kernel, FramePreExposureId, data.FramePreExposure);
+            cmd.SetComputeTextureParam(shader, kernel, PreviousPreExposureId, data.PreviousPreExposure);
+        }
+
         private static void DispatchDilateVelocity(CommandBuffer cmd, PassData data)
         {
             var shader = data.Shaders.DilateVelocity;
             var kernel = data.Shaders.DilateVelocityKernel;
             SetCommonConstants(cmd, shader, data);
+            BindPreExposure(cmd, data, shader, kernel);
             cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
             cmd.SetComputeTextureParam(shader, kernel, InputDepthId, data.Depth);
             cmd.SetComputeTextureParam(shader, kernel, InputMotionVectorsId, data.MotionVectors);
@@ -549,6 +565,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = data.Shaders.ReprojectHistory;
             var kernel = data.Shaders.ReprojectHistoryKernel;
             SetCommonConstants(cmd, shader, data);
+            BindPreExposure(cmd, data, shader, kernel);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.SetComputeTextureParam(shader, kernel, ThinGeometryCoverageId, data.ThinGeometryCoverage);
@@ -570,6 +587,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = data.Shaders.RejectShading;
             var kernel = data.Shaders.BuildShadingGuidesKernel;
             SetCommonConstants(cmd, shader, data);
+            BindPreExposure(cmd, data, shader, kernel);
             cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
             BindGuideHistory(cmd, data, shader, kernel);
             cmd.SetComputeTextureParam(shader, kernel, OutputShadingGuideMetadataId, data.GuideMetadata);
@@ -595,6 +613,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = data.Shaders.RejectShading;
             var kernel = data.Shaders.PropagateShadingConfidenceKernel;
             SetCommonConstants(cmd, shader, data);
+            BindPreExposure(cmd, data, shader, kernel);
             BindGuideHistory(cmd, data, shader, kernel);
             cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
             cmd.SetComputeTextureParam(shader, kernel, InputShadingGuideId, data.InputShadingGuide);
@@ -651,6 +670,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 #endif
             SetCommonConstants(cmd, shader, data);
+            cmd.SetComputeBufferParam(shader, kernel, FramePreExposureId, data.FramePreExposure);
+            cmd.SetComputeTextureParam(shader, kernel, OutputPreExposureId, data.CurrentPreExposure);
             cmd.SetComputeTextureParam(shader, kernel, CurrentFrameColorId, data.SpatialAntiAliasedColor);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
@@ -925,7 +946,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 TextureHandle previousResurrectionMeta,
                 TextureHandle currentResurrectionMeta,
                 TextureHandle previousShadingGuide,
-                TextureHandle currentShadingGuide)
+                TextureHandle currentShadingGuide, TextureHandle previousPreExposure, TextureHandle currentPreExposure)
             {
                 PreviousHistoryColor = previousHistoryColor;
                 CurrentHistoryColor = currentHistoryColor;
@@ -937,6 +958,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 CurrentResurrectionMeta = currentResurrectionMeta;
                 PreviousShadingGuide = previousShadingGuide;
                 CurrentShadingGuide = currentShadingGuide;
+                PreviousPreExposure = previousPreExposure;
+                CurrentPreExposure = currentPreExposure;
             }
 
             public TextureHandle PreviousHistoryColor { get; }
@@ -949,6 +972,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle CurrentResurrectionMeta { get; }
             public TextureHandle PreviousShadingGuide { get; }
             public TextureHandle CurrentShadingGuide { get; }
+            public TextureHandle PreviousPreExposure { get; }
+            public TextureHandle CurrentPreExposure { get; }
         }
 
         private readonly struct ShaderSet
@@ -1040,6 +1065,9 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
             public CameraState State;
             public ShaderSet Shaders;
+            public BufferHandle FramePreExposure;
+            public TextureHandle PreviousPreExposure;
+            public TextureHandle CurrentPreExposure;
             public TextureHandle Source;
             public TextureHandle Depth;
             public TextureHandle MotionVectors;
@@ -1093,6 +1121,7 @@ namespace VividRP.Runtime.RenderPass.Core
             private CameraHistoryTexture m_ResurrectionColor;
             private CameraHistoryTexture m_ResurrectionMeta;
             private CameraHistoryTexture m_ShadingGuide;
+            private CameraHistoryTexture m_PreExposure;
             private Vector2Int m_RenderSize;
             private Vector2Int m_OutputSize;
             private VividTsrQualityMode m_Quality;
@@ -1117,6 +1146,9 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 historySampleCount = Mathf.Clamp(historySampleCount, 8, 32);
                 EnsureTextures(camera, outputSize);
+                m_PreExposure = camera.GetVividCameraHistory().GetOrCreateTexture(
+                    CameraHistoryIds.TsrPreExposure, 2,
+                    CreateHistoryDescriptor(Vector2Int.one, GraphicsFormat.R32_SFloat));
                 if (pairedGuides)
                     m_ShadingGuide = camera.GetVividCameraHistory().GetOrCreateTexture(
                         CameraHistoryIds.TsrShadingGuide, 2,
@@ -1125,6 +1157,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     && m_HistoryMeta.IsValid()
                     && m_ResurrectionColor.IsValid()
                     && m_ResurrectionMeta.IsValid()
+                    && m_PreExposure.IsValid()
                     && (!pairedGuides || m_ShadingGuide.IsValid());
                 var resetHistory = forceResetHistory
                     || !m_HasValidHistory
@@ -1164,7 +1197,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     renderGraph.ImportTexture(m_ResurrectionMeta.GetPrevious()),
                     renderGraph.ImportTexture(m_ResurrectionMeta.GetCurrent()),
                     m_PairedGuides ? renderGraph.ImportTexture(m_ShadingGuide.GetPrevious()) : default,
-                    m_PairedGuides ? renderGraph.ImportTexture(m_ShadingGuide.GetCurrent()) : default);
+                    m_PairedGuides ? renderGraph.ImportTexture(m_ShadingGuide.GetCurrent()) : default,
+                    renderGraph.ImportTexture(m_PreExposure.GetPrevious()),
+                    renderGraph.ImportTexture(m_PreExposure.GetCurrent()));
             }
 
             public void CommitFrame(Vector2Int renderSize, Vector2Int outputSize, Vector2 jitter)
@@ -1176,6 +1211,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             public void MarkHistoryWritten()
             {
+                m_PreExposure?.MarkWritten();
                 m_HistoryColor?.MarkWritten();
                 m_HistoryMeta?.MarkWritten();
                 m_ResurrectionColor?.MarkWritten();
@@ -1190,6 +1226,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 for (var i = 0; i < 2; i++)
                 {
+                    ClearRTHandle(cmd, m_PreExposure.GetFrame(i), Color.white);
                     ClearRTHandle(cmd, m_HistoryColor.GetFrame(i), Color.clear);
                     ClearRTHandle(cmd, m_HistoryMeta.GetFrame(i), Color.clear);
                     ClearRTHandle(cmd, m_ResurrectionColor.GetFrame(i), Color.clear);
@@ -1205,6 +1242,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResurrectionColor = null;
                 m_ResurrectionMeta = null;
                 m_ShadingGuide = null;
+                m_PreExposure = null;
                 m_HasValidHistory = false;
             }
 

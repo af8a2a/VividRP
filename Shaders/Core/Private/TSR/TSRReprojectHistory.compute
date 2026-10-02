@@ -66,9 +66,11 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float2 historyMeta = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
     float2 resurrectionMeta = _ResurrectionMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
 
-    _ReprojectedHistoryColor[pixelCoord] = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
+    float4 reprojectedColor = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
+    float exposureCorrection = TSR_HistoryExposureCorrection();
+    _ReprojectedHistoryColor[pixelCoord] = float4(reprojectedColor.rgb * exposureCorrection, reprojectedColor.a);
     _ReprojectedHistoryMeta[pixelCoord] = float2(historyMeta.x * historyConfidence, historyMeta.y);
-    float3 resurrectionColor = TSR_SampleCatmullRom(_ResurrectionColor, historyUV, previousSize).rgb;
+    float3 resurrectionColor = TSR_SampleCatmullRom(_ResurrectionColor, historyUV, previousSize).rgb * exposureCorrection;
     // Count shading changes on the stable output grid. Point-quantizing each
     // jitter delta would accumulate a drift even for a stationary camera.
     // Color reconstruction still uses the jittered history coordinates above.

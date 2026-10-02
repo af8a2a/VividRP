@@ -148,7 +148,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (hasHistory)
     {
         float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
-        float historyLuma = TSR_LumaVALU(TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize).rgb);
+        float historyLuma = TSR_LumaVALU(TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize).rgb * TSR_HistoryExposureCorrection());
         float temporalDelta = abs(centerLuma - historyLuma) / max(max(abs(centerLuma), abs(historyLuma)), 0.2);
         temporalFlicker = saturate((temporalDelta - 0.04) * 4.0);
     }

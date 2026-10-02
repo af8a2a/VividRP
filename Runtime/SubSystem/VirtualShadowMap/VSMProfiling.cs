@@ -14,6 +14,12 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly ProfilingSampler BuildPageHierarchy = new("VSM.BuildPageHierarchy");
         internal static readonly ProfilingSampler AllocationPrepare = new("VSM.AllocationPrepare");
         internal static readonly ProfilingSampler AllocationCommit = new("VSM.AllocationCommit");
+        internal static readonly ProfilingSampler ResetPhysicalPageLists = new("VSM.ResetPhysicalPageLists");
+        internal static readonly ProfilingSampler UpdatePhysicalPages = new("VSM.UpdatePhysicalPages");
+        internal static readonly ProfilingSampler PackAvailablePages = new("VSM.PackAvailablePages");
+        internal static readonly ProfilingSampler AppendEmptyPages = new("VSM.AppendEmptyPages");
+        internal static readonly ProfilingSampler AllocateNewMappings = new("VSM.AllocateNewMappings");
+        internal static readonly ProfilingSampler AppendPhysicalPageLists = new("VSM.AppendPhysicalPageLists");
         internal static readonly ProfilingSampler Allocate = new("VSM.Allocate");
         internal static readonly ProfilingSampler Clear = new("VSM.ClearPhysicalPages");
         internal static readonly ProfilingSampler ProductionFeedback = new("VSM.ProductionFeedback");

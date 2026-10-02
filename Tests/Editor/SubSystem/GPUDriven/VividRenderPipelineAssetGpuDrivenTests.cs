@@ -708,7 +708,7 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("nativeCmd.SetBufferData(", passSource);
             StringAssert.Contains("BuildUnmappedPageTable(", passSource);
             StringAssert.Contains("DefaultPhysicalPageCount = 256", passSource);
-            StringAssert.Contains("MaxPhysicalPageCount = 1024", passSource);
+            StringAssert.Contains("MaxPhysicalPageCount = 8192", passSource);
             StringAssert.Contains("VSMPrototypeAllocatePages", passSource);
             StringAssert.Contains("VSMClearPhysicalPagesIndirect", passSource);
             StringAssert.Contains("VSMReducePageOccupancyIndirect", passSource);

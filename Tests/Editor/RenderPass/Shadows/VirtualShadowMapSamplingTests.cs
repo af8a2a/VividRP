@@ -1,5 +1,7 @@
 using VividRP.Runtime.VirtualShadowMap;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEditor;
@@ -110,7 +112,9 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMPrototypePageTableEntryCount", 4);
                 shader.SetInt("_VSMPrototypeFeedbackFrameIndex", 2);
                 shader.SetInt("_VSMReceiverMaskEnabled", 0);
-                foreach (string name in new[] { "VSMUpdatePhysicalPagesUE", "VSMAllocateNewPageMappingsUE", "VSMAppendPhysicalPageListsUE" })
+                foreach (string name in new[] { "VSMResetPhysicalPageListsUE", "VSMUpdatePhysicalPagesUE",
+                    "VSMPackAvailablePagesUE", "VSMAppendEmptyPhysicalPagesUE",
+                    "VSMAllocateNewPageMappingsUE", "VSMAppendPhysicalPageListsUE" })
                 {
                     int kernel = shader.FindKernel(name);
                     shader.SetBuffer(kernel, "_VSMPrototypeWritablePageTable", table);
@@ -131,6 +135,148 @@ namespace VividRP.Editor.Tests
                 CollectionAssert.AreEquivalent(new uint[] { 0, 1 }, new[] { list[0], list[1] });
                 var count = new uint[4]; counters.GetData(count);
                 CollectionAssert.AreEqual(new uint[] { 2, 4, 0, 2 }, count);
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
+        [TestCase(1)]
+        [TestCase(63)]
+        [TestCase(1023)]
+        [TestCase(1024)]
+        [TestCase(1025)]
+        [TestCase(2049)]
+        [TestCase(8192)]
+        public void UEAllocation_MultipleChunksPreserveLRUCacheLifetimeAndWorkLists(int capacity)
+        {
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute"));
+            int pages = capacity * 2 + 17;
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 4);
+            using var lists = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 4 + 4 + 16, 4);
+            using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
+            using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
+            using var masks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 8);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2 + 16, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            try
+            {
+                var t = new uint[pages]; var m = new uint4[pages]; var o = new uint[capacity];
+                var r = new uint[pages]; var ls = new uint[capacity * 4 + 20];
+                var w = new uint[capacity * 2 + 16]; var a = new uint[6]; var c = new uint[4];
+                const uint guard = 0xdeadbeefu;
+                for (int i = 0; i < capacity; i++) ls[i] = (uint)i;
+                Array.Fill(ls, guard, capacity * 4 + 4, 16);
+                Array.Fill(w, guard, capacity * 2, 16);
+                table.SetData(t); metadata.SetData(m); owners.SetData(o); lists.SetData(ls); work.SetData(w);
+                pressure.SetData(new uint4[3]);
+                string[] names = { "VSMResetPhysicalPageListsUE", "VSMUpdatePhysicalPagesUE",
+                    "VSMPackAvailablePagesUE", "VSMAppendEmptyPhysicalPagesUE", "VSMAllocateNewPageMappingsUE",
+                    "VSMAppendPhysicalPageListsUE", "VSMResetPageWorkListsUE", "VSMBuildPageWorkListsUE" };
+                int[] kernels = names.Select(shader.FindKernel).ToArray();
+                foreach (int kernel in kernels)
+                {
+                    shader.SetBuffer(kernel, "_VSMPrototypeWritablePageTable", table);
+                    shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata);
+                    shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
+                    shader.SetBuffer(kernel, "_VSMPageRequestFlags", requests);
+                    shader.SetBuffer(kernel, "_VSMPhysicalPageLists", lists);
+                    shader.SetBuffer(kernel, "_VSMPagePressureRW", pressure);
+                    shader.SetBuffer(kernel, "_VSMPrototypeAllocatorCounters", counters);
+                    shader.SetBuffer(kernel, "_VSMPhysicalReceiverMasks", masks);
+                    shader.SetBuffer(kernel, "_VSMPageWorkListRW", work);
+                    shader.SetBuffer(kernel, "_VSMPageWorkDispatchArgsRW", args);
+                }
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", pages);
+                shader.SetInt("_VSMPrototypePageSize", 128);
+                shader.SetInt("_VSMPageUpdateBudget", 1); // Not a production quota.
+                shader.SetInt("_VSMPageOccupancySkipDisabled", 0);
+                var random = new System.Random(412 + capacity);
+                for (int frame = 0; frame < 27; frame++)
+                {
+                    // Cross uint wrap, then verify the exact 1000/1001-frame expiry boundary.
+                    uint clock = unchecked(0xfffffff0u + (uint)Math.Min(frame, 24));
+                    if (frame >= 25) clock += (uint)(1000 + frame - 25);
+                    Array.Clear(r, 0, r.Length);
+                    if (frame < 25)
+                        for (int page = 0; page < pages; page++)
+                            if (frame == 0 ? page < capacity / 2 + 1 : frame % 8 == 0 || random.Next(100) < 35)
+                                r[page] = 1u | (page % 2 == 0 ? 512u : 0u);
+                    // Introduce invalidations even for pages absent from this render's demand.
+                    for (int page = 0; page < pages; page++)
+                        if (t[page] != 0 && page % 5 == frame % 5) m[page].x |= 4u;
+                    metadata.SetData(m);
+                    var oldT = (uint[])t.Clone(); var oldM = (uint4[])m.Clone(); var oldO = (uint[])o.Clone();
+                    var retained = new List<uint>(); var empty = new List<uint>();
+                    int protectedCount = 0;
+                    foreach (uint slot in ls.Take(capacity))
+                    {
+                        uint owner = o[slot];
+                        if (owner != 0 && r[owner - 1] == 0 && unchecked(clock - m[owner - 1].z) > 1000u) owner = 0;
+                        if (owner == 0) empty.Add(slot);
+                        else if (r[owner - 1] != 0) protectedCount++;
+                        else retained.Add(slot);
+                    }
+                    requests.SetData(r);
+                    shader.SetInt("_VSMPrototypeFeedbackFrameIndex", unchecked((int)clock));
+                    bool receiverMask = frame % 2 == 0;
+                    shader.SetInt("_VSMReceiverMaskEnabled", receiverMask ? 1 : 0);
+                    for (int stage = 0; stage < 4; stage++)
+                        shader.Dispatch(kernels[stage], stage == 0 || stage == 2 ? 1 : (capacity + 63) / 64, 1, 1);
+                    lists.GetData(ls);
+                    string label = $"capacity={capacity}, frame={frame}";
+                    Assert.That(retained.SequenceEqual(ls.Skip(capacity).Take(retained.Count)), Is.True, label + " retained LRU order");
+                    Assert.That(empty.OrderBy(x => x).SequenceEqual(ls.Skip(capacity + retained.Count).Take(empty.Count).OrderBy(x => x)), Is.True, label + " empty tail including duplicates");
+                    int missing = Enumerable.Range(0, pages).Count(p => r[p] != 0 && oldT[p] == 0);
+                    int available = retained.Count + empty.Count, acquired = Math.Min(missing, available);
+                    var victims = ls.Skip(capacity + available - acquired).Take(acquired).ToHashSet();
+                    shader.Dispatch(kernels[4], (pages + 63) / 64, 1, 1);
+                    shader.Dispatch(kernels[5], (capacity + 63) / 64, 1, 1);
+                    shader.Dispatch(kernels[6], 1, 1, 1);
+                    shader.Dispatch(kernels[7], (capacity + 63) / 64, 1, 1);
+                    table.GetData(t); metadata.GetData(m); owners.GetData(o); lists.GetData(ls);
+                    work.GetData(w); args.GetData(a); counters.GetData(c);
+                    Assert.That(Enumerable.Range(0, capacity).Select(x => (uint)x).SequenceEqual(ls.Take(capacity).OrderBy(x => x)), Is.True, label + " LRU permutation including duplicates");
+                    Assert.That((int)ls[4 * capacity], Is.EqualTo(available - missing), label + " signed overflow");
+                    Assert.That(ls[4 * capacity + 1], Is.EqualTo(protectedCount + acquired), label + " requested count");
+                    CollectionAssert.AreEqual(new uint[] { (uint)o.Count(x => x != 0), (uint)r.Count(x => x != 0),
+                        (uint)acquired, (uint)(missing - acquired) }, c, label + " counters");
+                    var clear = new HashSet<uint>(); var occupancy = new HashSet<uint>();
+                    for (int page = 0; page < pages; page++)
+                    {
+                        if (r[page] != 0 && oldT[page] != 0)
+                            Assert.That(t[page], Is.EqualTo(oldT[page]), label + " requested page evicted");
+                        Assert.That((m[page].x & 2u) != 0, Is.EqualTo(t[page] != 0), label + " mapping/metadata");
+                        if (t[page] == 0) continue;
+                        uint slot = t[page] - 1;
+                        Assert.That(o[slot], Is.EqualTo(page + 1), label + " owner");
+                        Assert.That(m[page].y, Is.EqualTo(t[page]), label + " encoded slot");
+                        bool requested = r[page] != 0, reused = oldO[slot] == page + 1;
+                        uint flags = reused ? oldM[page].x : 2u | 4u | 32768u;
+                        if (requested && receiverMask) flags |= 32768u;
+                        if ((flags & 4u) != 0) flags |= 32768u;
+                        bool dirty = (flags & (4u | 32768u)) != 0;
+                        Assert.That(m[page].x & (4u | 32768u), Is.EqualTo(flags & (4u | 32768u)), label + " dirty retention");
+                        Assert.That((m[page].x & 131072u) != 0, Is.EqualTo(dirty && !requested), label + " deferred");
+                        Assert.That(m[page].z, Is.EqualTo(requested ? clock : oldM[page].z), label + " cache age");
+                        if (requested && dirty) clear.Add(slot);
+                        const uint known = (1u << 14) | (1u << 16);
+                        if (requested && (dirty || (flags & known) != known)) occupancy.Add(slot);
+                        if (!reused) Assert.That(victims.Contains(slot), Is.True, label + " wrong LRU victim");
+                        // Simulate successful rendering; leave unreferenced invalidations untouched.
+                        if (requested) m[page].x = (m[page].x & ~(4u | 32768u | 131072u)) | 8u | known;
+                    }
+                    Assert.That(a[2], Is.EqualTo(clear.Count), label + " clear count");
+                    Assert.That(a[3], Is.EqualTo(occupancy.Count), label + " occupancy count");
+                    Assert.That(clear.OrderBy(x => x).SequenceEqual(w.Take(clear.Count).OrderBy(x => x)), Is.True, label + " clear list including duplicates");
+                    Assert.That(occupancy.OrderBy(x => x).SequenceEqual(w.Skip(capacity).Take(occupancy.Count).OrderBy(x => x)), Is.True, label + " occupancy list including duplicates");
+                    Assert.That(ls.Skip(capacity * 4 + 4).All(x => x == guard), Is.True, label + " list bounds");
+                    Assert.That(w.Skip(capacity * 2).All(x => x == guard), Is.True, label + " work bounds");
+                }
+                Assert.That(o.All(x => x == 0u), Is.True, "1001-frame unrequested cache must expire");
             }
             finally { Object.DestroyImmediate(shader); }
         }

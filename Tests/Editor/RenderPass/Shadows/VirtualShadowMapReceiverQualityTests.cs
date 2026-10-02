@@ -490,7 +490,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.virtualShadowMapViewCoverage.value, Is.False);
                 Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(256));
                 settings.virtualShadowMapPhysicalPageBudget.value = 10000;
-                Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(1024));
+                Assert.That(settings.virtualShadowMapPhysicalPageBudget.value, Is.EqualTo(VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount));
             }
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }

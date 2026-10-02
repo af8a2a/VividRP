@@ -169,6 +169,8 @@ namespace VividRP.Editor.Tests
         [TestCase(256)]
         [TestCase(256, true)]
         [TestCase(1024, true)]
+        [TestCase(2048, true)]
+        [TestCase(4097, true)]
         [TestCase(384)]
         [TestCase(512)]
         [TestCase(768)]
@@ -181,7 +183,24 @@ namespace VividRP.Editor.Tests
             {
                 VirtualShadowMapPrototypeRuntime.PageWindowsEnabled = windows;
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
+                var key = Key();
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
+                VirtualShadowMapPrototypeRuntime.CommitDynamicCache(key, 1u, false);
+                var pressure = VirtualShadowMapPrototypeRuntime.PagePressure;
+                VirtualShadowMapPrototypeRuntime.PageTable.SetData(new uint[] { 1u }, 0, 0, 1);
+                VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.SetData(new uint[] { 1u }, 0, 0, 1);
                 Assert.That(VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsCacheValid, Is.EqualTo(budget == 256));
+                Assert.That(VirtualShadowMapPrototypeRuntime.RequiresFullDynamicCacheRefresh(key, false), Is.EqualTo(budget != 256));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PagePressure, Is.SameAs(pressure));
+                var firstEntry = new uint[1];
+                VirtualShadowMapPrototypeRuntime.PageTable.GetData(firstEntry, 0, 0, 1);
+                Assert.That(firstEntry[0], Is.EqualTo(budget == 256 ? 1u : 0u));
+                VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.GetData(firstEntry, 0, 0, 1);
+                Assert.That(firstEntry[0], Is.EqualTo(budget == 256 ? 1u : 0u));
+                Assert.That(VirtualShadowMapPrototypeRuntime.EnsureMeshletPageRequestCapacity(64), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.MeshletRasterPages.count,
+                    Is.EqualTo(budget + VirtualShadowMapPrototypeRuntime.RasterPageHeaderSize));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth, Is.EqualTo(windows ? 1 : budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.count, Is.EqualTo(budget));

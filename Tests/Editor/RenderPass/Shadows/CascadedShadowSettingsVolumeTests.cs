@@ -2311,7 +2311,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer rasterPagesBuffer = VirtualShadowMapPrototypeRuntime.MeshletRasterPages;
                 Assert.That(argsBuffer.count, Is.EqualTo((int)VividRendererListID.Count * 8));
                 Assert.That(rasterPagesBuffer.count, Is.EqualTo(
-                    VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount
+                    Mathf.Max(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, 1)
                     + VirtualShadowMapPrototypeRuntime.RasterPageHeaderSize));
 
                 for (int iteration = 0; iteration < warmupCount; iteration++)

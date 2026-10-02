@@ -25,7 +25,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static bool PageWindowsEnabled { get; set; } = true;
         internal static int RasterWindowScale => PageWindowsEnabled ? RasterWindowPages : 1;
         internal const int DefaultPhysicalPageCount = 256;
-        internal const int MaxPhysicalPageCount = 1024;
+        internal const int MaxPhysicalPageCount = 8192;
         internal const int ClearWorkArgsOffset = 0;
         internal const int OccupancyWorkArgsOffset = 3 * sizeof(uint);
         internal const int MaxPageRequestsPerMeshlet = 4;
@@ -421,7 +421,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 * MaxPageRequestsPerMeshlet;
             if (requiredRequestCapacity > int.MaxValue
                 || requiredRequestCapacity
-                    + (long)sourceRequestCapacity * MaxPhysicalPageCount > uint.MaxValue)
+                    + (long)sourceRequestCapacity * Mathf.Max(s_PhysicalPageCapacity, 1) > uint.MaxValue)
                 return false;
 
             int requestCapacity = (int)requiredRequestCapacity;
@@ -464,12 +464,14 @@ namespace VividRP.Runtime.VirtualShadowMap
                 };
             }
 
-            if (s_MeshletRasterPages == null || !s_MeshletRasterPages.IsValid())
+            int rasterListCapacity = Mathf.Max(s_PhysicalPageCapacity, 1) + RasterPageHeaderSize;
+            if (s_MeshletRasterPages == null || !s_MeshletRasterPages.IsValid()
+                || s_MeshletRasterPages.count != rasterListCapacity)
             {
                 s_MeshletRasterPages?.Dispose();
                 s_MeshletRasterPages = new GraphicsBuffer(
                     GraphicsBuffer.Target.Structured,
-                    MaxPhysicalPageCount + RasterPageHeaderSize,
+                    rasterListCapacity,
                     sizeof(uint))
                 {
                     name = "VSMPrototypeMeshletRasterPages",
@@ -579,6 +581,10 @@ namespace VividRP.Runtime.VirtualShadowMap
             int physicalPageCapacity = CalculatePhysicalPageCapacity(
                 pagesPerAxis,
                 resolvedCascadeCount, pageBudget);
+            // The legacy per-page DSV is a diagnostic path. Its array dimension
+            // must still fit the device even when the production pool grows.
+            if (!PageWindowsEnabled)
+                physicalPageCapacity = Mathf.Min(physicalPageCapacity, SystemInfo.maxTextureArraySlices);
             int physicalPagesPerRow = Mathf.CeilToInt(
                 Mathf.Sqrt(physicalPageCapacity));
             int physicalPageRows = CoreUtils.DivRoundUp(

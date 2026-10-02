@@ -23,7 +23,7 @@ namespace VividRP.Runtime
         [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to a power of two (at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
-        public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
+        public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, VirtualShadowMap.VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount);
         // Retain serialized legacy fields; UE allocation never applies these quotas.
         [HideInInspector]
         public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(0, 0, 1024);

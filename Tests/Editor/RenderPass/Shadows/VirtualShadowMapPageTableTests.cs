@@ -134,7 +134,7 @@ namespace VividRP.Editor.Tests
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
             try
             {
                 var state = new[] { new uint4(10, 1, 2, 8), new uint4(6, 2, 2, 4), new uint4(6, 3, 2, 4), uint4.zero };
@@ -166,8 +166,87 @@ namespace VividRP.Editor.Tests
             finally { Object.DestroyImmediate(shader); }
         }
 
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(63)]
+        [TestCase(64)]
+        [TestCase(65)]
+        [TestCase(1025)]
+        public void SparseFinalize_UsesGPUWorkCountAndPreservesUntouchedVirtualPages(int dirtyCount)
+        {
+            const int pages = 17 * 64 * 64;
+            int capacity = dirtyCount + 2;
+            var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(Production));
+            using var masks = new VirtualShadowMapReceiverMaskTestBuffers(shader, pages, capacity);
+            using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 4);
+            using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 16);
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pages, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
+                VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
+            try
+            {
+                var state = new uint4[pages]; var entries = new uint[pages]; var demand = new uint[pages];
+                var owner = new uint[capacity];
+                for (int page = 0; page < pages; page++)
+                {
+                    state[page] = new uint4(0, 0, (uint)page, 64);
+                    entries[page] = 0x80100007; // Alias cleanup belongs to propagation.
+                }
+                for (int slot = 0; slot < capacity; slot++)
+                {
+                    int page = pages - 1 - slot * 7;
+                    owner[slot] = (uint)page + 1u;
+                    // One clean cached owner and one dirty, unrequested owner.
+                    state[page] = new uint4(slot == dirtyCount ? 10u : 6u, (uint)slot + 1u, 3, 0);
+                    demand[page] = slot < dirtyCount ? 1u : 0u;
+                    entries[page] = VirtualShadowMapPageTableTestData.EncodeSlot((uint)slot + 1u, 128, false);
+                }
+                table.SetData(entries); metadata.SetData(state); owners.SetData(owner); requests.SetData(demand);
+                int reset = shader.FindKernel("VSMResetPageWorkListsUE"), build = shader.FindKernel("VSMBuildPageWorkListsUE");
+                int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
+                shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+                shader.SetInt("_VSMPrototypePageTableEntryCount", pages);
+                shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 128); shader.SetInt("_VSMPrototypePageSize", 128);
+                shader.SetBuffer(reset, "_VSMPageWorkDispatchArgsRW", args);
+                shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
+                shader.SetBuffer(build, "_VSMPageWorkListRW", work);
+                shader.SetBuffer(build, "_VSMPrototypeWritablePageTable", table);
+                shader.SetBuffer(build, "_VSMPrototypePageMetadata", metadata);
+                shader.SetBuffer(build, "_VSMPrototypePhysicalPageOwners", owners);
+                shader.SetBuffer(build, "_VSMPageRequestFlags", requests);
+                shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", table);
+                shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
+                var dispatch = new uint[VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount];
+                // The second frame reuses completed pages and must issue zero groups.
+                for (int frame = 0; frame < 2; frame++)
+                {
+                    shader.Dispatch(reset, 1, 1, 1); shader.Dispatch(build, (capacity + 63) / 64, 1, 1);
+                    args.GetData(dispatch); metadata.GetData(state); table.GetData(entries);
+                    int completed = frame == 0 ? dirtyCount : 0;
+                    Assert.That(dispatch[2], Is.EqualTo(completed));
+                    Assert.That(dispatch[6], Is.EqualTo((completed + 63) / 64));
+                    Assert.That(dispatch[7], Is.EqualTo(1u)); Assert.That(dispatch[8], Is.EqualTo(1u));
+                    var expectedState = (uint4[])state.Clone(); var expectedEntries = (uint[])entries.Clone();
+                    for (int slot = 0; slot < completed; slot++)
+                    {
+                        int page = (int)owner[slot] - 1;
+                        expectedState[page].x = 10u;
+                        expectedState[page].w = 4u | 32768u;
+                        expectedEntries[page] = VirtualShadowMapPageTableTestData.EncodeSlot((uint)slot + 1u, 128, false);
+                    }
+                    VirtualShadowMapPageTableTestData.DispatchFinalize(shader, finalize, work, args, owners);
+                    metadata.GetData(state); table.GetData(entries);
+                    Assert.That(state, Is.EqualTo(expectedState), "Only completed owners may change cache state");
+                    Assert.That(entries, Is.EqualTo(expectedEntries), "No finalization writes to other virtual entries");
+                }
+            }
+            finally { Object.DestroyImmediate(shader); }
+        }
+
         [Test]
-        public void PackedEntry_FinalizePublishesCompletedPagesAndClearsAliasesWithoutDroppingDeferredOwnership()
+        public void PackedEntry_FinalizeTouchesOnlyWorkAndPropagationReplacesStaleAliases()
         {
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(Production));
             using var masks = new VirtualShadowMapReceiverMaskTestBuffers(shader, 4, 4);
@@ -177,12 +256,20 @@ namespace VividRP.Editor.Tests
             {
                 var state = new[] { new uint4(10, 1, 2, 8), new uint4(6, 2, 2, 4),
                     new uint4(2u | 4u | 131072u, 3, 2, 4), uint4.zero };
-                metadata.SetData(state); table.SetData(new uint[] { 0x8010000f, 0xc0000001, 0xc0000002, 0x8010000f });
+                metadata.SetData(state); table.SetData(new uint[] { 0x80000000, 0xc0000001, 0x8010000f, 0x8010000f });
                 int kernel = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                 shader.SetInt("_VSMPrototypePageTableEntryCount", 4); shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
                 shader.SetBuffer(kernel, "_VSMPrototypePageMetadata", metadata); shader.SetBuffer(kernel, "_VSMPrototypeWritablePageTable", table);
-                shader.Dispatch(kernel, 1, 1, 1);
+                VirtualShadowMapPageTableTestData.FinalizeResidentFixture(shader, kernel, metadata, 4);
                 var actual = new uint[4]; table.GetData(actual);
+                Assert.That(actual, Is.EqualTo(new uint[] { 0x80000000, 0x80000001, 0x8010000f, 0x8010000f }));
+                using var offsets = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
+                offsets.SetData(new[] { int2.zero });
+                int propagate = shader.FindKernel("VSMPropagateMappedClipmaps");
+                shader.SetInt("_VSMPrototypePagesPerAxis", 2); shader.SetInt("_VSMProjectionCount", 1);
+                shader.SetBuffer(propagate, "_VSMClipmapPageOffsets", offsets);
+                shader.SetBuffer(propagate, "_VSMPrototypeWritablePageTable", table);
+                shader.Dispatch(propagate, 1, 1, 1); table.GetData(actual);
                 Assert.That(actual, Is.EqualTo(new uint[] { 0x80000000, 0x80000001, 0, 0 }));
                 var after = new uint4[4]; metadata.GetData(after);
                 Assert.That(after[2], Is.EqualTo(state[2]), "Unproduced page remains resident and dirty");

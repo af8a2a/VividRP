@@ -224,7 +224,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(remapMetadata.count, Is.EqualTo(budget));
                 Assert.That(remapMetadata.stride, Is.EqualTo(16));
                 Assert.That(workList.count, Is.EqualTo(budget * 2));
-                Assert.That(workArgs.count, Is.EqualTo(6));
+                Assert.That(workArgs.count, Is.EqualTo(VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount));
                 Assert.That(workArgs.target, Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments));
                 for (int i = 0; i < 32; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
                 long before = System.GC.GetAllocatedBytesForCurrentThread();
@@ -336,6 +336,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(update, "_VSMPrototypeWritablePageTable", table);
                 shader.Dispatch(update, (capacity + 63) / 64, 1, 1);
                 shader.SetBuffer(move, "_VSMRemapPageMetadata", remapMetadata);
+                shader.SetBuffer(move, "_VSMProjectionRemap", remap);
                 shader.SetBuffer(move, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(move, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(move, "_VSMPrototypePhysicalPageOwners", owners);

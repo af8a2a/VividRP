@@ -28,6 +28,9 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal const int MaxPhysicalPageCount = 8192;
         internal const int ClearWorkArgsOffset = 0;
         internal const int OccupancyWorkArgsOffset = 3 * sizeof(uint);
+        internal const int FinalizeWorkArgsOffset = 6 * sizeof(uint);
+        internal const int PageWorkArgsWordCount = 9;
+        internal static readonly int PageWorkDispatchArgsId = Shader.PropertyToID("_VSMPageWorkDispatchArgs");
         internal const int MaxPageRequestsPerMeshlet = 4;
         internal const int RasterPageHeaderSize = 1 + 2 * VirtualShadowMapClipmapLayout.MaxLevels;
         private const int MeshletPageRequestStride = sizeof(uint) * 4;
@@ -649,6 +652,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageWorkList != null && s_PageWorkList.IsValid()
                 && s_PageWorkList.count == physicalPageCapacity * 2
                 && s_PageWorkDispatchArgs != null && s_PageWorkDispatchArgs.IsValid()
+                && s_PageWorkDispatchArgs.count == PageWorkArgsWordCount
                 && s_ProductionFeedback != null && s_ProductionFeedback.IsValid()
                 && s_PagePressure != null && s_PagePressure.IsValid()
                 && s_VirtualResolution == resolvedResolution
@@ -754,7 +758,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 physicalPageCapacity * 2, sizeof(uint)) { name = "VSMPageWorkList" };
             s_PageWorkDispatchArgs = new GraphicsBuffer(
                 GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
-                6, sizeof(uint)) { name = "VSMPageWorkDispatchArgs" };
+                PageWorkArgsWordCount, sizeof(uint)) { name = "VSMPageWorkDispatchArgs" };
             return s_PhysicalPagePool != null
                 && s_PhysicalPagePool.rt != null
                 && s_RasterDepth != null

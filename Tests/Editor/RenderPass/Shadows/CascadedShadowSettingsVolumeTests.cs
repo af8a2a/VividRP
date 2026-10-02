@@ -908,7 +908,7 @@ namespace VividRP.Editor.Tests
                             Assert.That(metadataData[page].LastRequestedFrame, Is.EqualTo(feedbackFrame));
                     }
 
-                    shader.Dispatch(finalizeKernel, 1, 1, 1);
+                    VirtualShadowMapPageTableTestData.FinalizeResidentFixture(shader, finalizeKernel, metadata, owners.count);
                     metadata.GetData(metadataData);
                     for (int page = 0; page < pageTableData.Length; page++)
                     {
@@ -1004,10 +1004,10 @@ namespace VividRP.Editor.Tests
                     }
                     int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                     shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
-                using var publishedTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
+                    using var publishedTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
                     shader.SetInt("_VSMPrototypePhysicalPagesPerRow", 4);
                     shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", publishedTable);
-                    shader.Dispatch(finalize, 1, 1, 1);
+                    VirtualShadowMapPageTableTestData.FinalizeResidentFixture(shader, finalize, metadata, metadata.count);
                     metadata.GetData(metadataData);
                     for (int pageIndex = 0; pageIndex < metadataData.Length; pageIndex++)
                     {
@@ -1103,7 +1103,7 @@ namespace VividRP.Editor.Tests
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
             using var production = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 16);
             var productionData = new uint4[4];
             try
@@ -1140,7 +1140,7 @@ namespace VividRP.Editor.Tests
                 int finalize = shader.FindKernel("VSMPrototypeFinalizeDirtyPages");
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", pageTable);
-                var dispatch = new uint[6]; var entries = new uint[capacity * 2];
+                var dispatch = new uint[VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount]; var entries = new uint[capacity * 2];
                 var expected = new System.Collections.Generic.List<int>(capacity);
                 int completed = 0;
                 for (int frame = 0; frame <= (capacity + budget - 1) / budget + 1; frame++)
@@ -1199,7 +1199,7 @@ namespace VividRP.Editor.Tests
                     CollectionAssert.AreEquivalent(expected, occupancySlots);
                     // No drawing is needed for this metadata test: the selected
                     // pages represent completed empty geometry before finalize.
-                    shader.Dispatch(finalize, (capacity * 2 + 63) / 64, 1, 1);
+                    VirtualShadowMapPageTableTestData.DispatchFinalize(shader, finalize, work, args, owners);
                     metadata.GetData(data);
                     foreach (int slot in expected)
                     {
@@ -1243,7 +1243,7 @@ namespace VividRP.Editor.Tests
             using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
             try
             {
                 const uint dirty = 4u, deferred = 1u << 17, known = (1u << 14) | (1u << 16);
@@ -1288,7 +1288,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(build, "_VSMPageWorkListRW", work);
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
                 shader.Dispatch(build, 1, 1, 1);
-                var dispatch = new uint[6]; var entries = new uint[16]; var actualRequests = new uint[12];
+                var dispatch = new uint[VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount]; var entries = new uint[16]; var actualRequests = new uint[12];
                 args.GetData(dispatch); work.GetData(entries); metadata.GetData(data); requests.GetData(actualRequests);
                 Assert.That(dispatch[2], Is.EqualTo(2));
                 CollectionAssert.AreEquivalent(new[] { (uint)first, (uint)second }, new[] { entries[0], entries[1] });
@@ -1316,7 +1316,7 @@ namespace VividRP.Editor.Tests
             using var table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
             using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 12, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
             try
             {
                 var data = new uint4[12]; var mapping = new uint[12]; var demands = new uint[12];
@@ -1344,7 +1344,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(build, "_VSMPageWorkDispatchArgsRW", args);
                 shader.SetBuffer(finalize, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", table);
-                var dispatch = new uint[6]; var actualRequests = new uint[12];
+                var dispatch = new uint[VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount]; var actualRequests = new uint[12];
                 for (int frame = 1; frame <= 24; frame++)
                 {
                     foreach (int page in new[] { 0, 1, 2, 4 }) data[page].x |= 4u;
@@ -1354,7 +1354,7 @@ namespace VividRP.Editor.Tests
                     args.GetData(dispatch);
                     Assert.That(dispatch[2], Is.EqualTo(2));
                     // Selected pages represent completed empty caster output.
-                    shader.Dispatch(finalize, 1, 1, 1);
+                    VirtualShadowMapPageTableTestData.DispatchFinalize(shader, finalize, work, args, owners);
                     metadata.GetData(data);
                 }
                 foreach (int page in new[] { 6, 8, 9 })
@@ -1402,7 +1402,7 @@ namespace VividRP.Editor.Tests
             using var metadata = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 16);
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2 + 1, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 7, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 10, 4);
             try
             {
                 using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, metadata.count, 4);
@@ -1421,8 +1421,8 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMPrototypePageSize", 128);
                 const uint known = (1u << 14) | (1u << 16);
                 var data = new uint4[capacity]; var owner = new uint[capacity];
-                var entries = new uint[capacity * 2 + 1]; var dispatch = new uint[7];
-                entries[capacity * 2] = dispatch[6] = 0x12345678;
+                var entries = new uint[capacity * 2 + 1]; var dispatch = new uint[10];
+                entries[capacity * 2] = dispatch[9] = 0x12345678;
                 work.SetData(entries); args.SetData(dispatch);
                 // Reassign each physical slot to a different virtual owner; last
                 // iteration removes all owners after a full list was produced.
@@ -1452,7 +1452,7 @@ namespace VividRP.Editor.Tests
                     shader.SetInt("_VSMPageOccupancySkipDisabled", pattern == 2 ? 1 : 0);
                     shader.Dispatch(build, 1, 1, 1);
                     args.GetData(dispatch); work.GetData(entries);
-                    Assert.That(dispatch, Is.EqualTo(new uint[] { 16, 16, (uint)clear.Count, (uint)reduce.Count, 1, 1, 0x12345678 }));
+                    Assert.That(dispatch, Is.EqualTo(new uint[] { 16, 16, (uint)clear.Count, (uint)reduce.Count, 1, 1, (uint)(clear.Count + 63) / 64, 1, 1, 0x12345678 }));
                     for (int i = 0; i < dispatch[2]; i++) Assert.That(clear.Remove(entries[i]), Is.True);
                     for (int i = 0; i < dispatch[3]; i++) Assert.That(reduce.Remove(entries[capacity + i]), Is.True);
                     Assert.That(clear.Count + reduce.Count, Is.Zero);
@@ -1481,7 +1481,7 @@ namespace VividRP.Editor.Tests
             using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
             using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 512, 4);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 32, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
             using var mergeList = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
             using var mergeArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 3, 4);
             using var requestFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16, 4);
@@ -1552,7 +1552,7 @@ namespace VividRP.Editor.Tests
                 shader.Dispatch(build, 1, 1, 1);
                 metadata.GetData(meta);
                 check((meta[0].x & dd) != 0, "static invalidation must redraw dynamic");
-                var dispatch = new uint[6];
+                var dispatch = new uint[VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount];
                 args.GetData(dispatch);
                 check(dispatch[2] == 3 && dispatch[3] == 4, "dirty work lists");
                 if (deferred)
@@ -1641,7 +1641,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(finalize, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(finalize, "_VSMPageReceiverMasks", masks);
                 shader.SetBuffer(finalize, "_VSMPhysicalReceiverMasks", completed);
-                shader.Dispatch(finalize, 1, 1, 1);
+                VirtualShadowMapPageTableTestData.DispatchFinalize(shader, finalize, work, args, owners);
                 metadata.GetData(meta);
                 completed.GetData(oldMasks);
                 for (int i = 0; i < 4; i++)

@@ -10,6 +10,40 @@ namespace VividRP.Editor.Tests
 {
     internal static class VirtualShadowMapPageTableTestData
     {
+        internal static void DispatchFinalize(ComputeShader shader, int kernel,
+            GraphicsBuffer work, GraphicsBuffer args, GraphicsBuffer owners)
+        {
+            shader.SetBuffer(kernel, "_VSMPageWorkList", work);
+            shader.SetBuffer(kernel, "_VSMPageWorkDispatchArgs", args);
+            shader.SetBuffer(kernel, "_VSMPrototypePhysicalPageOwners", owners);
+            shader.DispatchIndirect(kernel, args, VirtualShadowMapPrototypeRuntime.FinalizeWorkArgsOffset);
+        }
+
+        // Metadata-only fixtures have no GPU list producer. Include even clean
+        // and deferred owners so they still exercise the finalizer's guards.
+        internal static void FinalizeResidentFixture(ComputeShader shader, int kernel, GraphicsBuffer metadata, int capacity)
+        {
+            var state = new uint4[metadata.count]; metadata.GetData(state);
+            int count = 0;
+            var ownerData = new uint[capacity]; var workData = new uint[capacity];
+            for (int page = 0; page < state.Length; page++)
+                if ((state[page].x & 2u) != 0 && state[page].y != 0)
+                {
+                    uint slot = state[page].y - 1u;
+                    Assert.That(slot, Is.LessThan((uint)capacity));
+                    ownerData[slot] = (uint)page + 1u; workData[count++] = slot;
+                }
+            using var owners = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
+                VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
+            owners.SetData(ownerData); work.SetData(workData);
+            args.SetData(new uint[] { 1, 1, (uint)count, 0, 1, 1, (uint)(count + 63) / 64, 1, 1 });
+            shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
+            shader.SetInt("_VSMPrototypePageTableEntryCount", metadata.count);
+            DispatchFinalize(shader, kernel, work, args, owners);
+        }
+
         internal static uint EncodeSlot(uint slotPlusOne, uint row = 4, bool renderable = true)
         {
             if (slotPlusOne == 0) return 0;
@@ -303,11 +337,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(data[0].x, Is.EqualTo(10u), "A subset of completed coverage stays cached.");
                 Assert.That(data[1].x & (4u | 32768u | 8u), Is.EqualTo(32768u));
                 data[1].x |= 131072u; metadata.SetData(data);
-                shader.Dispatch(finalize, 1, 1, 1);
+                VirtualShadowMapPageTableTestData.FinalizeResidentFixture(shader, finalize, metadata, 2);
                 var coverage = new uint2[2]; masks.Completed.GetData(coverage);
                 Assert.That(coverage[1], Is.EqualTo(new uint2(1, 0)));
                 data[1].x &= ~131072u; metadata.SetData(data);
-                shader.Dispatch(finalize, 1, 1, 1); masks.Completed.GetData(coverage);
+                VirtualShadowMapPageTableTestData.FinalizeResidentFixture(shader, finalize, metadata, 2); masks.Completed.GetData(coverage);
                 Assert.That(coverage[1], Is.EqualTo(new uint2(2, 0)), "Full dynamic clear requires replacement, not union.");
             }
             finally { Object.DestroyImmediate(shader); }

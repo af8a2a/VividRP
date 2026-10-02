@@ -754,6 +754,9 @@ void VSMUpdatePhysicalPageAddresses(uint3 id : SV_DispatchThreadID)
         uint level = source / perLevel;
         uint page = source % perLevel;
         int4 remap = _VSMProjectionRemap[level];
+        // A different clipmap may have scrolled. Unchanged levels keep their
+        // native mappings and metadata without a clear/scatter round trip.
+        if (all(remap.xyz == 0)) return;
         // CPU delta is current origin minus previous origin, so an old page's
         // address moves by -delta (the inverse of the former destination gather).
         int2 destXY = int2(page % axis, page / axis) - remap.xy;
@@ -789,6 +792,9 @@ void VSMRemapPages(uint3 id : SV_DispatchThreadID)
     if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
     uint owner = _VSMPrototypePhysicalPageOwners[slot];
     if (owner == 0u) return;
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint level = (owner - 1u) / (axis * axis);
+    if (all(_VSMProjectionRemap[level].xyz == 0)) return;
     // Translation is one-to-one within each level; retained owners cannot collide.
     _VSMPrototypeWritablePageTable[owner - 1u] = VividVSMEncodeNativePage(slot, (uint)_VSMPrototypePhysicalPagesPerRow, true);
     _VSMPrototypePageMetadata[owner - 1u] = _VSMRemapPageMetadata[slot];
@@ -1462,6 +1468,7 @@ void RunVSMBuildPageWorkLists(uint lane)
         // Always overwrite all arguments, including zero-work frames.
         _VSMPageWorkDispatchArgsRW.Store3(0u, uint3(tiles, tiles, g_VSMClearPageCount));
         _VSMPageWorkDispatchArgsRW.Store3(12u, uint3(g_VSMOccupancyPageCount, 1u, 1u));
+        _VSMPageWorkDispatchArgsRW.Store3(24u, uint3((g_VSMClearPageCount + 63u) / 64u, 1u, 1u));
     }
 #if defined(VIVID_VSM_PRODUCTION_FEEDBACK)
     if (staticPages != 0u) InterlockedAdd(_VSMProductionFeedbackRW[3].x, staticPages);
@@ -1519,34 +1526,29 @@ void VSMClearPhysicalPagesIndirect(uint3 id : SV_DispatchThreadID)
     ClearVSMPhysicalPage(_VSMPageWorkList[id.z], id.xy);
 }
 
+// Publish only pages completed by this frame's depth-production work list.
+// Mapping removal belongs to eviction/remap/work selection; propagation replaces
+// old coarse aliases itself. Cached and unowned virtual pages need no finalization.
 [numthreads(64, 1, 1)]
-void VSMPrototypeFinalizeDirtyPages(
-    uint3 dispatchThreadID : SV_DispatchThreadID)
+void VSMPrototypeFinalizeDirtyPages(uint3 id : SV_DispatchThreadID)
 {
-    uint virtualPageIndex = dispatchThreadID.x;
-    if (virtualPageIndex >= (uint)_VSMPrototypePageTableEntryCount)
-        return;
-
-    uint4 metadata = _VSMPrototypePageMetadata[virtualPageIndex];
-    // Publish sampling validity here, after successful depth production. Also
-    // removes previous-frame aliases before in-place propagation. No metadata
-    // lookup is needed in production depth sampling.
-    if ((metadata.x & kVSMPageAllocated) == 0u || (metadata.x & kVSMPageDeferred) != 0u)
-    {
-        _VSMPrototypeWritablePageTable[virtualPageIndex] = 0u;
-        return;
-    }
+    if (id.x >= _VSMPageWorkDispatchArgs.Load(8u)) return;
+    uint slot = _VSMPageWorkList[id.x];
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u || owner > (uint)_VSMPrototypePageTableEntryCount) return;
+    uint page = owner - 1u;
+    uint4 metadata = _VSMPrototypePageMetadata[page];
     uint redrawn = metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty);
-    if (redrawn != 0u)
-    {
-        if (_VSMReceiverMaskEnabled != 0 && (redrawn & kVSMPageDynamicDirty) != 0u)
-            _VSMPhysicalReceiverMasks[metadata.y - 1u] = _VSMPageReceiverMasks[virtualPageIndex];
-        metadata.x = (metadata.x | kVSMPageCached) & ~(kVSMPageDirty | kVSMPageDynamicDirty);
-        metadata.w = (metadata.w | redrawn) & ~(kVSMPageCached | kVSMPageDeferred);
-        _VSMPrototypePageMetadata[virtualPageIndex] = metadata;
-    }
-    _VSMPrototypeWritablePageTable[virtualPageIndex] = VividVSMEncodeNativePage(
-        metadata.y - 1u, (uint)_VSMPrototypePhysicalPagesPerRow, false);
+    if (metadata.y != slot + 1u || redrawn == 0u
+        || (metadata.x & (kVSMPageAllocated | kVSMPageDeferred)) != kVSMPageAllocated) return;
+    if (_VSMReceiverMaskEnabled != 0 && (redrawn & kVSMPageDynamicDirty) != 0u)
+        _VSMPhysicalReceiverMasks[slot] = _VSMPageReceiverMasks[page];
+    metadata.x = (metadata.x | kVSMPageCached) & ~(kVSMPageDirty | kVSMPageDynamicDirty);
+    metadata.w = (metadata.w | redrawn) & ~(kVSMPageCached | kVSMPageDeferred);
+    _VSMPrototypePageMetadata[page] = metadata;
+    _VSMPrototypeWritablePageTable[page] = VividVSMEncodeNativePage(
+        slot, (uint)_VSMPrototypePhysicalPagesPerRow, false);
 }
 
 groupshared uint g_VSMPageNonempty;
@@ -1989,6 +1991,7 @@ void VSMResetPageWorkListsUE(uint3 id : SV_DispatchThreadID)
     uint tiles = ((uint)_VSMPrototypePageSize + 7u) / 8u;
     _VSMPageWorkDispatchArgsRW.Store3(0u, uint3(tiles, tiles, 0u));
     _VSMPageWorkDispatchArgsRW.Store3(12u, uint3(0u, 1u, 1u));
+    _VSMPageWorkDispatchArgsRW.Store3(24u, uint3(0u, 1u, 1u));
 }
 
 // UE SelectPagesToInitializeCS: one invocation per physical page, with indirect
@@ -2013,7 +2016,14 @@ void VSMBuildPageWorkListsUE(uint3 id : SV_DispatchThreadID)
     if (selected)
     {
         uint index = 0u, count = WaveActiveCountBits(true), rank = WavePrefixCountBits(true);
-        if (WaveIsFirstLane()) _VSMPageWorkDispatchArgsRW.InterlockedAdd(8u, count, index);
+        if (WaveIsFirstLane())
+        {
+            _VSMPageWorkDispatchArgsRW.InterlockedAdd(8u, count, index);
+            // Count only newly crossed 64-page boundaries. Append ranges are
+            // disjoint, so these increments sum to ceil(total / 64) in any order.
+            uint groups = (index + count + 63u) / 64u - (index + 63u) / 64u;
+            if (groups != 0u) _VSMPageWorkDispatchArgsRW.InterlockedAdd(24u, groups);
+        }
         _VSMPageWorkListRW[WaveReadLaneFirst(index) + rank] = slot;
     }
     uint known = kVSMPageStaticOccupancyKnown | kVSMPageDynamicOccupancyKnown;

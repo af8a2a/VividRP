@@ -530,6 +530,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.DispatchCompute(shader, m_VSMUpdatePhysicalAddressesKernel, physicalGroups, 1, 1);
 
                 cmd.SetComputeBufferParam(shader, m_VSMRemapPagesKernel,
+                    VirtualShadowMapProjectionSet.RemapId, projections.RemapBuffer);
+                cmd.SetComputeBufferParam(shader, m_VSMRemapPagesKernel,
                     VSMRemapPageMetadataId, VirtualShadowMapPrototypeRuntime.RemapPageMetadata);
                 cmd.SetComputeBufferParam(shader, m_VSMRemapPagesKernel,
                     VSMPrototypeWritablePageTableId, VirtualShadowMapPrototypeRuntime.PageTable);
@@ -1664,19 +1666,21 @@ namespace VividRP.Runtime.RenderPass.Core
                     VirtualShadowMapPrototypeRuntime.PageReceiverMasksId, VirtualShadowMapPrototypeRuntime.PageReceiverMasks);
                 nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapFinalizeDirtyPagesKernel,
                     VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks);
-                nativeCmd.DispatchCompute(
-                    m_VirtualShadowMapPageManagementCompute,
-                    m_VirtualShadowMapFinalizeDirtyPagesKernel,
-                    CoreUtils.DivRoundUp(pageTableEntryCount, 64),
-                    1,
-                    1);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    VSMPrototypePhysicalPageOwnersId, physicalPageOwners);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    VSMPageWorkListId, VirtualShadowMapPrototypeRuntime.PageWorkList);
+                nativeCmd.SetComputeBufferParam(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgsId, VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs);
+                nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute, m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    VirtualShadowMapPrototypeRuntime.PageWorkDispatchArgs, VirtualShadowMapPrototypeRuntime.FinalizeWorkArgsOffset);
             }
 
             VirtualShadowMapHZB.Commit(nativeCmd);
 
             // UE PropagateMappedMips: rebuild aliases after final validity is known.
-            // Finalize published native entries and removed stale aliases. This
-            // dispatch writes only coarse aliases, reading only native entries.
+            // Finalize publishes only completed work. This dispatch overwrites
+            // every non-native entry (including stale aliases), reading native entries only.
             using (new ProfilingScope(nativeCmd, VSMProfiling.PropagateMappedClipmaps))
             {
                 int kernel = m_VSMPropagateMappedClipmapsKernel;

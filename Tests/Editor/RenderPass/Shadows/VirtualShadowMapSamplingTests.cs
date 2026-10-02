@@ -160,12 +160,12 @@ namespace VividRP.Editor.Tests
             using var counters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 4);
             using var masks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 8);
             using var work = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity * 2 + 16, 4);
-            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4);
+            using var args = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount, 4);
             try
             {
                 var t = new uint[pages]; var m = new uint4[pages]; var o = new uint[capacity];
                 var r = new uint[pages]; var ls = new uint[capacity * 4 + 20];
-                var w = new uint[capacity * 2 + 16]; var a = new uint[6]; var c = new uint[4];
+                var w = new uint[capacity * 2 + 16]; var a = new uint[VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount]; var c = new uint[4];
                 const uint guard = 0xdeadbeefu;
                 for (int i = 0; i < capacity; i++) ls[i] = (uint)i;
                 Array.Fill(ls, guard, capacity * 4 + 4, 16);
@@ -277,6 +277,8 @@ namespace VividRP.Editor.Tests
                         if (requested) m[page].x = (m[page].x & ~(4u | 32768u | 131072u)) | 8u | known;
                     }
                     Assert.That(a[2], Is.EqualTo(clear.Count), label + " clear count");
+                    Assert.That(a[6], Is.EqualTo((clear.Count + 63) / 64), label + " finalize groups");
+                    Assert.That(a[7], Is.EqualTo(1u)); Assert.That(a[8], Is.EqualTo(1u));
                     Assert.That(a[3], Is.EqualTo(occupancy.Count), label + " occupancy count");
                     Assert.That(clear.OrderBy(x => x).SequenceEqual(w.Take(clear.Count).OrderBy(x => x)), Is.True, label + " clear list including duplicates");
                     Assert.That(occupancy.OrderBy(x => x).SequenceEqual(w.Skip(capacity).Take(occupancy.Count).OrderBy(x => x)), Is.True, label + " occupancy list including duplicates");

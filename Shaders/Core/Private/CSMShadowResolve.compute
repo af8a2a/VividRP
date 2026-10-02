@@ -110,6 +110,7 @@ RWStructuredBuffer<uint> _VSMAllocationRequests;
 StructuredBuffer<uint> _VSMPageWorkList;
 RWStructuredBuffer<uint> _VSMPageWorkListRW;
 RWByteAddressBuffer _VSMPageWorkDispatchArgsRW;
+ByteAddressBuffer _VSMPageWorkDispatchArgs;
 // [0]: bias bits, recovery age, essential demand, essential misses.
 // [1]: primary demand, primary resident, previous bias bits, base target bits.
 // [2]: rejected recovery boundary, demand before/after that probe, prior demand.

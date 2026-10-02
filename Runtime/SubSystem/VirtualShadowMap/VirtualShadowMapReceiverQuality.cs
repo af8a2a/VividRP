@@ -51,9 +51,10 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         internal static readonly int SMRTSettingsId = Shader.PropertyToID("_VSMSMRTSettings");
 
+        // Keep UE's centimetre-based setting; the shader's depthScale is per metre.
         internal static Vector4 BuildSMRTSettings(CascadedShadowSettingsVolume settings)
             => settings == null ? Vector4.zero : new Vector4(
-                settings.virtualShadowMapSMRTExtrapolateMaxSlope.value,
+                settings.virtualShadowMapSMRTExtrapolateMaxSlope.value * 0.01f,
                 settings.virtualShadowMapSMRTTexelDitherScale.value,
                 settings.virtualShadowMapSMRTAdaptiveRayCount.value, 0);
 

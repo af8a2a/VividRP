@@ -80,7 +80,7 @@ namespace VividRP.Runtime
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
         [Tooltip("UE directional ray length = this scale times distance from the view origin.")]
         public MinFloatParameter virtualShadowMapSMRTRayLengthScale = new(1.5f, 0);
-        [Tooltip("UE maximum depth-history extrapolation slope. Zero selects the no-slope shader permutation.")]
+        [Tooltip("UE maximum depth-history extrapolation slope in centimetres per normalized ray time. Converted to metres for GPU projection. Zero selects the no-slope shader permutation.")]
         public MinFloatParameter virtualShadowMapSMRTExtrapolateMaxSlope = new(5, 0);
         [Tooltip("UE directional texel dither scale. Zero disables ray-origin dither.")]
         public MinFloatParameter virtualShadowMapSMRTTexelDitherScale = new(2, 0);

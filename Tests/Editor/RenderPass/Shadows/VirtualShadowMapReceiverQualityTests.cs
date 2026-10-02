@@ -332,12 +332,54 @@ namespace VividRP.Editor.Tests
                 settings.virtualShadowMapSMRT.value = true;
                 var parameters = VirtualShadowMapReceiverQuality.BuildSMRTParameters(settings, 90);
                 Assert.That(parameters, Is.EqualTo(new Vector4(7, 8, 1.5f, Mathf.Sin(45 * Mathf.Deg2Rad))));
-                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings), Is.EqualTo(new Vector4(5, 2, 1, 0)));
+                var smrtSettings = VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings);
+                Assert.That(smrtSettings.x, Is.EqualTo(.05f).Within(1e-7f));
+                Assert.That(new Vector3(smrtSettings.y, smrtSettings.z, smrtSettings.w), Is.EqualTo(new Vector3(2, 1, 0)));
                 foreach (bool slope in new[] { false, true })
                 foreach (bool adaptive in new[] { false, true })
                 foreach (int samples in new[] { 1, 2, 4, 8, 32 })
                     Assert.That(VirtualShadowMapReceiverQuality.SMRTPermutationIndex(samples, adaptive, slope),
                         Is.EqualTo((slope ? 6 : 0) + (adaptive ? 3 : 0) + (samples == 2 ? 1 : samples == 4 ? 2 : 0)));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [Test]
+        public void SMRT_SettingsBindingAllocatesNoManagedMemory()
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                Assert.That(VirtualShadowMapReceiverQuality.BuildSMRTSettings(null), Is.EqualTo(Vector4.zero));
+                for (int i = 0; i < 32; i++) VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings);
+                Vector4 bound = default;
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++) bound = VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings);
+                long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(bytes, Is.Zero);
+                Assert.That(bound.x, Is.EqualTo(.05f).Within(1e-7f));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [TestCase(0, 100)]
+        [TestCase(5, 1)]
+        [TestCase(5, 100)]
+        [TestCase(5, 10000)]
+        [TestCase(12.5f, 25)]
+        public void SMRT_ExtrapolationMatchesUEForEquivalentDepthRanges(float ueSlope, float depthRangeMetres)
+        {
+            var settings = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+            try
+            {
+                settings.virtualShadowMapSMRTExtrapolateMaxSlope.value = ueSlope;
+                float boundSlope = VirtualShadowMapReceiverQuality.BuildSMRTSettings(settings).x;
+                // Compare the shader's normalized-depth limit for the same physical range.
+                float ueLimit = ueSlope / (depthRangeMetres * 100);
+                float vividLimit = boundSlope / depthRangeMetres;
+                Assert.That(vividLimit, Is.EqualTo(ueLimit).Within(Mathf.Max(1e-8f, ueLimit * 1e-6f)));
+                Assert.That(boundSlope > 0, Is.EqualTo(ueSlope > 0));
+                Assert.That(settings.virtualShadowMapSMRTExtrapolateMaxSlope.value, Is.EqualTo(ueSlope));
             }
             finally { UnityEngine.Object.DestroyImmediate(settings); }
         }

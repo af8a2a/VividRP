@@ -13,7 +13,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal Matrix4x4 WorldToClip;
         internal Matrix4x4 WorldToShadow;
         internal Vector4 SelectionSphere;
-        // World units per virtual texel, receiver normal bias, blend border, max distance.
+        // World units per virtual texel, receiver normal bias, GPU performance LOD bias, max distance.
         internal Vector4 Parameters;
     }
 
@@ -117,7 +117,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                     WorldToShadow = VividShadowData.BuildWorldToShadowMatrix(layout.Projections[i], layout.Views[i]),
                     SelectionSphere = new Vector4(center.x, center.y, center.z, -layout.Radii[i]),
                     Parameters = new Vector4(2 * layout.Radii[i] / layout.Resolution,
-                        layout.NormalBias, layout.BlendBorder, layout.MaxDistance)
+                        layout.NormalBias, 0, layout.MaxDistance)
                 };
             }
         }

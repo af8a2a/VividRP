@@ -6,7 +6,7 @@ struct VividVSMProjection
     float4x4 worldToClip;
     float4x4 worldToShadow;
     float4 selectionSphere; // clipmaps: unsnapped camera xyz, negative level radius
-    float4 parameters; // world texel size, normal bias, border, max distance
+    float4 parameters; // world texel size, normal bias, performance LOD bias, max distance
 };
 StructuredBuffer<VividVSMProjection> _VSMProjections;
 int _VSMProjectionCount;

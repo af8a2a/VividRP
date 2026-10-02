@@ -333,7 +333,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             var shadowSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             if (shadowSettings == null || !shadowSettings.enableVirtualShadowMapPrototype.value)
+            {
+                VirtualShadowMapPerformanceThrottle.Disable();
                 return;
+            }
             m_PageUpdateBudget = 0; // UE produces all requested dirty pages; throttle request resolution instead.
             m_RasterVertexBudget = 0; // Vertex quotas are not UE Nanite load/time feedback.
             base.Prepare(frameData);
@@ -386,11 +389,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 RecordVirtualShadowMapLayout(nativeCmd);
                 if (!TryPrepareMeshletShadowDraws(nativeCmd, out var meshletContext))
                 {
+                    VirtualShadowMapPerformanceThrottle.CompleteFrame(false);
                     VirtualShadowMapPrototypeRuntime.MarkFallback(VirtualShadowMapPrototypeFallbackReason.RecordPreparationFailed);
                     return;
                 }
                 if (m_HasMeshletShadowCasters && !meshletContext.VirtualTextureReady)
                 {
+                    VirtualShadowMapPerformanceThrottle.CompleteFrame(false);
                     VirtualShadowMapPrototypeRuntime.MarkFallback(VirtualShadowMapPrototypeFallbackReason.VirtualTextureUnavailable);
                     return;
                 }
@@ -399,6 +404,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 var fallbackReason = VirtualShadowMapPrototypeFallbackReason.ReceiverFeedbackUnavailable;
                 m_ShadowData.virtualShadowMapRendered = RecordReceiverPageRequests(nativeCmd)
                     && DrawVirtualShadowMapPrototypePages(nativeCmd, in meshletContext, out fallbackReason);
+                VirtualShadowMapPerformanceThrottle.CompleteFrame(m_ShadowData.virtualShadowMapRendered);
                 if (!m_ShadowData.virtualShadowMapRendered)
                     VirtualShadowMapPrototypeRuntime.MarkFallback(fallbackReason);
             }
@@ -435,6 +441,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.DispatchCompute(shader, clearKernel,
                     CoreUtils.DivRoundUp(VirtualShadowMapPrototypeRuntime.PageTableEntryCount, 64), 1, 1);
             }
+            VirtualShadowMapPerformanceThrottle.BeginFrame(cmd, m_FrameIndex,
+                VirtualShadowMapPrototypeRuntime.Projections.Generation,
+                VirtualShadowMapPrototypeRuntime.Projections.Count, m_ReceiverQuality);
             using (new ProfilingScope(cmd, VSMProfiling.MarkCoarsePages))
             {
                 cmd.SetComputeIntParam(shader, VSMPrototypeRequestEnabledId, 1);
@@ -574,6 +583,18 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             VirtualShadowMapPrototypeRuntime.Projections.PrepareClipmaps(clipmaps);
+            if (!VirtualShadowMapPerformanceThrottle.Prepare(settings, m_VirtualShadowMapPageManagementCompute))
+            {
+                VirtualShadowMapPrototypeRuntime.MarkFallback(VirtualShadowMapPrototypeFallbackReason.PageManagementUnavailable);
+                return;
+            }
+            if (VirtualShadowMapPerformanceThrottle.Enabled)
+            {
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPerformanceThrottle.Current, AccessFlags.ReadWrite);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPerformanceThrottle.Previous, AccessFlags.ReadWrite);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPerformanceThrottle.Feedback, AccessFlags.ReadWrite);
+                PassRecorder.ImportBufferForPass(this, VirtualShadowMapPerformanceThrottle.DispatchArgs, AccessFlags.ReadWrite);
+            }
             VirtualShadowMapHZB.EnsureResources(m_VirtualShadowMapPageManagementCompute);
             PassRecorder.ImportTextureForPass(this, VirtualShadowMapHZB.Texture, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapHZB.PreviousTable, AccessFlags.ReadWrite);
@@ -1456,6 +1477,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         meshletContext.VirtualTextureBinding);
                     nativeCmd.ClearRandomWriteTargets();
                 }
+                VirtualShadowMapPerformanceThrottle.Capture(nativeCmd, staticPageRequestsBuffer, staticPageArgsBuffer, submittedMask);
                 RecordProductionWork(nativeCmd, staticPageArgsBuffer, submittedMask, 0);
             }
 
@@ -1483,6 +1505,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         staticPageRequestsBuffer, staticPageArgsBuffer,
                         meshletContext.VirtualTextureReady, meshletContext.VirtualTextureBinding);
                     nativeCmd.ClearRandomWriteTargets();
+                    VirtualShadowMapPerformanceThrottle.Capture(nativeCmd, staticPageRequestsBuffer, staticPageArgsBuffer, submitted);
                     RecordProductionWork(nativeCmd, staticPageArgsBuffer, submitted, 0, accumulate: true);
                 }
             }
@@ -1562,6 +1585,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     }
                     nativeCmd.ClearRandomWriteTargets();
                 }
+                VirtualShadowMapPerformanceThrottle.Capture(nativeCmd, dynamicPageRequestsBuffer, dynamicPageArgsBuffer, submittedMask);
                 RecordProductionWork(nativeCmd, dynamicPageArgsBuffer, submittedMask, 1);
             }
             if (canDrawDynamicMeshletCasters && VirtualShadowMapHZB.Enabled)
@@ -1588,6 +1612,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         dynamicPageRequestsBuffer, dynamicPageArgsBuffer,
                         meshletContext.VirtualTextureReady, meshletContext.VirtualTextureBinding);
                     nativeCmd.ClearRandomWriteTargets();
+                    VirtualShadowMapPerformanceThrottle.Capture(nativeCmd, dynamicPageRequestsBuffer, dynamicPageArgsBuffer, submitted);
                     RecordProductionWork(nativeCmd, dynamicPageArgsBuffer, submitted, 1, accumulate: true);
                 }
             }

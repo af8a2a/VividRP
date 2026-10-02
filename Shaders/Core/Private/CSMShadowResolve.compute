@@ -1426,3 +1426,9 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMPrepareShadowHZB
 #pragma kernel VSMBuildShadowHZBTop
 #pragma kernel VSMResetHZBPostDraws
+
+// UE performance throttling (kept after existing entries for kernel-index stability).
+#pragma kernel VSMProcessPreviousPerformance
+#pragma kernel VSMUpdatePerformanceThrottle
+#pragma kernel VSMPrepareRasterFeedback
+#pragma kernel VSMCaptureRasterFeedback

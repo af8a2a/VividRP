@@ -46,6 +46,12 @@ namespace VividRP.Runtime
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
         [Tooltip("UE distance-based clipmap LOD bias. -1 requests finer levels; +1 requests coarser levels. Includes horizontal viewport/projection normalization; total bias is clamped to zero to preserve coverage. Does not change resident projection sizes.")]
         public ClampedFloatParameter virtualShadowMapResolutionLodBias = new(0, -4, 4);
+        [Tooltip("UE raster-load budget in weighted HW meshlet instance counts. Zero disables performance throttling.")]
+        public MinFloatParameter virtualShadowMapThrottleLoadBudget = new(0, 0);
+        [Tooltip("UE per-VSM load contribution history weight. Higher values change individual clipmap bias more slowly.")]
+        public ClampedFloatParameter virtualShadowMapThrottleHistoryWeight = new(0.9f, 0, 1);
+        [Tooltip("Maximum directional compute LOD bias. UE default is unlimited; the global +2 cap minus current pool-pressure bias still applies.")]
+        public MinFloatParameter virtualShadowMapThrottleMaxBias = new(99999, 0);
         [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
         public BoolParameter virtualShadowMapPCF = new(false);
         [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]

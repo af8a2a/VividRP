@@ -2014,3 +2014,5 @@ void VSMBuildPageWorkListsUE(uint3 id : SV_DispatchThreadID)
 void VSMClearReceiverRequestsUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeClearReceiverRequests(id); }
 [numthreads(64, 1, 1)]
 void VSMResetReceiverFeedbackUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeResetReceiverFeedback(id); }
+
+#include "VSMPerformanceThrottle.hlsl"

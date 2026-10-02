@@ -64,6 +64,9 @@ namespace VividRP.Editor
         private SerializedDataParameter m_VirtualShadowMapLastLevel;
         private SerializedDataParameter m_VirtualShadowMapFirstLevel;
         private SerializedDataParameter m_VirtualShadowMapZRangeScale;
+        private SerializedDataParameter m_VirtualShadowMapThrottleLoadBudget;
+        private SerializedDataParameter m_VirtualShadowMapThrottleHistoryWeight;
+        private SerializedDataParameter m_VirtualShadowMapThrottleMaxBias;
         private SerializedDataParameter m_VirtualShadowMapResolutionLodBias;
         private SerializedDataParameter m_VirtualShadowMapSMRTRayLengthScale;
         private SerializedDataParameter m_VirtualShadowMapSMRTExtrapolateMaxSlope;
@@ -104,6 +107,9 @@ namespace VividRP.Editor
             m_VirtualShadowMapLastLevel = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapLastLevel));
             m_VirtualShadowMapZRangeScale = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapZRangeScale));
             m_VirtualShadowMapFirstLevel = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapFirstLevel));
+            m_VirtualShadowMapThrottleLoadBudget = Unpack(fetcher.Find(x => x.virtualShadowMapThrottleLoadBudget));
+            m_VirtualShadowMapThrottleHistoryWeight = Unpack(fetcher.Find(x => x.virtualShadowMapThrottleHistoryWeight));
+            m_VirtualShadowMapThrottleMaxBias = Unpack(fetcher.Find(x => x.virtualShadowMapThrottleMaxBias));
             m_VirtualShadowMapResolutionLodBias = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBias));
             m_VirtualShadowMapSMRTRayLengthScale = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTRayLengthScale));
             m_VirtualShadowMapSMRTExtrapolateMaxSlope = Unpack(fetcher.Find(x => x.virtualShadowMapSMRTExtrapolateMaxSlope));
@@ -137,6 +143,9 @@ namespace VividRP.Editor
             PropertyField(m_VirtualShadowMapLastLevel);
             PropertyField(m_VirtualShadowMapZRangeScale);
             PropertyField(m_VirtualShadowMapResolutionLodBias);
+            PropertyField(m_VirtualShadowMapThrottleLoadBudget);
+            PropertyField(m_VirtualShadowMapThrottleHistoryWeight);
+            PropertyField(m_VirtualShadowMapThrottleMaxBias);
             PropertyField(m_VirtualShadowMapSMRT);
             PropertyField(m_VirtualShadowMapSMRTAdaptiveRays);
             PropertyField(m_VirtualShadowMapSMRTRayCount);

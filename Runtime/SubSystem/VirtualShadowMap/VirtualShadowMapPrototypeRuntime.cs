@@ -1004,6 +1004,7 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private static void ReleaseAllocatedResources(bool preservePressure = false)
         {
+            VirtualShadowMapPerformanceThrottle.Dispose();
             if (s_DynamicInvalidationScratch.IsCreated)
                 s_DynamicInvalidationScratch.Dispose();
             Projections.InvalidateLayout();

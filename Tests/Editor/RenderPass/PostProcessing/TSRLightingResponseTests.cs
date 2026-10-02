@@ -418,10 +418,31 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(8, false)]
+        [TestCase(13, false)]
+        [TestCase(8, true)]
+        [TestCase(13, true)]
+        public void SubpixelReprojection_PreservesConstantHdrColor(int outputSize, bool waveOps)
+        {
+            if (waveOps) Assume.That(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
+                || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan, Is.True);
+            // Exercise both fractional axes: dropping the four corners of the
+            // separable Catmull-Rom kernel loses up to 1/64 per reprojection.
+            foreach (var offset in new[] { Vector2.zero, new Vector2(.5f, .5f),
+                new Vector2(.25f, -.75f), new Vector2(-.4375f, 5f / 9f) })
+            {
+                ReprojectionResult result = InspectReprojectedState(outputSize, 0, true, waveOps,
+                    offset, constantColor: new Color(.25f, 2, 16));
+                Assert.That(result.constantColorMaxError, Is.LessThan(.0001f), "Offset " + offset);
+                Assert.That(result.statesMatch && result.metadataMatch && result.paddingUntouched, Is.True);
+            }
+        }
+
         private sealed class ReprojectionResult
         {
             public int outputSize, paddedSize, statePixels, invalidPixels, filteredColorPixels;
             public float shiftPixels;
+            public float constantColorMaxError;
             public Vector2 jitterPixels;
             public int phase, stateOnlyInvalidPixels, colorOnlyInvalidPixels;
             [NonSerialized] public float[] stateGrid;
@@ -452,7 +473,7 @@ namespace VividRP.Editor.Tests
         }
 
         private static ReprojectionResult InspectReprojectedState(int outputSize, float shiftPixels, bool hasHistory, bool waveOps,
-            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0)
+            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null)
         {
             const int renderSize = 8;
             int paddedSize = (outputSize + 7) / 8 * 8;
@@ -493,7 +514,8 @@ namespace VividRP.Editor.Tests
                 {
                     int pixel = y * outputSize + x;
                     bool odd = (x + y) % 2 != 0;
-                    for (int c = 0; c < 3; c++) colorValues[pixel * 4 + c] = odd ? 0.8f : 0.2f;
+                    for (int c = 0; c < 3; c++)
+                        colorValues[pixel * 4 + c] = constantColor.HasValue ? constantColor.Value[c] : (odd ? 0.8f : 0.2f);
                     colorValues[pixel * 4 + 3] = previousStates != null ? previousStates[pixel] : (odd ? 26 : 5);
                 }
                 sourceColor.SetPixelData(colorValues, 0); sourceColor.Apply(false, false);
@@ -536,6 +558,7 @@ namespace VividRP.Editor.Tests
                     return request.GetData<float>().ToArray();
                 }
                 float[] colors = Read(resurrectionOut), mainMetadata = Read(historyMetaOut), cacheMetadata = Read(resurrectionMetaOut);
+                float[] mainColors = constantColor.HasValue ? Read(historyOut) : null;
                 for (int y = 0; y < paddedSize; y++) for (int x = 0; x < paddedSize; x++)
                 {
                     int pixel = y * paddedSize + x;
@@ -561,6 +584,15 @@ namespace VividRP.Editor.Tests
                     if (validState && !validColor) result.colorOnlyInvalidPixels++;
                     if (validColor)
                     {
+                        if (constantColor.HasValue)
+                        {
+                            for (int c = 0; c < 3; c++)
+                            {
+                                result.constantColorMaxError = Mathf.Max(result.constantColorMaxError,
+                                    Mathf.Abs(colors[pixel * 4 + c] - constantColor.Value[c]),
+                                    Mathf.Abs(mainColors[pixel * 4 + c] - constantColor.Value[c]));
+                            }
+                        }
                         result.statePixels++;
                         float pointColor = (sourceX + y) % 2 != 0 ? 0.8f : 0.2f;
                         if (Mathf.Abs(colors[pixel * 4] - pointColor) > 0.003f) result.filteredColorPixels++;

@@ -325,13 +325,19 @@ namespace VividRP.Editor.Tests
                 PreviousState = previousState, NeighborhoodHigh = 1 }, nextState, confirmed);
         }
 
-        [TestCase(0f, 0, 5)]
-        [TestCase(2f, 6, 0)]
-        public void LumaInstability_RelaxesOnlyTheMovingColorThreshold(float motionPixels, int previousState, int nextState)
+        [TestCase(0f)]
+        [TestCase(2f)]
+        public void FlickerError_DoesNotRelaxLightingConfirmationOrMovingRejection(float motionPixels)
         {
             using var fixture = new Fixture();
-            AssertStep(fixture, new Input { Current = Gray(1), History = Gray(0.7f),
-                LumaInstability = 1, MotionPixels = motionPixels, PreviousState = previousState, NeighborhoodHigh = 1 }, nextState, false);
+            var input = new Input { Current = Gray(1), History = Gray(0.7f),
+                MotionPixels = motionPixels, NeighborhoodHigh = 1 };
+            Snapshot original = fixture.Run(input);
+            input.LumaInstability = 1;
+            Snapshot protectedHistory = fixture.Run(input);
+            Assert.That(protectedHistory.Accepted, Is.EqualTo(original.Accepted));
+            Assert.That(protectedHistory.PendingState, Is.EqualTo(original.PendingState));
+            Assert.That(protectedHistory.AcceptedAlpha, Is.EqualTo(original.AcceptedAlpha));
         }
 
         [TestCase(1)]
@@ -984,6 +990,7 @@ namespace VividRP.Editor.Tests
                 reject.SetTexture(kernel, "_HistoryShadingGuide", historyGuide);
                 reject.SetTexture(kernel, "_ShadingGuideMetadata", guideMetadata);
                 reject.SetTexture(kernel, "_OutputShadingGuideConfidence", guideConfidence);
+                reject.SetTexture(kernel, "_LumaInstability", instability);
                 reject.SetTexture(kernel, "_CurrentShadingGuide", currentGuide);
                 reject.Dispatch(kernel, 1, 1, 1);
                 kernel = reject.FindKernel("CS");

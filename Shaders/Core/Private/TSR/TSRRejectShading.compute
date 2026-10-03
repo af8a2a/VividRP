@@ -1,5 +1,8 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSPrepareFlicker
+#pragma kernel CSAnalyzeFlicker
+#pragma kernel CSUpdateFlicker
 #pragma kernel CSBuildShadingGuides
 #pragma kernel CSPropagateShadingConfidence
 #pragma kernel CSHistoryDiagnostics VIVID_TSR_HISTORY_DIAGNOSTICS
@@ -209,7 +212,10 @@ void CSPropagateShadingConfidence(uint3 groupId : SV_GroupID, uint3 tid : SV_Gro
         [unroll] for(uint y=0;y<3;y++) [unroll] for(uint x=0;x<3;x++)
         { float3 v=ConfidenceInput[(center.y+y-1)*14+center.x+x-1].rgb; lo=min(lo,v);hi=max(hi,v); }
         float error=2.0/255.0+min(history.a,input.a*0.25);
-        float3 energy=abs(clamp(history.rgb,lo-error,hi+error)-history.rgb);
+        float3 boxMin=lo-error,boxMax=hi+error;
+        float moireSize=3.0*_LumaInstability[coord];
+        float3 stableMin=min(boxMin,boxMax-moireSize),stableMax=max(boxMax,boxMin+moireSize);
+        float3 energy=abs(clamp(history.rgb,stableMin,stableMax)-history.rgb);
         float3 delta=max(abs(input.rgb-history.rgb),max(input.a,error).xxx);
         float3 factor=saturate(1.0-energy/delta);
         ConfidenceRaw[rawIndex]=float4(energy,min(factor.x,min(factor.y,factor.z)));
@@ -331,7 +337,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float lumaDiff = abs(currentYCoCg.x - historyYCoCgForDiff.x) / max(max(currentYCoCg.x, historyYCoCgForDiff.x), 0.2);
     float chromaDiff = length(currentYCoCg.yz - historyYCoCgForDiff.yz);
     float baseLumaThreshold = lerp(_TSRRejectionParams.z, _TSRRejectionParams.z * 0.55, reprojectionBoundary);
-    float lumaThreshold = lerp(baseLumaThreshold, baseLumaThreshold * 1.45, lumaInstability);
+    float lumaThreshold = baseLumaThreshold;
     float chromaThreshold = lerp(_TSRRejectionParams.w, _TSRRejectionParams.w * 0.65, reprojectionBoundary);
     float motionLimit = lerp(_TSRRejectionParams.y, _TSRRejectionParams.y * 0.5, reprojectionBoundary);
     bool depthRejected = hasSignificantMotion && depthDiff > depthTolerance;
@@ -426,13 +432,19 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         && motionPixels < 0.5 && reprojectionBoundary < 0.25
         && depthDiff <= min(depthTolerance, receiverDepthScale * 0.02)
         && shadingState == 0.0 && _ReprojectedResurrectionColor[pixelCoord].a == 0.0;
-    if (stableHistory && lumaInstability > 0.15 && any(abs(historyColor - unclippedHistoryColor) > 1e-6))
+    if (stableHistory && lumaInstability > 0.0 && any(abs(historyColor - unclippedHistoryColor) > 1e-6))
     {
         float3 neighborhoodCenter = 0.5 * (clampMin + clampMax);
         float neighborhoodRange = (clampMax.x - clampMin.x) / max(abs(neighborhoodCenter.x), 0.2);
         // Keep full clipping for flat lighting steps and histories incompatible
         // with the neighborhood, even when temporal instability is high.
-        float noiseConfidence = smoothstep(0.15, 0.5, lumaInstability)
+        float3 currentMeasurement = TSR_ShadingMeasurementColor(currentColor);
+        float3 historyMeasurement = TSR_ShadingMeasurementColor(unclippedHistoryColor);
+        float measuredDelta = max(abs(currentMeasurement.x-historyMeasurement.x),
+            max(abs(currentMeasurement.y-historyMeasurement.y),abs(currentMeasurement.z-historyMeasurement.z)));
+        // Adapt UE's physical SMCS error to the existing conservative 50% clip
+        // restoration. It is not a normalized noise score or a history weight.
+        float noiseConfidence = saturate(3.0*lumaInstability/max(measuredDelta,1.0/127.0))
             * smoothstep(0.01, 0.05, neighborhoodRange);
         float3 neighborhoodVALU = TSR_RGBToYCoCgVALU(max(TSR_YCoCgToRGB(neighborhoodCenter), 0.0));
         float3 unclippedVALU = TSR_RGBToYCoCgVALU(unclippedHistoryColor);
@@ -491,3 +503,5 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _HistoryLossDiagnostics[pixelCoord] = float4(reasons, lumaInstability, depthDiff, depthTolerance);
 #endif
 }
+
+#include "TSRFlickering.hlsl"

@@ -18,12 +18,34 @@ namespace VividRP.Runtime.RenderPass.Core
         // Outputs: rejection reason bits/metrics, blend weights, updated history.
         internal static Camera EditorHistoryLossCaptureCamera;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture> EditorHistoryLossCapture;
+        internal static event Action<CommandBuffer, Camera, int, Vector4, Texture, Texture, Texture, Texture, Texture> EditorFlickeringCapture;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture> EditorShadingGuideCapture;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture> EditorGuideConfidenceCapture;
         private static readonly int HistoryLossDiagnosticsId = Shader.PropertyToID("_HistoryLossDiagnostics");
         private readonly RenderGraphTextureDesc m_RejectDiagnosticsDescriptor = new();
         private readonly RenderGraphTextureDesc m_UpdateDiagnosticsDescriptor = new();
 #endif
+        private static readonly ProfilingSampler s_FlickerPrepareSampler = new("TSR.PrepareFlickering");
+        private static readonly ProfilingSampler s_FlickerAnalyzeSampler = new("TSR.AnalyzeFlickering");
+        private static readonly ProfilingSampler s_FlickerUpdateSampler = new("TSR.UpdateFlickering");
+        private static readonly int PreviousFlickerHistoryId = Shader.PropertyToID("_PreviousFlickerHistory");
+        private static readonly int FlickerPreviousDepthId = Shader.PropertyToID("_FlickerPreviousDepth");
+        private static readonly int FlickerInputId = Shader.PropertyToID("_FlickerInput");
+        private static readonly int ReprojectedFlickerHistoryId = Shader.PropertyToID("_ReprojectedFlickerHistory");
+        private static readonly int FlickerGradientId = Shader.PropertyToID("_FlickerGradient");
+        private static readonly int OutputFlickerInputId = Shader.PropertyToID("_OutputFlickerInput");
+        private static readonly int OutputReprojectedFlickerHistoryId = Shader.PropertyToID("_OutputReprojectedFlickerHistory");
+        private static readonly int OutputFlickerGradientId = Shader.PropertyToID("_OutputFlickerGradient");
+        private static readonly int CurrentFlickerHistoryId = Shader.PropertyToID("_CurrentFlickerHistory");
+        private static readonly int OutputFlickerErrorId = Shader.PropertyToID("_OutputFlickerError");
+        private static readonly int FlickerParamsId = Shader.PropertyToID("_FlickerParams");
+        private static readonly int FlickerClipToPrevClipId = Shader.PropertyToID("_FlickerClipToPrevClip");
+        private static readonly int FlickerRotationalClipToPrevClipId = Shader.PropertyToID("_FlickerRotationalClipToPrevClip");
+        private static readonly int FlickerInvViewProjectionId = Shader.PropertyToID("_FlickerInvViewProjection");
+        private static readonly int FlickerPrevInvViewProjectionId = Shader.PropertyToID("_FlickerPrevInvViewProjection");
+        private readonly RenderGraphTextureDesc m_FlickerInputDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectedFlickerHistoryDescriptor = new();
+        private readonly RenderGraphTextureDesc m_FlickerGradientDescriptor = new();
         private const int CameraStateExpirationFrames = 400;
         private const int KernelThreadGroupSize = 8;
         private const string TsrWaveOpsKeyword = "VIVID_TSR_WAVE_OPS";
@@ -227,7 +249,13 @@ namespace VividRP.Runtime.RenderPass.Core
                     "TSR_LumaInstability",
                     renderSize.x,
                     renderSize.y,
-                    GraphicsFormat.R8_UNorm));
+                    GraphicsFormat.R16_SFloat));
+            var flickerInput = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                m_FlickerInputDescriptor, "TSR_FlickerInput", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+            var reprojectedFlickerHistory = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                m_ReprojectedFlickerHistoryDescriptor, "TSR_ReprojectedFlickerHistory", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+            var flickerGradient = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                m_FlickerGradientDescriptor, "TSR_FlickerGradient", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat));
             var reprojectedHistoryColor = renderGraph.CreateTexture(
                 ConfigureColorDescriptor(
                     m_ReprojectedHistoryColorDescriptor,
@@ -339,6 +367,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.ReprojectionBoundary = reprojectionBoundary;
                 passData.ThinGeometryCoverage = thinGeometryCoverage;
                 passData.LumaInstability = lumaInstability;
+                passData.FlickerInput = flickerInput;
+                passData.ReprojectedFlickerHistory = reprojectedFlickerHistory;
+                passData.FlickerGradient = flickerGradient;
+                passData.PreviousFlickerHistory = handles.PreviousFlickerHistory;
+                passData.CurrentFlickerHistory = handles.CurrentFlickerHistory;
+                var currentVP = temporalData?.ViewProjection ?? cameraData.mainViewConstants.nonJitteredViewProjMatrix;
+                var previousVP = temporalData?.PreviousViewProjection ?? cameraData.mainViewConstants.prevViewProjMatrix;
+                var invCurrentVP = currentVP.inverse;
+                passData.FlickerInvViewProjection = invCurrentVP;
+                passData.FlickerPrevInvViewProjection = previousVP.inverse;
+                passData.FlickerClipToPrevClip = previousVP * invCurrentVP;
+                var currentView = temporalData?.ViewMatrix ?? cameraData.mainViewConstants.viewMatrix;
+                var previousView = temporalData?.PreviousViewMatrix ?? cameraData.mainViewConstants.prevViewMatrix;
+                var currentProjection = currentVP * currentView.inverse;
+                var previousProjection = previousVP * previousView.inverse;
+                var rotation = previousView * currentView.inverse;
+                rotation.SetColumn(3, new Vector4(0, 0, 0, 1));
+                passData.FlickerRotationalClipToPrevClip = previousProjection * rotation * currentProjection.inverse;
+                var rateRatio = cameraState.FlickerDeltaTime > 0 ? cameraState.FlickerDeltaTime * 60f : 1f;
+                passData.FlickerParams = new Vector4(2f / Mathf.Max(rateRatio, 1f),
+                    1f / Mathf.Max(rateRatio * 10f * renderSize.x / 1920f, 0.001f), cameraData.frameIndex & 7, 0);
+
                 passData.ReprojectedHistoryColor = reprojectedHistoryColor;
                 passData.ReprojectedHistoryMeta = reprojectedHistoryMeta;
                 passData.ReprojectedResurrectionColor = reprojectedResurrectionColor;
@@ -388,6 +438,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.ReprojectionBoundary, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ThinGeometryCoverage, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.LumaInstability, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.FlickerInput, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.ReprojectedFlickerHistory, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.FlickerGradient, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.CurrentFlickerHistory, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.PreviousFlickerHistory, resetHistory ? AccessFlags.ReadWrite : AccessFlags.Read);
                 builder.UseTexture(passData.ReprojectedHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectedHistoryMeta, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectedResurrectionColor, AccessFlags.ReadWrite);
@@ -506,6 +561,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             DispatchDilateVelocity(cmd, data);
             DispatchReprojectHistory(cmd, data);
+            DispatchFlickering(cmd, data);
             if (data.EnablePairedGuides)
             {
                 DispatchBuildShadingGuides(cmd, data);
@@ -520,6 +576,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 DispatchSharpen(cmd, data);
 
 #if UNITY_EDITOR
+            EditorFlickeringCapture?.Invoke(cmd, data.Camera, data.FrameIndex, data.FlickerParams,
+                data.FlickerInput.ResolveTexture(), data.FlickerGradient.ResolveTexture(),
+                data.CurrentFlickerHistory.ResolveTexture(), data.LumaInstability.ResolveTexture(), data.ReprojectedFlickerHistory.ResolveTexture());
             EditorTemporalCapture?.Invoke(cmd, data.Camera, data.FrameIndex,
                 data.Source.ResolveTexture(), data.Output.ResolveTexture(), data.ResolveOutput.ResolveTexture(),
                 data.RejectionMask.ResolveTexture(), data.CurrentHistoryMeta.ResolveTexture(), data.DilatedMotion.ResolveTexture());
@@ -546,6 +605,49 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeBufferParam(shader, kernel, FramePreExposureId, data.FramePreExposure);
             cmd.SetComputeTextureParam(shader, kernel, PreviousPreExposureId, data.PreviousPreExposure);
+        }
+
+        private static void DispatchFlickering(CommandBuffer cmd, PassData data)
+        {
+            var shader = data.Shaders.RejectShading;
+            SetCommonConstants(cmd, shader, data);
+            cmd.SetComputeVectorParam(shader, FlickerParamsId, data.FlickerParams);
+            cmd.SetComputeMatrixParam(shader, FlickerClipToPrevClipId, data.FlickerClipToPrevClip);
+            cmd.SetComputeMatrixParam(shader, FlickerRotationalClipToPrevClipId, data.FlickerRotationalClipToPrevClip);
+            cmd.SetComputeMatrixParam(shader, FlickerInvViewProjectionId, data.FlickerInvViewProjection);
+            cmd.SetComputeMatrixParam(shader, FlickerPrevInvViewProjectionId, data.FlickerPrevInvViewProjection);
+            int kernel = data.Shaders.PrepareFlickerKernel;
+            using (new ProfilingScope(cmd, s_FlickerPrepareSampler))
+            {
+                BindPreExposure(cmd, data, shader, kernel);
+                cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
+                cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
+                cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
+                cmd.SetComputeTextureParam(shader, kernel, DepthErrorId, data.DepthError);
+                cmd.SetComputeTextureParam(shader, kernel, FlickerPreviousDepthId, data.PreviousHistoryMeta);
+                cmd.SetComputeTextureParam(shader, kernel, PreviousFlickerHistoryId, data.PreviousFlickerHistory);
+                cmd.SetComputeTextureParam(shader, kernel, OutputFlickerInputId, data.FlickerInput);
+                cmd.SetComputeTextureParam(shader, kernel, OutputReprojectedFlickerHistoryId, data.ReprojectedFlickerHistory);
+                cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, 8), DivRoundUp(data.RenderSize.y, 8), 1);
+            }
+            kernel = data.Shaders.AnalyzeFlickerKernel;
+            using (new ProfilingScope(cmd, s_FlickerAnalyzeSampler))
+            {
+                cmd.SetComputeTextureParam(shader, kernel, FlickerInputId, data.FlickerInput);
+                cmd.SetComputeTextureParam(shader, kernel, ReprojectedFlickerHistoryId, data.ReprojectedFlickerHistory);
+                cmd.SetComputeTextureParam(shader, kernel, OutputFlickerGradientId, data.FlickerGradient);
+                cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, 8), DivRoundUp(data.RenderSize.y, 8), 1);
+            }
+            kernel = data.Shaders.UpdateFlickerKernel;
+            using (new ProfilingScope(cmd, s_FlickerUpdateSampler))
+            {
+                cmd.SetComputeTextureParam(shader, kernel, FlickerInputId, data.FlickerInput);
+                cmd.SetComputeTextureParam(shader, kernel, ReprojectedFlickerHistoryId, data.ReprojectedFlickerHistory);
+                cmd.SetComputeTextureParam(shader, kernel, FlickerGradientId, data.FlickerGradient);
+                cmd.SetComputeTextureParam(shader, kernel, CurrentFlickerHistoryId, data.CurrentFlickerHistory);
+                cmd.SetComputeTextureParam(shader, kernel, OutputFlickerErrorId, data.LumaInstability);
+                cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, 8), DivRoundUp(data.RenderSize.y, 8), 1);
+            }
         }
 
         private static void DispatchDilateVelocity(CommandBuffer cmd, PassData data)
@@ -627,6 +729,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, HistoryShadingGuideId, data.HistoryShadingGuide);
             cmd.SetComputeTextureParam(shader, kernel, ShadingGuideMetadataId, data.GuideMetadata);
             cmd.SetComputeTextureParam(shader, kernel, OutputShadingGuideConfidenceId, data.GuideConfidence);
+            cmd.SetComputeTextureParam(shader, kernel, LumaInstabilityId, data.LumaInstability);
             cmd.SetComputeTextureParam(shader, kernel, CurrentShadingGuideId, data.CurrentShadingGuide);
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, KernelThreadGroupSize),
                 DivRoundUp(data.RenderSize.y, KernelThreadGroupSize), 1);
@@ -790,7 +893,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (cmd == null || shader == null)
                 return;
 
-            var keyword = new LocalKeyword(shader, keywordName);
+            var keyword = shader.keywordSpace.FindKeyword(keywordName);
             if (!keyword.isValid)
                 return;
 
@@ -955,7 +1058,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 TextureHandle previousResurrectionMeta,
                 TextureHandle currentResurrectionMeta,
                 TextureHandle previousShadingGuide,
-                TextureHandle currentShadingGuide, TextureHandle previousPreExposure, TextureHandle currentPreExposure)
+                TextureHandle currentShadingGuide, TextureHandle previousPreExposure, TextureHandle currentPreExposure,
+                TextureHandle previousFlickerHistory, TextureHandle currentFlickerHistory)
             {
                 PreviousHistoryColor = previousHistoryColor;
                 CurrentHistoryColor = currentHistoryColor;
@@ -969,6 +1073,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 CurrentShadingGuide = currentShadingGuide;
                 PreviousPreExposure = previousPreExposure;
                 CurrentPreExposure = currentPreExposure;
+                PreviousFlickerHistory = previousFlickerHistory;
+                CurrentFlickerHistory = currentFlickerHistory;
             }
 
             public TextureHandle PreviousHistoryColor { get; }
@@ -983,6 +1089,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle CurrentShadingGuide { get; }
             public TextureHandle PreviousPreExposure { get; }
             public TextureHandle CurrentPreExposure { get; }
+            public TextureHandle PreviousFlickerHistory { get; }
+            public TextureHandle CurrentFlickerHistory { get; }
         }
 
         private readonly struct ShaderSet
@@ -997,6 +1105,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly int DilateVelocityKernel;
             public readonly int ReprojectHistoryKernel;
             public readonly int RejectShadingKernel;
+            public readonly int PrepareFlickerKernel, AnalyzeFlickerKernel, UpdateFlickerKernel;
             public readonly int BuildShadingGuidesKernel;
             public readonly int PropagateShadingConfidenceKernel;
             public readonly int SpatialAntiAliasingKernel;
@@ -1020,6 +1129,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 DilateVelocityKernel = FindKernel(DilateVelocity);
                 ReprojectHistoryKernel = FindKernel(ReprojectHistory);
                 RejectShadingKernel = FindKernel(RejectShading);
+                PrepareFlickerKernel = RejectShading != null && RejectShading.HasKernel("CSPrepareFlicker") ? RejectShading.FindKernel("CSPrepareFlicker") : -1;
+                AnalyzeFlickerKernel = RejectShading != null && RejectShading.HasKernel("CSAnalyzeFlicker") ? RejectShading.FindKernel("CSAnalyzeFlicker") : -1;
+                UpdateFlickerKernel = RejectShading != null && RejectShading.HasKernel("CSUpdateFlicker") ? RejectShading.FindKernel("CSUpdateFlicker") : -1;
                 BuildShadingGuidesKernel = RejectShading != null && RejectShading.HasKernel("CSBuildShadingGuides")
                     ? RejectShading.FindKernel("CSBuildShadingGuides") : -1;
                 PropagateShadingConfidenceKernel = RejectShading != null && RejectShading.HasKernel("CSPropagateShadingConfidence")
@@ -1040,6 +1152,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 DilateVelocity != null && DilateVelocityKernel >= 0
                 && ReprojectHistory != null && ReprojectHistoryKernel >= 0
                 && RejectShading != null && RejectShadingKernel >= 0
+                && PrepareFlickerKernel >= 0 && AnalyzeFlickerKernel >= 0 && UpdateFlickerKernel >= 0
                 && BuildShadingGuidesKernel >= 0
                 && PropagateShadingConfidenceKernel >= 0
                 && SpatialAntiAliasing != null && SpatialAntiAliasingKernel >= 0
@@ -1087,6 +1200,11 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle ReprojectionBoundary;
             public TextureHandle ThinGeometryCoverage;
             public TextureHandle LumaInstability;
+            public TextureHandle FlickerInput, ReprojectedFlickerHistory, FlickerGradient;
+            public TextureHandle PreviousFlickerHistory, CurrentFlickerHistory;
+            public Vector4 FlickerParams;
+            public Matrix4x4 FlickerClipToPrevClip, FlickerRotationalClipToPrevClip;
+            public Matrix4x4 FlickerInvViewProjection, FlickerPrevInvViewProjection;
             public TextureHandle ReprojectedHistoryColor;
             public TextureHandle ReprojectedHistoryMeta;
             public TextureHandle ReprojectedResurrectionColor;
@@ -1132,6 +1250,10 @@ namespace VividRP.Runtime.RenderPass.Core
             private CameraHistoryTexture m_ResurrectionMeta;
             private CameraHistoryTexture m_ShadingGuide;
             private CameraHistoryTexture m_PreExposure;
+            private CameraHistoryTexture m_Flickering;
+            private double m_LastFlickerTime;
+            private int m_LastFlickerFrame = -1;
+            public float FlickerDeltaTime { get; private set; }
             private Vector2Int m_RenderSize;
             private Vector2Int m_OutputSize;
             private VividTsrQualityMode m_Quality;
@@ -1154,11 +1276,24 @@ namespace VividRP.Runtime.RenderPass.Core
                 bool forceResetHistory,
                 bool pairedGuides = false)
             {
+                // UE uses real frame time. Unity's Time.unscaledDeltaTime can be
+                // stale in paused/Edit Mode, so measure this camera's render cadence.
+                int flickerFrame = frameIndex >= 0 ? frameIndex : Time.frameCount;
+                if (m_LastFlickerFrame != flickerFrame)
+                {
+                    double now = Time.realtimeSinceStartupAsDouble;
+                    FlickerDeltaTime = m_LastFlickerFrame >= 0 ? (float)Math.Max(now - m_LastFlickerTime, 0.0) : 0f;
+                    m_LastFlickerTime = now;
+                    m_LastFlickerFrame = flickerFrame;
+                }
                 historySampleCount = Mathf.Clamp(historySampleCount, 8, 32);
                 EnsureTextures(camera, outputSize);
                 m_PreExposure = camera.GetVividCameraHistory().GetOrCreateTexture(
                     CameraHistoryIds.TsrPreExposure, 2,
                     CreateHistoryDescriptor(Vector2Int.one, GraphicsFormat.R32_SFloat));
+                m_Flickering = camera.GetVividCameraHistory().GetOrCreateTexture(
+                    CameraHistoryIds.TsrFlickering, 2,
+                    CreateHistoryDescriptor(renderSize, GraphicsFormat.R8G8B8A8_UNorm));
                 if (pairedGuides)
                     m_ShadingGuide = camera.GetVividCameraHistory().GetOrCreateTexture(
                         CameraHistoryIds.TsrShadingGuide, 2,
@@ -1168,6 +1303,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     && m_ResurrectionColor.IsValid()
                     && m_ResurrectionMeta.IsValid()
                     && m_PreExposure.IsValid()
+                    && m_Flickering.IsValid()
                     && (!pairedGuides || m_ShadingGuide.IsValid());
                 var resetHistory = forceResetHistory
                     || !m_HasValidHistory
@@ -1209,7 +1345,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PairedGuides ? renderGraph.ImportTexture(m_ShadingGuide.GetPrevious()) : default,
                     m_PairedGuides ? renderGraph.ImportTexture(m_ShadingGuide.GetCurrent()) : default,
                     renderGraph.ImportTexture(m_PreExposure.GetPrevious()),
-                    renderGraph.ImportTexture(m_PreExposure.GetCurrent()));
+                    renderGraph.ImportTexture(m_PreExposure.GetCurrent()),
+                    renderGraph.ImportTexture(m_Flickering.GetPrevious()),
+                    renderGraph.ImportTexture(m_Flickering.GetCurrent()));
             }
 
             public void CommitFrame(Vector2Int renderSize, Vector2Int outputSize, Vector2 jitter)
@@ -1222,6 +1360,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public void MarkHistoryWritten()
             {
                 m_PreExposure?.MarkWritten();
+                m_Flickering?.MarkWritten();
                 m_HistoryColor?.MarkWritten();
                 m_HistoryMeta?.MarkWritten();
                 m_ResurrectionColor?.MarkWritten();
@@ -1237,6 +1376,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 for (var i = 0; i < 2; i++)
                 {
                     ClearRTHandle(cmd, m_PreExposure.GetFrame(i), Color.white);
+                    ClearRTHandle(cmd, m_Flickering.GetFrame(i), new Color(0, 127f / 255f, 0, 0));
                     ClearRTHandle(cmd, m_HistoryColor.GetFrame(i), Color.clear);
                     ClearRTHandle(cmd, m_HistoryMeta.GetFrame(i), Color.clear);
                     ClearRTHandle(cmd, m_ResurrectionColor.GetFrame(i), Color.clear);
@@ -1253,6 +1393,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResurrectionMeta = null;
                 m_ShadingGuide = null;
                 m_PreExposure = null;
+                m_Flickering = null;
                 m_HasValidHistory = false;
             }
 

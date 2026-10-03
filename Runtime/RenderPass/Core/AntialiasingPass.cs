@@ -424,7 +424,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 renderSize,
                 outputSize,
                 context.TextureCache,
-                m_ResetHistory);
+                m_ResetHistory,
+                VividAutoExposureSystem.ResolvePreExposureBuffer(context.FrameData.Get<VividExposureData>()));
         }
 
 #if DLSS_PLUGIN_INTEGRATE

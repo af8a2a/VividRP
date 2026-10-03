@@ -3,6 +3,16 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
+// Exposure belongs to the stored TSR frame, not the auto-exposure write target.
+StructuredBuffer<float4> _TSRFramePreExposure;
+Texture2D<float> _TSRPreviousPreExposure;
+
+float TSR_CurrentPreExposure() { return max(_TSRFramePreExposure[0].x, 1e-4); }
+float TSR_HistoryExposureCorrection()
+{
+    return TSR_CurrentPreExposure() / max(_TSRPreviousPreExposure[int2(0, 0)], 1e-4);
+}
+
 #if defined(VIVID_TSR_WAVE_OPS) && defined(UNITY_COMPILER_DXC)
 #define VIVID_TSR_USE_WAVE_OPS 1
 #else
@@ -137,28 +147,29 @@ float3 TSR_ClipToAABB(float3 color, float3 aabbMin, float3 aabbMax)
 
 float4 TSR_SampleCatmullRom(Texture2D<float4> textureSource, float2 uv, float2 textureSize)
 {
+    // UE TSRKernels.ush: GetBicubic2DCatmullRomSamples_Stubbe.
+    // The five-tap approximation must preserve a constant signal. Dropping the
+    // four corner products from the separable kernel without correcting its
+    // center weight loses energy on every subpixel history reprojection.
     float2 position = uv * textureSize;
-    float2 center = floor(position - 0.5) + 0.5;
+    float2 center = floor(position - 0.5) + 1.0;
     float2 f = position - center;
     float2 f2 = f * f;
-    float2 f3 = f2 * f;
-
-    float2 w0 = f2 - 0.5 * (f3 + f);
-    float2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
-    float2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
-    float2 w3 = 0.5 * (f3 - f2);
-
-    float2 w12 = w1 + w2;
-    float2 tc0 = (center - 1.0) / textureSize;
-    float2 tc12 = (center + w2 / max(w12, float2(1e-6, 1e-6))) / textureSize;
-    float2 tc3 = (center + 2.0) / textureSize;
+    float2 offset = (1.25 - f2) * f + 0.5;
+    float2 sideWeight = (0.25 * f2 - 0.0625) * (1.125 - 0.5 * f2.yx);
+    float2 w0 = sideWeight * (1.0 - 2.0 * f);
+    float2 w3 = sideWeight * (1.0 + 2.0 * f);
+    float centerWeight = 1.0 - w0.x - w3.x - w0.y - w3.y;
+    float2 baseUV = (center - 0.5) / textureSize;
+    float2 invSize = rcp(textureSize);
+    offset *= invSize;
 
     float4 result =
-        textureSource.SampleLevel(sampler_LinearClamp, float2(tc12.x, tc0.y), 0) * (w12.x * w0.y) +
-        textureSource.SampleLevel(sampler_LinearClamp, float2(tc0.x, tc12.y), 0) * (w0.x * w12.y) +
-        textureSource.SampleLevel(sampler_LinearClamp, float2(tc12.x, tc12.y), 0) * (w12.x * w12.y) +
-        textureSource.SampleLevel(sampler_LinearClamp, float2(tc3.x, tc12.y), 0) * (w3.x * w12.y) +
-        textureSource.SampleLevel(sampler_LinearClamp, float2(tc12.x, tc3.y), 0) * (w12.x * w3.y);
+        textureSource.SampleLevel(sampler_LinearClamp, baseUV + float2(-invSize.x, offset.y), 0) * w0.x +
+        textureSource.SampleLevel(sampler_LinearClamp, baseUV + float2(2.0 * invSize.x, offset.y), 0) * w3.x +
+        textureSource.SampleLevel(sampler_LinearClamp, baseUV + offset, 0) * centerWeight +
+        textureSource.SampleLevel(sampler_LinearClamp, baseUV + float2(offset.x, -invSize.y), 0) * w0.y +
+        textureSource.SampleLevel(sampler_LinearClamp, baseUV + float2(offset.x, 2.0 * invSize.y), 0) * w3.y;
 
     return max(result, 0.0);
 }

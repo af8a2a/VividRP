@@ -43,22 +43,31 @@ bool TryResolveVSMPhysicalTexelInternal(int2 virtualTexel, int cascadeIndex, out
     uint2 texelInPage = (uint2)virtualTexel % pageSize;
     uint page = (uint)cascadeIndex * pagesPerAxis * pagesPerAxis
         + virtualPage.y * pagesPerAxis + virtualPage.x;
-    uint encoded = _VSMPrototypePageTable[page];
-    uint4 metadata = _VSMPrototypePageMetadata[page];
-    // An empty but completed page is valid (lit); unmapped or dirty pages are
-    // unavailable, not an implicit lit sample to blend into an existing shadow.
-    if (encoded == 0u || metadata.y != encoded
-        || (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty)) != kVSMPageAllocated)
+    uint entry = _VSMPrototypePageTable[page];
+    if (!VividVSMPageTableIsNative(entry))
     {
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-        g_VSMDebugMissing |= encoded == 0u ? 1u : 0u;
-        g_VSMDebugMissing |= (metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u ? 2u : 0u;
-        g_VSMDebugMissing |= metadata.y != encoded
-            || (encoded != 0u && (metadata.x & kVSMPageAllocated) == 0u) ? 4u : 0u;
+        uint flags = _VSMPrototypePageMetadata[page].x;
+        g_VSMDebugMissing |= (flags & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u ? 2u : 1u;
 #endif
         return false;
     }
-    uint slot = encoded - 1u;
+    uint slot = VividVSMPageTableSlot(entry, (uint)_VSMPrototypePhysicalPagesPerRow);
+#if defined(VIVID_VSM_RECEIVER_DEBUG) || defined(VIVID_VSM_LEGACY_DEPTH_TESTS)
+    // Diagnostic flags/legacy layered-depth oracle only. Production validity
+    // and physical coordinates come entirely from the packed page-table entry.
+    uint4 metadata = _VSMPrototypePageMetadata[page];
+    if (metadata.y != slot + 1u
+        || (metadata.x & (kVSMPageAllocated | kVSMPageDirty | kVSMPageDynamicDirty)) != kVSMPageAllocated)
+    {
+#if defined(VIVID_VSM_RECEIVER_DEBUG)
+        g_VSMDebugMissing |= (metadata.x & (kVSMPageDirty | kVSMPageDynamicDirty)) != 0u ? 2u : 0u;
+        g_VSMDebugMissing |= metadata.y != slot + 1u || (metadata.x & kVSMPageAllocated) == 0u ? 4u : 0u;
+#endif
+        return false;
+    }
+    pageFlags = _VSMPageOccupancySkipDisabled != 0 ? 0u : metadata.x;
+#endif
     if (checkReceiverMask && _VSMReceiverMaskEnabled != 0
         && !VividVSMReceiverMaskTexel(_VSMPhysicalReceiverMasks[slot], texelInPage, pageSize))
     {
@@ -67,9 +76,7 @@ bool TryResolveVSMPhysicalTexelInternal(int2 virtualTexel, int cascadeIndex, out
 #endif
         return false;
     }
-    uint rowSize = (uint)_VSMPrototypePhysicalPagesPerRow;
-    physicalTexel = (int2)(uint2(slot % rowSize, slot / rowSize) * pageSize + texelInPage);
-    pageFlags = _VSMPageOccupancySkipDisabled != 0 ? 0u : metadata.x;
+    physicalTexel = (int2)(VividVSMPageTableAddress(entry) * pageSize + texelInPage);
     return true;
 }
 

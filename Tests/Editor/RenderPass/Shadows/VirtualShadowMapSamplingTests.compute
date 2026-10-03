@@ -720,3 +720,40 @@ void InspectUEPointSample(uint3 id : SV_DispatchThreadID)
     float shadow = SampleUEVSMDirectional(p.xyz, normal.xyz, (int)p.w, normal.w, unavailable);
     _SamplingResults[id.x] = float2(shadow, unavailable ? 1.0 : 0.0);
 }
+
+#pragma kernel InspectPackedPageTable
+StructuredBuffer<uint4> _PackedPageTableInputs;
+RWStructuredBuffer<uint4> _PackedPageTableResults;
+uint _PackedPageTableCount;
+[numthreads(64, 1, 1)]
+void InspectPackedPageTable(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _PackedPageTableCount) return;
+    uint4 input = _PackedPageTableInputs[id.x];
+    uint entry = input.w == 2u ? 0u : input.z == 0u
+        ? VividVSMEncodeNativePage(input.y * 1024u + input.x, 1024u, input.w != 0u)
+        : VividVSMEncodePageTable(input.xy, input.z);
+    uint flags = (VividVSMPageTableIsNative(entry) ? 1u : 0u)
+        | (VividVSMPageTableIsRenderable(entry) ? 2u : 0u)
+        | ((entry & VIVID_VSM_PAGE_TABLE_VALID) != 0u ? 4u : 0u);
+    _PackedPageTableResults[id.x] = uint4(entry, flags, VividVSMPageTableSlot(entry, 1024u), VividVSMPageTableLOD(entry));
+}
+
+#pragma kernel InspectVSMClusterWindowFeedback VIVID_VSM_CLUSTER_FEEDBACK
+#if defined(VIVID_VSM_CLUSTER_FEEDBACK)
+[numthreads(1, 1, 1)]
+void InspectVSMClusterWindowFeedback(uint3 id : SV_DispatchThreadID)
+{
+    uint4 rect = (uint4)_SamplingInputs[0];
+    uint4 texels = (uint4)_SamplingInputs[1];
+    VividMeshletRenderRequestPacked source;
+    source.InstanceID_LOD = 0u; source.MeshletID = 0u;
+    uint clusters;
+    bool small = TryAppendVSMPageWindows((uint)_SamplingPixel.y, source, (uint)_SamplingPixel.x,
+        rect.xy, rect.zw, texels.xy, texels.zw, clusters);
+    if (!small)
+        AppendVSMLargePageMeshletRequest((uint)_SamplingPixel.y, source, (uint)_SamplingPixel.x,
+            rect.xy, rect.zw, clusters);
+    _SamplingResults[0] = float2(small ? 1.0 : 0.0, clusters);
+}
+#endif

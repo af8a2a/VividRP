@@ -96,7 +96,7 @@ namespace VividRP.Editor.Tests
                     int p = slot * 257 % pages;
                     map[p] = (uint)slot + 1; own[slot] = (uint)p + 1;
                 }
-                table.SetData(map); owners.SetData(own);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, map); owners.SetData(own);
                 int clear = shader.FindKernel("VSMClearPageCullHierarchy"), build = shader.FindKernel("VSMBuildPageCullHierarchy");
                 shader.SetInt("_VSMProjectionCount", levels); shader.SetInt("_VSMPrototypePagesPerAxis", axis);
                 shader.SetInt("_VSMPrototypePageTableEntryCount", pages); shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity);
@@ -381,7 +381,7 @@ namespace VividRP.Editor.Tests
                 using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
                 using var levels = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
                 using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
-                var map = new uint[16]; map[dirtyPage] = 1; table.SetData(map);
+                var map = new uint[16]; map[dirtyPage] = 1; VirtualShadowMapPageTableTestData.UploadSlots(shader, table, map);
                 var meta = new uint4[16]; meta[dirtyPage] = new uint4(2u | 4u | 32768u, 1, 0, 0); metadata.SetData(meta);
                 var mask = new uint2[16]; mask[dirtyPage] = new uint2(uint.MaxValue); masks.Requests.SetData(mask);
                 owners.SetData(new[] { (uint)dirtyPage + 1u });
@@ -489,7 +489,7 @@ namespace VividRP.Editor.Tests
                     meta[page] = new uint4(flags, (uint)slot + 1, 0, 0);
                     mask[page] = new uint2((uint)random.Next(), (uint)random.Next());
                 }
-                table.SetData(map); metadata.SetData(meta); owners.SetData(own); masks.Requests.SetData(mask);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, map); metadata.SetData(meta); owners.SetData(own); masks.Requests.SetData(mask);
                 shader.SetInt("_VSMProjectionCount", 2); shader.SetInt("_VSMPrototypePagesPerAxis", axis);
                 shader.SetInt("_VSMPrototypePageSize", 128); shader.SetInt("_VSMPrototypePageTableEntryCount", pages);
                 shader.SetInt("_VSMPrototypePhysicalPageCapacity", capacity); shader.SetInt("_VSMPageCullHierarchyEnabled", 1);

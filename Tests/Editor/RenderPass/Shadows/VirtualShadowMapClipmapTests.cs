@@ -169,6 +169,8 @@ namespace VividRP.Editor.Tests
         [TestCase(256)]
         [TestCase(256, true)]
         [TestCase(1024, true)]
+        [TestCase(2048, true)]
+        [TestCase(4097, true)]
         [TestCase(384)]
         [TestCase(512)]
         [TestCase(768)]
@@ -181,7 +183,24 @@ namespace VividRP.Editor.Tests
             {
                 VirtualShadowMapPrototypeRuntime.PageWindowsEnabled = windows;
                 VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, 256);
+                var key = Key();
+                VirtualShadowMapPrototypeRuntime.CommitStaticCache(key);
+                VirtualShadowMapPrototypeRuntime.CommitDynamicCache(key, 1u, false);
+                var pressure = VirtualShadowMapPrototypeRuntime.PagePressure;
+                VirtualShadowMapPrototypeRuntime.PageTable.SetData(new uint[] { 1u }, 0, 0, 1);
+                VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.SetData(new uint[] { 1u }, 0, 0, 1);
                 Assert.That(VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.IsCacheValid, Is.EqualTo(budget == 256));
+                Assert.That(VirtualShadowMapPrototypeRuntime.RequiresFullDynamicCacheRefresh(key, false), Is.EqualTo(budget != 256));
+                Assert.That(VirtualShadowMapPrototypeRuntime.PagePressure, Is.SameAs(pressure));
+                var firstEntry = new uint[1];
+                VirtualShadowMapPrototypeRuntime.PageTable.GetData(firstEntry, 0, 0, 1);
+                Assert.That(firstEntry[0], Is.EqualTo(budget == 256 ? 1u : 0u));
+                VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.GetData(firstEntry, 0, 0, 1);
+                Assert.That(firstEntry[0], Is.EqualTo(budget == 256 ? 1u : 0u));
+                Assert.That(VirtualShadowMapPrototypeRuntime.EnsureMeshletPageRequestCapacity(64), Is.True);
+                Assert.That(VirtualShadowMapPrototypeRuntime.MeshletRasterPages.count,
+                    Is.EqualTo(budget + VirtualShadowMapPrototypeRuntime.RasterPageHeaderSize));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageCapacity, Is.EqualTo(budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.RasterDepth.rt.volumeDepth, Is.EqualTo(windows ? 1 : budget));
                 Assert.That(VirtualShadowMapPrototypeRuntime.PhysicalPageOwners.count, Is.EqualTo(budget));
@@ -205,7 +224,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(remapMetadata.count, Is.EqualTo(budget));
                 Assert.That(remapMetadata.stride, Is.EqualTo(16));
                 Assert.That(workList.count, Is.EqualTo(budget * 2));
-                Assert.That(workArgs.count, Is.EqualTo(6));
+                Assert.That(workArgs.count, Is.EqualTo(VirtualShadowMapPrototypeRuntime.PageWorkArgsWordCount));
                 Assert.That(workArgs.target, Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments));
                 for (int i = 0; i < 32; i++) VirtualShadowMapPrototypeRuntime.EnsureResources(4096, 10, budget);
                 long before = System.GC.GetAllocatedBytesForCurrentThread();
@@ -281,7 +300,13 @@ namespace VividRP.Editor.Tests
                 using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (count + 31) / 32, 4);
                 using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
                 pressure.SetData(new uint4[3]);
-                table.SetData(tableData);
+                VirtualShadowMapPageTableTestData.UploadSlots(shader, table, tableData);
+                // Previous-frame coarse aliases have no physical owners. Remap
+                // must preserve only native ownership and ignore these entries.
+                var packed = new uint[count];
+                table.GetData(packed);
+                for (int i = 0; i < count; i++) if (tableData[i] == 0u) packed[i] = 0x80100000u;
+                table.SetData(packed);
                 metadata.SetData(metadataData);
                 var ownersData = new uint[capacity];
                 for (int page = 0; page < count; page++)
@@ -297,7 +322,6 @@ namespace VividRP.Editor.Tests
                     remap.SetData(remaps);
                 }
                 int update = shader.FindKernel("VSMUpdatePhysicalPageAddresses");
-                int clear = shader.FindKernel("VSMClearVirtualPageMappings");
                 int move = shader.FindKernel("VSMRemapPages");
                 int allocate = shader.FindKernel("VSMPrototypeAllocatePages");
                 shader.SetInt("_VSMProjectionCount", 17);
@@ -309,11 +333,10 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(update, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(update, "_VSMRemapPageMetadata", remapMetadata);
                 shader.SetBuffer(update, "_VSMProjectionRemap", remap);
+                shader.SetBuffer(update, "_VSMPrototypeWritablePageTable", table);
                 shader.Dispatch(update, (capacity + 63) / 64, 1, 1);
-                shader.SetBuffer(clear, "_VSMPrototypeWritablePageTable", table);
-                shader.SetBuffer(clear, "_VSMPrototypePageMetadata", metadata);
-                shader.Dispatch(clear, (count + 63) / 64, 1, 1);
                 shader.SetBuffer(move, "_VSMRemapPageMetadata", remapMetadata);
+                shader.SetBuffer(move, "_VSMProjectionRemap", remap);
                 shader.SetBuffer(move, "_VSMPrototypeWritablePageTable", table);
                 shader.SetBuffer(move, "_VSMPrototypePageMetadata", metadata);
                 shader.SetBuffer(move, "_VSMPrototypePhysicalPageOwners", owners);
@@ -321,7 +344,7 @@ namespace VividRP.Editor.Tests
                 var actual = new uint[count];
                 var actualMetadata = new uint4[count];
                 var actualOwners = new uint[capacity];
-                table.GetData(actual);
+                VirtualShadowMapPageTableTestData.ReadSlots(table, actual);
                 metadata.GetData(actualMetadata);
                 owners.GetData(actualOwners);
                 var expectedOwners = new uint[capacity];
@@ -332,7 +355,11 @@ namespace VividRP.Editor.Tests
                     bool inside = delta.z == 0 && x >= 0 && x < 4 && y >= 0 && y < 4;
                     int src = dest / 16 * 16 + y * 4 + x;
                     Assert.That(actual[dest], Is.EqualTo(inside ? tableData[src] : 0u));
-                    Assert.That(actualMetadata[dest], Is.EqualTo(inside && tableData[src] != 0u ? metadataData[src] : uint4.zero));
+                    // Unowned diagnostic state need not be swept by sparse remap;
+                    // it must never become allocated/resident at the destination.
+                    if (inside && tableData[src] != 0u)
+                        Assert.That(actualMetadata[dest], Is.EqualTo(metadataData[src]));
+                    else Assert.That(actualMetadata[dest].xy, Is.EqualTo(uint2.zero));
                     if (actual[dest] != 0)
                         expectedOwners[actual[dest] - 1] = (uint)dest + 1;
                 }
@@ -357,7 +384,7 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(allocate, "_VSMPagePressureRW", pressure);
                 shader.Dispatch(allocate, 1, 1, 1);
                 var allocated = new uint[count];
-                table.GetData(allocated);
+                VirtualShadowMapPageTableTestData.ReadSlots(table, allocated);
                 Assert.That(allocated[missing], Is.EqualTo((uint)free + 1));
                 for (int i = 0; i < count; i++)
                     if (actual[i] != 0) Assert.That(allocated[i], Is.EqualTo(actual[i]));

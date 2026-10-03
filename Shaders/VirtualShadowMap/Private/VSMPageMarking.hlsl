@@ -281,6 +281,17 @@ void VSMMarkReceiverPages(uint3 id : SV_DispatchThreadID)
 void VSMMarkReceiverPagesGrouped(uint3 id : SV_DispatchThreadID) { VSMMarkReceiverPages(id); }
 #endif
 
+// UE VirtualShadowMapProjectionDirectional.ush::IsBackfaceToDirectionalLight.
+// xyz points toward the light; w is sin(half angular diameter), not SMRT enable.
+float4 _VSMMarkingLight;
+uint _VSMCullBackfacingPixels;
+
+bool IsVSMMarkingBackface(float3 normalWS)
+{
+    float sinAlpha = max(abs(_VSMMarkingLight.w), 0.1);
+    return dot(normalWS, _VSMMarkingLight.xyz) < -sinAlpha;
+}
+
 #if defined(VIVID_VSM_MARK_RECEIVERS)
 [numthreads(8, 8, 1)]
 void VSMMarkReceiverPagesUE(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
@@ -290,6 +301,14 @@ void VSMMarkReceiverPagesUE(uint3 id : SV_DispatchThreadID, uint groupIndex : SV
     if (pixel.x >= (uint)_CSMOutputWidth || pixel.y >= (uint)_CSMOutputHeight) return;
     float depth = _DepthTexture.Load(int3(pixel, 0));
     if (IsSkyPixel(depth)) return;
+    if (_VSMCullBackfacingPixels != 0u)
+    {
+        // Use the shading normal, as UE does, not the reconstructed depth-plane
+        // normal used for receiver bias. Current GBuffer models are opaque;
+        // future subsurface/hair receivers must bypass this test like UE.
+        float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixel, 0)).xy);
+        if (IsVSMMarkingBackface(normalWS)) return;
+    }
     float3 position = ReconstructWorldPosition(pixel, depth);
     MarkVSMReceiverUE(position, groupIndex);
 }

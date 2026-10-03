@@ -41,13 +41,21 @@ int SelectVSMClipmapLevel(float3 positionWS, bool marking)
     if (_VSMProjectionCount <= 0) return -1;
     // UE absolute levels are centimetre exponents; position buffers use metres.
     float distance = length(positionWS - _VSMProjections[0].selectionSphere.xyz) * 100.0;
-    float bias = _VSMReceiverQuality.y;
+    float bias = 0.0;
+    float first = VSMBaseAbsoluteClipmapLevel();
 #if defined(VIVID_VSM_PAGE_PRESSURE)
     // UE GetBiasedClipmapLevel adds GlobalResolutionLodBias to demand only.
     // Sampling starts at its desired level and uses resident parent mappings.
     if (marking && _VSMReceiverQuality.x > 1.5) bias += asfloat(_VSMPagePressure[0].x);
 #endif
-    float first = VSMBaseAbsoluteClipmapLevel();
+    // UE throttling first chooses a VSM without its resolution bias. Requests
+    // include memory pressure at this stage; sampling intentionally does not.
+    if (_VSMReceiverQuality.z > 0.5)
+    {
+        int unbiased = VSMClipmapLevelFromDistance(distance, first, bias, _VSMProjectionCount);
+        bias += _VSMProjections[unbiased < 0 ? 0 : unbiased].parameters.z;
+    }
+    bias += _VSMReceiverQuality.y;
     int level = VSMClipmapLevelFromDistance(distance, first, bias, _VSMProjectionCount);
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
     g_VSMDebugQuality = float4(log2(max(distance, 1e-20)) + bias - first, first, level, bias);

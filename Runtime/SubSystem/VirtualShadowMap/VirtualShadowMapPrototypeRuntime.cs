@@ -25,9 +25,12 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static bool PageWindowsEnabled { get; set; } = true;
         internal static int RasterWindowScale => PageWindowsEnabled ? RasterWindowPages : 1;
         internal const int DefaultPhysicalPageCount = 256;
-        internal const int MaxPhysicalPageCount = 1024;
+        internal const int MaxPhysicalPageCount = 8192;
         internal const int ClearWorkArgsOffset = 0;
         internal const int OccupancyWorkArgsOffset = 3 * sizeof(uint);
+        internal const int FinalizeWorkArgsOffset = 6 * sizeof(uint);
+        internal const int PageWorkArgsWordCount = 9;
+        internal static readonly int PageWorkDispatchArgsId = Shader.PropertyToID("_VSMPageWorkDispatchArgs");
         internal const int MaxPageRequestsPerMeshlet = 4;
         internal const int RasterPageHeaderSize = 1 + 2 * VirtualShadowMapClipmapLayout.MaxLevels;
         private const int MeshletPageRequestStride = sizeof(uint) * 4;
@@ -51,10 +54,6 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static GraphicsBuffer s_PageMetadata;
         private static GraphicsBuffer s_PageRequestFlags;
         private static GraphicsBuffer s_PossibleMappedLevels;
-        private static GraphicsBuffer s_SamplingPageTable;
-        internal static GraphicsBuffer SamplingPageTable => s_SamplingPageTable;
-        internal static readonly int SamplingPageTableId = Shader.PropertyToID("_VSMSamplingPageTable");
-        internal static readonly int SamplingPageTableRWId = Shader.PropertyToID("_VSMSamplingPageTableRW");
         // Experimental: mixed per-frame benefit while moving; retain baseline kernels by default.
         internal static bool AvailableLevelHintsEnabled { get; set; }
         internal static readonly int PossibleMappedLevelsId = Shader.PropertyToID("_VSMPossibleMappedLevels");
@@ -191,7 +190,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             && s_PageMetadata.count == PageTableEntryCount
             && s_PossibleMappedLevels?.IsValid() == true
             && s_PossibleMappedLevels.count == PageTableEntryCount
-            && s_SamplingPageTable?.IsValid() == true && s_SamplingPageTable.count == PageTableEntryCount;
+            && s_PageTable?.IsValid() == true && s_PageTable.count == PageTableEntryCount;
         internal static VirtualShadowMapPrototypeFrameState FrameState => s_FrameState;
         internal static VirtualShadowMapPrototypeFallbackReason LastFallbackReason =>
             s_LastFallbackReason;
@@ -301,12 +300,6 @@ namespace VividRP.Runtime.VirtualShadowMap
                 var initial = new uint[listWords];
                 for (int slot = 0; slot < listCapacity; slot++) initial[slot] = (uint)slot;
                 s_PhysicalPageLists.SetData(initial);
-            }
-            if (s_SamplingPageTable == null || !s_SamplingPageTable.IsValid() || s_SamplingPageTable.count != pageCount)
-            {
-                s_SamplingPageTable?.Dispose();
-                s_SamplingPageTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, pageCount, sizeof(uint))
-                { name = "VSMSamplingPageTable" };
             }
             if (s_PossibleMappedLevels == null || !s_PossibleMappedLevels.IsValid() || s_PossibleMappedLevels.count != pageCount)
             {
@@ -421,7 +414,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 * MaxPageRequestsPerMeshlet;
             if (requiredRequestCapacity > int.MaxValue
                 || requiredRequestCapacity
-                    + (long)sourceRequestCapacity * MaxPhysicalPageCount > uint.MaxValue)
+                    + (long)sourceRequestCapacity * Mathf.Max(s_PhysicalPageCapacity, 1) > uint.MaxValue)
                 return false;
 
             int requestCapacity = (int)requiredRequestCapacity;
@@ -464,12 +457,14 @@ namespace VividRP.Runtime.VirtualShadowMap
                 };
             }
 
-            if (s_MeshletRasterPages == null || !s_MeshletRasterPages.IsValid())
+            int rasterListCapacity = Mathf.Max(s_PhysicalPageCapacity, 1) + RasterPageHeaderSize;
+            if (s_MeshletRasterPages == null || !s_MeshletRasterPages.IsValid()
+                || s_MeshletRasterPages.count != rasterListCapacity)
             {
                 s_MeshletRasterPages?.Dispose();
                 s_MeshletRasterPages = new GraphicsBuffer(
                     GraphicsBuffer.Target.Structured,
-                    MaxPhysicalPageCount + RasterPageHeaderSize,
+                    rasterListCapacity,
                     sizeof(uint))
                 {
                     name = "VSMPrototypeMeshletRasterPages",
@@ -579,6 +574,10 @@ namespace VividRP.Runtime.VirtualShadowMap
             int physicalPageCapacity = CalculatePhysicalPageCapacity(
                 pagesPerAxis,
                 resolvedCascadeCount, pageBudget);
+            // The legacy per-page DSV is a diagnostic path. Its array dimension
+            // must still fit the device even when the production pool grows.
+            if (!PageWindowsEnabled)
+                physicalPageCapacity = Mathf.Min(physicalPageCapacity, SystemInfo.maxTextureArraySlices);
             int physicalPagesPerRow = Mathf.CeilToInt(
                 Mathf.Sqrt(physicalPageCapacity));
             int physicalPageRows = CoreUtils.DivRoundUp(
@@ -653,6 +652,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PageWorkList != null && s_PageWorkList.IsValid()
                 && s_PageWorkList.count == physicalPageCapacity * 2
                 && s_PageWorkDispatchArgs != null && s_PageWorkDispatchArgs.IsValid()
+                && s_PageWorkDispatchArgs.count == PageWorkArgsWordCount
                 && s_ProductionFeedback != null && s_ProductionFeedback.IsValid()
                 && s_PagePressure != null && s_PagePressure.IsValid()
                 && s_VirtualResolution == resolvedResolution
@@ -758,7 +758,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 physicalPageCapacity * 2, sizeof(uint)) { name = "VSMPageWorkList" };
             s_PageWorkDispatchArgs = new GraphicsBuffer(
                 GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
-                6, sizeof(uint)) { name = "VSMPageWorkDispatchArgs" };
+                PageWorkArgsWordCount, sizeof(uint)) { name = "VSMPageWorkDispatchArgs" };
             return s_PhysicalPagePool != null
                 && s_PhysicalPagePool.rt != null
                 && s_RasterDepth != null
@@ -790,6 +790,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static void ReleaseResources()
         {
             VirtualShadowMapHZB.ReleaseResources();
+            VirtualShadowMapCacheInvalidation.Dispose();
             Projections.Dispose();
             ReleaseAllocatedResources();
             s_VirtualResolution = 0;
@@ -998,6 +999,7 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private static void ReleaseAllocatedResources(bool preservePressure = false)
         {
+            VirtualShadowMapPerformanceThrottle.Dispose();
             if (s_DynamicInvalidationScratch.IsCreated)
                 s_DynamicInvalidationScratch.Dispose();
             Projections.InvalidateLayout();
@@ -1017,7 +1019,6 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageRequestFlags?.Dispose();
             s_PageRequestFlags = null;
             s_PossibleMappedLevels?.Dispose(); s_PossibleMappedLevels = null;
-            s_SamplingPageTable?.Dispose(); s_SamplingPageTable = null;
             s_PageReceiverMasks?.Dispose(); s_PageReceiverMasks = null;
             s_PhysicalReceiverMasks?.Dispose(); s_PhysicalReceiverMasks = null;
             s_PageCullHierarchy?.Dispose(); s_PageCullHierarchy = null;

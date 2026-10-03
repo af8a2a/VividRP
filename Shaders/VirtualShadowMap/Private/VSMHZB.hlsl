@@ -136,7 +136,8 @@ void VSMSnapshotShadowHZB(uint3 id : SV_DispatchThreadID)
     uint flags = _VSMPrototypePageMetadata[id.x].x;
     bool complete = (flags & kVSMPageAllocated) != 0u
         && (flags & (kVSMPageDirty | kVSMPageDynamicDirty | kVSMPageDeferred)) == 0u;
-    _VSMHZBPreviousTableRW[id.x] = complete ? _VSMPrototypePageTable[id.x] : 0u;
+    uint entry = _VSMPrototypePageTable[id.x];
+    _VSMHZBPreviousTableRW[id.x] = complete && VividVSMPageTableIsNative(entry) ? entry : 0u;
 }
 
 [numthreads(1, 1, 1)]
@@ -190,17 +191,16 @@ bool VSMHZBRectOccluded(float2 low, float2 high, float depth, uint level, bool p
             if ((flags & kVSMPageAllocated) == 0u || (flags & kVSMPageDeferred) != 0u) return false;
             encoded = _VSMPrototypePageTable[index];
         }
-        if (encoded == 0u || encoded > (uint)_VSMPrototypePhysicalPageCapacity)
+        if (!VividVSMPageTableIsNative(encoded)
+            || VividVSMPageTableSlot(encoded, (uint)_VSMPrototypePhysicalPagesPerRow) >= (uint)_VSMPrototypePhysicalPageCapacity)
         {
             if (maskToRenderedPages) continue;
             return false;
         }
-        uint slot = encoded - 1u;
         uint2 pageOrigin = uint2(px, py) * size;
         uint2 cellLow = max(first, pageOrigin) - pageOrigin;
         uint2 cellHigh = min(last, pageOrigin + size - 1u) - pageOrigin;
-        uint2 physical = uint2(slot % (uint)_VSMPrototypePhysicalPagesPerRow,
-            slot / (uint)_VSMPrototypePhysicalPagesPerRow) * size;
+        uint2 physical = VividVSMPageTableAddress(encoded) * size;
         uint slice = _VSMPrototypeCasterLayer == 0 ? 1u : 0u;
         float furthest = 1.0;
         for (uint y = cellLow.y; y <= cellHigh.y; y++)

@@ -85,8 +85,6 @@ Texture2DArray<uint> _VSMPrototypeStaticPhysicalPage;
 Texture2DArray<uint> _VSMPrototypeDynamicPhysicalPage;
 #endif
 StructuredBuffer<uint> _VSMPrototypePageTable;
-StructuredBuffer<uint> _VSMSamplingPageTable;
-RWStructuredBuffer<uint> _VSMSamplingPageTableRW;
 StructuredBuffer<int2> _VSMClipmapPageOffsets;
 StructuredBuffer<uint> _VSMPossibleMappedLevels;
 RWStructuredBuffer<uint> _VSMPossibleMappedLevelsRW;
@@ -112,6 +110,7 @@ RWStructuredBuffer<uint> _VSMAllocationRequests;
 StructuredBuffer<uint> _VSMPageWorkList;
 RWStructuredBuffer<uint> _VSMPageWorkListRW;
 RWByteAddressBuffer _VSMPageWorkDispatchArgsRW;
+ByteAddressBuffer _VSMPageWorkDispatchArgs;
 // [0]: bias bits, recovery age, essential demand, essential misses.
 // [1]: primary demand, primary resident, previous bias bits, base target bits.
 // [2]: rejected recovery boundary, demand before/after that probe, prior demand.
@@ -1409,8 +1408,12 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMPropagateMappedClipmaps
 
 #pragma kernel VSMUpdatePhysicalPagesUE
+#pragma kernel VSMResetPhysicalPageListsUE
+#pragma kernel VSMPackAvailablePagesUE
+#pragma kernel VSMAppendEmptyPhysicalPagesUE
 #pragma kernel VSMAllocateNewPageMappingsUE
 #pragma kernel VSMAppendPhysicalPageListsUE
+#pragma kernel VSMResetPageWorkListsUE
 #pragma kernel VSMBuildPageWorkListsUE
 #pragma kernel VSMClearReceiverRequestsUE VIVID_VSM_UE_ALLOCATION
 #pragma kernel VSMResetReceiverFeedbackUE VIVID_VSM_UE_ALLOCATION
@@ -1422,3 +1425,18 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMPrepareShadowHZB
 #pragma kernel VSMBuildShadowHZBTop
 #pragma kernel VSMResetHZBPostDraws
+
+// UE performance throttling (kept after existing entries for kernel-index stability).
+#pragma kernel VSMProcessPreviousPerformance
+#pragma kernel VSMUpdatePerformanceThrottle
+#pragma kernel VSMPrepareRasterFeedback
+#pragma kernel VSMCaptureRasterFeedback
+
+#pragma kernel VSMResetInvalidationQueue
+#pragma kernel VSMUpdateInvalidationInstances
+#pragma kernel VSMPrepareInvalidationQueue
+#pragma kernel VSMProcessInvalidationQueue
+
+// Throttle-only variants keep cluster accounting out of the disabled hot path.
+#pragma kernel VSMCullMeshletsToPagesThrottle VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB VIVID_VSM_CLUSTER_FEEDBACK
+#pragma kernel VSMPostCullMeshletsToPagesThrottle VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB VIVID_VSM_CLUSTER_FEEDBACK

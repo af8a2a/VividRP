@@ -101,68 +101,11 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     reprojectionBoundary = max(reprojectionBoundary, waveReprojectionBoundary * 0.2);
     thinGeometryCoverage = max(thinGeometryCoverage, waveThinGeometryCoverage * 0.15);
 
-    float centerLuma = TSR_LumaVALU(_InputColor[pixelCoord].rgb);
-    float lumaMin = centerLuma;
-    float lumaMax = centerLuma;
-    float lumaSum = 0.0;
-    float lumaCross = 0.0;
-    float lumaCorners = 0.0;
-
-    [unroll]
-    for (int lumaY = -1; lumaY <= 1; lumaY++)
-    {
-        [unroll]
-        for (int lumaX = -1; lumaX <= 1; lumaX++)
-        {
-            int2 sampleCoord = clamp(pixelCoord + int2(lumaX, lumaY), int2(0, 0), renderSize - 1);
-            float sampleLuma = TSR_LumaVALU(_InputColor[sampleCoord].rgb);
-            lumaMin = min(lumaMin, sampleLuma);
-            lumaMax = max(lumaMax, sampleLuma);
-            lumaSum += sampleLuma;
-
-            if (abs(lumaX) + abs(lumaY) == 1)
-                lumaCross += sampleLuma;
-            else if (abs(lumaX) == 1 && abs(lumaY) == 1)
-                lumaCorners += sampleLuma;
-        }
-    }
-
-    float lumaMean = lumaSum * (1.0 / 9.0);
-    float lumaScale = max(max(abs(lumaMean), abs(centerLuma)), 0.2);
-    float crossMean = lumaCross * 0.25;
-    float cornerMean = lumaCorners * 0.25;
-    float lumaRange = (lumaMax - lumaMin) / lumaScale;
-    float laplacian = abs(centerLuma * 4.0 - lumaCross) / lumaScale;
-    float checkerEnergy = abs(centerLuma + cornerMean - 2.0 * crossMean) / lumaScale;
-    float spatialMoire = saturate((lumaRange * 0.55 + laplacian * 0.25 + checkerEnergy * 0.8 - 0.08) * 3.0);
-
-    float2 uv = (float2(pixelCoord) + 0.5) / float2(renderSize);
-    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    jitterDelta.y = -jitterDelta.y;
-#endif
-    float2 historyUV = uv - selectedMotion + jitterDelta;
-    bool validHistoryUV = all(historyUV >= 0.0) && all(historyUV <= 1.0);
-    bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV;
-    float temporalFlicker = 0.0;
-    if (hasHistory)
-    {
-        float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
-        float historyLuma = TSR_LumaVALU(TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize).rgb);
-        float temporalDelta = abs(centerLuma - historyLuma) / max(max(abs(centerLuma), abs(historyLuma)), 0.2);
-        temporalFlicker = saturate((temporalDelta - 0.04) * 4.0);
-    }
-
-    float moireSurfaceWeight = saturate(1.0 - thinGeometryCoverage * 0.25);
-    float lumaInstability = saturate(spatialMoire * (0.35 + temporalFlicker) + temporalFlicker * 0.5);
-    lumaInstability *= moireSurfaceWeight;
-    float waveLumaInstability = TSR_WaveActiveAverageOrSelf(lumaInstability);
-    lumaInstability = max(lumaInstability, waveLumaInstability * 0.35);
-
     _DilatedMotion[pixelCoord] = selectedMotion;
     _DilatedDepth[pixelCoord] = selectedDepth;
     _DepthError[pixelCoord] = maxDepthError;
     _ReprojectionBoundary[pixelCoord] = reprojectionBoundary;
     _ThinGeometryCoverage[pixelCoord] = thinGeometryCoverage;
-    _LumaInstability[pixelCoord] = lumaInstability;
+    // Initialized before reprojection; the dedicated flicker pass overwrites it.
+    _LumaInstability[pixelCoord] = 0.0;
 }

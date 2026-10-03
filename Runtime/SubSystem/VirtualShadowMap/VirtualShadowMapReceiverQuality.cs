@@ -11,6 +11,16 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly int ParametersId = Shader.PropertyToID("_VSMReceiverQuality");
         internal static readonly int ViewProjectionId = Shader.PropertyToID("_VSMReceiverViewProjection");
         internal static readonly int SMRTParametersId = Shader.PropertyToID("_VSMSMRTParameters");
+        internal static readonly int MarkingLightId = Shader.PropertyToID("_VSMMarkingLight");
+        internal static readonly int CullBackfacingPixelsId = Shader.PropertyToID("_VSMCullBackfacingPixels");
+
+        internal static Vector4 BuildMarkingLightParameters(Quaternion lightRotation, float angularDiameter)
+        {
+            Vector3 direction = lightRotation * Vector3.back;
+            // UE directional SourceRadius is sin(half angle), even with SMRT off.
+            return new Vector4(direction.x, direction.y, direction.z,
+                Mathf.Sin(Mathf.Clamp(angularDiameter, 0, 180) * (0.5f * Mathf.Deg2Rad)));
+        }
 
         internal static readonly int SMRTSampleIndexOffsetId = Shader.PropertyToID("_VSMSMRTSampleIndexOffset");
 
@@ -41,9 +51,10 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         internal static readonly int SMRTSettingsId = Shader.PropertyToID("_VSMSMRTSettings");
 
+        // Keep UE's centimetre-based setting; the shader's depthScale is per metre.
         internal static Vector4 BuildSMRTSettings(CascadedShadowSettingsVolume settings)
             => settings == null ? Vector4.zero : new Vector4(
-                settings.virtualShadowMapSMRTExtrapolateMaxSlope.value,
+                settings.virtualShadowMapSMRTExtrapolateMaxSlope.value * 0.01f,
                 settings.virtualShadowMapSMRTTexelDitherScale.value,
                 settings.virtualShadowMapSMRTAdaptiveRayCount.value, 0);
 
@@ -57,7 +68,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static Vector4 BuildParameters(CascadedShadowSettingsVolume settings)
             => settings == null ? Vector4.zero : BuildClipmapParameters(
                 settings.virtualShadowMapResolutionLodBias.value,
-                settings.virtualShadowMapPagePressure.value, 2, 1, 1);
+                settings.virtualShadowMapPagePressure.value, 2, 1, 1, PerformanceThrottleEnabled(settings));
 
         internal static Vector4 BuildParameters(CascadedShadowSettingsVolume settings,
             VividCameraData camera, int virtualResolution)
@@ -74,17 +85,20 @@ namespace VividRP.Runtime.VirtualShadowMap
                 width = Mathf.Max(width, Mathf.CeilToInt(2 / scaleX));
             }
             return BuildClipmapParameters(settings.virtualShadowMapResolutionLodBias.value,
-                settings.virtualShadowMapPagePressure.value, virtualResolution, width, scaleX);
+                settings.virtualShadowMapPagePressure.value, virtualResolution, width, scaleX, PerformanceThrottleEnabled(settings));
         }
+
+        private static bool PerformanceThrottleEnabled(CascadedShadowSettingsVolume settings)
+            => settings.virtualShadowMapThrottleLoadBudget.value > 0;
 
         // UE FVirtualShadowMapClipmap: normalize to horizontal camera resolution,
         // including its doubled projection extent, then clamp the TOTAL bias.
         internal static Vector4 BuildClipmapParameters(float lodBias, bool pagePressure,
-            int virtualResolution, int viewportWidth, float projectionScaleX)
+            int virtualResolution, int viewportWidth, float projectionScaleX, bool performanceThrottle = false)
             => new(pagePressure ? 2 : 1,
                 Mathf.Max(0, lodBias + Mathf.Log(0.5f * Mathf.Max(virtualResolution, 1)
                     / (Mathf.Max(viewportWidth, 1) * Mathf.Max(Mathf.Abs(projectionScaleX), 1e-6f)), 2)),
-                0, 0);
+                performanceThrottle ? 1 : 0, 0);
 
         internal static Vector4 BuildParameters(bool enabled, float targetTexelPixels, float lodBias,
             float coverageTransition = -1, bool pagePressure = false)

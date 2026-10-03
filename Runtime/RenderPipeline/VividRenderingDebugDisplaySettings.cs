@@ -201,6 +201,9 @@ namespace VividRP.Runtime
         private VSMReceiverDebugMode m_VSMReceiverDebugMode = DefaultVSMReceiverDebugMode;
 
         [SerializeField]
+        private bool m_TSRPairedShadingGuides;
+
+        [SerializeField]
         private bool m_ForceMeshletCullingFromMainCamera;
 
         [SerializeField]
@@ -466,6 +469,12 @@ namespace VividRP.Runtime
             set => m_ForceMeshletCullingFromMainCamera = value;
         }
 
+        internal bool tsrPairedShadingGuides
+        {
+            get => m_TSRPairedShadingGuides;
+            set => m_TSRPairedShadingGuides = value;
+        }
+
         internal ReflectionProbeAtlasDebugMode reflectionProbeAtlasDebugMode
         {
             get => ReflectionProbeAtlasDebugPass.NormalizeDebugMode(m_ReflectionProbeAtlasDebugMode);
@@ -629,6 +638,7 @@ namespace VividRP.Runtime
                 DefaultVisibilityBufferWireframeThickness)
             || m_ForceMeshletCullingFromMainCamera
             || vsmReceiverDebugMode != DefaultVSMReceiverDebugMode
+            || m_TSRPairedShadingGuides
             || reflectionProbeAtlasDebugMode != ReflectionProbeAtlasDebugMode.None
             || m_ReflectionProbeAtlasArraySlice != 0
             || m_ReflectionProbeAtlasMipLevel != 0
@@ -686,6 +696,7 @@ namespace VividRP.Runtime
                 DefaultVisibilityBufferWireframeThickness;
             m_ForceMeshletCullingFromMainCamera = false;
             m_VSMReceiverDebugMode = DefaultVSMReceiverDebugMode;
+            m_TSRPairedShadingGuides = false;
             m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.None;
             m_ReflectionProbeAtlasArraySlice = 0;
             m_ReflectionProbeAtlasMipLevel = 0;
@@ -1170,6 +1181,13 @@ namespace VividRP.Runtime
                 root.children.Add(CreateMaterialFoldout(data));
                 root.children.Add(CreateVisibilityBufferFoldout(data));
                 root.children.Add(CreateVirtualShadowMapFoldout(data));
+                root.children.Add(new DebugUI.BoolField
+                {
+                    displayName = "TSR Paired Shading Guides (Experimental)",
+                    tooltip = "Compare low-frequency input and history guides when relaxing TSR history clipping. Adds GPU work, temporary textures and persistent guide history; disabled by default pending demonstrated quality benefit.",
+                    getter = () => data.tsrPairedShadingGuides,
+                    setter = value => data.tsrPairedShadingGuides = value,
+                });
                 root.children.Add(CreateReflectionProbeAtlasFoldout(data));
                 root.children.Add(CreateSliderFoldout(data));
                 root.children.Add(CreateVirtualTextureFoldout(data));

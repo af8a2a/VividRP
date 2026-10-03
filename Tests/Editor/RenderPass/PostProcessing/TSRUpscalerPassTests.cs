@@ -66,6 +66,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShadingGuideDescriptors_StableConfigurationDoesNotAllocate()
+        {
+            var input = new RenderGraphTextureDesc();
+            var history = new RenderGraphTextureDesc();
+            for (int i = 0; i < 32; i++)
+            {
+                TSRUpscalerPass.ConfigureColorDescriptor(input, "TSR_InputShadingGuide", 1920, 1080, GraphicsFormat.R16G16B16A16_SFloat);
+                TSRUpscalerPass.ConfigureColorDescriptor(history, "TSR_HistoryShadingGuide", 1920, 1080, GraphicsFormat.R16G16B16A16_SFloat);
+            }
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 256; i++)
+            {
+                TSRUpscalerPass.ConfigureColorDescriptor(input, "TSR_InputShadingGuide", 1920, 1080, GraphicsFormat.R16G16B16A16_SFloat);
+                TSRUpscalerPass.ConfigureColorDescriptor(history, "TSR_HistoryShadingGuide", 1920, 1080, GraphicsFormat.R16G16B16A16_SFloat);
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+        }
+
+        [Test]
         public void CameraState_UsesCameraHistoryAndPreservesValidFrame()
         {
             var cameraObject = new GameObject("TSRCameraHistoryTests.Camera");
@@ -109,6 +129,29 @@ namespace VividRP.Editor.Tests
                         2,
                         false),
                     Is.False);
+                Assert.That(state.Prepare(camera, new Vector2Int(8, 8), new Vector2Int(16, 16),
+                    VividTsrQualityMode.Balanced, 16, 2, false, true), Is.True,
+                    "Enabling paired guides must discard history from the previous comparison mode.");
+                Assert.That(history.TryGetTexture(CameraHistoryIds.TsrShadingGuide, out var shadingGuide), Is.True);
+                Assert.That(shadingGuide.FrameCount, Is.EqualTo(2));
+                Assert.That(shadingGuide.GetCurrent().rt.width, Is.EqualTo(8));
+                state.MarkHistoryWritten();
+                history.CommitFrame();
+                history.BeginFrame(8, 8);
+                Assert.That(state.Prepare(camera, new Vector2Int(8, 8), new Vector2Int(16, 16),
+                    VividTsrQualityMode.Balanced, 16, 3, false, true), Is.False);
+                var renderSize = new Vector2Int(8, 8);
+                var outputSize = new Vector2Int(16, 16);
+                for (int i = 0; i < 32; i++)
+                    state.Prepare(camera, renderSize, outputSize, VividTsrQualityMode.Balanced, 16, 3, false, true);
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                    state.Prepare(camera, renderSize, outputSize, VividTsrQualityMode.Balanced, 16, 3, false, true);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero, "Stable Guide history preparation must reuse owned resources.");
+                Assert.That(state.Prepare(camera, new Vector2Int(8, 8), new Vector2Int(16, 16),
+                    VividTsrQualityMode.Balanced, 16, 3, false, false), Is.True,
+                    "Disabling paired guides must also discard experiment history.");
             }
             finally
             {

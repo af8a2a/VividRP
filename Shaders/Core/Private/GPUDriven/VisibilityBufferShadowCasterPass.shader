@@ -260,7 +260,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 output.virtualPageIndex = virtualPageIndex;
                 output.windowExtent = windowExtent;
                 output.renderTargetArrayIndex = _VSMRasterWindowPages > 1
-                    ? 0u : _VSMPrototypePageTable[virtualPageIndex] - 1u;
+                    ? 0u : VividVSMPageTableSlot(_VSMPrototypePageTable[virtualPageIndex],
+                        (uint)_VSMPrototypePhysicalPagesPerRow);
 #endif
 
                 return output;

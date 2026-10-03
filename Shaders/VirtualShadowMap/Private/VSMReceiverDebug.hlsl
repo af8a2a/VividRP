@@ -108,18 +108,17 @@ void VSMReceiverDebug(uint3 id : SV_DispatchThreadID)
                 uint axis = (uint)_VSMPrototypePagesPerAxis;
                 uint index = (uint)level * axis * axis + page.y * axis + page.x;
                 uint4 metadata = _VSMPrototypePageMetadata[index];
-                uint mapping = _VSMPrototypePageTable[index];
-                bool allocated = mapping != 0u && (metadata.x & kVSMPageAllocated) != 0u;
+                bool allocated = metadata.y != 0u && (metadata.x & kVSMPageAllocated) != 0u;
                 if (_VSMReceiverDebugMode == 8)
                 {
                     // Preserve the exported cache/request snapshot without storing
                     // transient request roles in the resident metadata buffer.
-                    data = float4(metadata.x, metadata.w | _VSMPageRequestFlags[index], mapping, level);
+                    data = float4(metadata.x, metadata.w | _VSMPageRequestFlags[index], allocated ? metadata.y : 0u, level);
                     color = VSMDebugCacheColor(metadata, allocated, 0u);
                 }
                 else
                 {
-                    data = float4(page, level, mapping);
+                    data = float4(page, level, allocated ? metadata.y : 0u);
                     color = VSMDebugIndexColor(index);
                     if (any((uint2)texel % (uint)_VSMPrototypePageSize < 1u)) color *= 0.3;
                 }

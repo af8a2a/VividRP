@@ -23,7 +23,13 @@ namespace VividRP.Runtime
         [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to a power of two (at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]
-        public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, 1024);
+        public ClampedIntParameter virtualShadowMapPhysicalPageBudget = new(256, 128, VirtualShadowMap.VirtualShadowMapPrototypeRuntime.MaxPhysicalPageCount);
+        [Tooltip("UE Cache.InvalidateUseHZB: reject invalidation pages hidden by previous static shadow depth. Invalid history always invalidates conservatively.")]
+        public BoolParameter virtualShadowMapCacheInvalidateUseHZB = new(true);
+        [Tooltip("UE Cache.DeformableMeshesInvalidate: invalidate deformable casters every rendered frame, even without transform changes. Disabling this accepts stale deformation shadows.")]
+        public BoolParameter virtualShadowMapCacheDeformableMeshesInvalidate = new(true);
+        [Tooltip("UE Cache.FramesStaticThreshold: promote a primitive after more than this many frames without invalidation. Independent of its authoring Static flag.")]
+        public MinIntParameter virtualShadowMapCacheFramesStaticThreshold = new(100, 0);
         // Retain serialized legacy fields; UE allocation never applies these quotas.
         [HideInInspector]
         public ClampedIntParameter virtualShadowMapPageUpdateBudget = new(0, 0, 1024);
@@ -42,10 +48,18 @@ namespace VividRP.Runtime
         public BoolParameter virtualShadowMapScreenDensity = new(false);
         [Tooltip("UE pool-pressure LOD bias: target 85% capacity, fast reduction, recovery after 10 frames below the threshold, maximum +2 levels. Sampling keeps its desired level and falls back to resident parents.")]
         public BoolParameter virtualShadowMapPagePressure = new(true);
+        [Tooltip("UE CullBackfacingPixels: skip receiver requests facing away from the directional light, with source-angle coverage and a minimum 0.1 dot-product tolerance.")]
+        public BoolParameter virtualShadowMapCullBackfacingPixels = new(true);
         [HideInInspector, Tooltip("Legacy serialized value; UE distance selection and continuous texel dither replace this control.")]
         public ClampedFloatParameter virtualShadowMapTargetTexelPixels = new(1, 0.25f, 8);
         [Tooltip("UE distance-based clipmap LOD bias. -1 requests finer levels; +1 requests coarser levels. Includes horizontal viewport/projection normalization; total bias is clamped to zero to preserve coverage. Does not change resident projection sizes.")]
         public ClampedFloatParameter virtualShadowMapResolutionLodBias = new(0, -4, 4);
+        [Tooltip("UE raster-load budget in weighted visible HW/SW cluster counts. Vivid counts one HW meshlet per nonempty raster window, excluding overflow padding; SW is zero. Zero disables performance throttling.")]
+        public MinFloatParameter virtualShadowMapThrottleLoadBudget = new(0, 0);
+        [Tooltip("UE per-VSM load contribution history weight. Higher values change individual clipmap bias more slowly.")]
+        public ClampedFloatParameter virtualShadowMapThrottleHistoryWeight = new(0.9f, 0, 1);
+        [Tooltip("Maximum directional compute LOD bias. UE default is unlimited; the global +2 cap minus current pool-pressure bias still applies.")]
+        public MinFloatParameter virtualShadowMapThrottleMaxBias = new(99999, 0);
         [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
         public BoolParameter virtualShadowMapPCF = new(false);
         [HideInInspector, Tooltip("Legacy serialized option; UE directional output uses SMRT or point visibility and scene temporal reconstruction.")]
@@ -66,7 +80,7 @@ namespace VividRP.Runtime
         public ClampedFloatParameter virtualShadowMapSMRTMaxRayLength = new(10, 0.1f, 100);
         [Tooltip("UE directional ray length = this scale times distance from the view origin.")]
         public MinFloatParameter virtualShadowMapSMRTRayLengthScale = new(1.5f, 0);
-        [Tooltip("UE maximum depth-history extrapolation slope. Zero selects the no-slope shader permutation.")]
+        [Tooltip("UE maximum depth-history extrapolation slope in centimetres per normalized ray time. Converted to metres for GPU projection. Zero selects the no-slope shader permutation.")]
         public MinFloatParameter virtualShadowMapSMRTExtrapolateMaxSlope = new(5, 0);
         [Tooltip("UE directional texel dither scale. Zero disables ray-origin dither.")]
         public MinFloatParameter virtualShadowMapSMRTTexelDitherScale = new(2, 0);

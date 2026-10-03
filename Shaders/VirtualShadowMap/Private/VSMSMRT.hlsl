@@ -471,10 +471,10 @@ bool ResolveVSMSMRTMappedTexel(float2 uv, int index, out int mappedIndex,
     if (!UseVirtualShadowMapPrototype(index) || !all(isfinite(uv)) || any(uv < 0) || any(uv >= 1)) return false;
     uint axis = (uint)_VSMPrototypePagesPerAxis;
     uint2 basePage = min((uint2)(uv * axis), axis - 1u);
-    uint entry = _VSMSamplingPageTable[((uint)index * axis + basePage.y) * axis + basePage.x];
+    uint entry = _VSMPrototypePageTable[((uint)index * axis + basePage.y) * axis + basePage.x];
     VSM_COST_ADD(11, 1u);
-    if ((entry & 0x80000000u) == 0u) return false;
-    uint offset = (entry >> 20u) & 63u;
+    if ((entry & VIVID_VSM_PAGE_TABLE_VALID) == 0u) return false;
+    uint offset = VividVSMPageTableLOD(entry);
     mappedIndex = index + (int)offset;
     if (mappedIndex >= _VSMProjectionCount) return false;
     int2 texel = (int2)(uv * _VSMPrototypeVirtualResolution);
@@ -487,12 +487,12 @@ bool ResolveVSMSMRTMappedTexel(float2 uv, int index, out int mappedIndex,
         mappedUV = uv * scale + float2(delta) * (scale / axis);
         int2 low = page * _VSMPrototypePageSize;
         texel = clamp((int2)(mappedUV * _VSMPrototypeVirtualResolution), low, low + _VSMPrototypePageSize - 1);
-        entry = _VSMSamplingPageTable[(mappedIndex * axis + (uint)page.y) * axis + (uint)page.x];
+        entry = _VSMPrototypePageTable[(mappedIndex * axis + (uint)page.y) * axis + (uint)page.x];
         VSM_COST_ADD(11, 1u);
         // Only THIS LOD is valid here; never follow a second alias.
-        if ((entry & 0x83f00000u) != 0x80000000u) return false;
+        if (!VividVSMPageTableIsNative(entry)) return false;
     }
-    uint2 physicalPage = uint2(entry & 1023u, (entry >> 10u) & 1023u);
+    uint2 physicalPage = VividVSMPageTableAddress(entry);
     physical = (int2)(physicalPage * (uint)_VSMPrototypePageSize) + texel % _VSMPrototypePageSize;
     return true;
 }

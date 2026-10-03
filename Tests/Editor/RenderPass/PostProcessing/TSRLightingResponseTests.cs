@@ -660,6 +660,7 @@ namespace VividRP.Editor.Tests
                 shader.SetVector("_TSRParams", new Vector4(hasHistory ? 1 : 0, 16, 0, 0));
                 shader.SetBuffer(kernel, "_TSRFramePreExposure", frameExposure);
                 shader.SetTexture(kernel, "_TSRPreviousPreExposure", InputTexture(1, 1, previousPreExposure));
+                shader.SetTexture(kernel, "_ReprojectionValidity", InputTexture(renderSize, 2, 1));
                 shader.SetTexture(kernel, "_DilatedMotion", motion); shader.SetTexture(kernel, "_ReprojectionBoundary", boundary);
                 shader.SetTexture(kernel, "_ThinGeometryCoverage", zero); shader.SetTexture(kernel, "_LumaInstability", zero);
                 shader.SetTexture(kernel, "_HistoryColor", sourceColor); shader.SetTexture(kernel, "_HistoryMeta", historyMeta);
@@ -771,6 +772,93 @@ namespace VividRP.Editor.Tests
             Assert.That(result.SampleCount, Is.EqualTo(16f / 255f * 16f).Within(0.001f));
         }
 
+        [TestCase(0f)]
+        [TestCase(0.25f)]
+        [TestCase(2f)]
+        public void GeometricDisocclusion_RejectsHistoryRegardlessOfMotion(float motionPixels)
+        {
+            using var fixture = new Fixture();
+            var input = new Input { Current = Gray(0.5f), History = Gray(0.5f),
+                NeighborhoodLow = 0.5f, NeighborhoodHigh = 0.5f,
+                MotionPixels = motionPixels, GeometricValidity = 0f };
+            Snapshot result = fixture.Run(input);
+            Assert.That(result.Accepted, Is.Zero);
+            Assert.That(result.DisableHistoryClamp, Is.Zero);
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public void OccluderScatter_PreservesStationaryHistoryAndRejectsOverlappingMotion(bool collision, bool cameraCut)
+        {
+            const int width = 13, height = 11;
+            var resources = new System.Collections.Generic.List<Object>();
+            try
+            {
+                var source = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                    "Packages/com.vivid.render-pipelines/Shaders/Core/Private/TSR/TSRReprojectHistory.compute");
+                var shader = Object.Instantiate(source); resources.Add(shader);
+                Texture2D InputTexture(int channels, float[] values)
+                {
+                    var texture = new Texture2D(width, height, channels == 1 ? GraphicsFormat.R32_SFloat : GraphicsFormat.R32G32_SFloat,
+                        TextureCreationFlags.None) { filterMode = FilterMode.Point };
+                    resources.Add(texture); texture.SetPixelData(values, 0); texture.Apply(false, false); return texture;
+                }
+                RenderTexture OutputTexture(GraphicsFormat format)
+                {
+                    var texture = new RenderTexture(new RenderTextureDescriptor(width, height)
+                        { graphicsFormat = format, depthStencilFormat = GraphicsFormat.None, enableRandomWrite = true });
+                    resources.Add(texture); Assert.That(texture.Create(), Is.True); return texture;
+                }
+                var depths = new float[width * height]; var motions = new float[width * height * 2];
+                for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+                {
+                    bool foreground = collision && x >= 8 && x <= 10;
+                    float reverseZ = foreground ? .8f : .2f;
+                    depths[y * width + x] = SystemInfo.usesReversedZBuffer ? reverseZ : 1f - reverseZ;
+                    motions[(y * width + x) * 2] = foreground ? 4f / width : 0f;
+                }
+                var depth = InputTexture(1, depths); var motion = InputTexture(2, motions);
+                var zero = InputTexture(1, new float[width * height]);
+                var originalMotion = InputTexture(2, new float[width * height * 2]);
+                var packed = OutputTexture(GraphicsFormat.R32_UInt);
+                var validity = OutputTexture(GraphicsFormat.R32G32_SFloat);
+                shader.SetVector("_RenderSize", new Vector4(width, height, 1f / width, 1f / height));
+                shader.SetVector("_TSRParams", new Vector4(cameraCut ? 0 : 1, 0, 0, 0));
+                shader.SetVector("_Jitter", Vector4.zero);
+                shader.SetMatrix("_OcclusionClipToPrevClip", Matrix4x4.identity);
+                shader.SetVector("_OcclusionDepthToView", SystemInfo.usesReversedZBuffer
+                    ? new Vector4(0, 1, 1, 0) : new Vector4(0, 1, -1, 1));
+                shader.SetVector("_OcclusionPixelScale", new Vector4(1f / width, 1f / height, 0, 0));
+                foreach (string name in new[] { "CSClearOccluders", "CSScatterOccluders", "CSResolveOcclusion" })
+                {
+                    int kernel = shader.FindKernel(name);
+                    shader.SetTexture(kernel, "_PreviousClosestOccluder", packed);
+                    if (name != "CSClearOccluders")
+                    { shader.SetTexture(kernel, "_DilatedMotion", motion); shader.SetTexture(kernel, "_DilatedDepth", depth); }
+                    if (name == "CSResolveOcclusion")
+                    {
+                        shader.SetTexture(kernel, "_DepthError", zero);
+                        shader.SetTexture(kernel, "_InputMotionVectors", originalMotion);
+                        shader.SetTexture(kernel, "_OutputReprojectionValidity", validity);
+                    }
+                    shader.Dispatch(kernel, 2, 2, 1);
+                }
+                var request = AsyncGPUReadback.Request(validity); request.WaitForCompletion();
+                Assert.That(request.hasError, Is.False);
+                var result = request.GetData<float>();
+                Assert.That(result[(5 * width + 4) * 2], cameraCut || collision ? Is.LessThan(.5f) : Is.EqualTo(1f).Within(.001f));
+                Assert.That(result[(5 * width + 8) * 2], cameraCut ? Is.LessThan(.5f) : Is.GreaterThanOrEqualTo(.5f));
+                if (collision) Assert.That(result[(5 * width + 8) * 2 + 1], Is.LessThan(.5f));
+                else Assert.That(result[(5 * width + 4) * 2 + 1], Is.EqualTo(1f).Within(.001f));
+            }
+            finally
+            {
+                foreach (var resource in resources)
+                { if (resource is RenderTexture texture) texture.Release(); Object.DestroyImmediate(resource); }
+            }
+        }
+
         private sealed class Input
         {
             internal Color Current = Gray(0.8f), History = Gray(0.2f), Resurrection = Color.clear;
@@ -780,6 +868,7 @@ namespace VividRP.Editor.Tests
             internal float ForcedUpdateState;
             internal Color NeighborhoodColorA = new Color(0.9f, 0.1f, 0.1f), NeighborhoodColorB = new Color(0.1f, 0.1f, 0.9f);
             internal Vector2Int NearbyDepthFeatureOffset;
+            internal float GeometricValidity = 1f;
             internal float DepthError, MotionPixels, LumaInstability, HistorySamples = 16, HistoryDepth = 0.5f, ResurrectionFrames;
             internal float NeighborhoodLow = 0.1f, NeighborhoodHigh = 0.9f;
             internal bool ChromaPattern;
@@ -817,6 +906,7 @@ namespace VividRP.Editor.Tests
             private readonly RenderTexture inputGuide, historyGuide;
             private readonly RenderTexture guideMetadata, guideConfidence, currentGuide;
             private readonly Texture2D previousGuide, guideBoundary;
+            private readonly Texture2D reprojectionValidity = CreateInput(GraphicsFormat.R32G32_SFloat);
 
             internal Fixture(bool waveOps = false)
             {
@@ -894,6 +984,7 @@ namespace VividRP.Editor.Tests
 
             private void BindGuideInputs(int kernel)
             {
+                reject.SetTexture(kernel, "_ReprojectionValidity", reprojectionValidity);
                 reject.SetTexture(kernel, "_PreviousShadingGuide", previousGuide);
                 reject.SetTexture(kernel, "_DilatedMotion", motion);
                 reject.SetTexture(kernel, "_InputDepth", depth);
@@ -966,6 +1057,7 @@ namespace VividRP.Editor.Tests
                     guideValues[((Size / 2 + input.GuideUnreliableOffset.y) * Size + Size / 2 + input.GuideUnreliableOffset.x) * 4 + 3] = 0;
                 previousGuide.SetPixelData(guideValues, 0); previousGuide.Apply(false, false);
                 SetConstant(guideBoundary, 1, 1f - input.GuideInputUncertainty);
+                SetConstant(reprojectionValidity, 2, input.GeometricValidity, input.GuideInputUncertainty);
                 resurrection.SetPixelData(resurrections, 0); resurrection.Apply(false, false);
                 SetDepthInputs(input);
                 SetConstant(instability, 1, input.LumaInstability);
@@ -998,6 +1090,7 @@ namespace VividRP.Editor.Tests
                 reject.SetTexture(kernel, "_InputShadingGuide", inputGuide);
                 reject.SetTexture(kernel, "_HistoryShadingGuide", historyGuide);
                 reject.SetVector("_TSRRejectionParams", new Vector4(0.003f, 16, 0.28f, 0.35f));
+                reject.SetTexture(kernel, "_ReprojectionValidity", reprojectionValidity);
                 reject.SetTexture(kernel, "_InputColor", color); reject.SetTexture(kernel, "_InputDepth", depth);
                 reject.SetTexture(kernel, "_DilatedDepth", depth); reject.SetTexture(kernel, "_DilatedMotion", motion);
                 reject.SetTexture(kernel, "_DepthError", depthError); reject.SetTexture(kernel, "_ReprojectionBoundary", zero);
@@ -1057,7 +1150,7 @@ namespace VividRP.Editor.Tests
                 frameExposure.Dispose();
                 Object.DestroyImmediate(previousExposure);
                 outputExposure.Release(); Object.DestroyImmediate(outputExposure);
-                foreach (Texture2D texture in new[] { weightControlOverride, color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta, previousGuide, guideBoundary })
+                foreach (Texture2D texture in new[] { reprojectionValidity, weightControlOverride, color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta, previousGuide, guideBoundary })
                     Object.DestroyImmediate(texture);
                 foreach (RenderTexture texture in new[] { weightControl, acceptedColor, rejection, updatedColor, updatedMeta, updatedResurrectionColor, updatedResurrectionMeta, inputGuide, historyGuide, guideMetadata, guideConfidence, currentGuide })
                 { texture.Release(); Object.DestroyImmediate(texture); }

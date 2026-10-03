@@ -16,6 +16,7 @@ Texture2D<float4> _InputColor;
 Texture2D<float> _InputDepth;
 Texture2D<float> _DilatedDepth;
 Texture2D<float2> _DilatedMotion;
+Texture2D<float2> _ReprojectionValidity;
 Texture2D<float> _DepthError;
 Texture2D<float> _ReprojectionBoundary;
 Texture2D<float> _LumaInstability;
@@ -60,27 +61,15 @@ float4 TSR_LoadPreviousGuide(int2 coord, out bool valid)
 #endif
     float2 historyUV = uv - _DilatedMotion[coord] + jitterDelta;
     float2 meta = _ReprojectedHistoryMeta.SampleLevel(sampler_PointClamp, uv, 0);
-    float depth = _InputDepth[coord];
-#if UNITY_REVERSED_Z
-    float depthScale = max(depth, 1e-6);
-#else
-    float depthScale = max(1.0 - depth, 1e-6);
-#endif
-    // Render-size changes invalidate both color and Guide histories on the CPU.
     float2 halfTexel = _RenderSize.zw * 0.5;
-    valid = _TSRParams.x > 0.5 && meta.x > 0.5
+    valid = _TSRParams.x > 0.5 && meta.x > 0.0
         && all(historyUV >= halfTexel) && all(historyUV <= 1.0 - halfTexel)
-        && abs(depth - meta.y) <= min(_TSRRejectionParams.x + _DepthError[coord] * 2.0, depthScale * 0.02)
-        && _DepthError[coord] <= depthScale * 0.02;
+        && _ReprojectionValidity[coord].x >= 0.5;
     if (!valid) return 0.0;
-    float4 guide = _PreviousShadingGuide.SampleLevel(sampler_LinearClamp, historyUV, 0);
-    // Do not average an unreliable metadata tap into a reliable one.
-    int2 base = int2(floor(historyUV * _RenderSize.xy - 0.5));
-    float uncertainty = 1.0;
-    [unroll] for (int y = 0; y < 2; y++)
-    [unroll] for (int x = 0; x < 2; x++)
-        uncertainty = min(uncertainty, _PreviousShadingGuide[clamp(base + int2(x,y), 0, int2(_RenderSize.xy)-1)].a);
-    return float4(guide.rgb * TSR_HistoryExposureCorrection(), saturate(uncertainty));
+    // UE reprojects color and uncertainty with the same Catmull-Rom footprint.
+    // Clamp metadata ringing after reconstruction, not by min-reducing its taps.
+    float4 guide = TSR_SampleCatmullRom(_PreviousShadingGuide, historyUV, _RenderSize.xy);
+    return float4(guide.rgb * TSR_HistoryExposureCorrection(), saturate(guide.a));
 }
 
 // UE's SMCS comparison space. Both inputs already contain exposed linear
@@ -171,8 +160,8 @@ void CSBuildShadingGuides(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_G
     _OutputHistoryShadingGuide[outputCoord] = float4(historyMean, max(removedDetail.x, max(removedDetail.y, removedDetail.z)));
     bool validGuide;
     float4 previousGuide = TSR_LoadPreviousGuide(outputCoord, validGuide);
-    // Vivid's boundary has the opposite direction to UE's ReprojectionEdge.
-    float inputUncertainty = saturate(1.0 - _ReprojectionBoundary[outputCoord]);
+    // UE ReprojectionEdge measures velocity overlap; geometric validity is separate.
+    float inputUncertainty = _ReprojectionValidity[outputCoord].y;
     _OutputShadingGuideMetadata[outputCoord] = float2(inputUncertainty, validGuide ? previousGuide.a : -1.0);
 }
 
@@ -340,7 +329,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float lumaThreshold = baseLumaThreshold;
     float chromaThreshold = lerp(_TSRRejectionParams.w, _TSRRejectionParams.w * 0.65, reprojectionBoundary);
     float motionLimit = lerp(_TSRRejectionParams.y, _TSRRejectionParams.y * 0.5, reprojectionBoundary);
-    bool depthRejected = hasSignificantMotion && depthDiff > depthTolerance;
+    bool depthRejected = _ReprojectionValidity[renderCoord].x < 0.5;
     // Lighting can change without receiver motion. Compare the clipped history
     // to retain the existing neighborhood tolerance for detail and sample noise.
     bool colorRejected = hasSignificantMotion && (lumaDiff > lumaThreshold || chromaDiff > chromaThreshold);

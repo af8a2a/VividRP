@@ -70,7 +70,7 @@ void CSPrepareFlicker(uint3 id : SV_DispatchThreadID)
     float predictedDepth = previousClip.z * invPrevW;
     bool valid = _TSRParams.x > 0.5 && all(previousUV >= 0.0) && all(previousUV <= 1.0)
         && previousMeta.x > 0.0 && previousClip.w > 0.0
-        && abs(predictedDepth - previousMeta.y) <= _TSRRejectionParams.x + _DepthError[p] * 2.0;
+        && _ReprojectionValidity[p].x >= 0.5;
     float4 history = _PreviousFlickerHistory.SampleLevel(sampler_PointClamp, previousUV + TSR_FlickerPointOffset(p) * _RenderSize.zw, 0);
     // Only GCS luminance is exposure-dependent. Signed gradient/count are state.
     float linearHistory = 0.17 * history.x / max(1.0 - history.x, 1e-6);

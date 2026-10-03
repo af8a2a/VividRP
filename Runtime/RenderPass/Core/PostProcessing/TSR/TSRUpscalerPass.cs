@@ -19,6 +19,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static Camera EditorHistoryLossCaptureCamera;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture> EditorHistoryLossCapture;
         internal static event Action<CommandBuffer, Camera, int, Vector4, Texture, Texture, Texture, Texture, Texture> EditorFlickeringCapture;
+        internal static event Action<CommandBuffer, Camera, int, Texture, Texture> EditorOcclusionCapture;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture> EditorShadingGuideCapture;
         internal static event Action<CommandBuffer, Camera, int, Texture, Texture, Texture> EditorGuideConfidenceCapture;
         private static readonly int HistoryLossDiagnosticsId = Shader.PropertyToID("_HistoryLossDiagnostics");
@@ -80,6 +81,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HistoryColorId = Shader.PropertyToID("_HistoryColor");
         private static readonly int HistoryMetaId = Shader.PropertyToID("_HistoryMeta");
         private static readonly int DilatedMotionId = Shader.PropertyToID("_DilatedMotion");
+        private static readonly ProfilingSampler s_OcclusionSampler = new("TSR.OcclusionReprojection");
+        private static readonly int PreviousClosestOccluderId = Shader.PropertyToID("_PreviousClosestOccluder");
+        private static readonly int ReprojectionValidityId = Shader.PropertyToID("_ReprojectionValidity");
+        private static readonly int OutputReprojectionValidityId = Shader.PropertyToID("_OutputReprojectionValidity");
+        private static readonly int OcclusionClipToPrevClipId = Shader.PropertyToID("_OcclusionClipToPrevClip");
+        private static readonly int OcclusionDepthToViewId = Shader.PropertyToID("_OcclusionDepthToView");
+        private static readonly int OcclusionPixelScaleId = Shader.PropertyToID("_OcclusionPixelScale");
+        private readonly RenderGraphTextureDesc m_ClosestOccluderDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectionValidityDescriptor = new();
         private static readonly int DilatedDepthId = Shader.PropertyToID("_DilatedDepth");
         private static readonly int DepthErrorId = Shader.PropertyToID("_DepthError");
         private static readonly int ReprojectionBoundaryId = Shader.PropertyToID("_ReprojectionBoundary");
@@ -252,6 +262,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     GraphicsFormat.R16_SFloat));
             var flickerInput = renderGraph.CreateTexture(ConfigureColorDescriptor(
                 m_FlickerInputDescriptor, "TSR_FlickerInput", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+            var closestOccluder = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                m_ClosestOccluderDescriptor, "TSR_ClosestOccluder", renderSize.x, renderSize.y, GraphicsFormat.R32_UInt));
+            var reprojectionValidity = renderGraph.CreateTexture(ConfigureColorDescriptor(
+                m_ReprojectionValidityDescriptor, "TSR_ReprojectionValidity", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat));
             var reprojectedFlickerHistory = renderGraph.CreateTexture(ConfigureColorDescriptor(
                 m_ReprojectedFlickerHistoryDescriptor, "TSR_ReprojectedFlickerHistory", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat));
             var flickerGradient = renderGraph.CreateTexture(ConfigureColorDescriptor(
@@ -362,6 +376,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.MotionVectors = motionTexture.innerHandle;
                 passData.Output = outputHandle;
                 passData.DilatedMotion = dilatedMotion;
+                passData.ClosestOccluder = closestOccluder;
+                passData.ReprojectionValidity = reprojectionValidity;
                 passData.DilatedDepth = dilatedDepth;
                 passData.DepthError = depthError;
                 passData.ReprojectionBoundary = reprojectionBoundary;
@@ -384,6 +400,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 var previousProjection = previousVP * previousView.inverse;
                 var rotation = previousView * currentView.inverse;
                 rotation.SetColumn(3, new Vector4(0, 0, 0, 1));
+                var previousInverseProjection = previousProjection.inverse;
+                passData.OcclusionDepthToView = new Vector4(previousInverseProjection.m22, previousInverseProjection.m23,
+                    previousInverseProjection.m32, previousInverseProjection.m33);
+                passData.OcclusionPixelScale = new Vector4(Mathf.Abs(previousInverseProjection.m00) / renderSize.x,
+                    Mathf.Abs(previousInverseProjection.m11) / renderSize.y, cameraData.camera.orthographic ? 1f : 0f, 0f);
                 passData.FlickerRotationalClipToPrevClip = previousProjection * rotation * currentProjection.inverse;
                 var rateRatio = cameraState.FlickerDeltaTime > 0 ? cameraState.FlickerDeltaTime * 60f : 1f;
                 passData.FlickerParams = new Vector4(2f / Mathf.Max(rateRatio, 1f),
@@ -433,6 +454,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.MotionVectors, AccessFlags.Read);
                 builder.UseTexture(passData.Output, AccessFlags.WriteAll);
                 builder.UseTexture(passData.DilatedMotion, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.ClosestOccluder, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.ReprojectionValidity, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.DilatedDepth, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.DepthError, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectionBoundary, AccessFlags.ReadWrite);
@@ -560,6 +583,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 data.State.ClearHistory(cmd);
 
             DispatchDilateVelocity(cmd, data);
+            DispatchOcclusionReprojection(cmd, data);
             DispatchReprojectHistory(cmd, data);
             DispatchFlickering(cmd, data);
             if (data.EnablePairedGuides)
@@ -576,6 +600,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 DispatchSharpen(cmd, data);
 
 #if UNITY_EDITOR
+            EditorOcclusionCapture?.Invoke(cmd, data.Camera, data.FrameIndex, data.ReprojectionValidity.ResolveTexture(), data.ClosestOccluder.ResolveTexture());
             EditorFlickeringCapture?.Invoke(cmd, data.Camera, data.FrameIndex, data.FlickerParams,
                 data.FlickerInput.ResolveTexture(), data.FlickerGradient.ResolveTexture(),
                 data.CurrentFlickerHistory.ResolveTexture(), data.LumaInstability.ResolveTexture(), data.ReprojectedFlickerHistory.ResolveTexture());
@@ -624,6 +649,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
                 cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
                 cmd.SetComputeTextureParam(shader, kernel, DepthErrorId, data.DepthError);
+                cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
                 cmd.SetComputeTextureParam(shader, kernel, FlickerPreviousDepthId, data.PreviousHistoryMeta);
                 cmd.SetComputeTextureParam(shader, kernel, PreviousFlickerHistoryId, data.PreviousFlickerHistory);
                 cmd.SetComputeTextureParam(shader, kernel, OutputFlickerInputId, data.FlickerInput);
@@ -669,6 +695,34 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, KernelThreadGroupSize), DivRoundUp(data.RenderSize.y, KernelThreadGroupSize), 1);
         }
 
+        private static void DispatchOcclusionReprojection(CommandBuffer cmd, PassData data)
+        {
+            using var scope = new ProfilingScope(cmd, s_OcclusionSampler);
+            var shader = data.Shaders.ReprojectHistory;
+            SetCommonConstants(cmd, shader, data);
+            cmd.SetComputeMatrixParam(shader, OcclusionClipToPrevClipId, data.FlickerClipToPrevClip);
+            cmd.SetComputeVectorParam(shader, OcclusionDepthToViewId, data.OcclusionDepthToView);
+            cmd.SetComputeVectorParam(shader, OcclusionPixelScaleId, data.OcclusionPixelScale);
+            int groupsX = DivRoundUp(data.RenderSize.x, KernelThreadGroupSize);
+            int groupsY = DivRoundUp(data.RenderSize.y, KernelThreadGroupSize);
+            int kernel = data.Shaders.ClearOccludersKernel;
+            cmd.SetComputeTextureParam(shader, kernel, PreviousClosestOccluderId, data.ClosestOccluder);
+            cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+            kernel = data.Shaders.ScatterOccludersKernel;
+            cmd.SetComputeTextureParam(shader, kernel, PreviousClosestOccluderId, data.ClosestOccluder);
+            cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
+            cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
+            cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+            kernel = data.Shaders.ResolveOcclusionKernel;
+            cmd.SetComputeTextureParam(shader, kernel, PreviousClosestOccluderId, data.ClosestOccluder);
+            cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
+            cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
+            cmd.SetComputeTextureParam(shader, kernel, DepthErrorId, data.DepthError);
+            cmd.SetComputeTextureParam(shader, kernel, InputMotionVectorsId, data.MotionVectors);
+            cmd.SetComputeTextureParam(shader, kernel, OutputReprojectionValidityId, data.ReprojectionValidity);
+            cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+        }
+
         private static void DispatchReprojectHistory(CommandBuffer cmd, PassData data)
         {
             var shader = data.Shaders.ReprojectHistory;
@@ -684,6 +738,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, ResurrectionColorId, data.PreviousResurrectionColor);
             cmd.SetComputeTextureParam(shader, kernel, ResurrectionMetaId, data.PreviousResurrectionMeta);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionMetaId, data.ReprojectedResurrectionMeta);
@@ -712,6 +767,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, InputDepthId, data.Depth);
             cmd.SetComputeTextureParam(shader, kernel, DepthErrorId, data.DepthError);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
         }
@@ -755,6 +811,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.SetComputeTextureParam(shader, kernel, LumaInstabilityId, data.LumaInstability);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, AcceptedHistoryColorId, data.AcceptedHistoryColor);
             if (data.EnablePairedGuides)
@@ -1104,6 +1161,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly ComputeShader Sharpen;
             public readonly int DilateVelocityKernel;
             public readonly int ReprojectHistoryKernel;
+            public readonly int ClearOccludersKernel, ScatterOccludersKernel, ResolveOcclusionKernel;
             public readonly int RejectShadingKernel;
             public readonly int PrepareFlickerKernel, AnalyzeFlickerKernel, UpdateFlickerKernel;
             public readonly int BuildShadingGuidesKernel;
@@ -1128,6 +1186,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 Sharpen = resources.TSRSharpenCompute;
                 DilateVelocityKernel = FindKernel(DilateVelocity);
                 ReprojectHistoryKernel = FindKernel(ReprojectHistory);
+                ClearOccludersKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSClearOccluders") ? ReprojectHistory.FindKernel("CSClearOccluders") : -1;
+                ScatterOccludersKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSScatterOccluders") ? ReprojectHistory.FindKernel("CSScatterOccluders") : -1;
+                ResolveOcclusionKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSResolveOcclusion") ? ReprojectHistory.FindKernel("CSResolveOcclusion") : -1;
                 RejectShadingKernel = FindKernel(RejectShading);
                 PrepareFlickerKernel = RejectShading != null && RejectShading.HasKernel("CSPrepareFlicker") ? RejectShading.FindKernel("CSPrepareFlicker") : -1;
                 AnalyzeFlickerKernel = RejectShading != null && RejectShading.HasKernel("CSAnalyzeFlicker") ? RejectShading.FindKernel("CSAnalyzeFlicker") : -1;
@@ -1151,6 +1212,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public bool IsValid =>
                 DilateVelocity != null && DilateVelocityKernel >= 0
                 && ReprojectHistory != null && ReprojectHistoryKernel >= 0
+                && ClearOccludersKernel >= 0 && ScatterOccludersKernel >= 0 && ResolveOcclusionKernel >= 0
                 && RejectShading != null && RejectShadingKernel >= 0
                 && PrepareFlickerKernel >= 0 && AnalyzeFlickerKernel >= 0 && UpdateFlickerKernel >= 0
                 && BuildShadingGuidesKernel >= 0
@@ -1195,6 +1257,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle MotionVectors;
             public TextureHandle Output;
             public TextureHandle DilatedMotion;
+            public TextureHandle ClosestOccluder, ReprojectionValidity;
+            public Vector4 OcclusionDepthToView, OcclusionPixelScale;
             public TextureHandle DilatedDepth;
             public TextureHandle DepthError;
             public TextureHandle ReprojectionBoundary;

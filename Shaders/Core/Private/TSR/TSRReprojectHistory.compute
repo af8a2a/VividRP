@@ -1,11 +1,25 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSClearOccluders
+#pragma kernel CSScatterOccluders
+#pragma kernel CSResolveOcclusion
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
 Texture2D<float2> _DilatedMotion;
+Texture2D<float> _DilatedDepth;
+Texture2D<float> _DepthError;
+Texture2D<float4> _InputMotionVectors;
+Texture2D<float2> _ReprojectionValidity;
+RWTexture2D<uint> _PreviousClosestOccluder;
+RWTexture2D<float2> _OutputReprojectionValidity;
+float4x4 _OcclusionClipToPrevClip;
+float4 _OcclusionDepthToView;
+float4 _OcclusionPixelScale;
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+
 Texture2D<float> _ReprojectionBoundary;
 Texture2D<float> _ThinGeometryCoverage;
 Texture2D<float> _LumaInstability;
@@ -43,7 +57,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 #endif
     float2 historyUV = uv - motion + jitterDelta;
     bool validHistoryUV = all(historyUV >= 0.0) && all(historyUV <= 1.0);
-    bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV;
+    bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV && _ReprojectionValidity[renderCoord].x >= 0.5;
 
     if (!hasHistory)
     {
@@ -81,4 +95,134 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         ? _ResurrectionColor.SampleLevel(sampler_PointClamp, stateUV, 0).a : 0.0;
     _ReprojectedResurrectionColor[pixelCoord] = float4(resurrectionColor, shadingState);
     _ReprojectedResurrectionMeta[pixelCoord] = float2(resurrectionMeta.x * historyConfidence, resurrectionMeta.y);
+}
+
+// UE TSRClosestOccluder: current closest surfaces scatter into previous raster
+// coordinates. The packed velocity belongs to the winning depth atomically.
+// Motion is XY-only in Vivid; camera reprojection supplies previous device Z.
+float2 TSR_OcclusionJitter(float2 jitter)
+{
+    float2 result = jitter * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    result.y = -result.y;
+#endif
+    return result;
+}
+float TSR_OcclusionPreviousDepth(int2 p, float depth)
+{
+    float2 uv = (float2(p) + 0.5) * _RenderSize.zw - TSR_OcclusionJitter(_Jitter.xy);
+    float2 screen = uv * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    screen.y = -screen.y;
+#endif
+    float4 previous = mul(_OcclusionClipToPrevClip, float4(screen, depth, 1.0));
+    return previous.w > 0.0 ? previous.z / previous.w : -1.0;
+}
+float TSR_OcclusionViewDepth(float z)
+{
+    float denominator = _OcclusionDepthToView.z * z + _OcclusionDepthToView.w;
+    return abs((_OcclusionDepthToView.x * z + _OcclusionDepthToView.y) / max(abs(denominator), 1e-20));
+}
+uint TSR_EncodeOccluder(float z, float2 velocity)
+{
+#if !UNITY_REVERSED_Z
+    z = 1.0 - z;
+#endif
+    uint angle = (uint)round(atan2(velocity.y, velocity.x) * (16.0 / PI) + 16.0) & 31u;
+    uint distance = min((uint)ceil(length(velocity) * 32.0), 8191u);
+    return (f32tof16(saturate(z)) << 18u) | (angle << 13u) | distance;
+}
+float TSR_DecodeOccluderDepth(uint encoded)
+{
+    float z = f16tof32(encoded >> 18u);
+#if !UNITY_REVERSED_Z
+    z = 1.0 - z;
+#endif
+    return z;
+}
+float TSR_OccluderVelocityAgreement(uint encoded, float2 velocity)
+{
+    float distance = float(encoded & 8191u) / 32.0;
+    if (distance >= (8192.0 - 1.5) / 32.0) return 0.0;
+    float angle = float((encoded >> 13u) & 31u) * (PI / 16.0) - PI;
+    float2 direction; sincos(angle, direction.y, direction.x);
+    float ownAngle = atan2(velocity.y, velocity.x), ownLength = length(velocity);
+    float angleDelta = abs(angle - ownAngle);
+    angleDelta = min(angleDelta, 2.0 * PI - angleDelta);
+    float polar = min(saturate(2.0 - angleDelta / (PI / 16.0)),
+        saturate(1.0 + 1.0 / 32.0 - (abs(distance - ownLength) - 2.0)));
+    float cartesian = saturate(1.0 + (PI / 16.0) * ownLength - length(direction * distance - velocity));
+    return lerp(cartesian, polar, saturate(min(distance, ownLength) - 2.0));
+}
+[numthreads(8,8,1)]
+void CSClearOccluders(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_RenderSize.xy))) return;
+    _PreviousClosestOccluder[id.xy] = 0u;
+}
+[numthreads(8,8,1)]
+void CSScatterOccluders(uint3 id : SV_DispatchThreadID)
+{
+    int2 p = id.xy, size = int2(_RenderSize.xy);
+    if (any(p >= size)) return;
+    float2 motion = _DilatedMotion[p];
+    float2 previousUV = (float2(p) + 0.5) * _RenderSize.zw - motion
+        + TSR_OcclusionJitter(_Jitter.zw - _Jitter.xy);
+    float z = TSR_OcclusionPreviousDepth(p, _DilatedDepth[p]);
+    if (any(previousUV < 0.0) || any(previousUV > 1.0) || z < 0.0 || z > 1.0) return;
+    uint encoded = TSR_EncodeOccluder(z, motion * _RenderSize.xy);
+    float2 position = previousUV * _RenderSize.xy - 0.5;
+    int2 base = int2(floor(position)); float2 fraction = frac(position);
+    [unroll] for (int y=0;y<2;y++) [unroll] for (int x=0;x<2;x++)
+    {
+        int2 q = base + int2(x,y);
+        float weight = (x == 0 ? 1.0-fraction.x : fraction.x) * (y == 0 ? 1.0-fraction.y : fraction.y);
+        if (all(q >= 0) && all(q < size) && round(weight * 63.0) > 0.0)
+            InterlockedMax(_PreviousClosestOccluder[q], encoded);
+    }
+}
+[numthreads(8,8,1)]
+void CSResolveOcclusion(uint3 id : SV_DispatchThreadID)
+{
+    int2 p=id.xy, size=int2(_RenderSize.xy);
+    if (any(p >= size)) return;
+    float2 motion = _DilatedMotion[p], pixelMotion=motion*_RenderSize.xy;
+    float2 originalMotion; DecodeMotionVector(_InputMotionVectors[p], originalMotion);
+    float preliminary = saturate(1.1 - 1.1 * dot(abs((motion-originalMotion)*_RenderSize.xy), 1.0.xx));
+    float edge = 1.0;
+    // UE's plus-neighborhood velocity overlap, independent of wave layout.
+    [unroll] for (int axis=0;axis<2;axis++) [unroll] for (int sign=-1;sign<=1;sign+=2)
+    {
+        int2 offset = axis == 0 ? int2(sign,0) : int2(0,sign);
+        float2 delta = pixelMotion - _DilatedMotion[clamp(p+offset,0,size-1)]*_RenderSize.xy;
+        edge=min(edge,1.0-dot(saturate(abs(delta*float2(offset))),1.0.xx));
+    }
+    edge = preliminary > 0.9 ? preliminary : saturate(edge * 1.1);
+    float2 previousUV=(float2(p)+0.5)*_RenderSize.zw-motion+TSR_OcclusionJitter(_Jitter.zw-_Jitter.xy);
+    float z=TSR_OcclusionPreviousDepth(p,_DilatedDepth[p]);
+    if (_TSRParams.x < 0.5 || any(previousUV<0.0) || any(previousUV>1.0) || z<0.0 || z>1.0)
+    { _OutputReprojectionValidity[p]=float2(0,edge); return; }
+    float worldDepth=TSR_OcclusionViewDepth(z);
+    float errorZ=TSR_OcclusionPreviousDepth(p,saturate(_DilatedDepth[p]+_DepthError[p]));
+    float worldError=abs(worldDepth-TSR_OcclusionViewDepth(saturate(errorZ)));
+    float2 position=previousUV*_RenderSize.xy-0.5;
+    int2 base=int2(floor(position)); float2 fraction=frac(position);
+    float agreement=0.0; uint closest=0u; bool anySample=false;
+    [unroll] for(int y=0;y<2;y++) [unroll] for(int x=0;x<2;x++)
+    {
+        int2 q=base+int2(x,y);
+        if(any(q<0)||any(q>=size)) continue;
+        uint encoded=_PreviousClosestOccluder[q];
+        // Zero is an empty scatter cell. It must not restore history by velocity.
+        if(encoded==0u) continue;
+        float weight=(x==0?1.0-fraction.x:fraction.x)*(y==0?1.0-fraction.y:fraction.y);
+        float closestDepth=TSR_OcclusionViewDepth(TSR_DecodeOccluderDepth(encoded));
+        float radius=max(_OcclusionPixelScale.x,_OcclusionPixelScale.y)
+            * (_OcclusionPixelScale.z>0.5?1.0:closestDepth);
+        float epsilon=max(6.0*radius+worldError,1e-6);
+        agreement+=weight*saturate(2.0-abs(closestDepth-worldDepth)/epsilon);
+        closest=max(closest,encoded); anySample=true;
+    }
+    if(anySample) agreement=max(agreement,TSR_OccluderVelocityAgreement(closest,pixelMotion));
+    _OutputReprojectionValidity[p]=float2(saturate(agreement),edge);
 }

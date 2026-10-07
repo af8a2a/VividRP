@@ -1,0 +1,92 @@
+{
+  "format": 1,
+  "restore": {
+    "E:\\VividRP_Reborn\\Packages\\VividRP\\ThirdParty\\UnityGLTF\\Runtime\\Plugins\\GLTFSerialization\\Legacy~\\GLTFSerialization.csproj": {}
+  },
+  "projects": {
+    "E:\\VividRP_Reborn\\Packages\\VividRP\\ThirdParty\\UnityGLTF\\Runtime\\Plugins\\GLTFSerialization\\Legacy~\\GLTFSerialization.csproj": {
+      "version": "1.0.0-alpha",
+      "restore": {
+        "projectUniqueName": "E:\\VividRP_Reborn\\Packages\\VividRP\\ThirdParty\\UnityGLTF\\Runtime\\Plugins\\GLTFSerialization\\Legacy~\\GLTFSerialization.csproj",
+        "projectName": "GLTFSerialization",
+        "projectPath": "E:\\VividRP_Reborn\\Packages\\VividRP\\ThirdParty\\UnityGLTF\\Runtime\\Plugins\\GLTFSerialization\\Legacy~\\GLTFSerialization.csproj",
+        "packagesPath": "C:\\Users\\11252\\.nuget\\packages\\",
+        "outputPath": "E:\\VividRP_Reborn\\Packages\\VividRP\\ThirdParty\\UnityGLTF\\Runtime\\Plugins\\GLTFSerialization\\Legacy~\\obj\\",
+        "projectStyle": "PackageReference",
+        "crossTargeting": true,
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\11252\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net35",
+          "netstandard1.3"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net35": {
+            "framework": "net35",
+            "targetAlias": "net35",
+            "projectReferences": {}
+          },
+          "netstandard1.3": {
+            "framework": "netstandard1.3",
+            "targetAlias": "netstandard1.3",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net35": {
+          "framework": "net35",
+          "targetAlias": "net35",
+          "dependencies": {
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "autoReferenced": true
+            },
+            "Microsoft.Net.Compilers": {
+              "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
+              "suppressParent": "ContentFiles, Analyzers",
+              "target": "Package",
+              "version": "[2.7.0, )"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\RuntimeIdentifierGraph.json"
+        },
+        "netstandard1.3": {
+          "framework": "netstandard1.3",
+          "targetAlias": "netstandard1.3",
+          "dependencies": {
+            "NETStandard.Library": {
+              "target": "Package",
+              "version": "[1.6.1, )",
+              "autoReferenced": true
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

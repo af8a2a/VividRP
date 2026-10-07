@@ -98,6 +98,7 @@ namespace VividRP.Runtime
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
             using var renderScope = s_RenderMarker.Auto();
+            RenderPassGpuProfiler.Collect();
             using (s_ApplySRPBatcherMarker.Auto())
             {
                 ApplySRPBatcherSetting(m_Asset);

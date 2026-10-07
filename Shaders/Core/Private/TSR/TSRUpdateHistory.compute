@@ -15,9 +15,9 @@ Texture2D<float> _LumaInstability;
 Texture2D<float4> _AcceptedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 Texture2D<float4> _ReprojectedResurrectionColor;
-Texture2D<float2> _ReprojectedResurrectionMeta;
+Texture2D<float4> _ReprojectedResurrectionMeta;
 Texture2D<float> _RejectionMask;
-Texture2D<float2> _HistoryWeightControl;
+Texture2D<float4> _HistoryWeightControl;
 
 RWTexture2D<float> _TSROutputPreExposure;
 RWTexture2D<float4> _UpdatedHistoryColor;
@@ -34,7 +34,7 @@ float4 _RenderSize;
 float4 _OutputSize;
 float4 _TSRParams;
 
-static const float TSR_RESURRECTION_PERSISTENT_FRAMES = 6.0;
+
 
 // UE ComputeSampleWeigth, evaluated on our existing Catmull-Rom input grid.
 float TSR_InputAlignment(float factor, float2 delta)
@@ -61,19 +61,19 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 currentColor = _CurrentFrameColor[pixelCoord].rgb;
     float3 historyColor = _AcceptedHistoryColor[pixelCoord].rgb;
-    float previousSampleCount = _ReprojectedHistoryMeta[pixelCoord].x;
-    float3 resurrectionColor = _ReprojectedResurrectionColor[pixelCoord].rgb;
-    float2 resurrectionMeta = _ReprojectedResurrectionMeta[pixelCoord];
+    bool resurrected = _HistoryWeightControl[pixelCoord].z > 0.5;
+    float previousSampleCount = resurrected ? _ReprojectedResurrectionMeta[pixelCoord].x
+        : _ReprojectedHistoryMeta[pixelCoord].x;
     float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;
     float shadingState = _AcceptedHistoryColor[pixelCoord].a;
     bool stationaryShadingChange = shadingState < -1.5;
     float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
     float thinGeometryCoverage = _ThinGeometryCoverage[renderCoord];
     float lumaInstability = _LumaInstability[renderCoord];
-    float2 motion = _DilatedMotion[renderCoord];
+    float2 motion = resurrected ? _ReprojectedResurrectionMeta[pixelCoord].zw : _DilatedMotion[renderCoord];
     float velocityPixels = length(motion * float2(renderSize));
     float velocityFactor = saturate((velocityPixels - 0.5) * (1.0 / 7.5));
-    // Retained only for the legacy resurrection path and diagnostics. Primary
+    // Retained only for diagnostics. Primary
     // history validity has one owner below; reprojection no longer decays it.
     float updateInstability = max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage);
     float maxSampleCount = max(_TSRParams.y, 1.0);
@@ -84,7 +84,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float coarseContribution = TSR_InputAlignment(1.0, inputDelta) * hysteresis;
     float idealContribution = TSR_InputAlignment(inputToHistoryFactor, inputDelta) * hysteresis;
     float previousValidity = accepted > 0.5 ? saturate(previousSampleCount / maxSampleCount) : 0.0;
-    float2 control = saturate(_HistoryWeightControl[pixelCoord]);
+    float2 control = saturate(_HistoryWeightControl[pixelCoord].xy);
     if (stationaryShadingChange)
         control.y = 1.0;
     // UE defaults: rejection retains two samples, motion retains four samples.
@@ -123,51 +123,14 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float historyWeight = historyContribution / max(historyContribution + currentContribution, 1e-8);
     float3 result = TSR_BlendColorVALU(currentColor, historyColor, historyWeight);
 
-    float resurrectionFrames = resurrectionMeta.x;
-    float resurrectionDepth = resurrectionMeta.y;
     float currentDepth = _DilatedDepth[renderCoord];
-    float resurrectionDepthDiff = abs(currentDepth - resurrectionDepth);
-    float3 currentYCoCg = TSR_RGBToYCoCgVALU(currentColor);
-    float3 resurrectionYCoCg = TSR_RGBToYCoCgVALU(resurrectionColor);
-    float resurrectionLumaDiff = abs(currentYCoCg.x - resurrectionYCoCg.x)
-        / max(max(currentYCoCg.x, resurrectionYCoCg.x), 0.2);
-    float resurrectionChromaDiff = length(currentYCoCg.yz - resurrectionYCoCg.yz);
-    float resurrectionDepthTolerance = 0.003 + reprojectionBoundary * 0.012 + thinGeometryCoverage * 0.006;
-    float resurrectionLumaTolerance = 0.22 + lumaInstability * 0.25;
-    float resurrectionChromaTolerance = 0.28 + lumaInstability * 0.2;
-    bool allowResurrection = shadingState >= 0.0;
-    bool resurrectionValid = accepted < 0.5
-        && allowResurrection
-        && resurrectionFrames > 0.5
-        && velocityFactor < 0.9
-        && resurrectionDepthDiff <= resurrectionDepthTolerance
-        && resurrectionLumaDiff <= resurrectionLumaTolerance
-        && resurrectionChromaDiff <= resurrectionChromaTolerance;
-    float resurrectionAgeWeight = saturate(resurrectionFrames / TSR_RESURRECTION_PERSISTENT_FRAMES);
-    float resurrectionWeight = resurrectionValid
-        ? resurrectionAgeWeight * saturate(1.0 - updateInstability * 0.65) * 0.35
-        : 0.0;
-    result = lerp(result, resurrectionColor, resurrectionWeight);
-    // Resurrection is a separate color fallback, not evidence of primary validity.
-
-    // Expire stale shading as well as blocking it in this frame, so a later
-    // disocclusion cannot recover the lighting that was just rejected.
-    float nextResurrectionFrames = !allowResurrection ? 0.0 : (accepted > 0.5
-        ? TSR_RESURRECTION_PERSISTENT_FRAMES
-        : max(resurrectionFrames - 1.0, 0.0));
-    float3 nextResurrectionColor = accepted > 0.5 ? result : resurrectionColor;
-    float nextResurrectionDepth = accepted > 0.5 ? currentDepth : resurrectionDepth;
-
     _UpdatedHistoryColor[pixelCoord] = float4(max(result, 0.0), 1.0);
     _UpdatedHistoryMeta[pixelCoord] = float2(sampleCount, currentDepth);
-    // Confirmation state remains valid even when no color can be resurrected.
-    _UpdatedResurrectionColor[pixelCoord] = float4(
-        nextResurrectionFrames > 0.5 ? max(nextResurrectionColor, 0.0) : 0.0,
-        max(shadingState, 0.0));
-    _UpdatedResurrectionMeta[pixelCoord] = nextResurrectionFrames > 0.5
-        ? float2(nextResurrectionFrames, nextResurrectionDepth)
-        : 0.0;
+    // This two-frame surface only retains the stationary-lighting confirmation.
+    // Persistent color/validity are recorded separately, without a lifetime lerp.
+    _UpdatedResurrectionColor[pixelCoord] = float4(0, 0, 0, max(shadingState, 0.0));
+    _UpdatedResurrectionMeta[pixelCoord] = 0.0;
 #if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
-    _HistoryLossDiagnostics[pixelCoord] = float4(historyWeight, initialHistoryWeight, resurrectionWeight, updateInstability);
+    _HistoryLossDiagnostics[pixelCoord] = float4(historyWeight, initialHistoryWeight, resurrected ? historyWeight : 0.0, updateInstability);
 #endif
 }

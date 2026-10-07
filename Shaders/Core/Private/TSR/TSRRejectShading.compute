@@ -1,5 +1,7 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSSelectResurrection
+#pragma kernel CSUpdateResurrectedGuide
 #pragma kernel CSPrepareFlicker
 #pragma kernel CSAnalyzeFlicker
 #pragma kernel CSUpdateFlicker
@@ -23,6 +25,7 @@ Texture2D<float> _LumaInstability;
 Texture2D<float4> _ReprojectedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 Texture2D<float4> _ReprojectedResurrectionColor;
+Texture2D<float2> _ReprojectedResurrectionMeta;
 Texture2D<float4> _InputShadingGuide;
 Texture2D<float4> _HistoryShadingGuide;
 RWTexture2D<float4> _OutputInputShadingGuide;
@@ -36,7 +39,7 @@ RWTexture2D<float4> _CurrentShadingGuide;
 
 RWTexture2D<float4> _AcceptedHistoryColor;
 RWTexture2D<float> _RejectionMask;
-RWTexture2D<float2> _HistoryWeightControl;
+RWTexture2D<float4> _HistoryWeightControl;
 
 #if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
 RWTexture2D<float4> _HistoryLossDiagnostics;
@@ -480,7 +483,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     // are disabled or hide a coherent lighting change inside their neighborhood.
     if (stationaryShadingChange)
         weightControl.y = 1.0;
-    _HistoryWeightControl[pixelCoord] = accepted ? weightControl : float2(0.0, 1.0);
+    _HistoryWeightControl[pixelCoord] = float4(accepted ? weightControl : float2(0.0, 1.0), 0.0, 0.0);
 #if defined(VIVID_TSR_HISTORY_DIAGNOSTICS)
     // Bits: valid, significant motion, motion limit, depth rejection, color
     // rejection, stationary confirmation, pending confirmation, stable history.
@@ -494,3 +497,82 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 #include "TSRFlickering.hlsl"
+
+// Candidate discovery matches UE IsResurrectedFrameCloserThanPreviousFrame:
+// 3x3 summed SMCS error advantage > 0.05 * 3 * 9, followed by a majority vote.
+// This scalar stage uses the local rejection box until the full UE rejection
+// convolution is ported; both histories are measured in the same color space.
+groupshared float3 ResurrectionInput[144];
+groupshared float3 ResurrectionPrevious[144];
+groupshared float3 ResurrectionCandidate[144];
+groupshared float2 ResurrectionMatch[100];
+groupshared uint ResurrectionTileNeeded;
+[numthreads(8,8,1)]
+void CSSelectResurrection(uint3 group : SV_GroupID, uint3 tid : SV_GroupThreadID, uint lane : SV_GroupIndex)
+{
+    int2 size = int2(_OutputSize.xy), origin = int2(group.xy)*8;
+    if(lane==0) ResurrectionTileNeeded=0;
+    GroupMemoryBarrierWithGroupSync();
+    int2 lanePixel=origin+int2(tid.xy);
+    if(all(lanePixel<size) && _HistoryWeightControl[lanePixel].x<0.5 && _AcceptedHistoryColor[lanePixel].a>-1.5)
+        InterlockedOr(ResurrectionTileNeeded,1u);
+    GroupMemoryBarrierWithGroupSync();
+    if(ResurrectionTileNeeded==0u)return;
+    for(uint i=lane;i<144;i+=64)
+    {
+        int2 p=clamp(origin+int2(i%12,i/12)-2,0,size-1);
+        float2 uv=(float2(p)+0.5)/float2(size);
+        ResurrectionInput[i]=TSR_ShadingMeasurementColor(_InputColor.SampleLevel(sampler_LinearClamp,uv,0).rgb);
+        ResurrectionPrevious[i]=TSR_ShadingMeasurementColor(_ReprojectedHistoryColor[p].rgb);
+        ResurrectionCandidate[i]=TSR_ShadingMeasurementColor(_ReprojectedResurrectionColor[p].rgb);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for(uint j=lane;j<100;j+=64)
+    {
+        uint2 p=uint2(j%10,j/10);
+        float advantage=0.0; float3 lo=1.0,hi=0.0,mean=0.0,candidateMean=0.0;
+        [unroll] for(uint y=0;y<3;y++) [unroll] for(uint x=0;x<3;x++)
+        {
+            uint at=(p.y+y)*12+p.x+x;
+            float3 current=ResurrectionInput[at],candidate=ResurrectionCandidate[at];
+            advantage+=dot(abs(current-ResurrectionPrevious[at])-abs(current-candidate),1.0.xxx);
+            lo=min(lo,current);hi=max(hi,current);mean+=current;candidateMean+=candidate;
+        }
+        mean/=9.0;candidateMean/=9.0;
+        float3 error=abs(clamp(candidateMean,lo-2.0/255.0,hi+2.0/255.0)-candidateMean);
+        float3 confidence=saturate(1.0-error/max(abs(mean-candidateMean),max(hi-lo,2.0/255.0)));
+        ResurrectionMatch[j]=float2(advantage>0.05*3.0*9.0?1.0:0.0,min(confidence.x,min(confidence.y,confidence.z)));
+    }
+    GroupMemoryBarrierWithGroupSync();
+    int2 pixel=origin+int2(tid.xy);if(any(pixel>=size))return;
+    float votes=0.0,confidence=1.0;
+    [unroll] for(uint y=0;y<3;y++) [unroll] for(uint x=0;x<3;x++)
+    { float2 m=ResurrectionMatch[(tid.y+y)*10+tid.x+x];votes+=m.x;confidence=min(confidence,m.y); }
+    float4 control=_HistoryWeightControl[pixel];
+    float2 meta=_ReprojectedResurrectionMeta[pixel];
+    float state=_AcceptedHistoryColor[pixel].a;
+    bool selectHistory=meta.x>0.0 && votes>4.0 && control.x<0.5
+        && confidence-control.x>0.1 && state>-1.5;
+    if(!selectHistory)return;
+    float3 candidate=_ReprojectedResurrectionColor[pixel].rgb;
+    int2 r=TSR_OutputToRenderCoord(pixel,size,int2(_RenderSize.xy));
+    float3 lo,hi;TSR_NeighborhoodYCoCgBounds(_InputColor,r,int2(_RenderSize.xy),lo,hi);
+    float3 clipped=max(TSR_YCoCgToRGB(TSR_ClipToAABB(TSR_RGBToYCoCg(candidate),lo,hi)),0.0);
+    float disableClamp=min(saturate(meta.y),confidence);
+    _AcceptedHistoryColor[pixel]=float4(lerp(clipped,candidate,disableClamp),0.0);
+    _RejectionMask[pixel]=1.0;
+    _HistoryWeightControl[pixel]=float4(confidence,1.0-confidence,1.0,disableClamp);
+}
+
+[numthreads(8,8,1)]
+void CSUpdateResurrectedGuide(uint3 id : SV_DispatchThreadID)
+{
+    int2 p=id.xy,size=int2(_RenderSize.xy);if(any(p>=size))return;
+    float2 uv=(float2(p)+0.5)/float2(size);
+    int2 q=clamp(int2(uv*_OutputSize.xy),0,int2(_OutputSize.xy)-1);
+    float4 control=_HistoryWeightControl[q];if(control.z<0.5)return;
+    float3 history=_ReprojectedResurrectionColor[q].rgb;
+    float ratio=(_OutputSize.x*_OutputSize.y)/(_RenderSize.x*_RenderSize.y);
+    float blend=max(rcp(1.0+_TSRParams.y/max(ratio,1.0)),1.0-control.x);
+    _CurrentShadingGuide[p]=float4(lerp(history,max(_InputColor[p].rgb,0.0),blend),_ReprojectionValidity[p].y);
+}

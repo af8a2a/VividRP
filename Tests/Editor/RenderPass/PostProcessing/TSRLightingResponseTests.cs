@@ -111,7 +111,7 @@ namespace VividRP.Editor.Tests
         [TestCase(4f, 1f)]
         [TestCase(.25f, 1f)]
         [TestCase(1f, 4f)]
-        public void PreExposure_ReprojectionConvertsBothHistoriesWithoutChangingState(float current, float previous)
+        public void PreExposure_ReprojectionConvertsPrimaryHistoryWithoutChangingState(float current, float previous)
         {
             var result = InspectReprojectedState(8, 0, true, false,
                 constantColor: new Color(.25f, 2f, 16f), currentPreExposure: current, previousPreExposure: previous);
@@ -429,7 +429,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void InvalidPrimary_ClearsPendingAndCanRecoverCompatibleResurrection()
+        public void InvalidPrimary_DoesNotBlendAnUnselectedLegacyResurrection()
         {
             using var fixture = new Fixture();
             Snapshot result = fixture.Run(new Input { Current = Gray(1), History = Gray(0.1f), HistorySamples = 0,
@@ -437,8 +437,8 @@ namespace VividRP.Editor.Tests
             Assert.That(result.Accepted, Is.Zero);
             Assert.That(result.AcceptedAlpha, Is.Zero);
             Assert.That(result.PendingState, Is.Zero);
-            Assert.That(result.Updated.r, Is.EqualTo(0.965f).Within(0.003f));
-            Assert.That(result.ResurrectionFrames, Is.EqualTo(5));
+            Assert.That(result.Updated.r, Is.EqualTo(1f).Within(0.003f));
+            Assert.That(result.ResurrectionFrames, Is.Zero);
         }
 
         private static void Confirm(Fixture fixture, Input input, int direction)
@@ -553,6 +553,7 @@ namespace VividRP.Editor.Tests
 
         private sealed class ReprojectionResult
         {
+            internal float persistentSamples, persistentRed, primarySamples;
             public int outputSize, paddedSize, statePixels, invalidPixels, filteredColorPixels;
             public float shiftPixels;
             public float constantColorMaxError;
@@ -586,7 +587,7 @@ namespace VividRP.Editor.Tests
         }
 
         private static ReprojectionResult InspectReprojectedState(int outputSize, float shiftPixels, bool hasHistory, bool waveOps,
-            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f)
+            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f, bool persistent = false, float persistentExposure = 1f, float snapshotClipOffset = 0f, float snapshotDepth = .5f)
         {
             const int renderSize = 8;
             int paddedSize = (outputSize + 7) / 8 * 8;
@@ -664,6 +665,16 @@ namespace VividRP.Editor.Tests
                 shader.SetTexture(kernel, "_DilatedMotion", motion); shader.SetTexture(kernel, "_ReprojectionBoundary", boundary);
                 shader.SetTexture(kernel, "_ThinGeometryCoverage", zero); shader.SetTexture(kernel, "_LumaInstability", zero);
                 shader.SetTexture(kernel, "_HistoryColor", sourceColor); shader.SetTexture(kernel, "_HistoryMeta", historyMeta);
+                shader.SetVector("_PersistentParams", new Vector4(persistent ? 1 : 0, 0, 0, 0));
+                shader.SetMatrix("_ClipToPersistentClip", Matrix4x4.Translate(new Vector3(snapshotClipOffset, 0, 0)));
+                shader.SetTexture(kernel, "_PersistentHistoryColor", sourceColor);
+                var persistentMeta = InputTexture(outputSize, 2, 0);
+                var persistentValues = new float[outputSize * outputSize * 2];
+                for (int i = 0; i < outputSize * outputSize; i++) { persistentValues[i * 2] = 16; persistentValues[i * 2 + 1] = snapshotDepth; }
+                persistentMeta.SetPixelData(persistentValues, 0); persistentMeta.Apply(false, false);
+                shader.SetTexture(kernel, "_PersistentHistoryMeta", persistentMeta);
+                shader.SetTexture(kernel, "_PersistentPreExposure", InputTexture(1, 1, persistentExposure));
+                shader.SetTexture(kernel, "_DilatedDepth", InputTexture(renderSize, 1, .5f));
                 shader.SetTexture(kernel, "_ResurrectionColor", sourceColor); shader.SetTexture(kernel, "_ResurrectionMeta", resurrectionMeta);
                 shader.SetTexture(kernel, "_ReprojectedHistoryColor", historyOut); shader.SetTexture(kernel, "_ReprojectedHistoryMeta", historyMetaOut);
                 shader.SetTexture(kernel, "_ReprojectedResurrectionColor", resurrectionOut);
@@ -676,7 +687,11 @@ namespace VividRP.Editor.Tests
                     return request.GetData<float>().ToArray();
                 }
                 float[] colors = Read(resurrectionOut), mainMetadata = Read(historyMetaOut), cacheMetadata = Read(resurrectionMetaOut);
-                float[] mainColors = constantColor.HasValue ? Read(historyOut) : null;
+                float[] mainColors = Read(historyOut);
+                int center = (outputSize / 2) * paddedSize + outputSize / 2;
+                result.persistentSamples = cacheMetadata[center * 2];
+                result.persistentRed = colors[center * 4];
+                result.primarySamples = mainMetadata[center * 2];
                 for (int y = 0; y < paddedSize; y++) for (int x = 0; x < paddedSize; x++)
                 {
                     int pixel = y * paddedSize + x;
@@ -707,13 +722,12 @@ namespace VividRP.Editor.Tests
                             for (int c = 0; c < 3; c++)
                             {
                                 result.constantColorMaxError = Mathf.Max(result.constantColorMaxError,
-                                    Mathf.Abs(colors[pixel * 4 + c] - constantColor.Value[c] * currentPreExposure / previousPreExposure),
                                     Mathf.Abs(mainColors[pixel * 4 + c] - constantColor.Value[c] * currentPreExposure / previousPreExposure));
                             }
                         }
                         result.statePixels++;
                         float pointColor = (sourceX + y) % 2 != 0 ? 0.8f : 0.2f;
-                        if (Mathf.Abs(colors[pixel * 4] - pointColor) > 0.003f) result.filteredColorPixels++;
+                        if (Mathf.Abs(mainColors[pixel * 4] - pointColor) > 0.003f) result.filteredColorPixels++;
                     }
                     else result.invalidPixels++;
                 }
@@ -859,6 +873,41 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(true, 16f)]
+        [TestCase(false, 16f)]
+        [TestCase(true, 0f)]
+        public void PersistentResurrection_RequiresSelectionAndValidCandidate(bool evaluate, float samples)
+        {
+            using var fixture = new Fixture();
+            Snapshot result = fixture.Run(new Input { Current = Gray(.8f), History = Gray(.1f),
+                Resurrection = Gray(.8f), HistorySamples = 0, ResurrectionFrames = samples,
+                NeighborhoodLow = .8f, NeighborhoodHigh = .8f, EvaluateResurrection = evaluate });
+            Assert.That(result.Accepted, Is.EqualTo(evaluate && samples > 0 ? 1f : 0f));
+            Assert.That(result.Updated.r, Is.EqualTo(.8f).Within(.003f));
+            Assert.That(result.SampleCount, evaluate && samples > 0 ? Is.GreaterThan(8f) : Is.LessThan(2f));
+            Assert.That(result.ResurrectionFrames, Is.Zero, "No six-frame lifetime survives in the legacy state surface.");
+        }
+
+        [TestCase(0, 0)] [TestCase(31, 0)] [TestCase(61, 0)]
+        [TestCase(62, 1)] [TestCase(63, 1)] [TestCase(93, 0)] [TestCase(124, 1)]
+        public void PersistentResurrection_SelectsUEPersistentSlice(int completed, int expected)
+        {
+            Assert.That(VividRP.Runtime.RenderPass.Core.TSRUpscalerPass.CameraState.GetPersistentReadSlot(completed), Is.EqualTo(expected));
+        }
+
+        [TestCase(0f, .5f, true)]
+        [TestCase(3f, .5f, false)]
+        [TestCase(0f, .8f, false)]
+        public void PersistentResurrection_ReprojectsIndependentlyWithStoredExposure(float clipOffset, float depth, bool valid)
+        {
+            var result = InspectReprojectedState(8, 20, true, false, constantColor: Gray(.8f),
+                currentPreExposure: 2f, previousPreExposure: 4f, persistent: true, persistentExposure: .5f,
+                snapshotClipOffset: clipOffset, snapshotDepth: depth);
+            Assert.That(result.primarySamples, Is.Zero, "The primary frame is outside the viewport.");
+            Assert.That(result.persistentSamples, Is.EqualTo(valid ? 16f : 0f));
+            if (valid) Assert.That(result.persistentRed, Is.EqualTo(3.2f).Within(.001f));
+        }
+
         private sealed class Input
         {
             internal Color Current = Gray(0.8f), History = Gray(0.2f), Resurrection = Color.clear;
@@ -868,6 +917,7 @@ namespace VividRP.Editor.Tests
             internal float ForcedUpdateState;
             internal Color NeighborhoodColorA = new Color(0.9f, 0.1f, 0.1f), NeighborhoodColorB = new Color(0.1f, 0.1f, 0.9f);
             internal Vector2Int NearbyDepthFeatureOffset;
+            internal bool EvaluateResurrection;
             internal float GeometricValidity = 1f;
             internal float DepthError, MotionPixels, LumaInstability, HistorySamples = 16, HistoryDepth = 0.5f, ResurrectionFrames;
             internal float NeighborhoodLow = 0.1f, NeighborhoodHigh = 0.9f;
@@ -901,7 +951,7 @@ namespace VividRP.Editor.Tests
             private readonly ComputeShader reject, update;
             private readonly Texture2D color, history, resurrection, depth, depthError, zero, instability, motion, historyMeta, resurrectionMeta;
             private readonly Texture2D weightControlOverride = CreateInput(GraphicsFormat.R32G32_SFloat);
-            private readonly RenderTexture weightControl = CreateOutput(GraphicsFormat.R32G32_SFloat);
+            private readonly RenderTexture weightControl = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
             private readonly RenderTexture acceptedColor, rejection, updatedColor, updatedMeta, updatedResurrectionColor, updatedResurrectionMeta;
             private readonly RenderTexture inputGuide, historyGuide;
             private readonly RenderTexture guideMetadata, guideConfidence, currentGuide;
@@ -918,7 +968,7 @@ namespace VividRP.Editor.Tests
                 resurrection = CreateInput(GraphicsFormat.R32G32B32A32_SFloat);
                 depth = CreateInput(GraphicsFormat.R32_SFloat); depthError = CreateInput(GraphicsFormat.R32_SFloat); zero = CreateInput(GraphicsFormat.R32_SFloat);
                 instability = CreateInput(GraphicsFormat.R32_SFloat); motion = CreateInput(GraphicsFormat.R32G32_SFloat);
-                historyMeta = CreateInput(GraphicsFormat.R32G32_SFloat); resurrectionMeta = CreateInput(GraphicsFormat.R32G32_SFloat);
+                historyMeta = CreateInput(GraphicsFormat.R32G32_SFloat); resurrectionMeta = CreateInput(GraphicsFormat.R32G32B32A32_SFloat);
                 acceptedColor = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
                 rejection = CreateOutput(GraphicsFormat.R32_SFloat); updatedColor = CreateOutput(GraphicsFormat.R32G32B32A32_SFloat);
                 updatedMeta = CreateOutput(GraphicsFormat.R32G32_SFloat);
@@ -1063,7 +1113,7 @@ namespace VividRP.Editor.Tests
                 SetConstant(instability, 1, input.LumaInstability);
                 SetConstant(motion, 2, input.MotionPixels / Size);
                 SetConstant(historyMeta, 2, input.HistorySamples, input.HistoryDepth);
-                SetConstant(resurrectionMeta, 2, input.ResurrectionFrames, 0.5f);
+                SetConstant(resurrectionMeta, 4, input.ResurrectionFrames, 0.5f);
                 int kernel = reject.FindKernel("CSBuildShadingGuides");
                 reject.SetVector("_Jitter", Vector4.zero);
                 reject.SetVector("_TSRParams", new Vector4(input.GuideHistoryValid && input.HistorySamples > 0 ? 1 : 0, 16, 0, 0));
@@ -1100,6 +1150,18 @@ namespace VividRP.Editor.Tests
                 reject.SetTexture(kernel, "_HistoryWeightControl", weightControl);
                 reject.SetTexture(kernel, "_AcceptedHistoryColor", acceptedColor); reject.SetTexture(kernel, "_RejectionMask", rejection);
                 reject.Dispatch(kernel, 1, 1, 1);
+                if (input.EvaluateResurrection)
+                {
+                    kernel = reject.FindKernel("CSSelectResurrection");
+                    reject.SetTexture(kernel, "_InputColor", color);
+                    reject.SetTexture(kernel, "_ReprojectedHistoryColor", history);
+                    reject.SetTexture(kernel, "_ReprojectedResurrectionColor", resurrection);
+                    reject.SetTexture(kernel, "_ReprojectedResurrectionMeta", resurrectionMeta);
+                    reject.SetTexture(kernel, "_AcceptedHistoryColor", acceptedColor);
+                    reject.SetTexture(kernel, "_RejectionMask", rejection);
+                    reject.SetTexture(kernel, "_HistoryWeightControl", weightControl);
+                    reject.Dispatch(kernel, 1, 1, 1);
+                }
                 kernel = update.FindKernel("CS");
                 update.SetVector("_TSRParams", new Vector4(input.HistorySamples > 0 ? 1 : 0, 16, 0, 0));
                 if (input.WeightControl.HasValue)

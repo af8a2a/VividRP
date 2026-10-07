@@ -19,6 +19,33 @@ float TSR_HistoryExposureCorrection()
 #define VIVID_TSR_USE_WAVE_OPS 0
 #endif
 
+// UE resurrection uses a constant-device-Z camera Jacobian, not depth gradients.
+// Rows differentiate pixel velocity along input X/Y; adapt UE's row-vector clip
+// transform to Unity's column-vector matrix and UV orientation. Quantize as the
+// UE 8-bit signed sqrt field, including its [-2,2] bound and exact zero.
+float2x2 TSR_PersistentVelocityJacobian(float4x4 transform, float inverseW, float2 size)
+{
+    float ySign = 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+    ySign = -1.0;
+#endif
+    float4 j = float4(1.0-transform[0][0]*inverseW,
+        -transform[1][0]*inverseW*ySign*size.y/size.x,
+        -transform[0][1]*inverseW*ySign*size.x/size.y,
+        1.0-transform[1][1]*inverseW);
+    j = clamp(j, -2.0, 2.0);
+    float4 encoded = floor(sign(j)*sqrt(abs(j)*2.0)*63.5+127.5);
+    j = encoded*(2.0/127.0)-2.0;
+    j = j*abs(j)*0.5;
+    return float2x2(j.xy,j.zw);
+}
+
+float TSR_PersistentUpscaleConfidence(float2x2 jacobian)
+{
+    float2 east = float2(1,0)+jacobian[0], south = float2(0,1)+jacobian[1];
+    return rsqrt(max(dot(east,east),1.0)*max(dot(south,south),1.0));
+}
+
 #if defined(UNITY_DEVICE_SUPPORTS_NATIVE_16BIT) && defined(UNITY_COMPILER_DXC)
 #define VIVID_TSR_USE_16BIT_VALU 1
 typedef float16_t tsr_valu;

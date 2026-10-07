@@ -96,7 +96,11 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 #if UNITY_UV_STARTS_AT_TOP
         jitterUV.y = -jitterUV.y;
 #endif
-        float2 screen = (uv - jitterUV) * 2.0 - 1.0;
+        // UE stores velocity at the input pixel center and applies its Jacobian
+        // at the output sample. Do not apply the correction to an already exact
+        // per-output projection (that would count the displacement twice).
+        float2 anchorUV = (float2(renderCoord)+0.5)*_RenderSize.zw;
+        float2 screen = (anchorUV - jitterUV) * 2.0 - 1.0;
 #if UNITY_UV_STARTS_AT_TOP
         screen.y = -screen.y;
 #endif
@@ -105,6 +109,9 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 #if UNITY_UV_STARTS_AT_TOP
         snapshotUV.y = 1.0 - snapshotUV.y;
 #endif
+        float2x2 jacobian = TSR_PersistentVelocityJacobian(_ClipToPersistentClip, rcp(max(clip.w,1e-8)), _RenderSize.xy);
+        float2 offset = (uv-anchorUV)*_RenderSize.xy;
+        snapshotUV += (offset-mul(offset,jacobian))*_RenderSize.zw;
         snapshotUV += _PersistentParams.yz;
         float2 halfTexel = 0.5 / previousSize;
         if (clip.w > 0.0 && all(snapshotUV >= halfTexel) && all(snapshotUV <= 1.0-halfTexel))

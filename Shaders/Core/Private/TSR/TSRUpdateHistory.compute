@@ -33,6 +33,8 @@ RWTexture2D<float4> _HistoryLossDiagnostics;
 float4 _RenderSize;
 float4 _OutputSize;
 float4 _TSRParams;
+float4 _Jitter;
+float4x4 _ClipToPersistentClip;
 
 
 
@@ -85,6 +87,22 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float idealContribution = TSR_InputAlignment(inputToHistoryFactor, inputDelta) * hysteresis;
     float previousValidity = accepted > 0.5 ? saturate(previousSampleCount / maxSampleCount) : 0.0;
     float2 control = saturate(_HistoryWeightControl[pixelCoord].xy);
+    if (resurrected)
+    {
+        float2 jitterUV = _Jitter.xy*0.5;
+#if UNITY_UV_STARTS_AT_TOP
+        jitterUV.y = -jitterUV.y;
+#endif
+        float2 screen = ((float2(renderCoord)+0.5)*_RenderSize.zw-jitterUV)*2.0-1.0;
+#if UNITY_UV_STARTS_AT_TOP
+        screen.y = -screen.y;
+#endif
+        float4 clip = mul(_ClipToPersistentClip,float4(screen,_DilatedDepth[renderCoord],1.0));
+        float2x2 jacobian = TSR_PersistentVelocityJacobian(_ClipToPersistentClip,rcp(max(clip.w,1e-8)),_RenderSize.xy);
+        // UE min(LowFrequencyRejection, ReprojectionUpscaleCorrection), before
+        // converting confidence into blend weights. This is not sample-count decay.
+        control.x = min(control.x,TSR_PersistentUpscaleConfidence(jacobian));
+    }
     if (stationaryShadingChange)
         control.y = 1.0;
     // UE defaults: rejection retains two samples, motion retains four samples.

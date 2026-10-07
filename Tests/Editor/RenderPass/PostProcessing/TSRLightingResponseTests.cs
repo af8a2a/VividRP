@@ -554,6 +554,7 @@ namespace VividRP.Editor.Tests
         private sealed class ReprojectionResult
         {
             internal float persistentSamples, persistentRed, primarySamples;
+            internal float[] persistentMetadata;
             public int outputSize, paddedSize, statePixels, invalidPixels, filteredColorPixels;
             public float shiftPixels;
             public float constantColorMaxError;
@@ -587,7 +588,7 @@ namespace VividRP.Editor.Tests
         }
 
         private static ReprojectionResult InspectReprojectedState(int outputSize, float shiftPixels, bool hasHistory, bool waveOps,
-            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f, bool persistent = false, float persistentExposure = 1f, float snapshotClipOffset = 0f, float snapshotDepth = .5f)
+            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f, bool persistent = false, float persistentExposure = 1f, float snapshotClipOffset = 0f, float snapshotDepth = .5f, Matrix4x4? persistentTransform = null)
         {
             const int renderSize = 8;
             int paddedSize = (outputSize + 7) / 8 * 8;
@@ -641,7 +642,7 @@ namespace VividRP.Editor.Tests
                 historyMeta.SetPixelData(metadata, 0); historyMeta.Apply(false, false);
                 var resurrectionMeta = InputTexture(outputSize, 2, 0);
                 var historyOut = OutputTexture(4); var historyMetaOut = OutputTexture(2);
-                var resurrectionOut = OutputTexture(4); var resurrectionMetaOut = OutputTexture(2);
+                var resurrectionOut = OutputTexture(4); var resurrectionMetaOut = OutputTexture(4);
                 using (var clear = new CommandBuffer())
                 {
                     foreach (var target in new[] { historyOut, historyMetaOut, resurrectionOut, resurrectionMetaOut })
@@ -666,7 +667,7 @@ namespace VividRP.Editor.Tests
                 shader.SetTexture(kernel, "_ThinGeometryCoverage", zero); shader.SetTexture(kernel, "_LumaInstability", zero);
                 shader.SetTexture(kernel, "_HistoryColor", sourceColor); shader.SetTexture(kernel, "_HistoryMeta", historyMeta);
                 shader.SetVector("_PersistentParams", new Vector4(persistent ? 1 : 0, 0, 0, 0));
-                shader.SetMatrix("_ClipToPersistentClip", Matrix4x4.Translate(new Vector3(snapshotClipOffset, 0, 0)));
+                shader.SetMatrix("_ClipToPersistentClip", persistentTransform ?? Matrix4x4.Translate(new Vector3(snapshotClipOffset, 0, 0)));
                 shader.SetTexture(kernel, "_PersistentHistoryColor", sourceColor);
                 var persistentMeta = InputTexture(outputSize, 2, 0);
                 var persistentValues = new float[outputSize * outputSize * 2];
@@ -689,7 +690,8 @@ namespace VividRP.Editor.Tests
                 float[] colors = Read(resurrectionOut), mainMetadata = Read(historyMetaOut), cacheMetadata = Read(resurrectionMetaOut);
                 float[] mainColors = Read(historyOut);
                 int center = (outputSize / 2) * paddedSize + outputSize / 2;
-                result.persistentSamples = cacheMetadata[center * 2];
+                result.persistentMetadata = cacheMetadata;
+                result.persistentSamples = cacheMetadata[center * 4];
                 result.persistentRed = colors[center * 4];
                 result.primarySamples = mainMetadata[center * 2];
                 for (int y = 0; y < paddedSize; y++) for (int x = 0; x < paddedSize; x++)
@@ -698,7 +700,7 @@ namespace VividRP.Editor.Tests
                     if (x >= outputSize || y >= outputSize)
                     {
                         for (int c = 0; c < 4; c++) result.paddingUntouched &= colors[pixel * 4 + c] == -17;
-                        for (int c = 0; c < 2; c++) result.paddingUntouched &= mainMetadata[pixel * 2 + c] == -17 && cacheMetadata[pixel * 2 + c] == -17;
+                        for (int c = 0; c < 2; c++) result.paddingUntouched &= mainMetadata[pixel * 2 + c] == -17 && cacheMetadata[pixel * 4 + c] == -17;
                         continue;
                     }
                     float statePixelX = x + 0.5f + shiftPixels;
@@ -712,7 +714,7 @@ namespace VividRP.Editor.Tests
                     result.stateGrid[y * outputSize + x] = colors[pixel * 4 + 3];
                     result.statesMatch &= colors[pixel * 4 + 3] == expectedState;
                     result.metadataMatch &= Mathf.Abs(mainMetadata[pixel * 2] - (validColor ? 16 : 0)) < 0.003f
-                        && cacheMetadata[pixel * 2] == 0 && cacheMetadata[pixel * 2 + 1] == 0;
+                        && cacheMetadata[pixel * 4] == 0 && cacheMetadata[pixel * 4 + 1] == 0;
                     if (!validState && validColor) result.stateOnlyInvalidPixels++;
                     if (validState && !validColor) result.colorOnlyInvalidPixels++;
                     if (validColor)
@@ -873,6 +875,265 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(1f, 0f, 0f, 1f)]
+        [TestCase(.5f, 0f, 0f, 1f)]
+        [TestCase(1.5f, .2f, -.15f, 1f)]
+        [TestCase(.8f, -.3f, .1f, 1f)]
+        [TestCase(1f, .2f, -.15f, 1.5f)]
+        [TestCase(.8f, -.3f, .1f, .75f)]
+        public void ResurrectionJacobian_CorrectsOutputOffsetsAtNonIntegerScale(float scale, float shearX, float shearY, float homogeneousW)
+        {
+            var transform = Matrix4x4.identity;
+            transform.m00 = scale; transform.m11 = scale;
+            transform.m01 = shearX; transform.m10 = shearY;
+            transform.m22 = homogeneousW; transform.m33 = homogeneousW;
+            var result = InspectReprojectedState(13, 0, true, false, persistent: true, persistentTransform: transform);
+            const int padded = 16;
+            float flip = SystemInfo.graphicsUVStartsAtTop ? -1 : 1;
+            float Quantize(float v)
+            {
+                v = Mathf.Clamp(v, -2, 2);
+                float decoded = Mathf.Floor(Mathf.Sign(v) * Mathf.Sqrt(Mathf.Abs(v) * 2) * 63.5f + 127.5f) * (2f / 127) - 2;
+                return decoded * Mathf.Abs(decoded) * .5f;
+            }
+            var dx = new Vector2(Quantize(1 - scale / homogeneousW), Quantize(-shearY * flip / homogeneousW));
+            var dy = new Vector2(Quantize(-shearX * flip / homogeneousW), Quantize(1 - scale / homogeneousW));
+            int checkedPixels = 0;
+            for (int y = 2; y < 11; y++) for (int x = 2; x < 11; x++)
+            {
+                int index = (y * padded + x) * 4;
+                if (result.persistentMetadata[index] == 0) continue;
+                var uv = new Vector2((x + .5f) / 13, (y + .5f) / 13);
+                var anchor = new Vector2((Mathf.Floor(uv.x * 8) + .5f) / 8, (Mathf.Floor(uv.y * 8) + .5f) / 8);
+                var clip = transform * new Vector4(anchor.x * 2 - 1, (anchor.y * 2 - 1) * flip, .5f, 1);
+                var projected = new Vector2(clip.x / clip.w * .5f + .5f, clip.y / clip.w * flip * .5f + .5f);
+                Vector2 offset = (uv - anchor) * 8;
+                Vector2 expected = uv - projected - (offset - offset.x * dx - offset.y * dy) / 8;
+                Assert.That(result.persistentMetadata[index + 2], Is.EqualTo(expected.x).Within(2e-5f));
+                Assert.That(result.persistentMetadata[index + 3], Is.EqualTo(expected.y).Within(2e-5f));
+                checkedPixels++;
+            }
+            Assert.That(checkedPixels, Is.GreaterThan(20));
+        }
+
+        [TestCase(.5f)]
+        [TestCase(.75f)]
+        public void ResurrectionJacobian_LimitsAccumulationWhenHistoryIsMagnified(float scale)
+        {
+            using var fixture = new Fixture();
+            var input = new Input { Current = Gray(.8f), History = Gray(.1f), Resurrection = Gray(.8f),
+                HistorySamples = 0, ResurrectionFrames = 16, NeighborhoodLow = .8f, NeighborhoodHigh = .8f,
+                EvaluateResurrection = true };
+            Snapshot identity = fixture.Run(input);
+            input.PersistentTransform = Matrix4x4.Scale(new Vector3(scale, scale, 1));
+            Snapshot magnified = fixture.Run(input);
+            Assert.That(magnified.Accepted, Is.EqualTo(1));
+            Assert.That(magnified.SampleCount, Is.LessThan(identity.SampleCount * .5f));
+            Assert.That(magnified.Updated.r, Is.EqualTo(identity.Updated.r).Within(.002f));
+        }
+
+        // Independent whole-image CPU oracle. This uses unclipped float arrays and
+        // image convolutions rather than the GPU's tiles, shared-memory indexing,
+        // resource reuse, or median sorting network.
+        private sealed class RejectionGrid
+        {
+            internal readonly int Width, Height;
+            internal readonly Vector3[] Values;
+            internal RejectionGrid(int width, int height) { Width = width; Height = height; Values = new Vector3[width * height]; }
+            internal Vector3 this[int x, int y] { get => Values[y * Width + x]; set => Values[y * Width + x] = value; }
+            internal RejectionGrid Map(Func<int, int, Vector3> f)
+            {
+                var r = new RejectionGrid(Width - 2, Height - 2);
+                for (int y = 0; y < r.Height; y++) for (int x = 0; x < r.Width; x++) r[x, y] = f(x + 1, y + 1);
+                return r;
+            }
+            internal Vector3 Min(int x, int y) => Reduce(x, y, true);
+            internal Vector3 Max(int x, int y) => Reduce(x, y, false);
+            private Vector3 Reduce(int x, int y, bool minimum)
+            {
+                Vector3 r = this[x, y];
+                for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++)
+                    r = minimum ? Vector3.Min(r, this[x + i, y + j]) : Vector3.Max(r, this[x + i, y + j]);
+                return r;
+            }
+            internal Vector3 Blur(int x, int y)
+            {
+                Vector3 r = Vector3.zero;
+                for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) r += this[x + i, y + j] * ((i == 0 ? 2 : 1) * (j == 0 ? 2 : 1) / 16f);
+                return r;
+            }
+            internal Vector3 Variation(int x, int y)
+            {
+                Vector3 sum = Vector3.zero;
+                for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) if (i != 0 || j != 0) sum += this[x + i, y + j];
+                return Abs(this[x, y] - sum / 8);
+            }
+            internal Vector3 Median(int x, int y)
+            {
+                var result = Vector3.zero;
+                for (int c = 0; c < 3; c++)
+                {
+                    var values = new float[9]; int n = 0;
+                    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) values[n++] = this[x + i, y + j][c];
+                    Array.Sort(values); result[c] = values[4];
+                }
+                return result;
+            }
+        }
+        private static Vector3 Abs(Vector3 v) => new(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
+        private static Vector3 Clamp3(Vector3 v, Vector3 lo, Vector3 hi) => Vector3.Min(Vector3.Max(v, lo), hi);
+        private static float Min3(Vector3 v) => Mathf.Min(v.x, Mathf.Min(v.y, v.z));
+        private static Vector3 Measurement(Color c)
+        {
+            float Convert(float v) { v = Mathf.Max(v, 0); return v * v / ((v + .17f) * (v + .17f)); }
+            return new Vector3(Convert(c.r), Convert(c.g), Convert(c.b));
+        }
+        private static Vector2[] ReferenceCandidateScore(Color[] input, Color[] candidate, int width, int height)
+        {
+            RejectionGrid Pad(Color[] source)
+            {
+                var r = new RejectionGrid(width + 12, height + 12);
+                for (int y = 0; y < r.Height; y++) for (int x = 0; x < r.Width; x++)
+                    r[x, y] = Measurement(source[Mathf.Clamp(y - 6, 0, height - 1) * width + Mathf.Clamp(x - 6, 0, width - 1)]);
+                return r;
+            }
+            var a = Pad(input); var b = Pad(candidate);
+            var a1 = a.Map((x, y) => Clamp3(a[x, y], b.Min(x, y), b.Max(x, y)));
+            var b1 = b.Map((x, y) => Clamp3(b[x, y], a.Min(x, y), a.Max(x, y)));
+            var a2 = a1.Map((x, y) => Clamp3(a[x + 1, y + 1], b1.Min(x, y), b1.Max(x, y)));
+            var b2 = b1.Map((x, y) => Clamp3(b[x + 1, y + 1], a1.Min(x, y), a1.Max(x, y)));
+            var diff = new RejectionGrid(a2.Width, a2.Height);
+            for (int y = 0; y < diff.Height; y++) for (int x = 0; x < diff.Width; x++) diff[x, y] = Abs(a[x + 2, y + 2] - a2[x, y]);
+            var variation = a2.Map((x, y) => Vector3.Min(a2.Variation(x, y), diff.Variation(x, y)));
+            var filteredA = a2.Map(a2.Blur); var filteredB = b2.Map(b2.Blur);
+            var delta = new RejectionGrid(filteredA.Width - 2, filteredA.Height - 2);
+            const float q = .5f / 1024;
+            var energy = filteredA.Map((x, y) =>
+            {
+                Vector3 range = a2.Max(x + 1, y + 1) - a2.Min(x + 1, y + 1);
+                Vector3 error = Vector3.Max(Vector3.Max(Vector3.one * q, variation.Blur(x, y)), range / 16) + Vector3.one * q;
+                Vector3 d = Vector3.Max(Abs(filteredA[x, y] - filteredB[x, y]), range / 4 + Vector3.one * (q / 2));
+                delta[x - 1, y - 1] = d;
+                return Abs(Clamp3(filteredB[x, y], filteredA.Min(x, y) - error, filteredA.Max(x, y) + error) - filteredB[x, y]);
+            });
+            Vector3 Factor(Vector3 e, Vector3 d) => new(Mathf.Clamp01(1 - e.x / d.x), Mathf.Clamp01(1 - e.y / d.y), Mathf.Clamp01(1 - e.z / d.z));
+            var confidence = new RejectionGrid(energy.Width, energy.Height);
+            for (int y = 0; y < energy.Height; y++) for (int x = 0; x < energy.Width; x++) confidence[x, y] = Vector3.one * Min3(Factor(energy[x, y], delta[x, y]));
+            var medianEnergy = energy.Map(energy.Median); var medianConfidence = confidence.Map(confidence.Median);
+            var result = new Vector2[width * height];
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+                result[y * width + x] = new Vector2(Min3(Factor(medianEnergy.Max(x + 1, y + 1), delta[x + 2, y + 2])), medianConfidence.Min(x + 1, y + 1).x);
+            return result;
+        }
+
+        [TestCase(8, 8, 0)] [TestCase(13, 11, 1)] [TestCase(17, 9, 2)]
+        [TestCase(13, 11, 3)] [TestCase(13, 11, 4)] [TestCase(13, 11, 5)]
+        [TestCase(13, 11, 6)]
+        public void ResurrectionNetwork_MatchesIndependentReferenceAtEveryPixel(int width, int height, int pattern)
+        {
+            int count = width * height;
+            var input = new Color[count]; var candidate = new Color[count]; var previous = new Color[count];
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            {
+                int at = y * width + x;
+                float v = .35f + .12f * Mathf.Sin(x * .7f) * Mathf.Cos(y * .5f);
+                input[at] = new Color(v, v * .7f, v * 1.2f, 1);
+                previous[at] = Gray(.005f);
+                float change = pattern == 0 ? 0 : .16f * Mathf.Sin(x * .4f + y * .3f);
+                candidate[at] = input[at] + new Color(change, -.4f * change, .6f * change, 0);
+                if (pattern == 2 && (x + y) % 2 == 0) candidate[at] *= .6f;
+                if (pattern == 3 && x > width / 2) candidate[at] = Gray(.03f);
+                if (pattern == 6)
+                {
+                    input[at] = Gray((x + y) % 2 == 0 ? .8f : .2f);
+                    previous[at] = Gray((x + y) % 2 == 0 ? .2f : .8f);
+                    candidate[at] = input[at];
+                }
+            }
+            Vector2[] expected = ReferenceCandidateScore(input, candidate, width, height);
+            Vector2[] previousExpected = ReferenceCandidateScore(input, previous, width, height);
+            var owned = new System.Collections.Generic.List<Object>();
+            try
+            {
+                Texture2D Source(Color[] data)
+                {
+                    var t = new Texture2D(width, height, GraphicsFormat.R32G32B32A32_SFloat, TextureCreationFlags.None);
+                    owned.Add(t); t.SetPixels(data); t.Apply(); return t;
+                }
+                Texture2D Constant(Color v)
+                {
+                    var data = new Color[count]; for (int i = 0; i < count; i++) data[i] = v; return Source(data);
+                }
+                RenderTexture Target(GraphicsFormat format, Color initial)
+                {
+                    var t = new RenderTexture(new RenderTextureDescriptor(width, height) { graphicsFormat = format,
+                        depthStencilFormat = GraphicsFormat.None, enableRandomWrite = true, msaaSamples = 1 });
+                    owned.Add(t); Assert.That(t.Create(), Is.True);
+                    using var cmd = new CommandBuffer(); cmd.SetRenderTarget(t); cmd.ClearRenderTarget(false, true, initial); Graphics.ExecuteCommandBuffer(cmd); return t;
+                }
+                var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                    "Packages/com.vivid.render-pipelines/Shaders/Core/Private/TSR/TSRRejectShading.compute"));
+                owned.Add(shader); int k = shader.FindKernel("CSSelectResurrection");
+                shader.SetVector("_RenderSize", new Vector4(width, height, 1f / width, 1f / height));
+                shader.SetVector("_OutputSize", new Vector4(width, height, 1f / width, 1f / height));
+                shader.SetTexture(k, "_InputColor", Source(input)); shader.SetTexture(k, "_ReprojectedHistoryColor", Source(previous));
+                shader.SetTexture(k, "_ReprojectedResurrectionColor", Source(candidate));
+                shader.SetTexture(k, "_ReprojectedResurrectionMeta", Constant(new Color(pattern == 4 ? 0 : 16, 1, 0, 0)));
+                shader.SetTexture(k, "_ReprojectionValidity", Constant(Color.white));
+                shader.SetTexture(k, "_LumaInstability", Constant(pattern == 5 ? Color.white : Color.clear));
+                shader.SetTexture(k, "_AcceptedHistoryColor", Target(GraphicsFormat.R32G32B32A32_SFloat, Color.clear));
+                shader.SetTexture(k, "_RejectionMask", Target(GraphicsFormat.R32_SFloat, pattern == 6 ? Color.white : Color.clear));
+                var control = Target(GraphicsFormat.R32G32B32A32_SFloat, new Color(0, 1, 0, 0));
+                shader.SetTexture(k, "_HistoryWeightControl", control);
+                shader.Dispatch(k, (width + 7) / 8, (height + 7) / 8, 1);
+                var read = AsyncGPUReadback.Request(control); read.WaitForCompletion(); Assert.That(read.hasError, Is.False);
+                var actual = read.GetData<float>(); int selected = 0, retained = 0;
+                Vector3 At(Color[] values, int x, int y) => Measurement(values[Mathf.Clamp(y, 0, height - 1) * width + Mathf.Clamp(x, 0, width - 1)]);
+                var closer = new bool[count];
+                int groupsX = (width + 7) / 8;
+                var needed = new bool[groupsX * ((height + 7) / 8)];
+                for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+                {
+                    int votes = 0;
+                    for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++)
+                    {
+                        float advantage = 0;
+                        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++)
+                        {
+                            Vector3 v = At(input, x + dx + i, y + dy + j);
+                            Vector3 d = Abs(v - At(previous, x + dx + i, y + dy + j)) - Abs(v - At(candidate, x + dx + i, y + dy + j));
+                            advantage += d.x + d.y + d.z;
+                        }
+                        if (advantage > .05f * 3 * 9) votes++;
+                    }
+                    int at = y * width + x;
+                    closer[at] = pattern != 4 && votes > 4;
+                    float previousScore = pattern == 6 ? previousExpected[at].x : 0;
+                    if (closer[at] && previousScore < .5f) needed[(y / 8) * groupsX + x / 8] = true;
+                }
+                for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+                {
+                    int at = y * width + x;
+                    float previousScore = pattern == 6 ? previousExpected[at].x : 0;
+                    // Repeated edge texels change the checker footprint. Score
+                    // these as well; only the interior is guaranteed to match.
+                    bool pick = closer[at] && needed[(y / 8) * groupsX + x / 8] && expected[at].x - previousScore > .1f;
+                    Assert.That(actual[at * 4 + 2], Is.EqualTo(pick ? 1 : 0), $"Selection at {x},{y}");
+                    if (closer[at] && !pick) retained++;
+                    if (!pick) continue;
+                    selected++;
+                    Assert.That(actual[at * 4], Is.EqualTo(expected[at].x).Within(.001f), $"Confidence at {x},{y}");
+                    Assert.That(actual[at * 4 + 1], Is.EqualTo(1 - expected[at].y).Within(.001f), $"Clamp confidence at {x},{y}");
+                }
+                if (pattern != 4 && pattern != 6) Assert.That(selected, Is.GreaterThan(0));
+                if (pattern == 6) Assert.That(retained, Is.GreaterThan(count / 2), "A good primary guide must survive obsolete low Guide confidence.");
+            }
+            finally
+            {
+                foreach (var resource in owned) { if (resource is RenderTexture t) t.Release(); Object.DestroyImmediate(resource); }
+            }
+        }
+
         [TestCase(true, 16f)]
         [TestCase(false, 16f)]
         [TestCase(true, 0f)]
@@ -918,6 +1179,7 @@ namespace VividRP.Editor.Tests
             internal Color NeighborhoodColorA = new Color(0.9f, 0.1f, 0.1f), NeighborhoodColorB = new Color(0.1f, 0.1f, 0.9f);
             internal Vector2Int NearbyDepthFeatureOffset;
             internal bool EvaluateResurrection;
+            internal Matrix4x4 PersistentTransform = Matrix4x4.identity;
             internal float GeometricValidity = 1f;
             internal float DepthError, MotionPixels, LumaInstability, HistorySamples = 16, HistoryDepth = 0.5f, ResurrectionFrames;
             internal float NeighborhoodLow = 0.1f, NeighborhoodHigh = 0.9f;
@@ -1153,6 +1415,8 @@ namespace VividRP.Editor.Tests
                 if (input.EvaluateResurrection)
                 {
                     kernel = reject.FindKernel("CSSelectResurrection");
+                    reject.SetTexture(kernel, "_LumaInstability", instability);
+                    reject.SetTexture(kernel, "_ReprojectionValidity", reprojectionValidity);
                     reject.SetTexture(kernel, "_InputColor", color);
                     reject.SetTexture(kernel, "_ReprojectedHistoryColor", history);
                     reject.SetTexture(kernel, "_ReprojectedResurrectionColor", resurrection);
@@ -1163,6 +1427,8 @@ namespace VividRP.Editor.Tests
                     reject.Dispatch(kernel, 1, 1, 1);
                 }
                 kernel = update.FindKernel("CS");
+                update.SetMatrix("_ClipToPersistentClip", input.PersistentTransform);
+                update.SetVector("_Jitter", Vector4.zero);
                 update.SetVector("_TSRParams", new Vector4(input.HistorySamples > 0 ? 1 : 0, 16, 0, 0));
                 if (input.WeightControl.HasValue)
                     SetConstant(weightControlOverride, 2, input.WeightControl.Value.x, input.WeightControl.Value.y);

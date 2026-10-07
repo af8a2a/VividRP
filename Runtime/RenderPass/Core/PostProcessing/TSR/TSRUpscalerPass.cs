@@ -765,6 +765,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = data.Shaders.RejectShading;
             int kernel = data.Shaders.SelectResurrectionKernel;
             SetCommonConstants(cmd, shader, data);
+            cmd.SetComputeTextureParam(shader, kernel, LumaInstabilityId, data.LumaInstability);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
             cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
@@ -925,6 +927,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetCommonConstants(cmd, shader, data);
             cmd.SetComputeBufferParam(shader, kernel, FramePreExposureId, data.FramePreExposure);
             cmd.SetComputeTextureParam(shader, kernel, OutputPreExposureId, data.CurrentPreExposure);
+            cmd.SetComputeMatrixParam(shader, ClipToPersistentId, data.ClipToPersistent);
             cmd.SetComputeTextureParam(shader, kernel, CurrentFrameColorId, data.SpatialAntiAliasedColor);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);

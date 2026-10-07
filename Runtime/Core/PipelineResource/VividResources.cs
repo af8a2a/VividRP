@@ -259,7 +259,7 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/Debug/ReflectionProbeAtlasDebug")]
         public Shader ReflectionProbeAtlasDebugShader;
 
-        [VividResourcePath("Shaders/VirtualShadowMap/Debug/VSMDebug")]
+        [VividResourcePath("Shaders/Core/Private/VirtualShadowMap/Debug/VSMDebug")]
         public Shader VSMDebugShader;
 
         [VividResourcePath("Shaders/Core/Private/Debug/MaterialDebug")]

@@ -1251,7 +1251,7 @@ namespace VividRP.Editor.Tests
             string source = File.ReadAllText(path);
             // VSM implementations are included by the shared CSM/VSM entry point.
             return System.Text.RegularExpressions.Regex.Replace(source,
-                @"#include ""Packages/com\.vivid\.render-pipelines/(Shaders/VirtualShadowMap/Private/[^""]+)""",
+                @"#include ""Packages/com\.vivid\.render-pipelines/(Shaders/Core/Private/VirtualShadowMap/[^""]+)""",
                 match => File.ReadAllText(Path.Combine(package.resolvedPath, match.Groups[1].Value)));
         }
 

@@ -24,28 +24,26 @@
 
 调试 Pass 保留 `VividRP.Runtime.RenderPass.Core` 命名空间，避免改变已有 RenderGraph 的序列化类型身份及生成节点注册。
 
-## Shader
+## Shader（2026-10-07 收束）
 
-根目录：`Shaders/VirtualShadowMap/`。
+生产 Shader 归入 `Shaders/Core`，按访问边界与职责组织：
 
-| 目录 / 文件 | 职责 |
+| 目录（相对 `Shaders/Core`） | 职责 / 文件 |
 | --- | --- |
-| `Public/VividVirtualShadowMapAddressing.hlsl` | 共享虚拟页寻址、receiver mask 和页层级寻址/归约 |
-| `Public/VividVirtualShadowMapProjection.hlsl` | 投影 ABI 和坐标变换 |
-| `Public/VividVirtualShadowMapCaster.hlsl` | Caster 多层深度插入 |
-| `Private/VSMPageDefinitions.hlsl` | 页标志、请求优先级及调试统计定义 |
-| `Private/VSMPageCulling.hlsl` | caster 投影、补绘矩形裁剪及最多 2×2 节点的 PageFlags/receiver mask 查询，供源裁剪与最终分页共享 |
-| `Private/VSMPageManagement.hlsl` | Meshlet 页请求、分配、重映射、失效、清页、占用归约和 PageFlags/mask 层级裁剪 |
-| `Private/VSMPageMarking.hlsl` | 独立末层粗页和接收点请求生成；逐层合并 SMRT 和 PCF footprint，保留独立角色与完整回退链 |
-| `Private/VSMPhysicalSampling.hlsl` | 页解析、深度层读取、虚拟采样 |
-| `Private/VSMReceiverNormal.hlsl` | 接收面法线重建 |
-| `Private/VSMReceiverResolve.hlsl` | 接收面偏移、PCF、层间过渡和阴影求值 |
-| `Private/VSMReceiverQuality.hlsl` | 接收面覆盖、密度和层级选择 |
-| `Private/VSMSMRT.hlsl` | 多层深度 SMRT 遮挡查询和渐进采样；生产自适应使用独立 kernel，现有 Volume 开关控制波级提前退出 |
-| `Private/VSMFiltering.hlsl` | 双边滤波、历史重投影和时间积累 |
-| `Private/VSMReceiverDebug.hlsl`、`Debug/VSMDebug.shader` | 接收面与页池可视化 |
+| `Public/Shadow/VirtualShadowMap/` | 跨模块接口：`VividVirtualShadowMapAddressing.hlsl` 页表/receiver mask 寻址，`VividVirtualShadowMapProjection.hlsl` 投影 ABI，`VividVirtualShadowMapCaster.hlsl` 深度写入接口 |
+| `Private/VirtualShadowMap/Paging/` | `VSMPageDefinitions` 页标志与统计，`VSMPageMarking` 接收点请求，`VSMPageManagement` 分配、重映射、清页与提交 |
+| `Private/VirtualShadowMap/Cache/` | `VSMCacheInvalidation` 缓存失效；`VSMPerformanceThrottle` 生产负载节流 |
+| `Private/VirtualShadowMap/Culling/` | `VSMPageCulling` 层级页裁剪，`VSMGeometryBounds` 投影包围盒，`VSMViewCompaction` 工作视图压缩，`VSMHZB` 阴影层级深度 |
+| `Private/VirtualShadowMap/Projection/` | `VSMPhysicalSampling` 物理采样；`VSMReceiverNormal/Quality/Resolve` 接收面、选层和求值；`VSMFiltering` 阴影过滤 |
+| `Private/VirtualShadowMap/SMRT/` | `VSMSMRT` 射线采样与 `VSMSMRTTraceTemplate` Trace 模板 |
+| `Private/VirtualShadowMap/Debug/` | `VSMDebug.shader`、`VSMPageDebug`、`VSMReceiverDebug` 页池/接收点可视化 |
+| `Private/VirtualShadowMap/ReferenceVSM/` | 本地 UE 参考代码，原样保留并继续忽略 Git；不参与生产编译 |
 
-`Private` 模块依赖共享 compute 入口声明的资源和辅助函数，按入口中的 include 顺序编译。添加 shader 功能时，在这些模块中实现；当前 kernel 声明仍由共享入口统一维护。
+Public 仅暴露共享数据和 caster/寻址契约；页管理、SMRT、过滤和调试实现属于 Private。GPUDriven 的内部裁剪入口可以依赖 Core Private 裁剪模块；材质 caster 使用 Public 接口。
+
+本轮仅调整目录和引用，保留文件 GUID、shader 名称、kernel 名称及顺序。`Private` 模块仍依赖 compute 入口声明的资源和辅助函数，维持原 include 顺序。共用入口 `Shaders/Core/Private/CSMShadowResolve.compute` 保持原位置，未在目录整理中拆分其 CSM/VSM kernel。
+
+调试资源名为 `Shaders/Core/Private/VirtualShadowMap/Debug/VSMDebug`；由 `VividResources` 声明并通过 `PipelineResourceUpdater` 同步资源容器。
 
 ## 共用入口与集成点
 
@@ -204,4 +202,4 @@ GPU-driven 定向光 VSM 的生产入口为 `GPUInstanceCulling::CSVSMHierarchy`
 
 ## SMRT 成本诊断（2026-09-17）
 
-`VIVID_VSM_SMRT_COST` 仅为新增 `VSMReceiverCost` 入口启用计数，源码仍位于 `Shaders/VirtualShadowMap/Private`。Editor 的 `SMRTCostCapture` 负责一次性读回的统计归约，`VividDiagnostics` 暴露 `smrt-cost` 操作。钩子位于 raw resolve 与降噪之间，默认无订阅/派发。见 [使用说明](SMRTCostDiagnostics.md) 与 [实测报告](../Temp~/VSM/Roadmap~/Experiments/SMRTCost_20260917/README.md)。
+`VIVID_VSM_SMRT_COST` 仅为新增 `VSMReceiverCost` 入口启用计数，源码仍位于 `Shaders/Core/Private/VirtualShadowMap`。Editor 的 `SMRTCostCapture` 负责一次性读回的统计归约，`VividDiagnostics` 暴露 `smrt-cost` 操作。钩子位于 raw resolve 与降噪之间，默认无订阅/派发。见 [使用说明](SMRTCostDiagnostics.md) 与 [实测报告](../Temp~/VSM/Roadmap~/Experiments/SMRTCost_20260917/README.md)。

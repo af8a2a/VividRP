@@ -50,8 +50,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialCoverage.hlsl"
-            #include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapCaster.hlsl"
-            #include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapProjection.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapCaster.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapProjection.hlsl"
 
             #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
             #include "UnityIndirect.cginc"

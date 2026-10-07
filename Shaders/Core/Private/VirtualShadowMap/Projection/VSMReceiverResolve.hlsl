@@ -260,7 +260,7 @@ float VSMTransitionWeight(float edge, float border)
     return t * t * (3.0 - 2.0 * t);
 }
 
-#include "VSMSMRT.hlsl"
+#include "../SMRT/VSMSMRT.hlsl"
 
 // Reproject the original world receiver (including THIS level's normal bias)
 // at every fallback level. Reusing a fine UV/depth or shifting a physical texel
@@ -296,7 +296,7 @@ bool TryEvaluateVSMProjection(VSMReceiverProjection prepared, int index,
 }
 
 #include "VSMReceiverQuality.hlsl"
-#include "VSMPageMarking.hlsl"
+#include "../Paging/VSMPageMarking.hlsl"
 
 // UE SampleVirtualShadowMapDirectional: one mapped point comparison, including
 // its coarse page and optimal slope bias. No PCF footprint or receiver-mask gate.
@@ -431,7 +431,7 @@ void ResolveVSMScreenPixel(uint3 id)
 }
 
 #if defined(VIVID_VSM_RECEIVER_DEBUG)
-#include "VSMReceiverDebug.hlsl"
+#include "../Debug/VSMReceiverDebug.hlsl"
 #endif
 
 #if defined(VIVID_VSM_SMRT_COST)

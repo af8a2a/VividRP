@@ -112,7 +112,7 @@ Shader "Hidden/VividRP/VSMDebug"
             #pragma vertex Vert
             #pragma fragment Frag
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
-            #include "../Private/VSMPageDefinitions.hlsl"
+            #include "../Paging/VSMPageDefinitions.hlsl"
             #include "VSMPageDebug.hlsl"
 
             StructuredBuffer<uint> _VSMPrototypePageTable;

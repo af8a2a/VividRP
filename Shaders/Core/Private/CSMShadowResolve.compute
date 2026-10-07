@@ -73,8 +73,8 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapAddressing.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapProjection.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapAddressing.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapProjection.hlsl"
 
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
@@ -217,9 +217,9 @@ static const float kPCSSGoldenAngle = 2.39996323;
 static const float kPCSSTwoPi = 6.28318531;
 static const float kDegreesToRadians = 0.01745329251;
 static const float kFixedUniformDepthBias = 1.0 / 65536.0;
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPageDefinitions.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Paging/VSMPageDefinitions.hlsl"
 
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPageManagement.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Paging/VSMPageManagement.hlsl"
 
 bool IsSkyPixel(float deviceDepth)
 {
@@ -317,7 +317,7 @@ float3 ReconstructWorldPosition(uint2 pixelCoord, float deviceDepth)
     return ComputeWorldSpacePosition(uv, deviceDepth, _CSMInvViewProjMatrix);
 }
 
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMReceiverNormal.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMReceiverNormal.hlsl"
 
 int SelectCascade(float3 positionWS, out float distFromSphere)
 {
@@ -436,7 +436,7 @@ int2 ShadowUVToTexelCoord(float2 shadowUV, int cascadeIndex)
     return int2(saturate(shadowUV) * (GetShadowMapResolution(cascadeIndex) - 1));
 }
 
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMPhysicalSampling.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMPhysicalSampling.hlsl"
 
 float SampleCSMShadowMap(float2 shadowUV, float depth, int cascadeIndex)
 {
@@ -1208,9 +1208,9 @@ void CSMShadowBilateralFilterV(
     _CSMShadowFilterTexture[pixelCoord] = FilterCSMShadow(pixelCoord, int2(0, 1));
 }
 
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMFiltering.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMFiltering.hlsl"
 
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMReceiverResolve.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMReceiverResolve.hlsl"
 
 [numthreads(8, 8, 1)]
 void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)

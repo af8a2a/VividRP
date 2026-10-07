@@ -84,11 +84,11 @@ void VSMCompleteProductionFeedback(uint3 id : SV_DispatchThreadID)
 
 // 1 keeps the qualified per-page path; larger values enable experimental windows.
 int _VSMRasterWindowPages;
-#include "VSMPageCulling.hlsl"
-#include "VSMHZB.hlsl"
-#include "VSMCacheInvalidation.hlsl"
+#include "../Culling/VSMPageCulling.hlsl"
+#include "../Culling/VSMHZB.hlsl"
+#include "../Cache/VSMCacheInvalidation.hlsl"
 #if defined(VIVID_VSM_COMPACT_VIEWS)
-#include "VSMViewCompaction.hlsl"
+#include "../Culling/VSMViewCompaction.hlsl"
 RWStructuredBuffer<uint> _VSMPageCullDispatchArgsRW;
 #endif
 
@@ -2073,7 +2073,7 @@ void VSMClearReceiverRequestsUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeCl
 [numthreads(64, 1, 1)]
 void VSMResetReceiverFeedbackUE(uint3 id : SV_DispatchThreadID) { VSMPrototypeResetReceiverFeedback(id); }
 
-#include "VSMPerformanceThrottle.hlsl"
+#include "../Cache/VSMPerformanceThrottle.hlsl"
 
 #if defined(VIVID_VSM_CLUSTER_FEEDBACK)
 [numthreads(64, 1, 1)]

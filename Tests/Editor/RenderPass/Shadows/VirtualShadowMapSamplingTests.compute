@@ -452,7 +452,7 @@ VSMSMRTSample VSMSMRTFindSample(inout VSMTraceHistoryTestState state, float time
     return sample;
 }
 #define VIVID_SMRT_TEMPLATE_RAY_STRUCT VSMTraceHistoryTestState
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Private/VSMSMRTTraceTemplate.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/SMRT/VSMSMRTTraceTemplate.hlsl"
 #undef VIVID_SMRT_TEMPLATE_RAY_STRUCT
 
 [numthreads(64, 1, 1)]

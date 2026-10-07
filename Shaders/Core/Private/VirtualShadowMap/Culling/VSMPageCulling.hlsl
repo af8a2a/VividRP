@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_VSM_PAGE_CULLING_INCLUDED
 #define VIVIDRP_VSM_PAGE_CULLING_INCLUDED
 
-#include "../Public/VividVirtualShadowMapAddressing.hlsl"
+#include "../../../Public/Shadow/VirtualShadowMap/VividVirtualShadowMapAddressing.hlsl"
 #include "VSMGeometryBounds.hlsl"
 
 StructuredBuffer<uint3> _VSMPageCullHierarchy;
@@ -95,8 +95,8 @@ bool VividVSMHierarchyOverlaps(uint level, uint axis,
 // Only the VSM variants of the generic GPU-driven shaders own these bindings.
 // Main-view and CSM kernels have no dependency on VSM resources or stale globals.
 #if defined(VIVID_VSM_EARLY_CULL)
-#include "../Public/VividVirtualShadowMapProjection.hlsl"
-#include "VSMPageDefinitions.hlsl"
+#include "../../../Public/Shadow/VirtualShadowMap/VividVirtualShadowMapProjection.hlsl"
+#include "../Paging/VSMPageDefinitions.hlsl"
 StructuredBuffer<uint4> _VSMUncachedPageRectBounds;
 float4 _VSMCasterCullingParameters; // pages per axis, page size, resolution, caster layer
 int _VSMReceiverMaskEnabled;

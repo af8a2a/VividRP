@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_VIRTUAL_SHADOW_MAP_CASTER_INCLUDED
 #define VIVIDRP_VIRTUAL_SHADOW_MAP_CASTER_INCLUDED
 
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapAddressing.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapAddressing.hlsl"
 
 #if defined(VIVID_VSM_CASTER) || defined(VIVID_VSM_PAGE_CASTER)
 RWTexture2DArray<uint> _VSMPrototypePhysicalPage : register(u0);

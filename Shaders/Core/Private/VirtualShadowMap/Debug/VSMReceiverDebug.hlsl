@@ -1,5 +1,5 @@
 // Included only by the opt-in VSMReceiverDebug kernel. No feedback or pool writes.
-#include "../Debug/VSMPageDebug.hlsl"
+#include "VSMPageDebug.hlsl"
 RWTexture2D<float4> _VSMReceiverDebugOutput;
 RWTexture2D<float4> _VSMReceiverDebugData;
 Texture2D<float> _VSMReceiverDebugShadow;

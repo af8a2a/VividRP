@@ -1,6 +1,6 @@
 # 定向光 SMRT：对齐 UE 的调用方式
 
-依据：用户提供的 `Shaders/VirtualShadowMap/ReferenceVSM` 快照，而非某个未经确认的 UE 发布版本。约束继续沿用：保留静态/动态独立 16 层的隐藏遮挡能力。第 1 项自适应调用已接入生产，见[实现与验证](../Temp~/VSM/Roadmap~/Experiments/SMRTAdaptiveProduction_20260918/README.md)；第 2 项准备复用已实现，见[等价与计时报告](../Temp~/VSM/Roadmap~/Experiments/SMRTReceiverPreparation_20260918/README.md)；第 3 项固定步点/视距长度已做[独立验证](../Temp~/VSM/Roadmap~/Experiments/SMRTFixedStepsViewLength_20260918/README.md)，存在明显遮挡质量代价，未切换生产。
+依据：用户提供的 `Shaders/Core/Private/VirtualShadowMap/ReferenceVSM` 快照，而非某个未经确认的 UE 发布版本。约束继续沿用：保留静态/动态独立 16 层的隐藏遮挡能力。第 1 项自适应调用已接入生产，见[实现与验证](../Temp~/VSM/Roadmap~/Experiments/SMRTAdaptiveProduction_20260918/README.md)；第 2 项准备复用已实现，见[等价与计时报告](../Temp~/VSM/Roadmap~/Experiments/SMRTReceiverPreparation_20260918/README.md)；第 3 项固定步点/视距长度已做[独立验证](../Temp~/VSM/Roadmap~/Experiments/SMRTFixedStepsViewLength_20260918/README.md)，存在明显遮挡质量代价，未切换生产。
 
 ## 核心差距
 
@@ -56,8 +56,8 @@
 
 ## 源码入口
 
-- [UE 定向光入口、选层、自适应](../Shaders/VirtualShadowMap/ReferenceVSM/VirtualShadowMapProjectionDirectional.ush)
-- [UE 步进与深度历史](../Shaders/VirtualShadowMap/ReferenceVSM/VirtualShadowMapSMRTTemplate.ush)
-- [UE 参数和随机采样](../Shaders/VirtualShadowMap/ReferenceVSM/VirtualShadowMapSMRTCommon.ush)
-- [UE 接收面与 screen-ray offset](../Shaders/VirtualShadowMap/ReferenceVSM/VirtualShadowMapProjection.usf)
-- [当前 SMRT](../Shaders/VirtualShadowMap/Private/VSMSMRT.hlsl)、[接收面求值](../Shaders/VirtualShadowMap/Private/VSMReceiverResolve.hlsl)、[CPU 绑定](../Runtime/RenderPass/Core/CSMShadowResolvePass.cs)
+- [UE 定向光入口、选层、自适应](../Shaders/Core/Private/VirtualShadowMap/ReferenceVSM/VirtualShadowMapProjectionDirectional.ush)
+- [UE 步进与深度历史](../Shaders/Core/Private/VirtualShadowMap/ReferenceVSM/VirtualShadowMapSMRTTemplate.ush)
+- [UE 参数和随机采样](../Shaders/Core/Private/VirtualShadowMap/ReferenceVSM/VirtualShadowMapSMRTCommon.ush)
+- [UE 接收面与 screen-ray offset](../Shaders/Core/Private/VirtualShadowMap/ReferenceVSM/VirtualShadowMapProjection.usf)
+- [当前 SMRT](../Shaders/Core/Private/VirtualShadowMap/SMRT/VSMSMRT.hlsl)、[接收面求值](../Shaders/Core/Private/VirtualShadowMap/Projection/VSMReceiverResolve.hlsl)、[CPU 绑定](../Runtime/RenderPass/Core/CSMShadowResolvePass.cs)

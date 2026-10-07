@@ -3,7 +3,7 @@
 #pragma kernel ClearReceiverMaskedCaster
 #pragma use_dxc
 #define VIVID_VSM_CASTER 1
-#include "Packages/com.vivid.render-pipelines/Shaders/VirtualShadowMap/Public/VividVirtualShadowMapCaster.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapCaster.hlsl"
 StructuredBuffer<uint4> _TestDepthInputs;
 uint _TestDepthInputCount;
 RWStructuredBuffer<uint4> _TestCasterResults;

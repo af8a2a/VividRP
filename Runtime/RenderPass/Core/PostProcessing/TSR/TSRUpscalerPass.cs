@@ -133,6 +133,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int TSRRejectionParamsId = Shader.PropertyToID("_TSRRejectionParams");
 
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
+        private readonly ShaderKeywordCache m_ShaderKeywords = new();
+        private ShaderSet m_KeywordShaders;
         private readonly List<EntityId> m_ExpiredCameraIds = new();
         private readonly RenderGraphTextureDesc m_OutputDescriptor =
             RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
@@ -197,6 +199,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             if (!TryResolveShaderSet(resources, out var shaders))
                 return false;
+
+            PrepareShaderKeywords(shaders);
 
             var renderSize = ResolveRenderSize(requestedRenderSize, sourceTexture, cameraData);
             var outputSize = ResolveOutputSize(requestedOutputSize, outputTexture, cameraData, renderSize);
@@ -380,6 +384,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
 #endif
                 passData.Shaders = shaders;
+                passData.ShaderKeywords = m_ShaderKeywords;
                 passData.FramePreExposure = renderGraph.ImportBuffer(framePreExposure ?? VividAutoExposureSystem.GetOrCreateDefaultExposureBuffer());
                 passData.PreviousPreExposure = handles.PreviousPreExposure;
                 passData.CurrentPreExposure = handles.CurrentPreExposure;
@@ -561,6 +566,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 m_CameraStates.Clear();
                 m_ExpiredCameraIds.Clear();
+                m_ShaderKeywords.Clear();
+                m_KeywordShaders = default;
             }
         }
 
@@ -606,6 +613,30 @@ namespace VividRP.Runtime.RenderPass.Core
 
             shaders = new ShaderSet(resources);
             return shaders.IsValid;
+        }
+
+        private void PrepareShaderKeywords(ShaderSet shaders)
+        {
+            if (m_KeywordShaders.DilateVelocity != shaders.DilateVelocity
+                || m_KeywordShaders.ReprojectHistory != shaders.ReprojectHistory
+                || m_KeywordShaders.RejectShading != shaders.RejectShading
+                || m_KeywordShaders.SpatialAntiAliasing != shaders.SpatialAntiAliasing
+                || m_KeywordShaders.UpdateHistory != shaders.UpdateHistory
+                || m_KeywordShaders.ResolveHistory != shaders.ResolveHistory
+                || m_KeywordShaders.Sharpen != shaders.Sharpen)
+            {
+                // Release cached references when pipeline resources replace the shader set.
+                m_ShaderKeywords.Clear();
+                m_KeywordShaders = shaders;
+            }
+
+            m_ShaderKeywords.Get(shaders.DilateVelocity);
+            m_ShaderKeywords.Get(shaders.ReprojectHistory);
+            m_ShaderKeywords.Get(shaders.RejectShading);
+            m_ShaderKeywords.Get(shaders.SpatialAntiAliasing);
+            m_ShaderKeywords.Get(shaders.UpdateHistory);
+            m_ShaderKeywords.Get(shaders.ResolveHistory);
+            m_ShaderKeywords.Get(shaders.Sharpen);
         }
 
         private static void Execute(CommandBuffer cmd, PassData data)
@@ -980,8 +1011,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static void SetCommonConstants(CommandBuffer cmd, ComputeShader shader, PassData data)
         {
-            SetKeyword(cmd, shader, TsrWaveOpsKeyword, data.EnableWaveOps);
-            SetKeyword(cmd, shader, TsrPairedGuidesKeyword, data.EnablePairedGuides);
+            var keywords = data.ShaderKeywords.Get(shader);
+            keywords.Set(cmd, shader, data.EnableWaveOps, data.EnablePairedGuides);
             cmd.SetComputeVectorParam(
                 shader,
                 RenderSizeId,
@@ -1033,16 +1064,53 @@ namespace VividRP.Runtime.RenderPass.Core
                 || deviceType == GraphicsDeviceType.Metal;
         }
 
-        private static void SetKeyword(CommandBuffer cmd, ComputeShader shader, string keywordName, bool enabled)
+        internal sealed class ShaderKeywordCache
         {
-            if (cmd == null || shader == null)
-                return;
+            private readonly Dictionary<ComputeShader, ShaderKeywords> m_Keywords = new(7);
 
-            var keyword = shader.keywordSpace.FindKeyword(keywordName);
-            if (!keyword.isValid)
-                return;
+            internal ShaderKeywords Get(ComputeShader shader)
+            {
+                if (shader == null)
+                    return default;
 
-            cmd.SetKeyword(shader, keyword, enabled);
+                var space = shader.keywordSpace;
+                if (!m_Keywords.TryGetValue(shader, out var keywords) || keywords.Space != space)
+                {
+                    // FindKeyword marshals the keyword name; only do it on initialization
+                    // or when reimporting the shader changes its keyword space.
+                    keywords = new ShaderKeywords(space);
+                    m_Keywords[shader] = keywords;
+                }
+
+                return keywords;
+            }
+
+            internal void Clear() => m_Keywords.Clear();
+        }
+
+        internal readonly struct ShaderKeywords
+        {
+            internal readonly LocalKeywordSpace Space;
+            internal readonly LocalKeyword WaveOps;
+            internal readonly LocalKeyword PairedGuides;
+
+            internal ShaderKeywords(LocalKeywordSpace space)
+            {
+                Space = space;
+                WaveOps = space.FindKeyword(TsrWaveOpsKeyword);
+                PairedGuides = space.FindKeyword(TsrPairedGuidesKeyword);
+            }
+
+            internal void Set(CommandBuffer cmd, ComputeShader shader, bool waveOps, bool pairedGuides)
+            {
+                if (cmd == null || shader == null)
+                    return;
+
+                if (WaveOps.isValid)
+                    cmd.SetKeyword(shader, WaveOps, waveOps);
+                if (PairedGuides.isValid)
+                    cmd.SetKeyword(shader, PairedGuides, pairedGuides);
+            }
         }
 
         private static Vector2Int ResolveRenderSize(
@@ -1342,6 +1410,7 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
             public CameraState State;
             public ShaderSet Shaders;
+            public ShaderKeywordCache ShaderKeywords;
             public BufferHandle FramePreExposure;
             public TextureHandle PreviousPreExposure;
             public TextureHandle CurrentPreExposure;

@@ -68,6 +68,9 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividTerrainData> m_CurrentReferencedTerrainData = new();
         private readonly List<VividTerrainData> m_TrackedTerrainData = new();
         private readonly List<bool> m_RendererRenderability = new();
+        private readonly Dictionary<EntityId, bool> m_MaterialProxyRenderabilityByObjectId = new(s_EntityIdComparer);
+        private MaterialProgramCatalogAsset m_RenderabilityFrozenCatalog;
+        private bool m_HasRenderabilityFrozenCatalog;
         private readonly List<VividInstanceData> m_PreviousInstanceData = new();
         private static readonly Dictionary<Shader, bool> s_SimpleForwardShaderMatchCache = new();
         private static Shader s_SimpleForwardShader;
@@ -127,6 +130,11 @@ namespace VividRP.Runtime.GPUDriven
             m_ChangedFallbackMaterialIds.Clear();
             m_ChangedTerrainDataIds.Clear();
             m_ChangedShadowSourceIds.Clear();
+            // Share validation within this build, including a failed skip check's
+            // subsequent rebuild. Revalidate next time so invalid proxies can recover
+            // and graph/catalog/content changes do not need a separate cache key.
+            m_RenderabilityFrozenCatalog = null;
+            m_HasRenderabilityFrozenCatalog = false;
             // Global changes cannot be explained by any object's resource journal.
             m_ShadowChangesRequireFullRefresh = !m_HasBuiltStaticData
                 || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
@@ -424,21 +432,48 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererDatabase database,
             IGPUDrivenTextureBackend textureBackend)
         {
-            if (!m_HasBuiltStaticData
-                || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
-                || m_PreviousDatabaseStructureRevision != database.StructureRevision
-                || m_PreviousDatabaseResourceRevision != database.ResourceRevision
-                || m_PreviousDatabaseInstanceRevision != database.InstanceRevision
-                || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision
-                || HaveRendererRenderabilityChanged(database))
+            using var canSkipBuildScope = RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildMarker.Auto();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildRevisionGateMarker.Auto())
             {
-                return false;
+                if (!m_HasBuiltStaticData
+                    || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
+                    || m_PreviousDatabaseStructureRevision != database.StructureRevision
+                    || m_PreviousDatabaseResourceRevision != database.ResourceRevision
+                    || m_PreviousDatabaseInstanceRevision != database.InstanceRevision
+                    || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision)
+                {
+                    return false;
+                }
             }
 
-            return !HaveTrackedMeshletAssetsChanged()
-                && !HaveTrackedMaterialProxiesChanged(textureBackend)
-                && !HaveFallbackMaterialsChanged(m_TrackedFallbackMaterials)
-                && !HaveTrackedTerrainDataChanged();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildRenderabilityMarker.Auto())
+            {
+                if (HaveRendererRenderabilityChanged(database))
+                    return false;
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildMeshletRevisionMarker.Auto())
+            {
+                if (HaveTrackedMeshletAssetsChanged())
+                    return false;
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildProxyRevisionMarker.Auto())
+            {
+                if (HaveTrackedMaterialProxiesChanged(textureBackend))
+                    return false;
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildFallbackRevisionMarker.Auto())
+            {
+                if (HaveFallbackMaterialsChanged(m_TrackedFallbackMaterials))
+                    return false;
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildTerrainRevisionMarker.Auto())
+            {
+                return !HaveTrackedTerrainDataChanged();
+            }
         }
 
         private bool HaveRendererRenderabilityChanged(
@@ -1025,7 +1060,7 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static bool IsRenderable(
+        private bool IsRenderable(
             in VividMeshletRendererRenderData trackedData,
             in VividMeshletRendererResources trackedResources
         )
@@ -1078,9 +1113,7 @@ namespace VividRP.Runtime.GPUDriven
                 {
                     GPUDrivenMaterialProxy materialProxy = materialProxies[proxyIndex];
                     if (materialProxy != null
-                        && !GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
-                            materialProxy,
-                            out _))
+                        && !IsMaterialProxyRenderable(materialProxy))
                     {
                         return false;
                     }
@@ -1088,6 +1121,31 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return true;
+        }
+
+        private bool IsMaterialProxyRenderable(GPUDrivenMaterialProxy materialProxy)
+        {
+            if (!m_HasRenderabilityFrozenCatalog)
+            {
+                // Clear lazily inside the renderability scan so its marker includes
+                // the scratch reset and scenes without proxies do not resolve a catalog.
+                m_MaterialProxyRenderabilityByObjectId.Clear();
+                // Resolve through the compiler so its default-catalog identity and
+                // RuntimeRevision validation caches remain in use by the overload.
+                m_RenderabilityFrozenCatalog = GPUDrivenMaterialCompiler.GetDefaultFrozenCatalog();
+                m_HasRenderabilityFrozenCatalog = true;
+            }
+
+            EntityId proxyId = materialProxy.GetEntityId();
+            if (m_MaterialProxyRenderabilityByObjectId.TryGetValue(proxyId, out bool isRenderable))
+                return isRenderable;
+
+            isRenderable = GPUDrivenMaterialCompiler.TryValidateMaterialProxy(
+                materialProxy,
+                m_RenderabilityFrozenCatalog,
+                out _);
+            m_MaterialProxyRenderabilityByObjectId.Add(proxyId, isRenderable);
+            return isRenderable;
         }
 
         private void ReserveMeshletSceneCapacity(VividGPUDrivenSceneData sceneData)

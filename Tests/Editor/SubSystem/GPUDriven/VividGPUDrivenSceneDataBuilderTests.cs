@@ -400,6 +400,7 @@ namespace VividRP.Editor.Tests
         public void Build_CullsRendererWhenBoundProxyBecomesInvalidAndRestoresWhenValid()
         {
             GameObject gameObject = null;
+            GameObject sharedProxyGameObject = null;
             Mesh mesh = null;
             Material material = null;
             VividMeshletCollectionAsset meshletCollection = null;
@@ -434,6 +435,15 @@ namespace VividRP.Editor.Tests
                     VividMeshletRendererDatabase.instance;
                 database.UpdateRendererData(meshletRenderer);
 
+                sharedProxyGameObject = CreateMeshletRendererObject(
+                    "DynamicProxyValidationSharedRenderer",
+                    mesh,
+                    new[] { material },
+                    out MeshletRenderer sharedProxyRenderer);
+                sharedProxyRenderer.SetMeshletCollections(new[] { meshletCollection });
+                sharedProxyRenderer.SetMaterialProxies(new[] { materialProxy });
+                database.UpdateRendererData(sharedProxyRenderer);
+
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
                 using var textureBackend = new ThrowOnceTextureBackend();
@@ -442,7 +452,7 @@ namespace VividRP.Editor.Tests
                     sceneData,
                     database,
                     textureBackend);
-                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
 
                 materialProxy.Model = GPUDrivenMaterialProxyModel.DualSlab;
                 Assert.That(
@@ -453,6 +463,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     staleRendererData.flags & VividMeshletRendererFlags.Valid,
                     Is.EqualTo(VividMeshletRendererFlags.Valid));
+
+                Assert.DoesNotThrow(() => builder.Build(
+                    sceneData,
+                    database,
+                    textureBackend));
+                Assert.That(sceneData.InstanceCount, Is.Zero);
 
                 Assert.DoesNotThrow(() => builder.Build(
                     sceneData,
@@ -472,13 +488,13 @@ namespace VividRP.Editor.Tests
                     sceneData,
                     database,
                     textureBackend));
-                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
             }
             finally
             {
                 DestroyTestObjects(
                     gameObject,
-                    null,
+                    sharedProxyGameObject,
                     material,
                     mesh,
                     meshletCollection,
@@ -2666,10 +2682,11 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void PrepareFrame_DoesNotAllocate_WhenFallbackAndProxyMaterialSceneIsStable()
+        [TestCase(1)]
+        [TestCase(16)]
+        public void PrepareFrame_DoesNotAllocate_WhenFallbackAndProxyMaterialSceneIsStable(int rendererCount)
         {
-            GameObject gameObject = null;
+            var gameObjects = new GameObject[rendererCount];
             Mesh mesh = null;
             Material material = null;
             VividMeshletCollectionAsset firstMeshletCollection = null;
@@ -2701,16 +2718,19 @@ namespace VividRP.Editor.Tests
                 materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
                 materialProxy.SourceMaterial = material;
 
-                gameObject = CreateMeshletRendererObject(
-                    "Renderer_StablePrepareFrame",
-                    mesh,
-                    new[] { material, material },
-                    out MeshletRenderer meshletRenderer);
-                meshletRenderer.SetMeshletCollections(
-                    new[] { firstMeshletCollection, secondMeshletCollection });
-                meshletRenderer.SetMaterialProxies(
-                    new[] { materialProxy, null });
-                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+                for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+                {
+                    gameObjects[rendererIndex] = CreateMeshletRendererObject(
+                        "Renderer_StablePrepareFrame",
+                        mesh,
+                        new[] { material, material },
+                        out MeshletRenderer meshletRenderer);
+                    meshletRenderer.SetMeshletCollections(
+                        new[] { firstMeshletCollection, secondMeshletCollection });
+                    meshletRenderer.SetMaterialProxies(
+                        new[] { materialProxy, null });
+                    VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+                }
 
                 using var system = new VividGPUDrivenSystem(new FakeBindlessTextureDescriptorAllocator(16));
                 system.PrepareFrame(reportStats: false);
@@ -2727,8 +2747,13 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                for (int rendererIndex = 0; rendererIndex < gameObjects.Length; rendererIndex++)
+                {
+                    if (gameObjects[rendererIndex] != null)
+                        Object.DestroyImmediate(gameObjects[rendererIndex]);
+                }
                 DestroyTestObjects(
-                    gameObject,
+                    null,
                     null,
                     material,
                     mesh,

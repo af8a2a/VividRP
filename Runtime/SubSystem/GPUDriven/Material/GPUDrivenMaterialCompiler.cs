@@ -141,7 +141,7 @@ namespace VividRP.Runtime.GPUDriven
             return s_BuiltinRuntimeBindings[(int) programIndex];
         }
 
-        private static MaterialProgramCatalogAsset GetDefaultFrozenCatalog()
+        internal static MaterialProgramCatalogAsset GetDefaultFrozenCatalog()
         {
             MaterialProgramCatalogAsset frozenCatalog =
                 MaterialProgramCatalogAsset.LoadDefault();

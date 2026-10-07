@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -83,6 +84,95 @@ namespace VividRP.Editor.Tests
             }
             long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(allocated, Is.Zero);
+        }
+
+        [TestCase(nameof(VividRPCoreResources.TSRDilateVelocityCompute))]
+        [TestCase(nameof(VividRPCoreResources.TSRReprojectHistoryCompute))]
+        [TestCase(nameof(VividRPCoreResources.TSRRejectShadingCompute))]
+        [TestCase(nameof(VividRPCoreResources.TSRSpatialAntiAliasingCompute))]
+        [TestCase(nameof(VividRPCoreResources.TSRUpdateHistoryCompute))]
+        [TestCase(nameof(VividRPCoreResources.TSRResolveHistoryCompute))]
+        [TestCase(nameof(VividRPCoreResources.TSRSharpenCompute))]
+        public void ShaderKeywords_StableLookupAndRecordingDoNotAllocate(string resourceField)
+        {
+            var shader = CloneTsrShader(resourceField);
+            using var cmd = new CommandBuffer();
+            var cache = new TSRUpscalerPass.ShaderKeywordCache();
+            try
+            {
+                var keywords = cache.Get(shader);
+                Assert.That(keywords.WaveOps.isValid, Is.True);
+                Assert.That(keywords.PairedGuides.isValid,
+                    Is.EqualTo(resourceField == nameof(VividRPCoreResources.TSRRejectShadingCompute)));
+                for (int i = 0; i < 32; i++)
+                {
+                    cache.Get(shader).Set(cmd, shader, (i & 1) != 0, (i & 2) != 0);
+                    cmd.Clear();
+                }
+
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; i++)
+                {
+                    cache.Get(shader).Set(cmd, shader, (i & 1) != 0, (i & 2) != 0);
+                    cmd.Clear();
+                }
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero, "Stable TSR keyword lookup and command recording must not allocate.");
+            }
+            finally
+            {
+                cache.Clear();
+                Object.DestroyImmediate(shader);
+            }
+        }
+
+        [Test]
+        public void ShaderKeywords_PreserveToggleStateAndShaderOwnership()
+        {
+            var first = CloneTsrShader(nameof(VividRPCoreResources.TSRRejectShadingCompute));
+            var second = Object.Instantiate(first);
+            using var cmd = new CommandBuffer();
+            var cache = new TSRUpscalerPass.ShaderKeywordCache();
+            try
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    bool waveOps = (i & 1) != 0;
+                    bool pairedGuides = (i & 2) != 0;
+                    var firstKeywords = cache.Get(first);
+                    var secondKeywords = cache.Get(second);
+                    Assert.That(firstKeywords.Space, Is.EqualTo(first.keywordSpace));
+                    Assert.That(secondKeywords.Space, Is.EqualTo(second.keywordSpace));
+                    firstKeywords.Set(cmd, first, waveOps, pairedGuides);
+                    secondKeywords.Set(cmd, second, !waveOps, !pairedGuides);
+                    Graphics.ExecuteCommandBuffer(cmd);
+                    cmd.Clear();
+                    Assert.That(first.IsKeywordEnabled(firstKeywords.WaveOps), Is.EqualTo(waveOps));
+                    Assert.That(first.IsKeywordEnabled(firstKeywords.PairedGuides), Is.EqualTo(pairedGuides));
+                    Assert.That(second.IsKeywordEnabled(secondKeywords.WaveOps), Is.EqualTo(!waveOps));
+                    Assert.That(second.IsKeywordEnabled(secondKeywords.PairedGuides), Is.EqualTo(!pairedGuides));
+                    cache.Clear();
+                }
+
+                var missing = cache.Get(null);
+                Assert.That(missing.WaveOps.isValid, Is.False);
+                Assert.That(missing.PairedGuides.isValid, Is.False);
+                missing.Set(cmd, null, true, true);
+            }
+            finally
+            {
+                cache.Clear();
+                Object.DestroyImmediate(first);
+                Object.DestroyImmediate(second);
+            }
+        }
+
+        private static ComputeShader CloneTsrShader(string resourceField)
+        {
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var source = (ComputeShader)typeof(VividRPCoreResources).GetField(resourceField).GetValue(resources);
+            Assert.That(source, Is.Not.Null, resourceField);
+            return Object.Instantiate(source);
         }
 
         [Test]

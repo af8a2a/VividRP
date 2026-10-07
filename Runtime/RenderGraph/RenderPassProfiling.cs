@@ -334,12 +334,14 @@ namespace VividRP.Runtime
             var graphName = ResolveGraphName(pass, displayName);
             displayName = ResolveDisplayName(graphName, passIndex);
             markers = new RenderPassProfilerMarkers(displayName, graphName);
+            RenderPassGpuProfiler.Register(pass, markers);
             s_Markers[key] = markers;
             return markers;
         }
 
         public static void Clear()
         {
+            RenderPassGpuProfiler.Clear();
             foreach (var markers in s_Markers.Values)
                 markers.Release();
 

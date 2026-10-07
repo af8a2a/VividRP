@@ -6,6 +6,7 @@
         "Unity.RenderPipelines.Core.Runtime",
         "Unity.RenderPipelines.Core.Runtime.Shared",
         "Unity.Mathematics",
+        "Unity.Profiling.Core",
         "Unity.Collections",
         "Unity.RenderPipelines.GPUDriven.Runtime",
         "Unity.Burst",

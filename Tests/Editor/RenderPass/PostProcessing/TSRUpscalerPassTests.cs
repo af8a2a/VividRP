@@ -86,6 +86,46 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PersistentHistory_RetainsIndependentFramesAndResetsOnCameraCut()
+        {
+            var go = new GameObject("TSR.PersistentHistory.Tests");
+            var camera = go.AddComponent<Camera>();
+            var history = camera.GetVividCameraHistory();
+            var state = new TSRUpscalerPass.CameraState();
+            var size = new Vector2Int(8, 8);
+            UnityEngine.Rendering.RTHandle firstSlot = null;
+            try
+            {
+                for (int frame = 0; frame < 70; frame++)
+                {
+                    history.BeginFrame(8, 8);
+                    bool reset = state.Prepare(camera, size, size, VividTsrQualityMode.NativeAA, 16, frame, false);
+                    Assert.That(reset, Is.EqualTo(frame == 0));
+                    if (frame == 0) firstSlot = state.PersistentColor[0].GetCurrent();
+                    Assert.That(state.PersistentColor[0].GetCurrent(), Is.SameAs(firstSlot));
+                    Assert.That(state.CanResurrect, Is.EqualTo(frame > 1));
+                    if (frame == 62)
+                    {
+                        Assert.That(state.PersistentReadSlot, Is.EqualTo(1));
+                        Assert.That(state.PersistentViewProjection[1].m03, Is.EqualTo(31));
+                    }
+                    int store = state.PersistentStoreSlot;
+                    Assert.That(store, Is.EqualTo(frame % 31 == 0 ? frame / 31 % 2 : -1));
+                    if (store >= 0) state.StorePersistentTransform(store, Matrix4x4.Translate(new Vector3(frame, 0, 0)), Vector2.zero);
+                    state.MarkHistoryWritten(); history.CommitFrame();
+                }
+                history.BeginFrame(8, 8);
+                Assert.That(state.Prepare(camera, size, size, VividTsrQualityMode.NativeAA, 16, 70, true), Is.True);
+                Assert.That(state.CanResurrect, Is.False);
+                Assert.That(state.PersistentStoreSlot, Is.Zero);
+            }
+            finally
+            {
+                history.AbortFrame(); state.Dispose(); CameraHistorySystem.Dispose(); Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
         public void CameraState_UsesCameraHistoryAndPreservesValidFrame()
         {
             var cameraObject = new GameObject("TSRCameraHistoryTests.Camera");

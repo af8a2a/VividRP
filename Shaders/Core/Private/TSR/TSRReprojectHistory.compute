@@ -1,5 +1,6 @@
 #pragma use_dxc
 #pragma kernel CS
+#pragma kernel CSStorePersistentHistory
 #pragma kernel CSClearOccluders
 #pragma kernel CSScatterOccluders
 #pragma kernel CSResolveOcclusion
@@ -31,7 +32,18 @@ Texture2D<float2> _ResurrectionMeta;
 RWTexture2D<float4> _ReprojectedHistoryColor;
 RWTexture2D<float2> _ReprojectedHistoryMeta;
 RWTexture2D<float4> _ReprojectedResurrectionColor;
-RWTexture2D<float2> _ReprojectedResurrectionMeta;
+RWTexture2D<float4> _ReprojectedResurrectionMeta;
+
+Texture2D<float4> _PersistentHistoryColor;
+Texture2D<float2> _PersistentHistoryMeta;
+Texture2D<float> _PersistentPreExposure;
+Texture2D<float4> _SnapshotHistoryColor;
+Texture2D<float2> _SnapshotHistoryMeta;
+RWTexture2D<float4> _OutputPersistentColor;
+RWTexture2D<float2> _OutputPersistentMeta;
+RWTexture2D<float> _OutputPersistentExposure;
+float4x4 _ClipToPersistentClip;
+float4 _PersistentParams; // valid, snapshot jitter UV, reserved
 
 float4 _RenderSize;
 float4 _OutputSize;
@@ -59,42 +71,66 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     bool validHistoryUV = all(historyUV >= 0.0) && all(historyUV <= 1.0);
     bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV && _ReprojectionValidity[renderCoord].x >= 0.5;
 
-    if (!hasHistory)
+    float2 previousSize = max(_PreviousOutputSize.xy, 1.0.xx);
+    float exposureCorrection = TSR_HistoryExposureCorrection();
+    _ReprojectedHistoryColor[pixelCoord] = 0.0;
+    _ReprojectedHistoryMeta[pixelCoord] = 0.0;
+    float shadingState = 0.0;
+    if (hasHistory)
     {
-        _ReprojectedHistoryColor[pixelCoord] = 0.0;
-        _ReprojectedHistoryMeta[pixelCoord] = 0.0;
-        _ReprojectedResurrectionColor[pixelCoord] = 0.0;
-        _ReprojectedResurrectionMeta[pixelCoord] = 0.0;
-        return;
+        float4 color = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
+        _ReprojectedHistoryColor[pixelCoord] = float4(color.rgb * exposureCorrection, color.a);
+        _ReprojectedHistoryMeta[pixelCoord] = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
+        float2 stateUV = uv - motion;
+        shadingState = all(stateUV >= 0.0) && all(stateUV <= 1.0)
+            ? _ResurrectionColor.SampleLevel(sampler_PointClamp, stateUV, 0).a : 0.0;
     }
 
-    float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
-    float localBoundary = _ReprojectionBoundary[renderCoord];
-    float thinGeometryCoverage = _ThinGeometryCoverage[renderCoord];
-    float lumaInstability = _LumaInstability[renderCoord];
-    float2 historyTexelBoundary = min(historyUV, 1.0 - historyUV) * previousSize;
-    float uvBoundary = saturate(1.0 - min(historyTexelBoundary.x, historyTexelBoundary.y));
-    float historyConfidence = saturate(1.0 - max(localBoundary, uvBoundary) * 0.75);
-    historyConfidence *= lerp(1.0, 0.55, thinGeometryCoverage);
-    historyConfidence *= lerp(1.0, 0.75, lumaInstability * max(localBoundary, thinGeometryCoverage));
-    float2 historyMeta = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
-    float2 resurrectionMeta = _ResurrectionMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
-
-    float4 reprojectedColor = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
-    float exposureCorrection = TSR_HistoryExposureCorrection();
-    _ReprojectedHistoryColor[pixelCoord] = float4(reprojectedColor.rgb * exposureCorrection, reprojectedColor.a);
-    // Preserve continuous validity; UpdateHistory owns contribution reduction.
-    // The legacy resurrection lifetime still uses its separate confidence below.
-    _ReprojectedHistoryMeta[pixelCoord] = historyMeta;
-    float3 resurrectionColor = TSR_SampleCatmullRom(_ResurrectionColor, historyUV, previousSize).rgb * exposureCorrection;
-    // Count shading changes on the stable output grid. Point-quantizing each
-    // jitter delta would accumulate a drift even for a stationary camera.
-    // Color reconstruction still uses the jittered history coordinates above.
-    float2 stateUV = uv - motion;
-    float shadingState = all(stateUV >= 0.0) && all(stateUV <= 1.0)
-        ? _ResurrectionColor.SampleLevel(sampler_PointClamp, stateUV, 0).a : 0.0;
-    _ReprojectedResurrectionColor[pixelCoord] = float4(resurrectionColor, shadingState);
-    _ReprojectedResurrectionMeta[pixelCoord] = float2(resurrectionMeta.x * historyConfidence, resurrectionMeta.y);
+    // A persistent frame has its own camera transform and exposure. Primary
+    // disocclusion/offscreen rejection must not erase this independent candidate.
+    _ReprojectedResurrectionColor[pixelCoord] = float4(0, 0, 0, shadingState);
+    _ReprojectedResurrectionMeta[pixelCoord] = 0.0;
+    if (_PersistentParams.x > 0.5)
+    {
+        float2 jitterUV = _Jitter.xy * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+        jitterUV.y = -jitterUV.y;
+#endif
+        // UE stores velocity at the input pixel center and applies its Jacobian
+        // at the output sample. Do not apply the correction to an already exact
+        // per-output projection (that would count the displacement twice).
+        float2 anchorUV = (float2(renderCoord)+0.5)*_RenderSize.zw;
+        float2 screen = (anchorUV - jitterUV) * 2.0 - 1.0;
+#if UNITY_UV_STARTS_AT_TOP
+        screen.y = -screen.y;
+#endif
+        float4 clip = mul(_ClipToPersistentClip, float4(screen, _DilatedDepth[renderCoord], 1));
+        float2 snapshotUV = clip.xy / max(clip.w, 1e-8) * 0.5 + 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+        snapshotUV.y = 1.0 - snapshotUV.y;
+#endif
+        float2x2 jacobian = TSR_PersistentVelocityJacobian(_ClipToPersistentClip, rcp(max(clip.w,1e-8)), _RenderSize.xy);
+        float2 offset = (uv-anchorUV)*_RenderSize.xy;
+        snapshotUV += (offset-mul(offset,jacobian))*_RenderSize.zw;
+        snapshotUV += _PersistentParams.yz;
+        float2 halfTexel = 0.5 / previousSize;
+        if (clip.w > 0.0 && all(snapshotUV >= halfTexel) && all(snapshotUV <= 1.0-halfTexel))
+        {
+            float4 color = TSR_SampleCatmullRom(_PersistentHistoryColor, snapshotUV, previousSize);
+            float2 meta = _PersistentHistoryMeta.SampleLevel(sampler_PointClamp, snapshotUV, 0);
+            // Conservative adapter until object velocity Z / animation tagging is
+            // available: persistent surfaces must agree in snapshot depth space.
+            float z = clip.z / clip.w;
+            float depthScale = max(abs(z), 1e-6);
+#if !UNITY_REVERSED_Z
+            depthScale = max(1.0-z, 1e-6);
+#endif
+            bool valid = meta.x > 0.0 && abs(meta.y-z) <= max(depthScale * 0.02, 1e-5);
+            float correction = TSR_CurrentPreExposure() / max(_PersistentPreExposure[int2(0,0)], 1e-6);
+            _ReprojectedResurrectionColor[pixelCoord] = float4(color.rgb * correction, shadingState);
+            _ReprojectedResurrectionMeta[pixelCoord] = valid ? float4(meta.x, saturate(color.a), (uv-jitterUV)-(snapshotUV-_PersistentParams.yz)) : 0.0;
+        }
+    }
 }
 
 // UE TSRClosestOccluder: current closest surfaces scatter into previous raster
@@ -225,4 +261,17 @@ void CSResolveOcclusion(uint3 id : SV_DispatchThreadID)
     }
     if(anySample) agreement=max(agreement,TSR_OccluderVelocityAgreement(closest,pixelMotion));
     _OutputReprojectionValidity[p]=float2(saturate(agreement),edge);
+}
+
+// Snapshot once per storage period, after UpdateHistory. It never accumulates
+// reprojection error between storage and resurrection.
+[numthreads(8,8,1)]
+void CSStorePersistentHistory(uint3 id : SV_DispatchThreadID)
+{
+    int2 p=id.xy, size=int2(_OutputSize.xy);
+    if(any(p>=size)) return;
+    int2 r=TSR_OutputToRenderCoord(p,size,int2(_RenderSize.xy));
+    _OutputPersistentColor[p]=float4(_SnapshotHistoryColor[p].rgb,_ReprojectionValidity[r].y);
+    _OutputPersistentMeta[p]=_SnapshotHistoryMeta[p];
+    if(all(p==0)) _OutputPersistentExposure[p]=TSR_CurrentPreExposure();
 }

@@ -90,6 +90,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OcclusionPixelScaleId = Shader.PropertyToID("_OcclusionPixelScale");
         private readonly RenderGraphTextureDesc m_ClosestOccluderDescriptor = new();
         private readonly RenderGraphTextureDesc m_ReprojectionValidityDescriptor = new();
+        private static readonly ProfilingSampler s_ResurrectionSampler = new("TSR.SelectResurrection");
+        private static readonly ProfilingSampler s_PersistentStoreSampler = new("TSR.StorePersistentHistory");
+        private static readonly int PersistentColorId = Shader.PropertyToID("_PersistentHistoryColor");
+        private static readonly int PersistentMetaId = Shader.PropertyToID("_PersistentHistoryMeta");
+        private static readonly int PersistentExposureId = Shader.PropertyToID("_PersistentPreExposure");
+        private static readonly int ClipToPersistentId = Shader.PropertyToID("_ClipToPersistentClip");
+        private static readonly int PersistentParamsId = Shader.PropertyToID("_PersistentParams");
+        private static readonly int SnapshotHistoryColorId = Shader.PropertyToID("_SnapshotHistoryColor");
+        private static readonly int SnapshotHistoryMetaId = Shader.PropertyToID("_SnapshotHistoryMeta");
+        private static readonly int OutputPersistentColorId = Shader.PropertyToID("_OutputPersistentColor");
+        private static readonly int OutputPersistentMetaId = Shader.PropertyToID("_OutputPersistentMeta");
+        private static readonly int OutputPersistentExposureId = Shader.PropertyToID("_OutputPersistentExposure");
         private static readonly int DilatedDepthId = Shader.PropertyToID("_DilatedDepth");
         private static readonly int DepthErrorId = Shader.PropertyToID("_DepthError");
         private static readonly int ReprojectionBoundaryId = Shader.PropertyToID("_ReprojectionBoundary");
@@ -297,7 +309,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     "TSR_ReprojectedResurrectionMeta",
                     outputSize.x,
                     outputSize.y,
-                    GraphicsFormat.R16G16_SFloat));
+                    GraphicsFormat.R16G16B16A16_SFloat));
             var inputShadingGuide = enablePairedGuides ? renderGraph.CreateTexture(ConfigureColorDescriptor(
                 m_InputShadingGuideDescriptor, "TSR_InputShadingGuide", renderSize.x, renderSize.y,
                 GraphicsFormat.R16G16B16A16_SFloat)) : default;
@@ -317,7 +329,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_GuideConfidenceDescriptor, "TSR_GuideConfidence", renderSize.x, renderSize.y, GraphicsFormat.R16G16B16A16_SFloat)) : default;
             var historyWeightControl = renderGraph.CreateTexture(ConfigureColorDescriptor(
                 m_HistoryWeightControlDescriptor, "TSR_HistoryWeightControl", outputSize.x, outputSize.y,
-                GraphicsFormat.R16G16_SFloat));
+                GraphicsFormat.R16G16B16A16_SFloat));
             var rejectionMask = renderGraph.CreateTexture(
                 ConfigureColorDescriptor(
                     m_RejectionMaskDescriptor,
@@ -391,6 +403,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 var currentVP = temporalData?.ViewProjection ?? cameraData.mainViewConstants.nonJitteredViewProjMatrix;
                 var previousVP = temporalData?.PreviousViewProjection ?? cameraData.mainViewConstants.prevViewProjMatrix;
                 var invCurrentVP = currentVP.inverse;
+                passData.CurrentViewProjection = currentVP;
+                int readSlot = cameraState.PersistentReadSlot;
+                passData.PersistentStoreSlot = cameraState.PersistentStoreSlot;
+                passData.CanResurrect = cameraState.CanResurrect;
+                passData.ClipToPersistent = cameraState.PersistentViewProjection[readSlot] * invCurrentVP;
+                var snapshotJitter = cameraState.PersistentJitter[readSlot] * 0.5f;
+                if (SystemInfo.graphicsUVStartsAtTop) snapshotJitter.y = -snapshotJitter.y;
+                passData.PersistentParams = new Vector4(passData.CanResurrect ? 1 : 0, snapshotJitter.x, snapshotJitter.y, 0);
+                // Reset may clear both slots, even if only one is sampled/stored.
+                for (int slot = 0; slot < 2; slot++)
+                {
+                    if (!resetHistory && slot != readSlot && slot != passData.PersistentStoreSlot) continue;
+                    var c = renderGraph.ImportTexture(cameraState.PersistentColor[slot].GetCurrent());
+                    var m = renderGraph.ImportTexture(cameraState.PersistentMeta[slot].GetCurrent());
+                    var e = renderGraph.ImportTexture(cameraState.PersistentExposure[slot].GetCurrent());
+                    var access = resetHistory || slot == passData.PersistentStoreSlot ? AccessFlags.ReadWrite : AccessFlags.Read;
+                    builder.UseTexture(c, access); builder.UseTexture(m, access); builder.UseTexture(e, access);
+                    if (slot == readSlot)
+                    { passData.PersistentColor = c; passData.PersistentMeta = m; passData.PersistentExposure = e; }
+                    if (slot == passData.PersistentStoreSlot)
+                    { passData.StorePersistentColor = c; passData.StorePersistentMeta = m; passData.StorePersistentExposure = e; }
+                }
                 passData.FlickerInvViewProjection = invCurrentVP;
                 passData.FlickerPrevInvViewProjection = previousVP.inverse;
                 passData.FlickerClipToPrevClip = previousVP * invCurrentVP;
@@ -592,8 +626,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 DispatchPropagateShadingConfidence(cmd, data);
             }
             DispatchRejectShading(cmd, data);
+            if (data.CanResurrect) DispatchSelectResurrection(cmd, data);
             DispatchSpatialAntiAliasing(cmd, data);
             DispatchUpdateHistory(cmd, data);
+            if (data.PersistentStoreSlot >= 0) DispatchStorePersistentHistory(cmd, data);
             DispatchResolveHistory(cmd, data);
 
             if (data.EnableSharpening)
@@ -723,12 +759,63 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
         }
 
+        private static void DispatchSelectResurrection(CommandBuffer cmd, PassData data)
+        {
+            using var scope = new ProfilingScope(cmd, s_ResurrectionSampler);
+            var shader = data.Shaders.RejectShading;
+            int kernel = data.Shaders.SelectResurrectionKernel;
+            SetCommonConstants(cmd, shader, data);
+            cmd.SetComputeTextureParam(shader, kernel, LumaInstabilityId, data.LumaInstability);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
+            cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionMetaId, data.ReprojectedResurrectionMeta);
+            cmd.SetComputeTextureParam(shader, kernel, AcceptedHistoryColorId, data.AcceptedHistoryColor);
+            cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
+            cmd.SetComputeTextureParam(shader, kernel, HistoryWeightControlId, data.HistoryWeightControl);
+            cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
+            if (data.EnablePairedGuides)
+            {
+                kernel = data.Shaders.UpdateResurrectedGuideKernel;
+                cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
+                cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
+                cmd.SetComputeTextureParam(shader, kernel, HistoryWeightControlId, data.HistoryWeightControl);
+                cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
+                cmd.SetComputeTextureParam(shader, kernel, CurrentShadingGuideId, data.CurrentShadingGuide);
+                cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, KernelThreadGroupSize), DivRoundUp(data.RenderSize.y, KernelThreadGroupSize), 1);
+            }
+        }
+
+        private static void DispatchStorePersistentHistory(CommandBuffer cmd, PassData data)
+        {
+            using var scope = new ProfilingScope(cmd, s_PersistentStoreSampler);
+            var shader = data.Shaders.ReprojectHistory;
+            int kernel = data.Shaders.StorePersistentKernel;
+            SetCommonConstants(cmd, shader, data);
+            BindPreExposure(cmd, data, shader, kernel);
+            cmd.SetComputeTextureParam(shader, kernel, SnapshotHistoryColorId, data.CurrentHistoryColor);
+            cmd.SetComputeTextureParam(shader, kernel, SnapshotHistoryMetaId, data.CurrentHistoryMeta);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionValidityId, data.ReprojectionValidity);
+            cmd.SetComputeTextureParam(shader, kernel, OutputPersistentColorId, data.StorePersistentColor);
+            cmd.SetComputeTextureParam(shader, kernel, OutputPersistentMetaId, data.StorePersistentMeta);
+            cmd.SetComputeTextureParam(shader, kernel, OutputPersistentExposureId, data.StorePersistentExposure);
+            cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
+            data.State.StorePersistentTransform(data.PersistentStoreSlot, data.CurrentViewProjection, data.Jitter);
+        }
+
         private static void DispatchReprojectHistory(CommandBuffer cmd, PassData data)
         {
             var shader = data.Shaders.ReprojectHistory;
             var kernel = data.Shaders.ReprojectHistoryKernel;
             SetCommonConstants(cmd, shader, data);
             BindPreExposure(cmd, data, shader, kernel);
+            cmd.SetComputeMatrixParam(shader, ClipToPersistentId, data.ClipToPersistent);
+            cmd.SetComputeVectorParam(shader, PersistentParamsId, data.PersistentParams);
+            cmd.SetComputeTextureParam(shader, kernel, PersistentColorId, data.PersistentColor);
+            cmd.SetComputeTextureParam(shader, kernel, PersistentMetaId, data.PersistentMeta);
+            cmd.SetComputeTextureParam(shader, kernel, PersistentExposureId, data.PersistentExposure);
+            cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.SetComputeTextureParam(shader, kernel, ThinGeometryCoverageId, data.ThinGeometryCoverage);
@@ -840,6 +927,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetCommonConstants(cmd, shader, data);
             cmd.SetComputeBufferParam(shader, kernel, FramePreExposureId, data.FramePreExposure);
             cmd.SetComputeTextureParam(shader, kernel, OutputPreExposureId, data.CurrentPreExposure);
+            cmd.SetComputeMatrixParam(shader, ClipToPersistentId, data.ClipToPersistent);
             cmd.SetComputeTextureParam(shader, kernel, CurrentFrameColorId, data.SpatialAntiAliasedColor);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
@@ -1160,6 +1248,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly ComputeShader ResolveHistory;
             public readonly ComputeShader Sharpen;
             public readonly int DilateVelocityKernel;
+            public readonly int StorePersistentKernel, SelectResurrectionKernel, UpdateResurrectedGuideKernel;
             public readonly int ReprojectHistoryKernel;
             public readonly int ClearOccludersKernel, ScatterOccludersKernel, ResolveOcclusionKernel;
             public readonly int RejectShadingKernel;
@@ -1186,6 +1275,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 Sharpen = resources.TSRSharpenCompute;
                 DilateVelocityKernel = FindKernel(DilateVelocity);
                 ReprojectHistoryKernel = FindKernel(ReprojectHistory);
+                UpdateResurrectedGuideKernel = RejectShading != null && RejectShading.HasKernel("CSUpdateResurrectedGuide") ? RejectShading.FindKernel("CSUpdateResurrectedGuide") : -1;
+                StorePersistentKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSStorePersistentHistory") ? ReprojectHistory.FindKernel("CSStorePersistentHistory") : -1;
+                SelectResurrectionKernel = RejectShading != null && RejectShading.HasKernel("CSSelectResurrection") ? RejectShading.FindKernel("CSSelectResurrection") : -1;
                 ClearOccludersKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSClearOccluders") ? ReprojectHistory.FindKernel("CSClearOccluders") : -1;
                 ScatterOccludersKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSScatterOccluders") ? ReprojectHistory.FindKernel("CSScatterOccluders") : -1;
                 ResolveOcclusionKernel = ReprojectHistory != null && ReprojectHistory.HasKernel("CSResolveOcclusion") ? ReprojectHistory.FindKernel("CSResolveOcclusion") : -1;
@@ -1212,6 +1304,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public bool IsValid =>
                 DilateVelocity != null && DilateVelocityKernel >= 0
                 && ReprojectHistory != null && ReprojectHistoryKernel >= 0
+                && StorePersistentKernel >= 0 && SelectResurrectionKernel >= 0 && UpdateResurrectedGuideKernel >= 0
                 && ClearOccludersKernel >= 0 && ScatterOccludersKernel >= 0 && ResolveOcclusionKernel >= 0
                 && RejectShading != null && RejectShadingKernel >= 0
                 && PrepareFlickerKernel >= 0 && AnalyzeFlickerKernel >= 0 && UpdateFlickerKernel >= 0
@@ -1257,6 +1350,12 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle MotionVectors;
             public TextureHandle Output;
             public TextureHandle DilatedMotion;
+            public TextureHandle PersistentColor, PersistentMeta, PersistentExposure;
+            public TextureHandle StorePersistentColor, StorePersistentMeta, StorePersistentExposure;
+            public Matrix4x4 ClipToPersistent, CurrentViewProjection;
+            public Vector4 PersistentParams;
+            public bool CanResurrect;
+            public int PersistentStoreSlot;
             public TextureHandle ClosestOccluder, ReprojectionValidity;
             public Vector4 OcclusionDepthToView, OcclusionPixelScale;
             public TextureHandle DilatedDepth;
@@ -1308,6 +1407,49 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal sealed class CameraState : IDisposable
         {
+            // UE defaults: two persistent frames, 31-frame odd storage period.
+            internal const int PersistentPeriod = 31;
+            private static readonly CameraHistoryId[] s_PersistentColorIds = { CameraHistoryId.Create("TSRPersistentColor0"), CameraHistoryId.Create("TSRPersistentColor1") };
+            private static readonly CameraHistoryId[] s_PersistentMetaIds = { CameraHistoryId.Create("TSRPersistentMeta0"), CameraHistoryId.Create("TSRPersistentMeta1") };
+            private static readonly CameraHistoryId[] s_PersistentExposureIds = { CameraHistoryId.Create("TSRPersistentExposure0"), CameraHistoryId.Create("TSRPersistentExposure1") };
+            internal readonly CameraHistoryTexture[] PersistentColor = new CameraHistoryTexture[2];
+            internal readonly CameraHistoryTexture[] PersistentMeta = new CameraHistoryTexture[2];
+            internal readonly CameraHistoryTexture[] PersistentExposure = new CameraHistoryTexture[2];
+            internal readonly Matrix4x4[] PersistentViewProjection = new Matrix4x4[2];
+            internal readonly Vector2[] PersistentJitter = new Vector2[2];
+            private readonly bool[] m_PersistentValid = new bool[2];
+            private int m_PersistentFrameCount;
+            internal static int GetPersistentReadSlot(int completedFrames)
+            {
+                // FTSRHistorySliceSequence::GetResurrectionFrameRollingIndex,
+                // specialized to two persistent slots plus two transient frames.
+                if (completedFrames < 2 * PersistentPeriod) return 0;
+                int last = (completedFrames - 1) % (2 * PersistentPeriod);
+                return ((last + 2 * PersistentPeriod - 1) / PersistentPeriod) % 2;
+            }
+            internal int PersistentReadSlot => GetPersistentReadSlot(m_PersistentFrameCount);
+            internal int PersistentStoreSlot => m_PersistentFrameCount % PersistentPeriod == 0
+                ? (m_PersistentFrameCount / PersistentPeriod) % 2 : -1;
+            internal bool CanResurrect => m_PersistentFrameCount > 1 && m_PersistentValid[PersistentReadSlot];
+            internal void PreparePersistent(Camera camera, Vector2Int size, bool reset)
+            {
+                var history = camera.GetVividCameraHistory();
+                for (int i = 0; i < 2; i++)
+                {
+                    var color = history.GetOrCreateTexture(s_PersistentColorIds[i], 1, CreateHistoryDescriptor(size, GraphicsFormat.R16G16B16A16_SFloat));
+                    var meta = history.GetOrCreateTexture(s_PersistentMetaIds[i], 1, CreateHistoryDescriptor(size, GraphicsFormat.R16G16_SFloat));
+                    var exposure = history.GetOrCreateTexture(s_PersistentExposureIds[i], 1, CreateHistoryDescriptor(Vector2Int.one, GraphicsFormat.R32_SFloat));
+                    reset |= !ReferenceEquals(color, PersistentColor[i]) || !ReferenceEquals(meta, PersistentMeta[i]) || !ReferenceEquals(exposure, PersistentExposure[i]);
+                    reset |= m_PersistentValid[i] && (!color.IsValid(0) || !meta.IsValid(0) || !exposure.IsValid(0));
+                    PersistentColor[i] = color; PersistentMeta[i] = meta; PersistentExposure[i] = exposure;
+                }
+                if (reset) { m_PersistentFrameCount = 0; m_PersistentValid[0] = m_PersistentValid[1] = false; }
+            }
+            internal void StorePersistentTransform(int slot, Matrix4x4 viewProjection, Vector2 jitter)
+            {
+                PersistentViewProjection[slot] = viewProjection; PersistentJitter[slot] = jitter;
+                m_PersistentValid[slot] = true;
+            }
             private CameraHistoryTexture m_HistoryColor;
             private CameraHistoryTexture m_HistoryMeta;
             private CameraHistoryTexture m_ResurrectionColor;
@@ -1390,6 +1532,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Quality = quality;
                 m_PairedGuides = pairedGuides;
                 m_HistorySampleCount = historySampleCount;
+                PreparePersistent(camera, outputSize, resetHistory);
                 m_HasValidHistory = true;
                 LastUsedFrame = frameIndex >= 0 ? frameIndex : Time.frameCount;
                 return resetHistory;
@@ -1423,6 +1566,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
             public void MarkHistoryWritten()
             {
+                for (int i = 0; i < 2; i++)
+                { PersistentColor[i].MarkWritten(); PersistentMeta[i].MarkWritten(); PersistentExposure[i].MarkWritten(); }
+                // Retained single-frame surfaces remain valid while untouched.
+                m_PersistentFrameCount++;
+                if (m_PersistentFrameCount >= 4 * PersistentPeriod) m_PersistentFrameCount -= 2 * PersistentPeriod;
                 m_PreExposure?.MarkWritten();
                 m_Flickering?.MarkWritten();
                 m_HistoryColor?.MarkWritten();
@@ -1439,6 +1587,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 for (var i = 0; i < 2; i++)
                 {
+                    ClearRTHandle(cmd, PersistentColor[i].GetCurrent(), Color.clear);
+                    ClearRTHandle(cmd, PersistentMeta[i].GetCurrent(), Color.clear);
+                    ClearRTHandle(cmd, PersistentExposure[i].GetCurrent(), Color.white);
                     ClearRTHandle(cmd, m_PreExposure.GetFrame(i), Color.white);
                     ClearRTHandle(cmd, m_Flickering.GetFrame(i), new Color(0, 127f / 255f, 0, 0));
                     ClearRTHandle(cmd, m_HistoryColor.GetFrame(i), Color.clear);
@@ -1451,6 +1602,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             public void Dispose()
             {
+                for (int i = 0; i < 2; i++)
+                { PersistentColor[i] = null; PersistentMeta[i] = null; PersistentExposure[i] = null; m_PersistentValid[i] = false; }
+                m_PersistentFrameCount = 0;
                 m_HistoryColor = null;
                 m_HistoryMeta = null;
                 m_ResurrectionColor = null;

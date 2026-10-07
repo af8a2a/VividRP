@@ -358,6 +358,10 @@ namespace VividRP.Runtime.GPUDriven
             {
                 programID = VividMaterialSurfaceProgramID.StandardSingleSlab;
             }
+            else if (root.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+            {
+                programID = VividMaterialSurfaceProgramID.OpenPBROpaque;
+            }
             else if (root.Opcode == ClosureExpressionOpcode.HorizontalMix
                 || root.Opcode == ClosureExpressionOpcode.VerticalLayer)
             {
@@ -400,12 +404,18 @@ namespace VividRP.Runtime.GPUDriven
                     roots.Add(node.Slab.Normal);
                     roots.Add(node.Slab.Tangent);
                 }
+                else if (node.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+                {
+                    for (int field = 0; field < OpenPBROpaqueContract.FieldCount; ++field)
+                        roots.Add(node.OpenPBROpaque.GetValue(field));
+                }
                 else
                 {
                     roots.Add(node.Weight);
                 }
             }
-            roots.Add(module.Outputs.Emission);
+            if (module.ShadingModels != MaterialShadingModelMask.OpenPBROpaque)
+                roots.Add(module.Outputs.Emission);
 
             return module.CreateValueSlice(roots.ToArray());
         }
@@ -729,6 +739,25 @@ namespace VividRP.Runtime.GPUDriven
                 requirements,
                 layoutSchema.ParameterLayout,
                 layoutSchema.ResourceLayout);
+        }
+
+        // AOT-only profiles have no StandardLit physical compatibility mapping.
+        // These empty descriptors identify generic lanes/records; their nominal
+        // stride is not the authoritative per-program generic layout size.
+        internal static MaterialNativeTemplateLayoutSchema CreateGenericOnlyLayoutSchema()
+        {
+            return new MaterialNativeTemplateLayoutSchema(
+                new CompiledParameterLayout(
+                    VividMaterialParameterLayoutID.GenericParameterLanes,
+                    sizeof(float) * 4,
+                    Array.Empty<MaterialParameterLayoutBinding>()),
+                new CompiledResourceLayout(
+                    VividMaterialResourceLayoutID.GenericResourceRecords,
+                    sizeof(uint),
+                    1,
+                    Array.Empty<MaterialResourceLayoutBinding>()),
+                Array.Empty<MaterialNativeParameterBinding>(),
+                Array.Empty<MaterialNativeResourceBinding>());
         }
 
         internal static MaterialNativeTemplateLayoutSchema CreateLegacyLayoutSchema()

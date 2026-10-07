@@ -83,6 +83,100 @@ namespace VividRP.Editor.Tests.GPUDriven
         }
 
         [Test]
+        public void OpenPBROpaqueGraph_UnconnectedInputsMatchNativeDefaults()
+        {
+            MaterialGraphEditorGraph graph = CreateGraph();
+            try
+            {
+                MaterialOpenPBROpaqueNode native = AddNode<MaterialOpenPBROpaqueNode>(graph);
+                MaterialOpenPBROpaqueOutputNode output = AddNode<MaterialOpenPBROpaqueOutputNode>(graph);
+                ConnectClosure(graph, native, output, MaterialOpenPBROpaqueOutputNode.SurfacePortName);
+
+                MaterialGraphCompilationResult result = MaterialGraphEditorCompiler.Compile(graph);
+                var expectedGraph = new VividRP.Runtime.GPUDriven.MaterialGraph();
+                MaterialGraphClosure expectedSurface = expectedGraph.OpenPBROpaqueDefault(
+                    "Native", expectedGraph.ExternalInput("Normal", MaterialExternalInput.GeometryNormalWS));
+                expectedGraph.Output("Output", expectedSurface,
+                    expectedGraph.Constant("Coverage", 1.0f),
+                    expectedGraph.Constant("Threshold", 0.0f),
+                    expectedGraph.Constant("LegacyEmission", Unity.Mathematics.float3.zero),
+                    MaterialFeatureMask.None, MaterialShadingModelMask.OpenPBROpaque);
+                MaterialGraphCompilationResult expected = MaterialGraphCompiler.Compile(
+                    expectedGraph, GPUDrivenMaterialCompiler.ProgramVersion);
+
+                Assert.That(result.Succeeded, Is.True, DiagnosticsToString(result));
+                Assert.That(expected.Succeeded, Is.True, DiagnosticsToString(expected));
+                Assert.That(result.Program.SemanticHash, Is.EqualTo(expected.Program.SemanticHash));
+                Assert.That(result.Program.CompiledHash, Is.EqualTo(expected.Program.CompiledHash));
+                Assert.That(result.Module.ShadingModels, Is.EqualTo(MaterialShadingModelMask.OpenPBROpaque));
+                Assert.That(output.GetInputPortByName("Emission"), Is.Null);
+                Assert.That(result.Module.Values.GetNode(result.Module.Outputs.Emission).Constant.xyz,
+                    Is.EqualTo(Unity.Mathematics.float3.zero));
+            }
+            finally
+            {
+                DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void OpenPBROpaqueGraph_SaveLoadPreservesNativeNodesAndConnections()
+        {
+            MaterialGraphEditorGraph graph = CreateGraph();
+            try
+            {
+                MaterialOpenPBROpaqueNode native = AddNode<MaterialOpenPBROpaqueNode>(graph);
+                MaterialOpenPBROpaqueOutputNode output = AddNode<MaterialOpenPBROpaqueOutputNode>(graph);
+                MaterialConstantNode ior = AddNode<MaterialConstantNode>(graph);
+                SetOption(ior, MaterialConstantNode.ValueOptionName, new Vector4(2.0f, 0.0f, 0.0f, 0.0f));
+                ConnectValue(graph, ior, native, MaterialOpenPBROpaqueNode.SpecularIorPortName);
+                ConnectClosure(graph, native, output, MaterialOpenPBROpaqueOutputNode.SurfacePortName);
+                SetOption(output, MaterialOpenPBROpaqueOutputNode.MaterialFeaturesOptionName,
+                    MaterialFeatureMask.AlphaClip);
+                MaterialGraphCompilationResult before = MaterialGraphEditorCompiler.Compile(graph);
+                Assert.That(before.Succeeded, Is.True, DiagnosticsToString(before));
+                GraphDatabase.SaveGraph(graph);
+
+                MaterialGraphEditorGraph restored = GraphDatabase.LoadGraphForImporter<MaterialGraphEditorGraph>(
+                    GraphDatabase.GetGraphAssetPath(graph));
+                MaterialGraphCompilationResult after = MaterialGraphEditorCompiler.Compile(restored);
+
+                Assert.That(after.Succeeded, Is.True, DiagnosticsToString(after));
+                Assert.That(restored.GetNodes().OfType<MaterialOpenPBROpaqueNode>().Count(), Is.EqualTo(1));
+                Assert.That(restored.GetNodes().OfType<MaterialOpenPBROpaqueOutputNode>().Count(), Is.EqualTo(1));
+                Assert.That(after.Program.CompiledHash, Is.EqualTo(before.Program.CompiledHash));
+                Assert.That(after.Module.MaterialFeatures, Is.EqualTo(MaterialFeatureMask.AlphaClip));
+            }
+            finally
+            {
+                DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void OpenPBROpaqueGraph_PreviewReportsUnsupportedProfile()
+        {
+            MaterialGraphEditorGraph graph = CreateGraph();
+            try
+            {
+                MaterialOpenPBROpaqueNode native = AddNode<MaterialOpenPBROpaqueNode>(graph);
+                MaterialOpenPBROpaqueOutputNode output = AddNode<MaterialOpenPBROpaqueOutputNode>(graph);
+                ConnectClosure(graph, native, output, MaterialOpenPBROpaqueOutputNode.SurfacePortName);
+
+                MaterialGraphPreviewCostViewModel viewModel = MaterialGraphPreviewCostViewModel.Build(graph);
+
+                Assert.That(viewModel.Status, Is.EqualTo(MaterialGraphPreviewStatus.UnsupportedProfile));
+                Assert.That(viewModel.CanPreview, Is.False);
+                Assert.That(viewModel.CompiledHash, Is.Not.Empty);
+                Assert.That(viewModel.Diagnostics.Any(message => message.Contains("OpenPBR shading")), Is.True);
+            }
+            finally
+            {
+                DeleteGraph(graph);
+            }
+        }
+
+        [Test]
         public void NamedDeclarationNodes_PreserveAuthoredSymbolsAndTypes()
         {
             MaterialGraphEditorGraph graph = CreateGraph();
@@ -309,6 +403,8 @@ namespace VividRP.Editor.Tests.GPUDriven
 
             Assert.That(materialNodeTypes, Does.Contain(typeof(MaterialOutputNode)));
             Assert.That(materialNodeTypes, Does.Contain(typeof(MaterialStandardSlabNode)));
+            Assert.That(materialNodeTypes, Does.Contain(typeof(MaterialOpenPBROpaqueNode)));
+            Assert.That(materialNodeTypes, Does.Contain(typeof(MaterialOpenPBROpaqueOutputNode)));
             Assert.That(materialNodeTypes, Does.Contain(typeof(MaterialNamedParameterNode)));
             Assert.That(
                 materialNodeTypes,

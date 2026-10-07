@@ -104,6 +104,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         StandardSingleSlab = 0,
         DualSlab = 1,
+        OpenPBROpaque = 2,
     }
 
     [GenerateHLSL(PackingRules.Exact)]
@@ -158,6 +159,7 @@ namespace VividRP.Runtime.GPUDriven
         LegacyGBufferExport = 1 << 0,
         AlphaClip = 1 << 1,
         Unlit = 1 << 2,
+        OpenPBROpaqueExport = 1 << 3,
     }
 
     [GenerateHLSL]

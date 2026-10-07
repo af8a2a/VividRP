@@ -2,7 +2,7 @@
 
 本合约冻结 VividRP 下一代默认 PBR 的原生输入和 BSDF 调用语义。默认家族选择包内的 OpenPBR 1.1 实现，首个 profile 为 `OpenPBROpaqueV1`：不透明、各向同性、单个 OpenPBR 叶 Closure。OpenPBR 内部的漫反射、介电反射和金属反射仍由 Vendor 实现组合；“单 Closure”不表示只保留一个反射 lobe。
 
-合约冻结与生产路径迁移、GPU 验收分别推进。本次不切换现有 Material Graph、IR、AOT、Frozen Catalog 或 Deferred 默认 evaluator，也不修改现有 StandardLit/PT adapter。后续实现以本合约作为新的原生材质入口。
+合约冻结与生产路径迁移、GPU 验收分别推进。新增的原生材质编译入口见“材质编译链接入”；默认创建/导入路径和 Deferred 默认 evaluator 仍保持当前行为，现有 StandardLit/PT adapter 不变。
 
 ## 版本与权威来源
 
@@ -117,7 +117,27 @@ Vendor 自带其 OpenPBR 多重散射和能量补偿。接入后不得再叠加 
 
 未来需要一个独立版本的 StandardLit → OpenPBR compatibility mapping，明确旧资产 smoothness、颜色、metalness、emission、Coverage 以及超出 V1 能力的处理，并让 Raster/PT 共享同一映射。迁移映射的版本与原生输入合约分别维护。不能在本轮静默改变旧材质的 PT 外观，也不能把旧图或 Catalog 的 SimpleSlab export 自动重解释为 OpenPBR。
 
-下一阶段是 Native OpenPBROpaqueV1 authoring、typed output、版本化 payload 以及方向/点光生产闭环。之后补 IBL/面积光/SSR 验收，再切换默认创建、导入、预览和生产 evaluator。General Closure 的 Mix/Layer 组合另行定义，不能继承 DualSlab 当前的颜色反推 opacity 公式。
+Native authoring 和 typed export 接入后，下一阶段是版本化 GPU payload 与方向/点光生产闭环。之后补 IBL/面积光/SSR 验收，再切换默认创建、导入、预览和生产 evaluator。General Closure 的 Mix/Layer 组合另行定义，不能继承 DualSlab 当前的颜色反推 opacity 公式。
+
+## 材质编译链接入
+
+GraphToolkit 提供独立的 **OpenPBR Opaque V1** Closure 节点与 **OpenPBR Opaque Output**，旧 **Standard Slab** 和 **Material Output** 的类型、端口名与选项保留。新 Output 只接收 Surface、Coverage、AlphaClipThreshold；其 shading model 固定为 `OpenPBROpaque`，不增加第二份 emission 输入。
+
+Closure 的 11 个 value ports 按本合约顺序定义。未连接的权重、颜色、粗糙度、metalness、IOR 和 emission 端口由真实 authoring adapter 注入冻结默认常量。**未连接的 NormalWS 使用当前 surface 的 `GeometryNormalWS` external input**；这是有几何上下文的 authoring 默认，不修改 `OpenPBROpaqueContract.CreateDefault()` 用于无几何输入测试的世界空间 `+Z` 默认。宿主仍负责提供有限、归一化的 surface normal。
+
+Output 未连接的 Coverage/AlphaClipThreshold 分别为 `1`/`0`；Material Features 默认 `None`，显式 `AlphaClip` 继续使用独立 Coverage 阶段。旧 emission root 在原生 profile 中固定为 Float3 零常量，叶节点的 EmissionLuminance/EmissionColor 保持唯一权威。不能连接旧 Slab 到新 Output，或将新 Closure 接到旧 Output 后沿用 StandardLit 语义。Native Mix/Layer 在 V1 中不支持；这些限制由 runtime Graph/IR verifier 执行，直接构造 runtime graph 也不能绕过。
+
+编译链保留完整原生字段：`MaterialGraph.OpenPBROpaque → ClosureOpenPBROpaqueExpression → canonical IR → Surface LIR → VividAOTSurfaceProgramOutput.OpenPBROpaque`。Surface export 包含 Native profile、合约版本、指纹和独立 `OpenPBROpaqueV1` payload ABI 标记；不能把原生值压成 legacy DiffuseAlbedo/F0 后丢弃权威输入。合约语义版本保持 `1`，指纹仍为 `0x1602062CE683E774`。IR、lowering、compiled、catalog 和 Surface artifact 的版本升级，使旧 Frozen Catalog 和旧 dispatcher 失效，要求正常重烘焙与重导入；既有 generic storage layout 和 runtime ABI 的版本不变。
+
+`MaterialGraphImporter` 版本为 `7`。Catalog 必须通过现有提交和 artifact-set 检查，导入材质才能取得有效 program identity；失败继续发布 failed sentinel，不保留旧 program ID 继续运行。Generated HLSL 和 Catalog asset 通过正常 baker 更新，不手工同步。
+
+模板注册表包含 4 个 template；原有 3 个 builtin programs 和生产 P0–P3 共 4 个槽继续保留。OpenPBR 图通过动态 Catalog 槽发布，不占用旧程序 ID。Native selection 只声明 `OpenPBROpaqueExport` 和独立 Coverage/AlphaClip 能力，使用实际 generic 参数与资源布局；没有 StandardLit 兼容字段映射。
+
+Editor cost model 继续展示原生编译的 hash、预算和诊断，但原生 profile 的预览状态明确为 `UnsupportedProfile`，`CanPreview = false`。当前预览尚未实现 OpenPBR shading；即使 program 已进入 Frozen Catalog，也不显示旧 Slab 球体作为原生 OpenPBR 的预览。Native export 的 Surface Summary 和 DualSlab Sidecar ABI 均为 `None`，不声明现有 IBL/SSR/Decal 语义。当前 `VisibilityBufferGBufferResolve` 明确拒绝 Native payload 并走错误路径；AOT 编译通过不代表生产光照闭环完成。
+
+`Runtime/Resources/MaterialGraphs/OpenPBROpaque.vmatg` 是通过 GraphToolkit API 创建的原生示例：一个 Closure、一个 Native Output，以及显式 `SpecularIor = 2` 常量连接。其余输入使用冻结的 authoring 默认值；该常量不会改变 profile 的默认 IOR `1.5`。2026-10-07 的正常 bake 将它发布为 ProgramID `4`，编译 hash 为 `hash_v=10 0xAA8D2823E94C38EE`。动态 ID 是当前 Catalog 的分配结果，调用方仍须通过 importer 的完整 identity 绑定，不能硬编码 `4`。
+
+纯托管 authoring 检查位于 `MaterialOpenPBROpaqueAuthoringTests`，调用真实 adapter 和 runtime compiler，无 GraphToolkit/AssetDatabase 调用。`MaterialGraphEditorTests` 另有 Native 缺省图 parity、保存/加载、节点发现和禁用预览测试；这些是 Unity Editor 集成检查，不能把纯托管用例通过当成它们已执行。
 
 ## 验收状态与剩余检查
 
@@ -135,11 +155,27 @@ Vendor 自带其 OpenPBR 多重散射和能量补偿。接入后不得再叠加 
 
 该工具需要 .NET 10 SDK、DXC，以及目标项目已导入的 Unity.Mathematics/NUnit 程序集；新版 Unity 的转发类型引用从目标项目生成的 `VividRP.Runtime.csproj` 解析。它运行实际合约和 NUnit fixture，并提取实际共享 hash utility 编译，不启动 Unity，不执行 GPU shader。生成的探针、DXIL 和日志保存在输出目录。
 
-本合约冻结阶段尚不具备以下运行时验收证据：
+2026-10-07 的编译链接入检查已通过：
 
-- 原生图经过 Graph → IR/LIR → AOT → Catalog → VisibilityBuffer Resolve 的生产链路。
+- 使用目标 Unity 项目的真实 Bee response files、defines、references 和 Roslyn 编译 Runtime、Editor、Tests 三个程序集。
+- 151 个纯托管用例通过、0 失败，其中 OpenPBR 四个 fixture 共 59 个。另有 4 个依赖 Unity native/AssetDatabase 的既有用例明确跳过。Builtin ABI 检查使用实际静态 Catalog，并固定 P0–P3 升版后的 semantic hash；不依赖项目当前的动态槽数量。测试工具直接执行实际 fixture，不启动 Unity Test Framework。
+- 在运行中的 Unity `6000.7.0b1` 中，通过普通 authoring/import/baker API 验证示例图保存后新鲜加载，编译 identity 保持一致；Importer `Succeeded = true`、`IsCataloged = true`、Catalog committed，三份 generated artifact 与 Catalog 同步。其 artifact set 为 `artifact_set_v=2 0xDBFA1A8CE789E0DE`。
+- 真实 backend 输出的 native-only Surface、export validation、Coverage + Surface 三个 DXC `cs_6_0` 入口通过；探针使用实际 GPU struct 与 production 参数 loader，并消费全部 11 个字段及 profile/export metadata。
+- 已发布 Catalog 的真实生产消费者也通过 DXC：VisibilityBuffer Resolve 共 6 个入口/variant（vertex、fragment、Sidecar、Bindless 和 VirtualTexture），MaterialGraphPreview 的 vertex/fragment 共 2 个入口。编译使用真实 Bindless/VT 接口；独立的 41 项 artifact audit 验证 manifest、stamp、slot 和 typed output 一致。Preview 编译保留 Unity HLSLSupport 的宏重复定义警告，无错误。这些检查没有执行 GPU 渲染。
+
+纯托管编译链检查可在已导入的目标项目中复现：
+
+```powershell
+& '.\Tools~\Validate-MaterialCompiler.ps1'
+```
+
+该工具从项目的 Bee references 定位对应 Unity SDK，并输出编译日志、测试结果及实际 mixed/native-only backend HLSL；它不发布资产或运行 GPU shader。Editor 当前处于交互会话，因此本轮没有运行 Unity Test Framework；请在关闭 Editor 后运行 `MaterialGraphEditorTests` 等相关 Editor 集成测试。上述普通 API 验证不等于完整测试 fixture 已执行。
+
+剩余生产验收：
+
+- 版本化 GPU payload，以及 Native Catalog → VisibilityBuffer Resolve → OpenPBR direct lighting 的生产链路。
 - Unity/GPU 的 direct lighting、白炉、roughness/metalness/IOR 扫描及掠射角对照。
 - IBL、面积光、SSR 与 OpenPBR 数值参考的误差，以及固定曝光 HDR 对照。
 - 原生/兼容材质的 Raster/PT 参数一致性与稳定帧 managed allocation 验收。
 
-这些检查完成前，只能声明输入合约已冻结，不能声明 GPU 视觉一致、性能改善或新默认生产路径通过。
+当前可以声明输入合约已冻结、原生材质编译链及正常 Catalog 发布已接通。剩余检查完成前，不能声明 GPU 视觉一致、性能改善或新默认生产路径通过。

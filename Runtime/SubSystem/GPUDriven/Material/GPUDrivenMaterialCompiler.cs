@@ -585,11 +585,11 @@ namespace VividRP.Runtime.GPUDriven
         {
             MaterialProgramTemplateRegistry templates =
                 MaterialProgramBuiltinCatalog.Templates;
-            if (templates.Count != MaterialProgramContract.BuiltinProgramCount)
+            if (templates.Count != MaterialProgramContract.BuiltinNativeTemplateCount)
             {
                 throw new InvalidOperationException(
                     "The builtin native material template registry must contain exactly "
-                    + $"{MaterialProgramContract.BuiltinProgramCount} templates.");
+                    + $"{MaterialProgramContract.BuiltinNativeTemplateCount} templates.");
             }
 
             CompiledMaterialProgram standard =

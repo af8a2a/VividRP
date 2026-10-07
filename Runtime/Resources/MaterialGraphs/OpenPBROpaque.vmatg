@@ -1,0 +1,391 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &1
+MonoBehaviour:
+  m_ObjectHideFlags: 61
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 12501, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: OpenPBROpaque
+  m_EditorClassIdentifier: UnityEditor.dll::Unity.GraphToolkit.Editor.Implementation.GraphObjectImp
+  m_GraphModel:
+    rid: 5836216681446506571
+  references:
+    version: 2
+    RefIds:
+    - rid: -2
+      type: {class: , ns: , asm: }
+    - rid: 5836216681446506571
+      type: {class: GraphModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 3770443762833151446
+          m_Value1: 2611676326152508969
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: d6d54129a04e533429169e08c8893e24
+        m_Name: 
+        m_GraphNodeModels:
+        - rid: 5836216681446506574
+        - rid: 5836216681446506575
+        - rid: 5836216681446506576
+        m_GraphWireModels:
+        - rid: 5836216681446506577
+        - rid: 5836216681446506578
+        m_GraphStickyNoteModels: []
+        m_GraphPlacematModels: []
+        m_GraphVariableModels: []
+        m_GraphPortalModels: []
+        m_SectionModels:
+        - rid: 5836216681446506572
+        m_LocalSubgraphs: []
+        m_LastKnownBounds:
+          serializedVersion: 2
+          x: 0
+          y: 0
+          width: 0
+          height: 0
+        m_GraphElementMetaData:
+        - m_Guid:
+            m_Value0: 13836837947716688859
+            m_Value1: 4312590837812430595
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: db5b4c80cd5206c003076a958466d93b
+          m_Category: 0
+          m_Index: 0
+        - m_Guid:
+            m_Value0: 13116054900362306752
+            m_Value1: 3079370540276906208
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: c0e49da6709605b6e0f801f1301fbc2a
+          m_Category: 0
+          m_Index: 1
+        - m_Guid:
+            m_Value0: 16275827349320794907
+            m_Value1: 4734691378311655283
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: 1b83dabdbd5adfe173ef5e1db900b541
+          m_Category: 0
+          m_Index: 2
+        - m_Guid:
+            m_Value0: 12743567439575034865
+            m_Value1: 2560119674844110959
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: f1ab1a67113fdab06f6092b9475f8723
+          m_Category: 2
+          m_Index: 0
+        - m_Guid:
+            m_Value0: 3360829948859723635
+            m_Value1: 18175153396979196750
+          m_HashGuid:
+            serializedVersion: 2
+            Hash: 732f47340811a42e4ee32dedb71d3bfc
+          m_Category: 2
+          m_Index: 1
+        m_Graph:
+          rid: 5836216681446506573
+    - rid: 5836216681446506572
+      type: {class: SectionModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 15421453973736495938
+          m_Value1: 10133192569618733586
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 429b99c8ae0204d6129ac040f454a08c
+        m_Version: 2
+        m_Items: []
+        m_Title: 
+    - rid: 5836216681446506573
+      type: {class: MaterialGraphEditorGraph, ns: VividRP.Editor.GPUDriven, asm: VividRP.Editor}
+      data: 
+    - rid: 5836216681446506574
+      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 13836837947716688859
+          m_Value1: 4312590837812430595
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: db5b4c80cd5206c003076a958466d93b
+        m_Version: 2
+        m_Position: {x: 0, y: 0}
+        m_Title: 
+        m_Tooltip: 
+        m_NodePreviewModel:
+          rid: -2
+        m_State: 0
+        m_InputConstantsById:
+          m_KeyList:
+          - BaseWeight
+          - BaseColor
+          - BaseDiffuseRoughness
+          - BaseMetalness
+          - SpecularWeight
+          - SpecularColor
+          - SpecularRoughness
+          - SpecularIor
+          - NormalWS
+          - EmissionLuminance
+          - EmissionColor
+          m_ValueList:
+          - rid: 5836216681446506579
+          - rid: 5836216681446506580
+          - rid: 5836216681446506581
+          - rid: 5836216681446506582
+          - rid: 5836216681446506583
+          - rid: 5836216681446506584
+          - rid: 5836216681446506585
+          - rid: 5836216681446506586
+          - rid: 5836216681446506587
+          - rid: 5836216681446506588
+          - rid: 5836216681446506589
+        m_PolymorphicPortSelections:
+          m_KeyList: []
+          m_ValueList: []
+        m_InputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_OutputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_Collapsed: 0
+        m_CurrentModeIndex: 0
+        m_ElementColor:
+          m_Color: {r: 0, g: 0, b: 0, a: 0}
+          m_HasUserColor: 0
+        m_Node:
+          rid: 5836216681446506590
+    - rid: 5836216681446506575
+      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 13116054900362306752
+          m_Value1: 3079370540276906208
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: c0e49da6709605b6e0f801f1301fbc2a
+        m_Version: 2
+        m_Position: {x: 440, y: 0}
+        m_Title: 
+        m_Tooltip: 
+        m_NodePreviewModel:
+          rid: -2
+        m_State: 0
+        m_InputConstantsById:
+          m_KeyList:
+          - __option_Material Features
+          - Surface
+          - Coverage
+          - AlphaClipThreshold
+          m_ValueList:
+          - rid: 5836216681446506591
+          - rid: 5836216681446506592
+          - rid: 5836216681446506593
+          - rid: 5836216681446506594
+        m_PolymorphicPortSelections:
+          m_KeyList: []
+          m_ValueList: []
+        m_InputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_OutputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_Collapsed: 0
+        m_CurrentModeIndex: 0
+        m_ElementColor:
+          m_Color: {r: 0, g: 0, b: 0, a: 0}
+          m_HasUserColor: 0
+        m_Node:
+          rid: 5836216681446506595
+    - rid: 5836216681446506576
+      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 16275827349320794907
+          m_Value1: 4734691378311655283
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 1b83dabdbd5adfe173ef5e1db900b541
+        m_Version: 2
+        m_Position: {x: -320, y: 0}
+        m_Title: 
+        m_Tooltip: 
+        m_NodePreviewModel:
+          rid: -2
+        m_State: 0
+        m_InputConstantsById:
+          m_KeyList:
+          - __option_Type
+          - __option_Value
+          m_ValueList:
+          - rid: 5836216681446506596
+          - rid: 5836216681446506597
+        m_PolymorphicPortSelections:
+          m_KeyList: []
+          m_ValueList: []
+        m_InputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_OutputPortInfos:
+          expandedPortsById:
+            m_KeyList: []
+            m_ValueList: 
+        m_Collapsed: 0
+        m_CurrentModeIndex: 0
+        m_ElementColor:
+          m_Color: {r: 0, g: 0, b: 0, a: 0}
+          m_HasUserColor: 0
+        m_Node:
+          rid: 5836216681446506598
+    - rid: 5836216681446506577
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 12743567439575034865
+          m_Value1: 2560119674844110959
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: f1ab1a67113fdab06f6092b9475f8723
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 16275827349320794907
+            m_Value1: 4734691378311655283
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 1b83dabdbd5adfe173ef5e1db900b541
+          m_UniqueId: Out
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: Out
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 13836837947716688859
+            m_Value1: 4312590837812430595
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: db5b4c80cd5206c003076a958466d93b
+          m_UniqueId: SpecularIor
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: SpecularIor
+    - rid: 5836216681446506578
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 3360829948859723635
+          m_Value1: 18175153396979196750
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 732f47340811a42e4ee32dedb71d3bfc
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 13836837947716688859
+            m_Value1: 4312590837812430595
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: db5b4c80cd5206c003076a958466d93b
+          m_UniqueId: Closure
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: Closure
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 13116054900362306752
+            m_Value1: 3079370540276906208
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: c0e49da6709605b6e0f801f1301fbc2a
+          m_UniqueId: Surface
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: Surface
+    - rid: 5836216681446506579
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506580
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506581
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506582
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506583
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506584
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506585
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506586
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506587
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506588
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506589
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506590
+      type: {class: MaterialOpenPBROpaqueNode, ns: VividRP.Editor.GPUDriven, asm: VividRP.Editor}
+      data: 
+    - rid: 5836216681446506591
+      type: {class: EnumConstant, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          m_EnumType:
+            m_Identification: VividRP.Runtime.GPUDriven.MaterialFeatureMask, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+          m_Value: 0
+        m_EnumType:
+          m_Identification: VividRP.Runtime.GPUDriven.MaterialFeatureMask, VividRP.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    - rid: 5836216681446506592
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphClosurePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506593
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506594
+      type: {class: 'Constant`1[[VividRP.Editor.GPUDriven.MaterialGraphValuePort, VividRP.Editor]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data: {}
+    - rid: 5836216681446506595
+      type: {class: MaterialOpenPBROpaqueOutputNode, ns: VividRP.Editor.GPUDriven, asm: VividRP.Editor}
+      data: 
+    - rid: 5836216681446506596
+      type: {class: EnumConstant, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          m_EnumType:
+            m_Identification: VividRP.Editor.GPUDriven.MaterialGraphConstantType, VividRP.Editor, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+          m_Value: 1
+        m_EnumType:
+          m_Identification: VividRP.Editor.GPUDriven.MaterialGraphConstantType, VividRP.Editor, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    - rid: 5836216681446506597
+      type: {class: 'Constant`1[[UnityEngine.Vector4, UnityEngine.CoreModule]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: {x: 2, y: 0, z: 0, w: 0}
+    - rid: 5836216681446506598
+      type: {class: MaterialConstantNode, ns: VividRP.Editor.GPUDriven, asm: VividRP.Editor}
+      data: 

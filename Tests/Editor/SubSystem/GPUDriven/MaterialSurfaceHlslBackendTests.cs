@@ -571,14 +571,14 @@ namespace VividRP.Editor.Tests
             CompiledMaterialProgram program = BuildStandard();
             MaterialSurfaceHlslArtifact artifact = program.SurfaceHlsl;
 
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(8u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(9u));
             Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(9u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(14u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(9u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(15u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(5u));
             Assert.That(artifact.Version, Is.EqualTo(
                 MaterialProgramContract.SurfaceHlslArtifactVersion));
             Assert.That(artifact.BackendVersion, Is.EqualTo(
@@ -1136,7 +1136,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 caseSource,
-                Does.Contain("deferredExportContract.Version = 1u;"));
+                Does.Contain($"deferredExportContract.Version = {MaterialProgramContract.DeferredExportContractVersion}u;"));
             Assert.That(
                 caseSource,
                 Does.Contain("deferredExportContract.SurfaceSummaryAbi = 1u;"));

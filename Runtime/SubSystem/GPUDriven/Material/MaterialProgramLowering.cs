@@ -130,7 +130,9 @@ namespace VividRP.Runtime.GPUDriven
                 topology,
                 VividMaterialExecutionClass.VisibilityDeferred);
             VividMaterialProgramCapabilities requiredCapabilities =
-                VividMaterialProgramCapabilities.LegacyGBufferExport;
+                topology == MaterialProgramTopologySpecialization.OpenPBROpaque
+                    ? VividMaterialProgramCapabilities.OpenPBROpaqueExport
+                    : VividMaterialProgramCapabilities.LegacyGBufferExport;
             if ((module.MaterialFeatures & MaterialFeatureMask.AlphaClip) != 0)
                 requiredCapabilities |= VividMaterialProgramCapabilities.AlphaClip;
             if ((module.ShadingModels & MaterialShadingModelMask.Unlit) != 0)
@@ -194,6 +196,8 @@ namespace VividRP.Runtime.GPUDriven
             {
                 case ClosureExpressionOpcode.Slab:
                     return MaterialProgramTopologySpecialization.SingleSlab;
+                case ClosureExpressionOpcode.OpenPBROpaque:
+                    return MaterialProgramTopologySpecialization.OpenPBROpaque;
                 case ClosureExpressionOpcode.HorizontalMix:
                     return MaterialProgramTopologySpecialization.HorizontalMix;
                 case ClosureExpressionOpcode.VerticalLayer:
@@ -231,7 +235,11 @@ namespace VividRP.Runtime.GPUDriven
                 CreateTemplate(
                     VividMaterialSurfaceProgramID.DualSlab,
                     MaterialProgramTopologySpecialization.VerticalLayer,
-                    dualSlabLayout));
+                    dualSlabLayout),
+                CreateTemplate(
+                    VividMaterialSurfaceProgramID.OpenPBROpaque,
+                    MaterialProgramTopologySpecialization.OpenPBROpaque,
+                    MaterialLayoutLowerer.CreateGenericOnlyLayoutSchema()));
         }
 
         private static MaterialProgramTemplate CreateTemplate(
@@ -250,9 +258,12 @@ namespace VividRP.Runtime.GPUDriven
             return new MaterialProgramTemplate(
                 selectionKey,
                 layoutSchema,
-                VividMaterialProgramCapabilities.LegacyGBufferExport
-                | VividMaterialProgramCapabilities.AlphaClip
-                | VividMaterialProgramCapabilities.Unlit,
+                surfaceProgramID == VividMaterialSurfaceProgramID.OpenPBROpaque
+                    ? VividMaterialProgramCapabilities.OpenPBROpaqueExport
+                        | VividMaterialProgramCapabilities.AlphaClip
+                    : VividMaterialProgramCapabilities.LegacyGBufferExport
+                        | VividMaterialProgramCapabilities.AlphaClip
+                        | VividMaterialProgramCapabilities.Unlit,
                 MaterialProgramContract.RuntimeAbiVersion);
         }
     }

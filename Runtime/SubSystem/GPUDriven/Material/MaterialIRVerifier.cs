@@ -353,6 +353,7 @@ namespace VividRP.Runtime.GPUDriven
         internal const string OutputTypeMismatch = "MIR2002";
         internal const string UnknownMaterialFeature = "MIR2003";
         internal const string InvalidShadingModel = "MIR2004";
+        internal const string InvalidOpenPBROpaqueOutput = "MIR2005";
 
         internal const string TopologyOwnerMismatch = "MIR3001";
         internal const string TopologyBudgetExceeded = "MIR3002";
@@ -372,6 +373,7 @@ namespace VividRP.Runtime.GPUDriven
         internal const string InvalidClosureGraphShape = "MIR4009";
         internal const string ClosureGraphFanOut = "MIR4010";
         internal const string ClosureGraphBudgetExceeded = "MIR4011";
+        internal const string InvalidOpenPBROpaqueConstant = "MIR4012";
 
         internal const string UnsupportedStageOpcode = "MIR5001";
         internal const string StageInputUnavailable = "MIR5002";
@@ -489,7 +491,8 @@ namespace VividRP.Runtime.GPUDriven
             (int) MaterialFeatureMask.AlphaClip;
         private const int KnownShadingModelBits =
             (int) MaterialShadingModelMask.StandardLit
-            | (int) MaterialShadingModelMask.Unlit;
+            | (int) MaterialShadingModelMask.Unlit
+            | (int) MaterialShadingModelMask.OpenPBROpaque;
         private const int KnownClosureFeatureBits =
             (int) ClosureFeatureMask.BaseColorTexture
             | (int) ClosureFeatureMask.NormalTexture
@@ -599,6 +602,33 @@ namespace VividRP.Runtime.GPUDriven
                 closureRoot,
                 closureBudget,
                 diagnostics);
+            if (closureGraph.Owns(closureRoot))
+            {
+                bool nativeOpenPBR = closureGraph.GetNode(closureRoot).Opcode
+                    == ClosureExpressionOpcode.OpenPBROpaque;
+                if (nativeOpenPBR
+                    ? shadingModels != MaterialShadingModelMask.OpenPBROpaque
+                    : (shadingModels & MaterialShadingModelMask.OpenPBROpaque) != 0)
+                {
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidShadingModel,
+                        "OpenPBROpaqueV1 requires one native leaf and the exclusive OpenPBROpaque shading model.");
+                }
+                if (nativeOpenPBR && values.Owns(outputs.Emission))
+                {
+                    MaterialValueNode emission = values.GetNode(outputs.Emission);
+                    if (emission.Opcode != MaterialValueOpcode.Constant
+                        || emission.Type != MaterialValueType.Float3
+                        || math.any(emission.Constant.xyz != 0.0f))
+                    {
+                        AddError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidOpenPBROpaqueOutput,
+                            "OpenPBROpaqueV1 emission is defined by its native leaf; the legacy emission output must be a constant float3 zero.");
+                    }
+                }
+            }
             return CreateResult(diagnostics);
         }
 
@@ -2577,6 +2607,7 @@ namespace VividRP.Runtime.GPUDriven
                 switch (node.Opcode)
                 {
                     case ClosureExpressionOpcode.Slab:
+                    case ClosureExpressionOpcode.OpenPBROpaque:
                         closureCount++;
                         break;
                     case ClosureExpressionOpcode.HorizontalMix:
@@ -2642,6 +2673,21 @@ namespace VividRP.Runtime.GPUDriven
         {
             switch (node.Opcode)
             {
+                case ClosureExpressionOpcode.OpenPBROpaque:
+                    if (node.Operand0 != InvalidOperand
+                        || node.Operand1 != InvalidOperand
+                        || node.Weight != default
+                        || HasSlabPayload(node.Slab))
+                    {
+                        AddNodeError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.InvalidClosureOperandEncoding,
+                            nodeIndex,
+                            "OpenPBROpaque nodes cannot contain slab payloads, operator operands or weight.");
+                    }
+                    AppendOpenPBROpaqueValueDiagnostics(
+                        graph.ValueIR, node.OpenPBROpaque, nodeIndex, diagnostics);
+                    break;
                 case ClosureExpressionOpcode.Slab:
                     if (node.Operand0 != InvalidOperand
                         || node.Operand1 != InvalidOperand
@@ -2753,6 +2799,55 @@ namespace VividRP.Runtime.GPUDriven
                 || slab.Features != ClosureFeatureMask.None;
         }
 
+        private static void AppendOpenPBROpaqueValueDiagnostics(
+            MaterialValueIR values,
+            in ClosureOpenPBROpaqueExpression expression,
+            int nodeIndex,
+            List<MaterialIRDiagnostic> diagnostics)
+        {
+            // Dynamic expressions are checked at the typed AOT boundary. Validate
+            // every known literal here, preserving valid defaults for unknowns.
+            OpenPBROpaqueInputs known = OpenPBROpaqueContract.CreateDefault();
+            for (int field = 0; field < OpenPBROpaqueContract.FieldCount; field++)
+            {
+                MaterialValue value = expression.GetValue(field);
+                MaterialValueType type = ClosureOpenPBROpaqueExpression.GetFieldType(field);
+                AppendClosureValueDiagnostics(
+                    values, value, type,
+                    ((OpenPBROpaqueFieldSemantic) field).ToString(), nodeIndex, diagnostics);
+                if (!values.Owns(value) || value.Type != type)
+                    continue;
+                MaterialValueNode valueNode = values.GetNode(value);
+                if (valueNode.Opcode != MaterialValueOpcode.Constant)
+                    continue;
+                float4 constant = valueNode.Constant;
+                switch ((OpenPBROpaqueFieldSemantic) field)
+                {
+                    case OpenPBROpaqueFieldSemantic.BaseWeight: known.BaseWeight = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.BaseColor: known.BaseColor = constant.xyz; break;
+                    case OpenPBROpaqueFieldSemantic.BaseDiffuseRoughness: known.BaseDiffuseRoughness = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.BaseMetalness: known.BaseMetalness = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.SpecularWeight: known.SpecularWeight = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.SpecularColor: known.SpecularColor = constant.xyz; break;
+                    case OpenPBROpaqueFieldSemantic.SpecularRoughness: known.SpecularRoughness = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.SpecularIor: known.SpecularIor = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.NormalWS: known.NormalWS = constant.xyz; break;
+                    case OpenPBROpaqueFieldSemantic.EmissionLuminance: known.EmissionLuminance = constant.x; break;
+                    case OpenPBROpaqueFieldSemantic.EmissionColor: known.EmissionColor = constant.xyz; break;
+                }
+            }
+            OpenPBROpaqueValidationErrors errors = OpenPBROpaqueContract.Validate(
+                known, OpenPBROpaqueUnsupportedFeatures.None);
+            if (errors != OpenPBROpaqueValidationErrors.None)
+            {
+                AddNodeError(
+                    diagnostics,
+                    MaterialIRDiagnosticCodes.InvalidOpenPBROpaqueConstant,
+                    nodeIndex,
+                    $"OpenPBROpaqueV1 constant inputs violate the frozen profile: {errors}.");
+            }
+        }
+
         private static void AppendClosureOperandDiagnostics(
             int operand,
             int operandIndex,
@@ -2842,7 +2937,8 @@ namespace VividRP.Runtime.GPUDriven
             List<MaterialIRDiagnostic> diagnostics)
         {
             ClosureExpressionNode rootNode = graph.Nodes[root.Index];
-            if (rootNode.Opcode == ClosureExpressionOpcode.Slab)
+            if (rootNode.Opcode == ClosureExpressionOpcode.Slab
+                || rootNode.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
             {
                 if (closureCount != 1 || operatorCount != 0)
                 {
@@ -2850,7 +2946,7 @@ namespace VividRP.Runtime.GPUDriven
                         diagnostics,
                         MaterialIRDiagnosticCodes.InvalidClosureGraphShape,
                         root.Index,
-                        "A slab root must resolve to exactly one slab and no operators.");
+                        "A leaf root must resolve to exactly one closure and no operators.");
                 }
                 return;
             }
@@ -2922,6 +3018,26 @@ namespace VividRP.Runtime.GPUDriven
                     + $"{topology.OperatorCount} operators, but its budget allows "
                     + $"{topology.Budget.MaxClosureCount} closures and "
                     + $"{topology.Budget.MaxOperatorCount} operators.");
+            }
+
+            if (topology.OpenPBROpaqueClosures.Count != 0)
+            {
+                if (topology.OpenPBROpaqueClosures.Count != 1
+                    || topology.Slabs.Count != 0
+                    || topology.NormalBases.Count != 0
+                    || topology.OperatorCount != 0)
+                {
+                    AddError(
+                        diagnostics,
+                        MaterialIRDiagnosticCodes.InvalidTopologyShape,
+                        "OpenPBROpaqueV1 topology requires exactly one native leaf, with no slabs, legacy bases or operators.");
+                }
+                for (int index = 0; index < topology.OpenPBROpaqueClosures.Count; index++)
+                {
+                    AppendOpenPBROpaqueValueDiagnostics(
+                        topology.ValueIR, topology.OpenPBROpaqueClosures[index], index, diagnostics);
+                }
+                return;
             }
 
             for (int basisIndex = 0; basisIndex < topology.NormalBases.Count; basisIndex++)

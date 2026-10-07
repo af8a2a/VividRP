@@ -425,6 +425,14 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("    VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;");
             ClosureExpressionNode root =
                 module.ClosureGraph.GetNode(module.SurfaceClosure);
+            if (root.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+            {
+                if (topology != MaterialProgramTopologySpecialization.OpenPBROpaque)
+                    throw new InvalidOperationException("Surface topology and native closure root disagree.");
+                AppendOpenPBROpaqueOutput(builder, stageLIR, root.OpenPBROpaque);
+                builder.AppendLine("    return output;");
+                return;
+            }
             if (root.Opcode == ClosureExpressionOpcode.Slab)
             {
                 if (topology != MaterialProgramTopologySpecialization.SingleSlab)
@@ -489,6 +497,28 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(GetMappedValueName(stageLIR, module.Outputs.Emission))
                 .AppendLine(";");
             builder.AppendLine("    return output;");
+        }
+
+        private static void AppendOpenPBROpaqueOutput(
+            StringBuilder builder,
+            MaterialStageLIR stageLIR,
+            in ClosureOpenPBROpaqueExpression inputs)
+        {
+            builder.AppendLine("    output.Profile = VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE;");
+            builder.AppendLine("    output.NativeProfileVersion = VIVID_OPENPBR_OPAQUE_CONTRACT_VERSION;");
+            builder.AppendLine("    output.NativeProfileFingerprintLo = VIVID_OPENPBR_OPAQUE_FINGERPRINT_LO;");
+            builder.AppendLine("    output.NativeProfileFingerprintHi = VIVID_OPENPBR_OPAQUE_FINGERPRINT_HI;");
+            for (int fieldIndex = 0; fieldIndex < OpenPBROpaqueContract.FieldCount; fieldIndex++)
+            {
+                MaterialValue value = inputs.GetValue(fieldIndex);
+                string field = ((OpenPBROpaqueFieldSemantic) fieldIndex).ToString();
+                RequireType(value, ClosureOpenPBROpaqueExpression.GetFieldType(fieldIndex),
+                    "OpenPBR " + field);
+                string hlslField = char.ToLowerInvariant(field[0]) + field.Substring(1);
+                AppendOutputAssignment(builder, stageLIR, "OpenPBROpaque", hlslField, value);
+            }
+            builder.AppendLine("    output.ClosureCount = VIVID_OPENPBR_OPAQUE_CLOSURE_COUNT;");
+            builder.AppendLine("    output.LayerOperator = 0u;");
         }
 
         private static void AppendSlabOutput(
@@ -985,6 +1015,7 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("// Generated from canonical Surface Stage LIR and Deferred Export contracts; do not edit.");
             builder.AppendLine("#ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
             builder.AppendLine("#define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
+            builder.AppendLine("#include \"../VividOpenPBROpaqueContract.hlsl\"");
             builder.AppendLine();
             builder.Append("#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION ")
                 .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
@@ -1040,6 +1071,10 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("    uint Version;");
             builder.AppendLine("    uint SurfaceSummaryAbi;");
             builder.AppendLine("    uint DualSlabSidecarAbi;");
+            builder.AppendLine("    uint NativePayloadAbi;");
+            builder.AppendLine("    uint NativeProfileVersion;");
+            builder.AppendLine("    uint NativeProfileFingerprintLo;");
+            builder.AppendLine("    uint NativeProfileFingerprintHi;");
             builder.AppendLine("    uint ShadingModelMask;");
             builder.AppendLine("    uint LitClass;");
             builder.AppendLine("    uint ExpectedClosureCount;");
@@ -1074,6 +1109,11 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine();
             builder.AppendLine("struct VividAOTSurfaceProgramOutput");
             builder.AppendLine("{");
+            builder.AppendLine("    uint Profile;");
+            builder.AppendLine("    uint NativeProfileVersion;");
+            builder.AppendLine("    uint NativeProfileFingerprintLo;");
+            builder.AppendLine("    uint NativeProfileFingerprintHi;");
+            builder.AppendLine("    VividOpenPBROpaqueInputs OpenPBROpaque;");
             builder.AppendLine("    VividAOTSurfaceSlabValues BaseSlab;");
             builder.AppendLine("    VividAOTSurfaceSlabValues TopSlab;");
             builder.AppendLine("    float3 Emission;");
@@ -1082,6 +1122,8 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("    uint LayerOperator;");
             builder.AppendLine("};");
             builder.AppendLine();
+            AppendDefine(builder, "VIVID_AOT_SURFACE_PROFILE_SLAB", 0u);
+            AppendDefine(builder, "VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE", 1u);
         }
 
         private static void AppendDeferredExportDefines(StringBuilder builder)
@@ -1092,8 +1134,16 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialProgramContract.DeferredExportContractVersion);
             AppendDefine(
                 builder,
+                "VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_NONE",
+                (uint) MaterialDeferredExportSurfaceSummaryAbi.None);
+            AppendDefine(
+                builder,
                 "VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_V1",
                 (uint) MaterialDeferredExportSurfaceSummaryAbi.SurfaceSummaryV1);
+            AppendDefine(builder, "VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE",
+                (uint) MaterialDeferredExportNativePayloadAbi.None);
+            AppendDefine(builder, "VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_OPENPBR_OPAQUE_V1",
+                (uint) MaterialDeferredExportNativePayloadAbi.OpenPBROpaqueV1);
             AppendDefine(
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE",
@@ -1110,6 +1160,8 @@ namespace VividRP.Runtime.GPUDriven
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT",
                 (uint) MaterialShadingModelMask.Unlit);
+            AppendDefine(builder, "VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_OPENPBR_OPAQUE",
+                (uint) MaterialShadingModelMask.OpenPBROpaque);
             AppendDefine(
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_NONE",
@@ -1122,6 +1174,8 @@ namespace VividRP.Runtime.GPUDriven
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_DUAL_SLAB",
                 (uint) MaterialDeferredExportLitClass.DualSlab);
+            AppendDefine(builder, "VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_OPENPBR_OPAQUE",
+                (uint) MaterialDeferredExportLitClass.OpenPBROpaque);
             AppendDefine(
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE",
@@ -1150,6 +1204,8 @@ namespace VividRP.Runtime.GPUDriven
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO",
                 (uint) MaterialDeferredExportPayloadFlags.SharedNormalAndAmbientOcclusion);
+            AppendDefine(builder, "VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_NATIVE_OPENPBR_OPAQUE",
+                (uint) MaterialDeferredExportPayloadFlags.NativeOpenPBROpaque);
             AppendDefine(
                 builder,
                 "VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE",
@@ -1207,7 +1263,26 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("bool VividIsAOTDeferredExportContractSupported(");
             builder.AppendLine("    const VividAOTDeferredExportContract contract)");
             builder.AppendLine("{");
-            builder.AppendLine("    if (contract.Version != VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION");
+            builder.AppendLine("    if (contract.Version != VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION)");
+            builder.AppendLine("        return false;");
+            builder.AppendLine("    if (contract.NativePayloadAbi == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_OPENPBR_OPAQUE_V1)");
+            builder.AppendLine("    {");
+            builder.AppendLine("        return contract.SurfaceSummaryAbi == VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_NONE");
+            builder.AppendLine("            && contract.DualSlabSidecarAbi == VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE");
+            builder.AppendLine("            && contract.NativeProfileVersion == VIVID_OPENPBR_OPAQUE_CONTRACT_VERSION");
+            builder.AppendLine("            && contract.NativeProfileFingerprintLo == VIVID_OPENPBR_OPAQUE_FINGERPRINT_LO");
+            builder.AppendLine("            && contract.NativeProfileFingerprintHi == VIVID_OPENPBR_OPAQUE_FINGERPRINT_HI");
+            builder.AppendLine("            && contract.ShadingModelMask == VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_OPENPBR_OPAQUE");
+            builder.AppendLine("            && contract.LitClass == VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_OPENPBR_OPAQUE");
+            builder.AppendLine("            && contract.ExpectedClosureCount == VIVID_OPENPBR_OPAQUE_CLOSURE_COUNT");
+            builder.AppendLine("            && contract.Topology == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE");
+            builder.AppendLine("            && contract.PayloadFlags == VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_NATIVE_OPENPBR_OPAQUE");
+            builder.AppendLine("            && contract.PolicyFlags == 0u;");
+            builder.AppendLine("    }");
+            builder.AppendLine("    if (contract.NativePayloadAbi != VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE");
+            builder.AppendLine("        || contract.NativeProfileVersion != 0u");
+            builder.AppendLine("        || contract.NativeProfileFingerprintLo != 0u");
+            builder.AppendLine("        || contract.NativeProfileFingerprintHi != 0u");
             builder.AppendLine("        || contract.SurfaceSummaryAbi != VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_V1)");
             builder.AppendLine("        return false;");
             builder.AppendLine();
@@ -1342,6 +1417,19 @@ namespace VividRP.Runtime.GPUDriven
                 builder.AppendLine("                runtimeHeader.ParameterAddress,");
                 builder.AppendLine("                runtimeHeader.ResourceBindingAddress,");
                 builder.AppendLine("                context);");
+                if (entry.Program.DeferredExportContract.NativePayloadAbi
+                    == MaterialDeferredExportNativePayloadAbi.OpenPBROpaqueV1)
+                {
+                    builder.AppendLine("            if (!VividIsAOTDeferredExportContractSupported(deferredExportContract)");
+                    builder.AppendLine("                || output.Profile != VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE");
+                    builder.AppendLine("                || output.NativeProfileVersion != deferredExportContract.NativeProfileVersion");
+                    builder.AppendLine("                || output.NativeProfileFingerprintLo != deferredExportContract.NativeProfileFingerprintLo");
+                    builder.AppendLine("                || output.NativeProfileFingerprintHi != deferredExportContract.NativeProfileFingerprintHi");
+                    builder.AppendLine("                || output.ClosureCount != deferredExportContract.ExpectedClosureCount");
+                    builder.AppendLine("                || output.LayerOperator != deferredExportContract.Topology");
+                    builder.AppendLine("                || VividValidateOpenPBROpaqueInputs(output.OpenPBROpaque, 0u) != 0u)");
+                    builder.AppendLine("                return false;");
+                }
                 builder.AppendLine("            return true;");
                 builder.AppendLine("        }");
             }
@@ -1364,6 +1452,10 @@ namespace VividRP.Runtime.GPUDriven
                 builder,
                 "DualSlabSidecarAbi",
                 (uint) contract.DualSlabSidecarAbi);
+            AppendContractField(builder, "NativePayloadAbi", (uint) contract.NativePayloadAbi);
+            AppendContractField(builder, "NativeProfileVersion", contract.NativeProfileVersion);
+            AppendContractField(builder, "NativeProfileFingerprintLo", (uint) contract.NativeProfileFingerprint);
+            AppendContractField(builder, "NativeProfileFingerprintHi", (uint) (contract.NativeProfileFingerprint >> 32));
             AppendContractField(
                 builder,
                 "ShadingModelMask",

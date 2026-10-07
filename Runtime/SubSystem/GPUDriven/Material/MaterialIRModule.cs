@@ -18,6 +18,7 @@ namespace VividRP.Runtime.GPUDriven
         None = 0,
         StandardLit = 1 << 0,
         Unlit = 1 << 1,
+        OpenPBROpaque = 1 << 2,
     }
 
     internal readonly struct MaterialOutputRoots
@@ -284,6 +285,17 @@ namespace VividRP.Runtime.GPUDriven
             {
                 ClosureExpressionNode node = ClosureGraph.Nodes[i];
                 builder.Append("  @c").Append(i).Append(" = ");
+                if (node.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+                {
+                    builder.Append("OpenPBROpaqueV1");
+                    for (int field = 0; field < OpenPBROpaqueContract.FieldCount; field++)
+                    {
+                        builder.Append(' ').Append((OpenPBROpaqueFieldSemantic) field)
+                            .Append("=%").Append(node.OpenPBROpaque.GetValue(field).Index);
+                    }
+                    builder.AppendLine();
+                    continue;
+                }
                 if (node.Opcode == ClosureExpressionOpcode.Slab)
                 {
                     ClosureSlabExpression slab = node.Slab;

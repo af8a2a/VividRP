@@ -36,6 +36,7 @@ namespace VividRP.Runtime.GPUDriven
         Slab = 0,
         HorizontalMix = 1,
         VerticalLayer = 2,
+        OpenPBROpaque = 3,
     }
 
     internal readonly struct MaterialGraphValue : IEquatable<MaterialGraphValue>
@@ -551,6 +552,52 @@ namespace VividRP.Runtime.GPUDriven
                 new[] { baseColor, roughness, metallic, normal, tangent },
                 null,
                 features);
+        }
+
+        internal MaterialGraphClosure OpenPBROpaque(
+            string nodeId,
+            MaterialGraphValue baseWeight,
+            MaterialGraphValue baseColor,
+            MaterialGraphValue baseDiffuseRoughness,
+            MaterialGraphValue baseMetalness,
+            MaterialGraphValue specularWeight,
+            MaterialGraphValue specularColor,
+            MaterialGraphValue specularRoughness,
+            MaterialGraphValue specularIor,
+            MaterialGraphValue normalWS,
+            MaterialGraphValue emissionLuminance,
+            MaterialGraphValue emissionColor)
+        {
+            return AddClosure(
+                nodeId,
+                MaterialGraphClosureOpcode.OpenPBROpaque,
+                new[]
+                {
+                    baseWeight, baseColor, baseDiffuseRoughness, baseMetalness,
+                    specularWeight, specularColor, specularRoughness, specularIor,
+                    normalWS, emissionLuminance, emissionColor,
+                },
+                null,
+                ClosureFeatureMask.None);
+        }
+
+        internal MaterialGraphClosure OpenPBROpaqueDefault(
+            string nodeId,
+            MaterialGraphValue normalWS)
+        {
+            return OpenPBROpaque(
+                nodeId,
+                Constant(nodeId + ".BaseWeight", OpenPBROpaqueContract.DefaultBaseWeight),
+                Constant(nodeId + ".BaseColor", new float3(OpenPBROpaqueContract.DefaultBaseColor)),
+                Constant(nodeId + ".BaseDiffuseRoughness", OpenPBROpaqueContract.DefaultBaseDiffuseRoughness),
+                Constant(nodeId + ".BaseMetalness", OpenPBROpaqueContract.DefaultBaseMetalness),
+                Constant(nodeId + ".SpecularWeight", OpenPBROpaqueContract.DefaultSpecularWeight),
+                Constant(nodeId + ".SpecularColor", new float3(OpenPBROpaqueContract.DefaultSpecularColor)),
+                Constant(nodeId + ".SpecularRoughness", OpenPBROpaqueContract.DefaultSpecularRoughness),
+                Constant(nodeId + ".SpecularIor", OpenPBROpaqueContract.DefaultSpecularIor),
+                normalWS,
+                Constant(nodeId + ".EmissionLuminance", OpenPBROpaqueContract.DefaultEmissionLuminance),
+                Constant(nodeId + ".EmissionColor", new float3(OpenPBROpaqueContract.DefaultEmissionColor)));
         }
 
         internal MaterialGraphClosure HorizontalMix(

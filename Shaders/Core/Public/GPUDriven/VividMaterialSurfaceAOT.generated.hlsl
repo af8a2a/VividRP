@@ -2,33 +2,39 @@
 // Generated from canonical Surface Stage LIR and Deferred Export contracts; do not edit.
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
+#include "../VividOpenPBROpaqueContract.hlsl"
 
-#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 8u
+#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 9u
 
-// Expected Material Program artifact set: v2 0x813CC91495317BA3
+// Expected Material Program artifact set: v2 0xDBFA1A8CE789E0DE
 #include "VividMaterialProgramCatalogStamp.generated.hlsl"
 #if !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED)
 #error Missing published Material Program Catalog stamp for Surface dispatcher.
-#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_H813CC91495317BA3)
+#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_HDBFA1A8CE789E0DE)
 #error Surface dispatcher does not match the published Material Program Catalog artifact set.
 #endif
 
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
-#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H57B7B026DE009361_N00000004 1
-#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000005_H57B7B026DE009361_N00000004)
+#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000006_HE73E4F7E34E02EF3_N00000005 1
+#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000006_HE73E4F7E34E02EF3_N00000005)
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
-#define VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION 1u
+#define VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION 2u
+#define VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_NONE 0u
 #define VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_V1 1u
+#define VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE 0u
+#define VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_OPENPBR_OPAQUE_V1 1u
 #define VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE 0u
 #define VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_DUAL_SLAB_V1 1u
 #define VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_STANDARD_LIT 1u
 #define VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT 2u
+#define VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_OPENPBR_OPAQUE 4u
 #define VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_NONE 0u
 #define VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_FAST_SLAB 2u
 #define VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_DUAL_SLAB 4u
+#define VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_OPENPBR_OPAQUE 6u
 #define VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE 0u
 #define VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX 1u
 #define VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER 2u
@@ -36,6 +42,7 @@
 #define VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DIFFUSE_IRRADIANCE 2u
 #define VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DUAL_SLAB_SIDECAR 4u
 #define VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO 8u
+#define VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_NATIVE_OPENPBR_OPAQUE 16u
 #define VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE 1u
 #define VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_SSR_ON_FAST_SLAB 2u
 #define VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS 4u
@@ -46,6 +53,10 @@ struct VividAOTDeferredExportContract
     uint Version;
     uint SurfaceSummaryAbi;
     uint DualSlabSidecarAbi;
+    uint NativePayloadAbi;
+    uint NativeProfileVersion;
+    uint NativeProfileFingerprintLo;
+    uint NativeProfileFingerprintHi;
     uint ShadingModelMask;
     uint LitClass;
     uint ExpectedClosureCount;
@@ -78,7 +89,26 @@ bool VividAOTDeferredExportHasPolicy(
 bool VividIsAOTDeferredExportContractSupported(
     const VividAOTDeferredExportContract contract)
 {
-    if (contract.Version != VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION
+    if (contract.Version != VIVID_AOT_DEFERRED_EXPORT_CONTRACT_VERSION)
+        return false;
+    if (contract.NativePayloadAbi == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_OPENPBR_OPAQUE_V1)
+    {
+        return contract.SurfaceSummaryAbi == VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_NONE
+            && contract.DualSlabSidecarAbi == VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE
+            && contract.NativeProfileVersion == VIVID_OPENPBR_OPAQUE_CONTRACT_VERSION
+            && contract.NativeProfileFingerprintLo == VIVID_OPENPBR_OPAQUE_FINGERPRINT_LO
+            && contract.NativeProfileFingerprintHi == VIVID_OPENPBR_OPAQUE_FINGERPRINT_HI
+            && contract.ShadingModelMask == VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_OPENPBR_OPAQUE
+            && contract.LitClass == VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_OPENPBR_OPAQUE
+            && contract.ExpectedClosureCount == VIVID_OPENPBR_OPAQUE_CLOSURE_COUNT
+            && contract.Topology == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE
+            && contract.PayloadFlags == VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_NATIVE_OPENPBR_OPAQUE
+            && contract.PolicyFlags == 0u;
+    }
+    if (contract.NativePayloadAbi != VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE
+        || contract.NativeProfileVersion != 0u
+        || contract.NativeProfileFingerprintLo != 0u
+        || contract.NativeProfileFingerprintHi != 0u
         || contract.SurfaceSummaryAbi != VIVID_AOT_DEFERRED_EXPORT_SURFACE_SUMMARY_ABI_V1)
         return false;
 
@@ -184,6 +214,11 @@ struct VividAOTSurfaceSlabValues
 
 struct VividAOTSurfaceProgramOutput
 {
+    uint Profile;
+    uint NativeProfileVersion;
+    uint NativeProfileFingerprintLo;
+    uint NativeProfileFingerprintHi;
+    VividOpenPBROpaqueInputs OpenPBROpaque;
     VividAOTSurfaceSlabValues BaseSlab;
     VividAOTSurfaceSlabValues TopSlab;
     float3 Emission;
@@ -192,8 +227,10 @@ struct VividAOTSurfaceProgramOutput
     uint LayerOperator;
 };
 
-// Surface AOT HLSL artifact v4, backend v8.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_ABF068A669E4D2A2(
+#define VIVID_AOT_SURFACE_PROFILE_SLAB 0u
+#define VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE 1u
+// Surface AOT HLSL artifact v5, backend v9.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_215C5B2731CAFB52(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -249,8 +286,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_ABF068A669E4D2A2(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v8.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_3FC025E7DAEEDDDC(
+// Surface AOT HLSL artifact v5, backend v9.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_130EA2D589CBAD8C(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -345,8 +382,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_3FC025E7DAEEDDDC(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v8.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_4AFB9BC7D86846A4(
+// Surface AOT HLSL artifact v5, backend v9.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_527E00D079249214(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -441,8 +478,8 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_4AFB9BC7D86846A4(
     return output;
 }
 
-// Surface AOT HLSL artifact v4, backend v8.
-VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_2CF70EF09BCB8B6C(
+// Surface AOT HLSL artifact v5, backend v9.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_FCBA57D9E58B9CDC(
     const uint parameterAddress,
     const uint resourceAddress,
     const VividAOTSurfaceContext context)
@@ -495,6 +532,41 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_2CF70EF09BCB8B6C(
     return output;
 }
 
+// Surface AOT HLSL artifact v5, backend v9.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_30B108E514D38D6E(
+    const uint parameterAddress,
+    const uint resourceAddress,
+    const VividAOTSurfaceContext context)
+{
+    const float vivid_v0000 = asfloat(0x00000000u);
+    const float vivid_v0001 = asfloat(0x3E99999Au);
+    const float vivid_v0002 = asfloat(0x3F800000u);
+    const float vivid_v0003 = asfloat(0x40000000u);
+    const float3 vivid_v0004 = float3(asfloat(0x3F4CCCCDu), asfloat(0x3F4CCCCDu), asfloat(0x3F4CCCCDu));
+    const float3 vivid_v0005 = float3(asfloat(0x3F800000u), asfloat(0x3F800000u), asfloat(0x3F800000u));
+    const float3 vivid_v0006 = context.GeometryNormalWS;
+
+    VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;
+    output.Profile = VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE;
+    output.NativeProfileVersion = VIVID_OPENPBR_OPAQUE_CONTRACT_VERSION;
+    output.NativeProfileFingerprintLo = VIVID_OPENPBR_OPAQUE_FINGERPRINT_LO;
+    output.NativeProfileFingerprintHi = VIVID_OPENPBR_OPAQUE_FINGERPRINT_HI;
+    output.OpenPBROpaque.baseWeight = vivid_v0002;
+    output.OpenPBROpaque.baseColor = vivid_v0004;
+    output.OpenPBROpaque.baseDiffuseRoughness = vivid_v0000;
+    output.OpenPBROpaque.baseMetalness = vivid_v0000;
+    output.OpenPBROpaque.specularWeight = vivid_v0002;
+    output.OpenPBROpaque.specularColor = vivid_v0005;
+    output.OpenPBROpaque.specularRoughness = vivid_v0001;
+    output.OpenPBROpaque.specularIor = vivid_v0003;
+    output.OpenPBROpaque.normalWS = vivid_v0006;
+    output.OpenPBROpaque.emissionLuminance = vivid_v0000;
+    output.OpenPBROpaque.emissionColor = vivid_v0005;
+    output.ClosureCount = VIVID_OPENPBR_OPAQUE_CLOSURE_COUNT;
+    output.LayerOperator = 0u;
+    return output;
+}
+
 bool VividTryEvaluateAOTSurfaceProgram(
     const VividMaterialRuntimeHeader runtimeHeader,
     const VividMaterialProgramData programData,
@@ -521,16 +593,20 @@ bool VividTryEvaluateAOTSurfaceProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            deferredExportContract.Version = 1u;
+            deferredExportContract.Version = 2u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 0u;
+            deferredExportContract.NativePayloadAbi = 0u;
+            deferredExportContract.NativeProfileVersion = 0u;
+            deferredExportContract.NativeProfileFingerprintLo = 0u;
+            deferredExportContract.NativeProfileFingerprintHi = 0u;
             deferredExportContract.ShadingModelMask = 3u;
             deferredExportContract.LitClass = 2u;
             deferredExportContract.ExpectedClosureCount = 1u;
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_ABF068A669E4D2A2(
+            output = VividEvaluateAOTSurface_215C5B2731CAFB52(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -545,16 +621,20 @@ bool VividTryEvaluateAOTSurfaceProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            deferredExportContract.Version = 1u;
+            deferredExportContract.Version = 2u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 1u;
+            deferredExportContract.NativePayloadAbi = 0u;
+            deferredExportContract.NativeProfileVersion = 0u;
+            deferredExportContract.NativeProfileFingerprintLo = 0u;
+            deferredExportContract.NativeProfileFingerprintHi = 0u;
             deferredExportContract.ShadingModelMask = 3u;
             deferredExportContract.LitClass = 4u;
             deferredExportContract.ExpectedClosureCount = 2u;
             deferredExportContract.Topology = 1u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_3FC025E7DAEEDDDC(
+            output = VividEvaluateAOTSurface_130EA2D589CBAD8C(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -569,16 +649,20 @@ bool VividTryEvaluateAOTSurfaceProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            deferredExportContract.Version = 1u;
+            deferredExportContract.Version = 2u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 1u;
+            deferredExportContract.NativePayloadAbi = 0u;
+            deferredExportContract.NativeProfileVersion = 0u;
+            deferredExportContract.NativeProfileFingerprintLo = 0u;
+            deferredExportContract.NativeProfileFingerprintHi = 0u;
             deferredExportContract.ShadingModelMask = 3u;
             deferredExportContract.LitClass = 4u;
             deferredExportContract.ExpectedClosureCount = 2u;
             deferredExportContract.Topology = 2u;
             deferredExportContract.PayloadFlags = 15u;
             deferredExportContract.PolicyFlags = 15u;
-            output = VividEvaluateAOTSurface_4AFB9BC7D86846A4(
+            output = VividEvaluateAOTSurface_527E00D079249214(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
@@ -593,19 +677,60 @@ bool VividTryEvaluateAOTSurfaceProgram(
                 || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
                 || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
                 return false;
-            deferredExportContract.Version = 1u;
+            deferredExportContract.Version = 2u;
             deferredExportContract.SurfaceSummaryAbi = 1u;
             deferredExportContract.DualSlabSidecarAbi = 0u;
+            deferredExportContract.NativePayloadAbi = 0u;
+            deferredExportContract.NativeProfileVersion = 0u;
+            deferredExportContract.NativeProfileFingerprintLo = 0u;
+            deferredExportContract.NativeProfileFingerprintHi = 0u;
             deferredExportContract.ShadingModelMask = 1u;
             deferredExportContract.LitClass = 2u;
             deferredExportContract.ExpectedClosureCount = 1u;
             deferredExportContract.Topology = 0u;
             deferredExportContract.PayloadFlags = 3u;
             deferredExportContract.PolicyFlags = 7u;
-            output = VividEvaluateAOTSurface_2CF70EF09BCB8B6C(
+            output = VividEvaluateAOTSurface_FCBA57D9E58B9CDC(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);
+            return true;
+        }
+        case 4u:
+        {
+            const uint parameterLaneCount = 0u;
+            const uint resourceCount = 0u;
+            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount
+                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress
+                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
+                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
+                return false;
+            deferredExportContract.Version = 2u;
+            deferredExportContract.SurfaceSummaryAbi = 0u;
+            deferredExportContract.DualSlabSidecarAbi = 0u;
+            deferredExportContract.NativePayloadAbi = 1u;
+            deferredExportContract.NativeProfileVersion = 1u;
+            deferredExportContract.NativeProfileFingerprintLo = 3867404148u;
+            deferredExportContract.NativeProfileFingerprintHi = 369231404u;
+            deferredExportContract.ShadingModelMask = 4u;
+            deferredExportContract.LitClass = 6u;
+            deferredExportContract.ExpectedClosureCount = 1u;
+            deferredExportContract.Topology = 0u;
+            deferredExportContract.PayloadFlags = 16u;
+            deferredExportContract.PolicyFlags = 0u;
+            output = VividEvaluateAOTSurface_30B108E514D38D6E(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
+                context);
+            if (!VividIsAOTDeferredExportContractSupported(deferredExportContract)
+                || output.Profile != VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE
+                || output.NativeProfileVersion != deferredExportContract.NativeProfileVersion
+                || output.NativeProfileFingerprintLo != deferredExportContract.NativeProfileFingerprintLo
+                || output.NativeProfileFingerprintHi != deferredExportContract.NativeProfileFingerprintHi
+                || output.ClosureCount != deferredExportContract.ExpectedClosureCount
+                || output.LayerOperator != deferredExportContract.Topology
+                || VividValidateOpenPBROpaqueInputs(output.OpenPBROpaque, 0u) != 0u)
+                return false;
             return true;
         }
         default:

@@ -101,6 +101,21 @@ namespace VividRP.Editor.GPUDriven
                         GetValueInput(graph, slab, MaterialStandardSlabNode.TangentPortName),
                         slab.GetFeatureMask());
                     return;
+                case MaterialOpenPBROpaqueNode openPbr:
+                    graph.OpenPBROpaque(
+                        nodeId,
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.BaseWeight),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.BaseColor),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.BaseDiffuseRoughness),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.BaseMetalness),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.SpecularWeight),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.SpecularColor),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.SpecularRoughness),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.SpecularIor),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.NormalWS),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.EmissionLuminance),
+                        GetOpenPBROpaqueInput(graph, openPbr, OpenPBROpaqueFieldSemantic.EmissionColor));
+                    return;
                 case MaterialHorizontalMixNode horizontalMix:
                     graph.HorizontalMix(
                         nodeId,
@@ -145,6 +160,18 @@ namespace VividRP.Editor.GPUDriven
                         GetValueInput(graph, output, MaterialOutputNode.EmissionPortName),
                         output.GetMaterialFeatures(),
                         output.GetShadingModels());
+                    return;
+                case MaterialOpenPBROpaqueOutputNode openPbrOutput:
+                    graph.Output(
+                        nodeId,
+                        GetClosureInput(graph, openPbrOutput, MaterialOpenPBROpaqueOutputNode.SurfacePortName),
+                        GetValueInputOrDefault(
+                            graph, openPbrOutput, MaterialOpenPBROpaqueOutputNode.CoveragePortName, 1.0f),
+                        GetValueInputOrDefault(
+                            graph, openPbrOutput, MaterialOpenPBROpaqueOutputNode.AlphaClipThresholdPortName, 0.0f),
+                        graph.Constant(nodeId + ".LegacyEmission", float3.zero),
+                        openPbrOutput.GetMaterialFeatures(),
+                        MaterialShadingModelMask.OpenPBROpaque);
                     return;
             }
         }
@@ -263,6 +290,28 @@ namespace VividRP.Editor.GPUDriven
             return source != null
                 ? graph.Value(GetNodeId(source))
                 : default;
+        }
+
+        private static MaterialGraphValue GetOpenPBROpaqueInput(
+            RuntimeMaterialGraph graph,
+            MaterialOpenPBROpaqueNode node,
+            OpenPBROpaqueFieldSemantic semantic)
+        {
+            INode source = GetConnectedNode(
+                node, MaterialOpenPBROpaqueAuthoring.GetPortName(semantic));
+            return source != null
+                ? graph.Value(GetNodeId(source))
+                : MaterialOpenPBROpaqueAuthoring.CreateDefaultInput(
+                    graph, GetNodeId(node), semantic);
+        }
+
+        private static MaterialGraphValue GetValueInputOrDefault(
+            RuntimeMaterialGraph graph, INode node, string portName, float defaultValue)
+        {
+            INode source = GetConnectedNode(node, portName);
+            return source != null
+                ? graph.Value(GetNodeId(source))
+                : graph.Constant(GetNodeId(node) + ".Default." + portName, defaultValue);
         }
 
         private static MaterialGraphClosure GetClosureInput(

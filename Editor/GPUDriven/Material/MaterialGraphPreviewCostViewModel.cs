@@ -10,6 +10,7 @@ namespace VividRP.Editor.GPUDriven
         OverBudget,
         CatalogMiss,
         Ready,
+        UnsupportedProfile,
     }
 
     internal readonly struct MaterialGraphCostMetric
@@ -154,13 +155,14 @@ namespace VividRP.Editor.GPUDriven
                         ? MaterialGraphPreviewStatus.OverBudget
                         : MaterialGraphPreviewStatus.CompileError;
             }
-            else if (!catalog.TryGetCatalogedProgram(result.Program, out catalogEntry))
-            {
-                status = MaterialGraphPreviewStatus.CatalogMiss;
-            }
             else
             {
-                status = MaterialGraphPreviewStatus.Ready;
+                bool isCataloged = catalog.TryGetCatalogedProgram(result.Program, out catalogEntry);
+                status = result.Program.Module.ShadingModels == MaterialShadingModelMask.OpenPBROpaque
+                    ? MaterialGraphPreviewStatus.UnsupportedProfile
+                    : isCataloged
+                        ? MaterialGraphPreviewStatus.Ready
+                        : MaterialGraphPreviewStatus.CatalogMiss;
             }
 
             MaterialGraphCostMetric[] metrics = programDiagnostics != null
@@ -186,6 +188,13 @@ namespace VividRP.Editor.GPUDriven
             {
                 diagnostics.Add(
                     "Compiled program is not present in the Frozen Catalog; preview dispatch is unavailable until the catalog is baked.");
+            }
+            if (status == MaterialGraphPreviewStatus.UnsupportedProfile)
+            {
+                diagnostics.Add(
+                    "OpenPBROpaqueV1 compiled successfully; this Editor preview does not yet implement OpenPBR shading.");
+                if (catalogEntry == null)
+                    diagnostics.Add("Compiled program is not present in the Frozen Catalog.");
             }
 
             MaterialIRModule module = result.Program?.Module ?? result.Module;

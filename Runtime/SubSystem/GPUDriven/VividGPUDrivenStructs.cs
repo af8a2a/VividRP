@@ -951,7 +951,8 @@ namespace VividRP.Runtime.GPUDriven
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
-    [StructLayout(LayoutKind.Auto)]
+    // Uploaded verbatim to a StructuredBuffer; field order must match the generated HLSL.
+    [StructLayout(LayoutKind.Sequential)]
     public unsafe struct VividGPUCullingContext
     {
         public float4x4 ViewProjectionMatrix;
@@ -975,7 +976,7 @@ namespace VividRP.Runtime.GPUDriven
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
-    [StructLayout(LayoutKind.Auto)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct VividGPULODSelectionContext
     {
         public float4x4 ViewProjectionMatrix;

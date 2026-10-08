@@ -1,9 +1,9 @@
 {
     "name": "VividRP.Diagnostics.Cli",
-    "references": ["VividRP.Editor", "Unity.Pipeline"],
+    "references": ["VividRP.Editor", "Unity.Pipeline", "Unity.Pipeline.Attributes"],
     "includePlatforms": ["Editor"],
     "defineConstraints": ["VIVIDRP_UNITY_PIPELINE"],
     "versionDefines": [
-        { "name": "com.unity.pipeline", "expression": "0.7.0-exp.1", "define": "VIVIDRP_UNITY_PIPELINE" }
+        { "name": "com.unity.pipeline", "expression": "0.8.0-exp.1", "define": "VIVIDRP_UNITY_PIPELINE" }
     ]
 }

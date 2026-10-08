@@ -267,6 +267,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int GlobalFogDimensionStride = 3;
         internal const int GlobalFogDistanceDimensionOffset = 0;
         internal const int GlobalFogPhaseDimensionOffset = 1;
+        // Reserved legacy local-fog sample block; keep the indexed sampling contract stable.
         internal const int LocalFogBaseDimension = 224;
         internal const int LocalFogDimensionStride = 4;
         internal const int LocalFogDistanceDimensionOffset = 0;
@@ -1221,7 +1222,6 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingEnvironmentState environmentState,
             ReferencedPathTracingAtmosphereState atmosphereState,
             ReferencedPathTracingGlobalFogState globalFogState,
-            ReferencedPathTracingLocalFogState localFogState,
             ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
             ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
@@ -1240,9 +1240,6 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 globalFogState.signature);
-            ReferencedPathTracingStableHash.Add(
-                ref hash,
-                localFogState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 cameraBackgroundState.signature);

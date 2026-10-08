@@ -1,3 +1,4 @@
+%UNITY 7.0
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!114 &11400000
@@ -73,6 +74,8 @@ MonoBehaviour:
     instantiationMode: 1
   - dependency: {fileID: 2800000, guid: d0c5f0c921695de4cb8776ab9d6968a3, type: 3}
     instantiationMode: 1
+  - dependency: {fileID: 2800000, guid: 177b2538515c71b4a86aa1cad939807a, type: 2}
+    instantiationMode: 1
   - dependency: {fileID: 2800000, guid: 262a5027ae234554a8b52ae2fdf8b1f9, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2800000, guid: dae012c9656c3d1499a2fffeda9a82f6, type: 2}
@@ -105,9 +108,9 @@ MonoBehaviour:
     instantiationMode: 1
   - dependency: {fileID: 2800000, guid: 0daf8e926af78b24989bf74729db649d, type: 3}
     instantiationMode: 1
-  - dependency: {fileID: 2100000, guid: a707c9a38b4da684eb4a401bf732dfb5, type: 2}
-    instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 0b6d01ce4b15630479c6d3c8f760c8e0, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: a707c9a38b4da684eb4a401bf732dfb5, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2800000, guid: cdcadd6e7d136eb49aab71a64a9b8ed8, type: 2}
     instantiationMode: 1

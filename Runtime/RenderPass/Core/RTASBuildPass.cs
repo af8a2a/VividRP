@@ -59,7 +59,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsRayTracing;
         private VividRayTracingAccelerationStructureStats m_LastStats;
 
-        private readonly struct SceneAccelerationStructureBuildStats
+        internal readonly struct SceneAccelerationStructureBuildStats
         {
             public SceneAccelerationStructureBuildStats(
                 int candidateRendererCount,
@@ -454,13 +454,14 @@ namespace VividRP.Runtime.RenderPass.Core
             var resolvedSettings = ResolveSettings(
                 VividVolumeManagerUtility.GetRayTracingSettingsVolume(),
                 m_SceneAccelerationStructure?.desc);
-            var camera = frameData.GetOrCreate<VividCameraData>().camera;
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var camera = cameraData.camera;
 
             WriteResolvedSettings(frameData, resolvedSettings);
 
             if (m_SceneAccelerationStructure == null)
             {
-                ReportUnavailableStats(camera, in resolvedSettings, "RTAS resource is not initialized.");
+                ReportUnavailableStats(cameraData, in resolvedSettings, "RTAS resource is not initialized.");
                 return;
             }
 
@@ -473,7 +474,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (!m_SupportsRayTracing)
             {
-                ReportUnavailableStats(camera, in resolvedSettings, "Ray tracing is not supported on the current device.");
+                ReportUnavailableStats(cameraData, in resolvedSettings, "Ray tracing is not supported on the current device.");
                 return;
             }
 
@@ -482,19 +483,19 @@ namespace VividRP.Runtime.RenderPass.Core
             var nativeAccelerationStructure = (RayTracingAccelerationStructure)m_SceneAccelerationStructure;
             if (nativeAccelerationStructure == null)
             {
-                ReportUnavailableStats(camera, in resolvedSettings, "Failed to create the native RTAS.");
+                ReportUnavailableStats(cameraData, in resolvedSettings, "Failed to create the native RTAS.");
                 return;
             }
 
             if (!ShouldBuildForCamera(camera))
             {
                 nativeAccelerationStructure.ClearInstances();
-                ReportUnavailableStats(camera, in resolvedSettings, "RTAS stats are available for Game and SceneView cameras only.");
+                ReportUnavailableStats(cameraData, in resolvedSettings, "RTAS stats are available for Game and SceneView cameras only.");
                 return;
             }
 
             var buildStats = PopulateSceneAccelerationStructure(nativeAccelerationStructure, camera, in resolvedSettings);
-            m_LastStats = CreateStats(camera, in resolvedSettings, buildStats, null);
+            m_LastStats = CreateStats(cameraData, in resolvedSettings, buildStats, null);
             VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
         }
 
@@ -792,15 +793,15 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private void ReportUnavailableStats(
-            Camera camera,
+            VividCameraData cameraData,
             in ResolvedRayTracingSettings settings,
             string statusMessage)
         {
             m_LastStats = new VividRayTracingAccelerationStructureStats(
                 false,
                 statusMessage,
-                camera != null ? camera.name : null,
-                camera != null ? camera.cameraType : default,
+                cameraData.cameraName,
+                cameraData.camera != null ? cameraData.camera.cameraType : default,
                 Time.frameCount,
                 Time.realtimeSinceStartupAsDouble,
                 settings.BuildMode,
@@ -812,8 +813,8 @@ namespace VividRP.Runtime.RenderPass.Core
             VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
         }
 
-        private static VividRayTracingAccelerationStructureStats CreateStats(
-            Camera camera,
+        internal static VividRayTracingAccelerationStructureStats CreateStats(
+            VividCameraData cameraData,
             in ResolvedRayTracingSettings settings,
             in SceneAccelerationStructureBuildStats buildStats,
             string statusMessage)
@@ -821,8 +822,8 @@ namespace VividRP.Runtime.RenderPass.Core
             return new VividRayTracingAccelerationStructureStats(
                 true,
                 statusMessage,
-                camera != null ? camera.name : null,
-                camera != null ? camera.cameraType : default,
+                cameraData.cameraName,
+                cameraData.camera != null ? cameraData.camera.cameraType : default,
                 Time.frameCount,
                 Time.realtimeSinceStartupAsDouble,
                 settings.BuildMode,
@@ -1039,7 +1040,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static bool SupportsRayTracingRendererType(Renderer renderer)
         {
             return renderer is SkinnedMeshRenderer
-                || (renderer is MeshRenderer && renderer.GetComponent<MeshFilter>() != null);
+                || (renderer is MeshRenderer && renderer.TryGetComponent<MeshFilter>(out _));
         }
 
         internal static RayTracingMode GetMeshletRayTracingMode(VividMeshletRendererFlags flags)
@@ -1278,15 +1279,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 && (!requireVividRenderPipelineTag || HasVividRenderPipelineMaterial(material));
         }
 
-        private static bool HasActiveAttachedSourceRenderer(in VividMeshletRendererResources meshletResources)
+        internal static bool HasActiveAttachedSourceRenderer(in VividMeshletRendererResources meshletResources)
         {
             var meshletRenderer = meshletResources.MeshletRenderer;
             var sourceMesh = meshletResources.SourceMesh;
             if (meshletRenderer == null || sourceMesh == null)
                 return false;
 
-            return IsActiveAttachedSourceRenderer(meshletRenderer.GetComponent<MeshRenderer>(), sourceMesh)
-                || IsActiveAttachedSourceRenderer(meshletRenderer.GetComponent<SkinnedMeshRenderer>(), sourceMesh);
+            // Missing source renderers are normal after Meshlet takeover. GetComponent
+            // creates an Editor null-error wrapper on misses; TryGetComponent avoids it.
+            return (meshletRenderer.TryGetComponent(out MeshRenderer meshRenderer)
+                    && IsActiveAttachedSourceRenderer(meshRenderer, sourceMesh))
+                || (meshletRenderer.TryGetComponent(out SkinnedMeshRenderer skinnedMeshRenderer)
+                    && IsActiveAttachedSourceRenderer(skinnedMeshRenderer, sourceMesh));
         }
 
         private static bool IsActiveAttachedSourceRenderer(Renderer renderer, Mesh sourceMesh)

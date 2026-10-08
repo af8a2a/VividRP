@@ -26,7 +26,9 @@ $targets = @($packageRoot, $coreRoot)
 $script:compiledCount = 0
 
 function Compile-Entry([string] $RelativePath, [string] $Entry, [string] $Stage, [string] $Variant = '') {
-    $arguments = @('-T', ($Stage + '_6_0'), '-E', $Entry,
+    # Core RP's D3D11 path uses HLSL 2018 vector conditionals. Do not inherit
+    # standalone DXC's HLSL 2021 default (which requires select/and/or instead).
+    $arguments = @('-T', ($Stage + '_6_0'), '-E', $Entry, '-HV', '2018',
         '-D', 'SHADER_API_D3D11', '-D', 'UNITY_COMPILER_HLSL',
         '-I', $includeRoot, '-Fo', 'NUL')
     $stageDefine = switch ($Stage) {

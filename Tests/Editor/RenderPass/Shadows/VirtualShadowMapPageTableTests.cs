@@ -16,6 +16,73 @@ namespace VividRP.Editor.Tests
         [SetUp]
         public void RequireGPU() => Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void HZB_RecreatesLostNativeTexture_BeforeRenderGraphImport(bool destroyTexture)
+        {
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(Production);
+            Assert.That(shader, Is.Not.Null);
+            try
+            {
+                Assert.That(VirtualShadowMapPrototypeRuntime.EnsureResources(128, 1, 16), Is.True);
+                VirtualShadowMapPrototypeRuntime.Projections.EnsureCapacity(1);
+                VirtualShadowMapHZB.EnsureResources(shader);
+                var previous = VirtualShadowMapHZB.Texture;
+                var texture = previous.rt;
+                Assert.That(texture.hideFlags, Is.EqualTo(HideFlags.HideAndDontSave));
+                Assert.That(texture.mipmapCount, Is.EqualTo(7));
+                Assert.That(texture.volumeDepth, Is.EqualTo(2));
+
+                if (destroyTexture)
+                    Object.DestroyImmediate(texture);
+                else
+                    texture.Release();
+
+                VirtualShadowMapHZB.EnsureResources(shader);
+                var recreated = VirtualShadowMapHZB.Texture;
+                Assert.That(recreated, Is.Not.SameAs(previous));
+                Assert.That(recreated.rt != null && recreated.rt.IsCreated(), Is.True);
+                var graph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("HZBImportRegression");
+                try
+                {
+                    Assert.That(graph.ImportTexture(recreated).IsValid(), Is.True);
+                }
+                finally
+                {
+                    graph.Cleanup();
+                }
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.ReleaseResources();
+            }
+        }
+
+        [Test]
+        public void HZB_StableResourcesReuseTexture_WithoutManagedAllocations()
+        {
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(Production);
+            Assert.That(shader, Is.Not.Null);
+            try
+            {
+                Assert.That(VirtualShadowMapPrototypeRuntime.EnsureResources(128, 1, 16), Is.True);
+                VirtualShadowMapPrototypeRuntime.Projections.EnsureCapacity(1);
+                for (int i = 0; i < 32; ++i)
+                    VirtualShadowMapHZB.EnsureResources(shader);
+                var texture = VirtualShadowMapHZB.Texture;
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 256; ++i)
+                    VirtualShadowMapHZB.EnsureResources(shader);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(VirtualShadowMapHZB.Texture, Is.SameAs(texture));
+            }
+            finally
+            {
+                VirtualShadowMapPrototypeRuntime.ReleaseResources();
+            }
+        }
+
         [Test]
         public void PackedEntry_MatchesUEBitsIncludingPhysicalZeroAndMaximumFields()
         {

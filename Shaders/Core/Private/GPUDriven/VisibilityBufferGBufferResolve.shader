@@ -432,6 +432,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 const bool supportedDeferredExport = dispatchedAOTSurface
                     && VividIsAOTDeferredExportContractSupported(
                         deferredExportContract)
+                    // Native OpenPBR compiles into the catalog, but its lighting
+                    // payload is not implemented in this legacy GBuffer path.
+                    && deferredExportContract.NativePayloadAbi
+                        == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE
+                    && aotSurfaceOutput.Profile == VIVID_AOT_SURFACE_PROFILE_SLAB
                     && deferredExportContract.SurfaceSummaryAbi
                         == VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION
                     && (deferredExportContract.DualSlabSidecarAbi

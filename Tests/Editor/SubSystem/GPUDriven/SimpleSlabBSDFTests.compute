@@ -1,0 +1,51 @@
+#pragma kernel EvaluateBaselines
+#pragma use_dxc
+#pragma target 5.0
+
+#include "../../../../Shaders/Core/Public/VividSimpleSlabBSDF.hlsl"
+
+RWStructuredBuffer<float4> _Output;
+
+VividSimpleSlabData CreateDefaultPlastic()
+{
+    VividSimpleSlabData slab;
+    slab.diffuseAlbedo = float3(0.18f, 0.18f, 0.18f);
+    slab.specularF0 = float3(0.04f, 0.04f, 0.04f);
+    slab.perceptualRoughness = 0.5f;
+    slab.normalWS = float3(0.0f, 0.0f, 1.0f);
+    return slab;
+}
+
+void StoreResponse(
+    uint index,
+    VividSimpleSlabData slab,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    VividSimpleSlabBSDFResponse response =
+        VividEvaluateSimpleSlabAnalyticDirect(
+            slab,
+            viewDirectionWS,
+            lightDirectionWS);
+    _Output[index] = float4(
+        response.diffuse.x,
+        response.specular.x,
+        VividCombineSimpleSlabBSDFResponse(response).x,
+        1.0f);
+}
+
+[numthreads(1, 1, 1)]
+void EvaluateBaselines(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    VividSimpleSlabData slab = CreateDefaultPlastic();
+    float3 normalDirection = float3(0.0f, 0.0f, 1.0f);
+    float3 sixtyDegreeDirection = float3(
+        0.8660254037844386f,
+        0.0f,
+        0.5f);
+
+    StoreResponse(0u, slab, normalDirection, normalDirection);
+    StoreResponse(1u, slab, normalDirection, sixtyDegreeDirection);
+    StoreResponse(2u, slab, sixtyDegreeDirection, normalDirection);
+    StoreResponse(3u, slab, normalDirection, -normalDirection);
+}

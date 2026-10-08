@@ -8,6 +8,7 @@ namespace VividRP.Runtime.GPUDriven
         Slab = 0,
         HorizontalMix = 1,
         VerticalLayer = 2,
+        OpenPBROpaque = 3,
     }
 
     internal readonly struct MaterialClosure : IEquatable<MaterialClosure>
@@ -85,6 +86,79 @@ namespace VividRP.Runtime.GPUDriven
         internal ClosureFeatureMask Features { get; }
     }
 
+    internal readonly struct ClosureOpenPBROpaqueExpression
+    {
+        internal ClosureOpenPBROpaqueExpression(
+            MaterialValue baseWeight,
+            MaterialValue baseColor,
+            MaterialValue baseDiffuseRoughness,
+            MaterialValue baseMetalness,
+            MaterialValue specularWeight,
+            MaterialValue specularColor,
+            MaterialValue specularRoughness,
+            MaterialValue specularIor,
+            MaterialValue normalWS,
+            MaterialValue emissionLuminance,
+            MaterialValue emissionColor)
+        {
+            BaseWeight = baseWeight;
+            BaseColor = baseColor;
+            BaseDiffuseRoughness = baseDiffuseRoughness;
+            BaseMetalness = baseMetalness;
+            SpecularWeight = specularWeight;
+            SpecularColor = specularColor;
+            SpecularRoughness = specularRoughness;
+            SpecularIor = specularIor;
+            NormalWS = normalWS;
+            EmissionLuminance = emissionLuminance;
+            EmissionColor = emissionColor;
+        }
+
+        internal MaterialValue BaseWeight { get; }
+        internal MaterialValue BaseColor { get; }
+        internal MaterialValue BaseDiffuseRoughness { get; }
+        internal MaterialValue BaseMetalness { get; }
+        internal MaterialValue SpecularWeight { get; }
+        internal MaterialValue SpecularColor { get; }
+        internal MaterialValue SpecularRoughness { get; }
+        internal MaterialValue SpecularIor { get; }
+        internal MaterialValue NormalWS { get; }
+        internal MaterialValue EmissionLuminance { get; }
+        internal MaterialValue EmissionColor { get; }
+
+        // The frozen semantic order also defines canonical payload field order.
+        internal MaterialValue GetValue(int fieldIndex)
+        {
+            switch ((OpenPBROpaqueFieldSemantic) fieldIndex)
+            {
+                case OpenPBROpaqueFieldSemantic.BaseWeight: return BaseWeight;
+                case OpenPBROpaqueFieldSemantic.BaseColor: return BaseColor;
+                case OpenPBROpaqueFieldSemantic.BaseDiffuseRoughness: return BaseDiffuseRoughness;
+                case OpenPBROpaqueFieldSemantic.BaseMetalness: return BaseMetalness;
+                case OpenPBROpaqueFieldSemantic.SpecularWeight: return SpecularWeight;
+                case OpenPBROpaqueFieldSemantic.SpecularColor: return SpecularColor;
+                case OpenPBROpaqueFieldSemantic.SpecularRoughness: return SpecularRoughness;
+                case OpenPBROpaqueFieldSemantic.SpecularIor: return SpecularIor;
+                case OpenPBROpaqueFieldSemantic.NormalWS: return NormalWS;
+                case OpenPBROpaqueFieldSemantic.EmissionLuminance: return EmissionLuminance;
+                case OpenPBROpaqueFieldSemantic.EmissionColor: return EmissionColor;
+                default: throw new ArgumentOutOfRangeException(nameof(fieldIndex));
+            }
+        }
+
+        internal static MaterialValueType GetFieldType(int fieldIndex)
+        {
+            if ((uint) fieldIndex >= OpenPBROpaqueContract.FieldCount)
+                throw new ArgumentOutOfRangeException(nameof(fieldIndex));
+            return fieldIndex == (int) OpenPBROpaqueFieldSemantic.BaseColor
+                || fieldIndex == (int) OpenPBROpaqueFieldSemantic.SpecularColor
+                || fieldIndex == (int) OpenPBROpaqueFieldSemantic.NormalWS
+                || fieldIndex == (int) OpenPBROpaqueFieldSemantic.EmissionColor
+                ? MaterialValueType.Float3
+                : MaterialValueType.Float;
+        }
+    }
+
     internal readonly struct ClosureExpressionNode
     {
         internal ClosureExpressionNode(
@@ -96,14 +170,28 @@ namespace VividRP.Runtime.GPUDriven
         {
             Opcode = opcode;
             Slab = slab;
+            OpenPBROpaque = default;
             Operand0 = operand0;
             Operand1 = operand1;
             Weight = weight;
         }
 
+        internal ClosureExpressionNode(
+            in ClosureOpenPBROpaqueExpression openPBROpaque)
+        {
+            Opcode = ClosureExpressionOpcode.OpenPBROpaque;
+            Slab = default;
+            OpenPBROpaque = openPBROpaque;
+            Operand0 = -1;
+            Operand1 = -1;
+            Weight = default;
+        }
+
         internal ClosureExpressionOpcode Opcode { get; }
 
         internal ClosureSlabExpression Slab { get; }
+
+        internal ClosureOpenPBROpaqueExpression OpenPBROpaque { get; }
 
         internal int Operand0 { get; }
 
@@ -158,6 +246,31 @@ namespace VividRP.Runtime.GPUDriven
                 normal,
                 tangent,
                 features));
+        }
+
+        internal MaterialClosure OpenPBROpaque(
+            in ClosureOpenPBROpaqueExpression inputs)
+        {
+            return Emit(new ClosureExpressionNode(inputs));
+        }
+
+        internal MaterialClosure OpenPBROpaque(
+            MaterialValue baseWeight,
+            MaterialValue baseColor,
+            MaterialValue baseDiffuseRoughness,
+            MaterialValue baseMetalness,
+            MaterialValue specularWeight,
+            MaterialValue specularColor,
+            MaterialValue specularRoughness,
+            MaterialValue specularIor,
+            MaterialValue normalWS,
+            MaterialValue emissionLuminance,
+            MaterialValue emissionColor)
+        {
+            return OpenPBROpaque(new ClosureOpenPBROpaqueExpression(
+                baseWeight, baseColor, baseDiffuseRoughness, baseMetalness,
+                specularWeight, specularColor, specularRoughness, specularIor,
+                normalWS, emissionLuminance, emissionColor));
         }
 
         internal MaterialClosure HorizontalMix(
@@ -216,6 +329,11 @@ namespace VividRP.Runtime.GPUDriven
 
             root = default;
             var graph = new ClosureExpressionGraph(topology.ValueIR);
+            if (topology.OpenPBROpaqueClosures.Count == 1)
+            {
+                root = graph.OpenPBROpaque(topology.OpenPBROpaqueClosures[0]);
+                return graph;
+            }
             var slabClosures = new MaterialClosure[topology.Slabs.Count];
             for (int slabIndex = 0; slabIndex < topology.Slabs.Count; slabIndex++)
             {
@@ -330,9 +448,13 @@ namespace VividRP.Runtime.GPUDriven
             var normalBases = new List<ClosureNormalBasis>();
             var slabs = new List<ClosureSlab>();
             var operators = new List<ClosureOperator>();
+            var openPBROpaqueClosures = new List<ClosureOpenPBROpaqueExpression>();
             ClosureExpressionNode rootNode = graph.GetNode(root);
             switch (rootNode.Opcode)
             {
+                case ClosureExpressionOpcode.OpenPBROpaque:
+                    openPBROpaqueClosures.Add(rootNode.OpenPBROpaque);
+                    break;
                 case ClosureExpressionOpcode.Slab:
                     AppendSlab(
                         rootNode.Slab,
@@ -377,7 +499,8 @@ namespace VividRP.Runtime.GPUDriven
                 normalBases.ToArray(),
                 slabs.ToArray(),
                 operators.ToArray(),
-                budget);
+                budget,
+                openPBROpaqueClosures.ToArray());
         }
 
         private static void AppendOperatorSlabs(

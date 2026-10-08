@@ -123,16 +123,19 @@ namespace VividRP.Runtime.GPUDriven
         private readonly ClosureNormalBasis[] m_NormalBases;
         private readonly ClosureSlab[] m_Slabs;
         private readonly ClosureOperator[] m_Operators;
+        private readonly ClosureOpenPBROpaqueExpression[] m_OpenPBROpaqueClosures;
         private readonly IReadOnlyList<ClosureNormalBasis> m_NormalBasesView;
         private readonly IReadOnlyList<ClosureSlab> m_SlabsView;
         private readonly IReadOnlyList<ClosureOperator> m_OperatorsView;
+        private readonly IReadOnlyList<ClosureOpenPBROpaqueExpression> m_OpenPBROpaqueClosuresView;
 
         internal ClosureTopology(
             MaterialValueIR valueIR,
             ClosureNormalBasis[] normalBases,
             ClosureSlab[] slabs,
             ClosureOperator[] operators,
-            ClosureTopologyBudget budget)
+            ClosureTopologyBudget budget,
+            ClosureOpenPBROpaqueExpression[] openPBROpaqueClosures = null)
         {
             ValueIR = valueIR ?? throw new ArgumentNullException(nameof(valueIR));
             if (normalBases == null)
@@ -145,9 +148,13 @@ namespace VividRP.Runtime.GPUDriven
             m_NormalBases = (ClosureNormalBasis[]) normalBases.Clone();
             m_Slabs = (ClosureSlab[]) slabs.Clone();
             m_Operators = (ClosureOperator[]) operators.Clone();
+            m_OpenPBROpaqueClosures = openPBROpaqueClosures != null
+                ? (ClosureOpenPBROpaqueExpression[]) openPBROpaqueClosures.Clone()
+                : Array.Empty<ClosureOpenPBROpaqueExpression>();
             m_NormalBasesView = Array.AsReadOnly(m_NormalBases);
             m_SlabsView = Array.AsReadOnly(m_Slabs);
             m_OperatorsView = Array.AsReadOnly(m_Operators);
+            m_OpenPBROpaqueClosuresView = Array.AsReadOnly(m_OpenPBROpaqueClosures);
             Budget = budget;
 
             Validate();
@@ -161,9 +168,12 @@ namespace VividRP.Runtime.GPUDriven
 
         internal IReadOnlyList<ClosureOperator> Operators => m_OperatorsView;
 
+        internal IReadOnlyList<ClosureOpenPBROpaqueExpression> OpenPBROpaqueClosures =>
+            m_OpenPBROpaqueClosuresView;
+
         internal ClosureTopologyBudget Budget { get; }
 
-        internal int ClosureCount => m_Slabs.Length;
+        internal int ClosureCount => m_Slabs.Length + m_OpenPBROpaqueClosures.Length;
 
         internal int OperatorCount => m_Operators.Length;
 

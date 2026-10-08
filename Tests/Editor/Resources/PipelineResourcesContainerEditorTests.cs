@@ -94,6 +94,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FrozenSimpleSlabLut_IsPublishedByTheSerializedRuntimeContainer()
+        {
+            const string path = "Shaders/Core/Private/VividSlabLut.compute";
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                VividPackagePathUtility.GetPreferredAssetPath(path));
+            Assert.That(shader, Is.Not.Null, "Import the native Slab LUT shader before freezing.");
+            var container = AssetDatabase.LoadAssetAtPath<PipelineResourcesContainer>(
+                VividPackagePathUtility.GetPreferredAssetPath("Runtime/Resources/PipelineResources.asset"));
+            Assert.That(container, Is.Not.Null);
+            Assert.That(container.Entries.Any(entry => entry.ResourceName == path && entry.ResourceObject == shader),
+                Is.True, "Recollect PipelineResources through its Inspector sync button before freezing.");
+        }
+
+        [Test]
         public void PackagePathUtility_IncludesCurrentAndLegacyPackageRoots()
         {
             var packageRoots = VividPackagePathUtility.GetCandidatePackageRoots();

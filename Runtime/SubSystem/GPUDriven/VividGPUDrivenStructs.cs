@@ -104,6 +104,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         StandardSingleSlab = 0,
         DualSlab = 1,
+        OpenPBROpaque = 2,
     }
 
     [GenerateHLSL(PackingRules.Exact)]
@@ -158,6 +159,7 @@ namespace VividRP.Runtime.GPUDriven
         LegacyGBufferExport = 1 << 0,
         AlphaClip = 1 << 1,
         Unlit = 1 << 2,
+        OpenPBROpaqueExport = 1 << 3,
     }
 
     [GenerateHLSL]
@@ -949,7 +951,8 @@ namespace VividRP.Runtime.GPUDriven
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
-    [StructLayout(LayoutKind.Auto)]
+    // Uploaded verbatim to a StructuredBuffer; field order must match the generated HLSL.
+    [StructLayout(LayoutKind.Sequential)]
     public unsafe struct VividGPUCullingContext
     {
         public float4x4 ViewProjectionMatrix;
@@ -973,7 +976,7 @@ namespace VividRP.Runtime.GPUDriven
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
-    [StructLayout(LayoutKind.Auto)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct VividGPULODSelectionContext
     {
         public float4x4 ViewProjectionMatrix;

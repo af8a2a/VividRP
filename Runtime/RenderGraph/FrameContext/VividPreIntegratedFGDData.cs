@@ -6,12 +6,14 @@ namespace VividRP.Runtime
     {
         internal RTHandle ggxDisneyDiffuseTexture;
         internal RTHandle charlieAndFabricTexture;
+        internal RTHandle slabLutTexture;
         internal bool hasValidTextures;
 
         public override void Reset()
         {
             ggxDisneyDiffuseTexture = null;
             charlieAndFabricTexture = null;
+            slabLutTexture = null;
             hasValidTextures = false;
         }
 

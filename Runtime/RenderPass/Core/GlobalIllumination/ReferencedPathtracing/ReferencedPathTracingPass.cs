@@ -218,17 +218,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 "_ReferencedGlobalFogHeightAnisotropy");
         private static readonly int GlobalFogLightingId =
             Shader.PropertyToID("_ReferencedGlobalFogLighting");
-        private static readonly int LocalFogCountId =
-            Shader.PropertyToID("_ReferencedLocalFogCount");
-        private static readonly int LocalFogListId =
-            Shader.PropertyToID("_ReferencedLocalFogList");
-        private static readonly int[] LocalFogMaskTextureIds =
-            CreateLocalFogMaskTextureIds();
-        private static readonly VividLocalVolumetricFogEngineData[]
-            s_EmptyLocalFogStorage =
-            {
-                default
-            };
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -329,11 +318,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RayTracingShader m_RayTracingShader;
         private GraphicsBuffer m_NvidiaShaderExtensionBuffer;
-        private GraphicsBuffer m_LocalFogBuffer;
         private readonly ReferencedPathTracingLightListBuilder.BuildWorkspace
             m_LightListBuildWorkspace = new();
-        private readonly ReferencedPathTracingLocalFogState.BuildWorkspace
-            m_LocalFogBuildWorkspace = new();
         private LocalKeyword m_ShaderExecutionReorderingKeyword;
         private bool m_ShaderExecutionReorderingKeywordAvailable;
         private LocalKeyword m_IndexedBndKeyword;
@@ -369,7 +355,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingAtmosphereState m_AtmosphereState;
         private ReferencedPathTracingGlobalFogState m_GlobalFogState;
-        private ReferencedPathTracingLocalFogState m_LocalFogState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
         private ReferencedPathTracingSamplingMode m_ResolvedPathSamplingMode =
@@ -505,12 +490,6 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareEnvironment(frameData, cameraData);
             m_GlobalFogState =
                 ReferencedPathTracingGlobalFogState.Resolve();
-            m_LocalFogState =
-                ReferencedPathTracingLocalFogState.Resolve(
-                    camera,
-                    m_GlobalFogState.enabled,
-                    m_LocalFogBuildWorkspace);
-            PrepareLocalFogBuffer();
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
             RefreshIndexedBndKeyword();
             ResolvePathSamplingMode();
@@ -778,8 +757,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_NvidiaShaderExtensionBuffer?.Dispose();
             m_NvidiaShaderExtensionBuffer = null;
-            m_LocalFogBuffer?.Dispose();
-            m_LocalFogBuffer = null;
             m_RayTracingShader = null;
             m_ShaderExecutionReorderingKeyword = default;
             m_ShaderExecutionReorderingKeywordAvailable = false;
@@ -815,8 +792,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AtmosphereState = default;
             m_GlobalFogState =
                 ReferencedPathTracingGlobalFogState.Disabled;
-            m_LocalFogState =
-                ReferencedPathTracingLocalFogState.Disabled;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
             m_ResolvedPathSamplingMode =
@@ -1141,7 +1116,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_EnvironmentState,
                     m_AtmosphereState,
                     m_GlobalFogState,
-                    m_LocalFogState,
                     m_CameraBackgroundState,
                     m_PhysicalCameraState);
             var temporalData = frameData.Contains<VividTemporalData>()
@@ -1367,65 +1341,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraSkyEnabled);
             BindAtmosphereContract(cmd);
             BindGlobalFogContract(cmd);
-            BindLocalFogContract(cmd);
-        }
-
-        private void BindLocalFogContract(CommandBuffer cmd)
-        {
-            var count = m_LocalFogState.count;
-            cmd.SetGlobalInt(LocalFogCountId, count);
-            cmd.SetRayTracingIntParam(
-                m_RayTracingShader,
-                LocalFogCountId,
-                count);
-
-            var fallbackMask =
-                VividLocalVolumetricFogManager.defaultMaskTexture;
-            var maskTextures = m_LocalFogState.maskTextures;
-            for (var index = 0;
-                index
-                    < ReferencedPathTracingLocalFogState
-                        .MaximumMaskTextureSlotCount;
-                index++)
-            {
-                var maskTexture =
-                    maskTextures != null
-                        && index < m_LocalFogState.maskTextureCount
-                        ? maskTextures[index]
-                        : fallbackMask;
-                cmd.SetRayTracingTextureParam(
-                    m_RayTracingShader,
-                    LocalFogMaskTextureIds[index],
-                    maskTexture != null
-                        ? maskTexture
-                        : fallbackMask);
-            }
-
-            if (m_LocalFogBuffer == null)
-                return;
-
-            cmd.SetGlobalBuffer(
-                LocalFogListId,
-                m_LocalFogBuffer);
-            cmd.SetRayTracingBufferParam(
-                m_RayTracingShader,
-                LocalFogListId,
-                m_LocalFogBuffer);
-        }
-
-        private static int[] CreateLocalFogMaskTextureIds()
-        {
-            var textureIds =
-                new int[
-                    ReferencedPathTracingLocalFogState
-                        .MaximumMaskTextureSlotCount];
-            for (var index = 0; index < textureIds.Length; index++)
-            {
-                textureIds[index] = Shader.PropertyToID(
-                    $"_ReferencedLocalFogMask{index}");
-            }
-
-            return textureIds;
         }
 
         private void BindGlobalFogContract(CommandBuffer cmd)
@@ -1479,41 +1394,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 GlobalFogLightingId,
                 lighting);
-        }
-
-        private void PrepareLocalFogBuffer()
-        {
-            var requiredCount =
-                Mathf.Max(m_LocalFogState.count, 1);
-            var requiredStride =
-                VividLocalVolumetricFogEngineData.Stride;
-            if (m_LocalFogBuffer == null
-                || !m_LocalFogBuffer.IsValid()
-                || m_LocalFogBuffer.count < requiredCount
-                || m_LocalFogBuffer.stride != requiredStride)
-            {
-                m_LocalFogBuffer?.Dispose();
-                m_LocalFogBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    requiredCount,
-                    requiredStride)
-                {
-                    name = "Referenced Path Tracing Local Fog List"
-                };
-            }
-
-            if (m_LocalFogState.count > 0)
-            {
-                m_LocalFogBuffer.SetData(
-                    m_LocalFogState.records,
-                    0,
-                    0,
-                    m_LocalFogState.count);
-            }
-            else
-            {
-                m_LocalFogBuffer.SetData(s_EmptyLocalFogStorage);
-            }
         }
 
         private void BindAtmosphereContract(CommandBuffer cmd)

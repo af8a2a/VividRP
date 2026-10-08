@@ -13,28 +13,28 @@ MonoBehaviour:
   m_Name: VividMaterialProgramCatalog
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.MaterialProgramCatalogAsset
   m_AssetSchemaVersion: 6
-  m_ProgramCatalogVersion: 4
-  m_ManifestVersion: 5
+  m_ProgramCatalogVersion: 5
+  m_ManifestVersion: 6
   m_RuntimeAbiVersion: 3
-  m_ManifestHashVersion: 5
-  m_ManifestHash: 6320714283017605985
+  m_ManifestHashVersion: 6
+  m_ManifestHash: 16662843074788994803
   m_IsCommitted: 1
   m_ArtifactSetHashVersion: 2
-  m_ArtifactSetHash: 9312539219734920099
+  m_ArtifactSetHash: 15851011030966198494
   m_CatalogPayloadSealVersion: 1
-  m_CatalogPayloadSealHash: 8458151049704437983
+  m_CatalogPayloadSealHash: 11800879380220013635
   m_Slots:
   - m_ProgramID: 0
     m_StableName: P0.StandardSingleSlab
     m_IsReserved: 0
-    m_CompiledHashVersion: 9
-    m_CompiledHash: 13834008346118628237
+    m_CompiledHashVersion: 10
+    m_CompiledHash: 15599136965681035956
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 11193960182733492371
-    m_DeferredExportFingerprintVersion: 1
-    m_DeferredExportFingerprint: 5888118281072226784
+    m_DeferredExportFingerprintVersion: 2
+    m_DeferredExportFingerprint: 11664293944592848528
     m_CoveragePayloadHash: 13510949883267873268
-    m_SurfacePayloadHash: 7960802402996909884
+    m_SurfacePayloadHash: 7680991488494134931
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 0
@@ -75,14 +75,14 @@ MonoBehaviour:
   - m_ProgramID: 1
     m_StableName: P1.DualSlabHorizontalMix
     m_IsReserved: 0
-    m_CompiledHashVersion: 9
-    m_CompiledHash: 4264700279243166112
+    m_CompiledHashVersion: 10
+    m_CompiledHash: 14711691861844056375
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 14469877800952702697
-    m_DeferredExportFingerprintVersion: 1
-    m_DeferredExportFingerprint: 12898365168916497089
+    m_DeferredExportFingerprintVersion: 2
+    m_DeferredExportFingerprint: 10760738126208923569
     m_CoveragePayloadHash: 18281067700041508341
-    m_SurfacePayloadHash: 8461351866686349072
+    m_SurfacePayloadHash: 13394633023677117217
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 1
@@ -143,14 +143,14 @@ MonoBehaviour:
   - m_ProgramID: 2
     m_StableName: P2.DualSlabVerticalLayer
     m_IsReserved: 0
-    m_CompiledHashVersion: 9
-    m_CompiledHash: 17211617449893112778
+    m_CompiledHashVersion: 10
+    m_CompiledHash: 17849628449161237169
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 14469877800952702697
-    m_DeferredExportFingerprintVersion: 1
-    m_DeferredExportFingerprint: 12268790991064211538
+    m_DeferredExportFingerprintVersion: 2
+    m_DeferredExportFingerprint: 7142986357067780482
     m_CoveragePayloadHash: 18281067700041508341
-    m_SurfacePayloadHash: 13922409097743260219
+    m_SurfacePayloadHash: 22007071189199627
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 1
@@ -211,14 +211,14 @@ MonoBehaviour:
   - m_ProgramID: 3
     m_StableName: P3.GenericSingleSlabProof
     m_IsReserved: 0
-    m_CompiledHashVersion: 9
-    m_CompiledHash: 15508265905773607658
+    m_CompiledHashVersion: 10
+    m_CompiledHash: 17597388476840272600
     m_LayoutFingerprintVersion: 3
     m_LayoutFingerprint: 11193960182733492371
-    m_DeferredExportFingerprintVersion: 1
-    m_DeferredExportFingerprint: 10455666665750202914
+    m_DeferredExportFingerprintVersion: 2
+    m_DeferredExportFingerprint: 12626838292671524690
     m_CoveragePayloadHash: 15735384498121314332
-    m_SurfacePayloadHash: 15573847914114781256
+    m_SurfacePayloadHash: 12341598327904019920
     m_RuntimeVersion: 3
     m_CoverageProgramID: 0
     m_SurfaceProgramID: 0
@@ -256,3 +256,27 @@ MonoBehaviour:
       m_Type: 5
       m_SampleClass: 1
       m_Slot: 0
+  - m_ProgramID: 4
+    m_StableName: G.10.AA8D2823E94C38EE.47A8BFB116736B24.AC3BCB6617CC9761.9B41623E4675AC47
+    m_IsReserved: 0
+    m_CompiledHashVersion: 10
+    m_CompiledHash: 12289523092867004654
+    m_LayoutFingerprintVersion: 3
+    m_LayoutFingerprint: 5163587740087053092
+    m_DeferredExportFingerprintVersion: 2
+    m_DeferredExportFingerprint: 9578047907624014108
+    m_CoveragePayloadHash: 12410736837495920481
+    m_SurfacePayloadHash: 11187330968974634055
+    m_RuntimeVersion: 3
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 2
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
+    m_CapabilityFlags: 10
+    m_ExecutionClass: 0
+    m_Topology: 3
+    m_ParameterStrideInWords: 0
+    m_ResourceCount: 0
+    m_ParameterBindings: []
+    m_ResourceBindings: []

@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine.Rendering;
@@ -53,6 +54,35 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 typeof(VividSubsystem<VividPreIntegratedFGDSystem>).IsAssignableFrom(typeof(VividPreIntegratedFGDSystem)),
                 Is.True);
+        }
+
+        [Test]
+        public void StableFramePreparation_OnlyPublishesNativeSlabLut_WithoutManagedAllocations()
+        {
+            Assert.That(PipelineResourceManager.Get<VividRPCoreResources>()?.SlabLutCompute, Is.Not.Null);
+            RTHandles.Initialize(1, 1);
+            using var frame = new ContextContainer();
+            using var cmd = new CommandBuffer();
+            VividPreIntegratedFGDSystem.PrepareFrame(frame, cmd);
+            UnityEngine.Graphics.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
+            var data = frame.Get<VividPreIntegratedFGDData>();
+            RTHandle texture = data.slabLutTexture;
+            Assert.That(texture, Is.Not.Null);
+
+            for (int i = 0; i < 32; ++i)
+                VividPreIntegratedFGDSystem.PrepareFrame(frame, cmd);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; ++i)
+                VividPreIntegratedFGDSystem.PrepareFrame(frame, cmd);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero);
+            Assert.That(data.slabLutTexture, Is.SameAs(texture));
+            Assert.That(data.ggxDisneyDiffuseTexture, Is.Null);
+            Assert.That(data.charlieAndFabricTexture, Is.Null);
+            Assert.That(data.hasValidTextures, Is.False);
+            Assert.That(cmd.sizeInBytes, Is.Zero, "A stable frame must not rebake any LUT.");
         }
     }
 }

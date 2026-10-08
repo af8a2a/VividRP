@@ -14,6 +14,8 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GPUDataLayouts_HaveExpectedStrides()
         {
+            Assert.That(UnsafeUtility.SizeOf<VividGPUCullingContext>(), Is.EqualTo(288));
+            Assert.That(UnsafeUtility.SizeOf<VividGPULODSelectionContext>(), Is.EqualTo(128));
             Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(128));
             Assert.That(UnsafeUtility.SizeOf<VividDualSlabMaterialData>(), Is.EqualTo(192));
             Assert.That(UnsafeUtility.SizeOf<VividMaterialRuntimeHeader>(), Is.EqualTo(16));
@@ -25,6 +27,33 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(32));
+        }
+
+        [Test]
+        public void CullingContexts_HaveHlslFieldOffsets()
+        {
+            Assert.That(typeof(VividGPUCullingContext).IsLayoutSequential, Is.True);
+            Assert.That(typeof(VividGPULODSelectionContext).IsLayoutSequential, Is.True);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.ViewProjectionMatrix), 0);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.ViewMatrix), 64);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.CameraPosition), 128);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.FrustumPlanes), 144);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.CullingSphereLS), 240);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.PassMask), 256);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.CameraIsPerspective), 260);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.BaseStartInstance), 264);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.MeshletListBuildJobsOffset), 268);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.MeshletRenderRequestsOffset), 272);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.Padding0), 276);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.Padding1), 280);
+            AssertFieldOffset<VividGPUCullingContext>(nameof(VividGPUCullingContext.Padding2), 284);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.ViewProjectionMatrix), 0);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.CameraPosition), 64);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.CameraUp), 80);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.CameraRight), 96);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.ScreenSizePixels), 112);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.Padding0), 120);
+            AssertFieldOffset<VividGPULODSelectionContext>(nameof(VividGPULODSelectionContext.Padding1), 124);
         }
 
         [Test]

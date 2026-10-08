@@ -8,6 +8,7 @@ namespace VividRP.Runtime.GPUDriven
         SingleSlab = 0,
         HorizontalMix = 1,
         VerticalLayer = 2,
+        OpenPBROpaque = 3,
     }
 
     internal readonly struct MaterialProgramSelectionKey :

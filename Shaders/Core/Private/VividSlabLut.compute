@@ -1,0 +1,31 @@
+#pragma kernel IntegrateDirectionalAlbedo
+#pragma kernel PackSlabLut
+#pragma editor_sync_compilation
+#pragma target 5.0
+
+#include "../Public/VividSlabLutIntegration.hlsl"
+
+RWTexture2D<float4> _SlabLutOutput;
+Texture2D<float4> _SlabDirectionalAlbedo;
+
+[numthreads(8, 8, 1)]
+void IntegrateDirectionalAlbedo(uint3 id : SV_DispatchThreadID)
+{
+    float2 uv = (float2)id.xy / (VIVID_SLAB_LUT_RESOLUTION - 1);
+    float2 basis = VividIntegrateSlabAlbedo(uv.x * uv.x, uv.y, VIVID_SLAB_LUT_SAMPLE_COUNT);
+    _SlabLutOutput[id.xy] = float4(basis, 0.0f, 0.0f);
+}
+
+[numthreads(8, 8, 1)]
+void PackSlabLut(uint3 id : SV_DispatchThreadID)
+{
+    float2 average = 0.0f;
+    for (uint x = 0u; x < VIVID_SLAB_LUT_RESOLUTION - 1u; ++x)
+    {
+        average += VividSlabIntegrateAlbedoSegment(
+            VividSlabNormalizeAlbedoBasis(_SlabDirectionalAlbedo.Load(int3(x, id.y, 0)).xy),
+            VividSlabNormalizeAlbedoBasis(_SlabDirectionalAlbedo.Load(int3(x + 1u, id.y, 0)).xy), x);
+    }
+    _SlabLutOutput[id.xy] = float4(_SlabDirectionalAlbedo.Load(int3(id.xy, 0)).xy,
+        VividSlabNormalizeAlbedoBasis(average));
+}

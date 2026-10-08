@@ -17,8 +17,15 @@ namespace VividRP.Runtime
     {
         private const BindingFlags BuilderMethodFlags =
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        private static readonly FieldInfo s_AccelerationStructureResourceHandleField =
-            typeof(RayTracingAccelerationStructureHandle).GetField("handle", BuilderMethodFlags);
+        private delegate ResourceHandle UseResourceDelegate(
+            RenderGraphBuilders builder, in ResourceHandle handle, AccessFlags access);
+
+        // CoreRP has no typed RTAS builder API. Bind its resource path once to avoid
+        // per-pass reflection, boxed handles/flags, and an Invoke argument array.
+        private static readonly UseResourceDelegate s_UseAccelerationStructureResource =
+            (UseResourceDelegate)Delegate.CreateDelegate(
+                typeof(UseResourceDelegate),
+                typeof(RenderGraphBuilders).GetMethod("UseResource", BuilderMethodFlags));
 
         private readonly struct ImportedPassHandle : IEquatable<ImportedPassHandle>
         {
@@ -727,7 +734,7 @@ namespace VividRP.Runtime
             builder.AllowPassCulling(false);
         }
 
-        private static void UseAccelerationStructure(
+        internal static void UseAccelerationStructure(
             IBaseRenderGraphBuilder builder,
             RayTracingAccelerationStructureHandle handle,
             AccessFlags access)
@@ -743,21 +750,6 @@ namespace VividRP.Runtime
             RayTracingAccelerationStructureHandle handle,
             AccessFlags access)
         {
-            if (s_AccelerationStructureResourceHandleField == null)
-            {
-                Debug.LogError("[VividRP] RenderGraph acceleration-structure handle field was not found.");
-                return;
-            }
-
-            var method = builder.GetType().GetMethod("UseResource", BuilderMethodFlags);
-            if (method == null)
-            {
-                Debug.LogError(
-                    $"[VividRP] RenderGraph builder method 'UseResource' was not found on '{builder.GetType().FullName}'.");
-                return;
-            }
-
-            var resourceHandle = s_AccelerationStructureResourceHandleField.GetValue(handle);
             var builderAccess = access;
 
             if ((builderAccess & AccessFlags.Write) != 0
@@ -766,7 +758,7 @@ namespace VividRP.Runtime
                 builderAccess |= AccessFlags.Discard;
             }
 
-            method.Invoke(builder, new[] { resourceHandle, (object)builderAccess });
+            s_UseAccelerationStructureResource((RenderGraphBuilders)builder, in handle.handle, builderAccess);
         }
     }
 }

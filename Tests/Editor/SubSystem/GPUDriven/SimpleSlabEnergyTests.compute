@@ -1,0 +1,83 @@
+#pragma kernel EvaluateFurnace
+#pragma kernel EvaluateReciprocity
+#pragma kernel ProbeLut
+#pragma target 5.0
+
+#include "../../../../Shaders/Core/Public/VividSlabLut.hlsl"
+#include "../../../../Shaders/Core/Public/VividSlabLutIntegration.hlsl"
+
+RWStructuredBuffer<float4> _Output;
+
+VividSimpleSlabData TestSlab(uint material, float roughness)
+{
+    VividSimpleSlabData slab;
+    slab.normalWS = float3(0, 0, 1);
+    slab.perceptualRoughness = roughness;
+    slab.diffuseAlbedo = material == 0u || material == 3u ? 0.0f : 1.0f;
+    slab.specularF0 = material == 0u ? 1.0f : (material == 2u ? 0.0f : 0.04f);
+    if (material == 3u) slab.specularF0 = float3(0.95f, 0.64f, 0.54f);
+    if (material == 4u) slab.specularF0 = 0.01f;
+    if (material == 5u) { slab.diffuseAlbedo = 0.0f; slab.specularF0 = 0.0f; }
+    return slab;
+}
+
+[numthreads(1, 1, 1)]
+void EvaluateFurnace(uint3 id : SV_DispatchThreadID)
+{
+    uint material = id.x % 6u;
+    uint roughnessIndex = (id.x / 6u) % 5u;
+    float roughness = roughnessIndex * 0.25f;
+    float nDotV = id.x / 30u == 0u ? 1.0f : (id.x / 30u == 1u ? 0.5f : 0.05f);
+    VividSimpleSlabData slab = TestSlab(material, roughness);
+    float3 view = float3(sqrt(1.0f - nDotV * nDotV), 0, nDotV);
+    VividSimpleSlabEnergy energy = VividLoadSimpleSlabEnergy(slab, view);
+    float alpha = VividSimpleSlabPerceptualRoughnessToAlpha(roughness);
+    float g1 = 2.0f * nDotV / (nDotV + sqrt(nDotV * nDotV * (1.0f - alpha * alpha) + alpha * alpha));
+    float3 total = 0.0f;
+    const uint sampleCount = 8192u;
+    for (uint i = 0; i < sampleCount; ++i)
+    {
+        float2 xi = float2((i + 0.5f) / sampleCount, reversebits(i) * 2.3283064365386963e-10f);
+        float3 h = VividSlabSampleVisibleNormal(view, alpha, xi);
+        float3 light = reflect(-view, h);
+        if (light.z > 0.0f)
+        {
+            // Integrate the sharp SS lobe with VNDF importance sampling.
+            float3 evaluatedH = normalize(view + light);
+            float pdf = VividSimpleSlabDGGX(alpha, evaluatedH.z) * g1 / (4.0f * nDotV);
+            total += VividEvaluateSimpleSlabAnalyticDirect(slab, view, light).specular / pdf;
+        }
+        // Integrate the broad MS and transmitted diffuse lobes with cosine sampling.
+        float radius = sqrt(xi.x);
+        float phi = 2.0f * VIVID_SIMPLE_SLAB_PI * xi.y;
+        light = float3(radius * cos(phi), radius * sin(phi), sqrt(1.0f - xi.x));
+        VividSimpleSlabBSDFResponse analytic = VividEvaluateSimpleSlabAnalyticDirect(slab, view, light);
+        VividSimpleSlabBSDFResponse complete = VividEvaluateSimpleSlabEnergyDirect(
+            slab, view, light, energy, VividSampleSlabLut(light.z, roughness).xy);
+        total += (complete.diffuse + complete.specular - analytic.specular)
+            * (VIVID_SIMPLE_SLAB_PI / light.z);
+    }
+    _Output[id.x] = float4(total / sampleCount, energy.specularAlbedo.x);
+}
+
+[numthreads(1, 1, 1)]
+void EvaluateReciprocity(uint3 id : SV_DispatchThreadID)
+{
+    VividSimpleSlabData slab = TestSlab(id.x % 5u, (id.x / 5u) * 0.25f);
+    float3 view = normalize(float3(0.4f, 0.1f, 1.0f));
+    float3 light = normalize(float3(-0.7f, 0.3f, 0.4f));
+    VividSimpleSlabBSDFResponse a = VividEvaluateSimpleSlabEnergyDirect(
+        slab, view, light, VividLoadSimpleSlabEnergy(slab, view), VividSampleSlabLut(light.z, slab.perceptualRoughness).xy);
+    VividSimpleSlabBSDFResponse b = VividEvaluateSimpleSlabEnergyDirect(
+        slab, light, view, VividLoadSimpleSlabEnergy(slab, light), VividSampleSlabLut(view.z, slab.perceptualRoughness).xy);
+    _Output[id.x] = float4(abs(a.diffuse / light.z - b.diffuse / view.z)
+        + abs(a.specular / light.z - b.specular / view.z), 1);
+}
+
+[numthreads(1, 1, 1)]
+void ProbeLut(uint3 id : SV_DispatchThreadID)
+{
+    float nDotV = (id.x % 5u) * 0.25f;
+    float roughness = (id.x / 5u) * 0.25f;
+    _Output[id.x] = VividSampleSlabLut(nDotV, roughness);
+}

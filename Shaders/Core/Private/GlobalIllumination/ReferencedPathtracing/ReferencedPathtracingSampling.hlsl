@@ -39,8 +39,8 @@ static const uint kReferencedPathtracingGlobalFogBaseDimension = 200u;
 static const uint kReferencedPathtracingGlobalFogDimensionStride = 3u;
 static const uint kReferencedPathtracingGlobalFogDistanceDimensionOffset = 0u;
 static const uint kReferencedPathtracingGlobalFogPhaseDimensionOffset = 1u;
-// Local fog consumes the final append-only block in the 256-dimension set.
-// Two values seed delta tracking and two values sample the phase function.
+// Reserved legacy local-fog block. Keep the indexed sampling contract stable;
+// the reference integrator no longer samples local fog.
 static const uint kReferencedPathtracingLocalFogBaseDimension = 224u;
 static const uint kReferencedPathtracingLocalFogDimensionStride = 4u;
 static const uint kReferencedPathtracingLocalFogDistanceDimensionOffset = 0u;

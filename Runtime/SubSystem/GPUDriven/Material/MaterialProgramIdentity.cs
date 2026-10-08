@@ -5,27 +5,33 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal static class MaterialProgramContract
     {
-        internal const uint IRSchemaVersion = 4u;
-        internal const uint CanonicalIRVersion = 3u;
-        internal const uint ClosureExpressionVersion = 1u;
+        internal const uint IRSchemaVersion = 5u;
+        internal const uint CanonicalIRVersion = 4u;
+        internal const uint ClosureExpressionVersion = 2u;
         internal const uint StageLIRVersion = 1u;
         internal const uint DerivativeLegalizationVersion = 1u;
-        internal const uint ProgramLoweringVersion = 7u;
+        internal const uint ProgramLoweringVersion = 8u;
         internal const uint GenericLayoutVersion = 2u;
         internal const uint LayoutFingerprintVersion = 3u;
-        internal const uint DeferredExportContractVersion = 1u;
-        internal const uint DeferredExportFingerprintVersion = 1u;
-        internal const uint ProgramCatalogVersion = 4u;
-        internal const uint ProgramCatalogManifestVersion = 5u;
-        internal const uint SurfaceHlslArtifactVersion = 4u;
-        internal const uint SurfaceHlslBackendVersion = 8u;
+        internal const uint DeferredExportContractVersion = 2u;
+        internal const uint DeferredExportFingerprintVersion = 2u;
+        internal const uint SimpleSlabContractVersion = 1u;
+        internal const uint SimpleSlabFingerprintVersion = 1u;
+        internal const uint SimpleSlabBSDFKernelVersion = 1u;
+        internal const uint SimpleSlabDirectLightingVersion = 2u;
+        internal const uint SimpleSlabEnergyVersion = 1u;
+        internal const uint SimpleSlabDeferredLightingVersion = 5u;
+        internal const uint ProgramCatalogVersion = 5u;
+        internal const uint ProgramCatalogManifestVersion = 6u;
+        internal const uint SurfaceHlslArtifactVersion = 5u;
+        internal const uint SurfaceHlslBackendVersion = 9u;
         internal const uint CoverageHlslArtifactVersion = 2u;
         internal const uint CoverageHlslBackendVersion = 5u;
-        internal const uint SemanticHashVersion = 5u;
-        internal const uint CompiledHashVersion = 9u;
-        internal const uint CompilerVersion = 14u;
-        internal const uint NativeTemplateBackendVersion = 9u;
-        internal const uint VerifierVersion = 4u;
+        internal const uint SemanticHashVersion = 6u;
+        internal const uint CompiledHashVersion = 10u;
+        internal const uint CompilerVersion = 15u;
+        internal const uint NativeTemplateBackendVersion = 10u;
+        internal const uint VerifierVersion = 5u;
         internal const uint RuntimeAbiVersion = 3u;
 
         internal const uint ArtifactSetHashVersion = 2u;
@@ -33,6 +39,7 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint CatalogPayloadSealVersion = 1u;
 
         internal const int BuiltinProgramCount = 3;
+        internal const int BuiltinNativeTemplateCount = 4;
         internal const int ProductionCatalogProgramCount = 4;
     }
 

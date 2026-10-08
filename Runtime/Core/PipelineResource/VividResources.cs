@@ -171,6 +171,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert")]
         public Shader PreIntegratedFGDCharlieFabricLambertShader;
 
+        [VividResourcePath("Shaders/Core/Private/VividSlabLut.compute")]
+        public ComputeShader SlabLutCompute;
+
         [VividResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;
 

@@ -11,6 +11,37 @@ namespace VividRP.Editor.Tests
 {
     public sealed class RTASBuildPassTests
     {
+        [Test]
+        public void CreateStats_ReusesFrameCameraNameWithoutAllocating()
+        {
+            var gameObject = new GameObject("RTAS_StatsCamera");
+            try
+            {
+                var camera = gameObject.AddComponent<Camera>();
+                var cameraData = new VividCameraData();
+                cameraData.SetCamera(camera);
+                var cachedName = cameraData.cameraName;
+                var settings = CreateDefaultResolvedSettings();
+                var buildStats = new RTASBuildPass.SceneAccelerationStructureBuildStats(3, 2, 1024, true);
+                for (var i = 0; i < 32; i++)
+                    RTASBuildPass.CreateStats(cameraData, in settings, in buildStats, null);
+
+                VividRayTracingAccelerationStructureStats stats = default;
+                var before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (var i = 0; i < 256; i++)
+                    stats = RTASBuildPass.CreateStats(cameraData, in settings, in buildStats, null);
+                var allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(stats.CameraName, Is.SameAs(cachedName));
+                cameraData.SetCamera(null);
+                Assert.That(RTASBuildPass.CreateStats(cameraData, in settings, in buildStats, null).CameraName, Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
         [SetUp]
         public void SetUp()
         {
@@ -351,6 +382,80 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(gameObject, mesh, material, meshletCollection);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AttachedSourceRendererGuard_TracksChangesWithoutAllocatingOnMisses(bool skinned)
+        {
+            var gameObject = new GameObject("RTAS_SourceRendererGuard");
+            var mesh = new Mesh();
+            var otherMesh = new Mesh();
+            try
+            {
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                var resources = new VividMeshletRendererResources(meshletRenderer, null, mesh, null, null, null);
+                for (var i = 0; i < 32; i++)
+                    RTASBuildPass.HasActiveAttachedSourceRenderer(in resources);
+
+                var anyActive = false;
+                var before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (var i = 0; i < 256; i++)
+                    anyActive |= RTASBuildPass.HasActiveAttachedSourceRenderer(in resources);
+                var allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(anyActive, Is.False);
+                Assert.That(allocated, Is.Zero);
+
+                Renderer source;
+                MeshFilter filter = null;
+                if (skinned)
+                {
+                    var renderer = gameObject.AddComponent<SkinnedMeshRenderer>();
+                    renderer.sharedMesh = mesh;
+                    source = renderer;
+                }
+                else
+                {
+                    filter = gameObject.AddComponent<MeshFilter>();
+                    filter.sharedMesh = mesh;
+                    source = gameObject.AddComponent<MeshRenderer>();
+                }
+
+                // The same resources must observe attachment and state changes immediately.
+                Assert.That(RTASBuildPass.HasActiveAttachedSourceRenderer(in resources), Is.True);
+                source.enabled = false;
+                Assert.That(RTASBuildPass.HasActiveAttachedSourceRenderer(in resources), Is.False);
+                source.enabled = true;
+                gameObject.SetActive(false);
+                Assert.That(RTASBuildPass.HasActiveAttachedSourceRenderer(in resources), Is.False);
+                gameObject.SetActive(true);
+                Assert.That(RTASBuildPass.HasActiveAttachedSourceRenderer(in resources), Is.True);
+                if (skinned)
+                    ((SkinnedMeshRenderer)source).sharedMesh = otherMesh;
+                else
+                    filter.sharedMesh = otherMesh;
+                Assert.That(RTASBuildPass.HasActiveAttachedSourceRenderer(in resources), Is.False);
+                if (!skinned)
+                {
+                    Object.DestroyImmediate(filter);
+                    for (var i = 0; i < 32; i++)
+                        RTASBuildPass.HasActiveAttachedSourceRenderer(in resources);
+                    before = System.GC.GetAllocatedBytesForCurrentThread();
+                    for (var i = 0; i < 256; i++)
+                        anyActive |= RTASBuildPass.HasActiveAttachedSourceRenderer(in resources);
+                    allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                    Assert.That(anyActive, Is.False);
+                    Assert.That(allocated, Is.Zero);
+                }
+                Object.DestroyImmediate(source);
+                Assert.That(RTASBuildPass.HasActiveAttachedSourceRenderer(in resources), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+                Object.DestroyImmediate(otherMesh);
             }
         }
 

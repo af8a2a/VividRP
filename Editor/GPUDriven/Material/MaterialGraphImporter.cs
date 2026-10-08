@@ -6,7 +6,7 @@ using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.GPUDriven
 {
-    [ScriptedImporter(6, MaterialGraphEditorGraph.AssetExtension)]
+    [ScriptedImporter(7, MaterialGraphEditorGraph.AssetExtension)]
     internal sealed class MaterialGraphImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)

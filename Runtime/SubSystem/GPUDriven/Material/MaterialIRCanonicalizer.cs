@@ -222,7 +222,8 @@ namespace VividRP.Runtime.GPUDriven
                     continue;
 
                 ClosureExpressionNode node = closureGraph.Nodes[nodeIndex];
-                if (node.Opcode == ClosureExpressionOpcode.Slab)
+                if (node.Opcode == ClosureExpressionOpcode.Slab
+                    || node.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
                     continue;
 
                 MarkClosureOperand(node.Operand0, nodeIndex, liveNodes);
@@ -263,7 +264,12 @@ namespace VividRP.Runtime.GPUDriven
                     continue;
 
                 ClosureExpressionNode closureNode = closureGraph.Nodes[closureIndex];
-                if (closureNode.Opcode == ClosureExpressionOpcode.Slab)
+                if (closureNode.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+                {
+                    for (int field = 0; field < OpenPBROpaqueContract.FieldCount; field++)
+                        MarkRoot(values, closureNode.OpenPBROpaque.GetValue(field), liveNodes);
+                }
+                else if (closureNode.Opcode == ClosureExpressionOpcode.Slab)
                 {
                     ClosureSlabExpression slab = closureNode.Slab;
                     MarkRoot(values, slab.BaseColor, liveNodes);
@@ -639,6 +645,21 @@ namespace VividRP.Runtime.GPUDriven
             int[] canonicalClosureNodeMap)
         {
             ClosureExpressionNode sourceNode = sourceGraph.Nodes[sourceIndex];
+            if (sourceNode.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+            {
+                ClosureOpenPBROpaqueExpression inputs = sourceNode.OpenPBROpaque;
+                var fields = new MaterialValue[OpenPBROpaqueContract.FieldCount];
+                for (int field = 0; field < fields.Length; field++)
+                {
+                    fields[field] = RemapValue(
+                        sourceValues, inputs.GetValue(field), canonicalValues, canonicalNodeMap);
+                }
+                MaterialClosure canonicalOpenPBR = canonicalGraph.OpenPBROpaque(
+                    fields[0], fields[1], fields[2], fields[3], fields[4], fields[5],
+                    fields[6], fields[7], fields[8], fields[9], fields[10]);
+                canonicalClosureNodeMap[sourceIndex] = canonicalOpenPBR.Index;
+                return canonicalOpenPBR;
+            }
             if (sourceNode.Opcode == ClosureExpressionOpcode.Slab)
             {
                 ClosureSlabExpression slab = sourceNode.Slab;
@@ -805,6 +826,16 @@ namespace VividRP.Runtime.GPUDriven
             {
                 ClosureExpressionNode node = closureGraph.Nodes[i];
                 writer.WriteUInt32((uint) node.Opcode);
+                if (node.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+                {
+                    writer.WriteUInt32(OpenPBROpaqueContract.Version);
+                    writer.WriteUInt32(OpenPBROpaqueContract.FingerprintVersion);
+                    writer.WriteUInt32((uint) OpenPBROpaqueContract.Fingerprint);
+                    writer.WriteUInt32((uint) (OpenPBROpaqueContract.Fingerprint >> 32));
+                    for (int field = 0; field < OpenPBROpaqueContract.FieldCount; field++)
+                        writer.WriteUInt32((uint) node.OpenPBROpaque.GetValue(field).Index);
+                    continue;
+                }
                 if (node.Opcode == ClosureExpressionOpcode.Slab)
                 {
                     ClosureSlabExpression slab = node.Slab;

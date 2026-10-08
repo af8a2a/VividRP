@@ -396,6 +396,63 @@ namespace VividRP.Editor.GPUDriven
     }
 
     [Serializable]
+    [Node("Material/Closure", "", "OpenPBR Opaque V1")]
+    internal sealed class MaterialOpenPBROpaqueNode : MaterialGraphEditorNode
+    {
+        internal const string BaseWeightPortName = "BaseWeight";
+        internal const string BaseColorPortName = "BaseColor";
+        internal const string BaseDiffuseRoughnessPortName = "BaseDiffuseRoughness";
+        internal const string BaseMetalnessPortName = "BaseMetalness";
+        internal const string SpecularWeightPortName = "SpecularWeight";
+        internal const string SpecularColorPortName = "SpecularColor";
+        internal const string SpecularRoughnessPortName = "SpecularRoughness";
+        internal const string SpecularIorPortName = "SpecularIor";
+        internal const string NormalWSPortName = "NormalWS";
+        internal const string EmissionLuminancePortName = "EmissionLuminance";
+        internal const string EmissionColorPortName = "EmissionColor";
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            for (uint semantic = 0u; semantic < OpenPBROpaqueContract.FieldCount; ++semantic)
+            {
+                context.AddInputPort<MaterialGraphValuePort>(
+                    MaterialOpenPBROpaqueAuthoring.GetPortName(
+                        (OpenPBROpaqueFieldSemantic) semantic)).Build();
+            }
+            AddClosureOutput(context);
+        }
+    }
+
+    [Serializable]
+    [Node("Material", "", "OpenPBR Opaque Output")]
+    internal sealed class MaterialOpenPBROpaqueOutputNode : MaterialGraphEditorNode
+    {
+        internal const string MaterialFeaturesOptionName = "Material Features";
+        internal const string SurfacePortName = "Surface";
+        internal const string CoveragePortName = "Coverage";
+        internal const string AlphaClipThresholdPortName = "AlphaClipThreshold";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<MaterialFeatureMask>(MaterialFeaturesOptionName)
+                .WithDefaultValue(MaterialFeatureMask.None);
+        }
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphClosurePort>(SurfacePortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(CoveragePortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(AlphaClipThresholdPortName).Build();
+        }
+
+        internal MaterialFeatureMask GetMaterialFeatures()
+        {
+            return GetOptionValue(
+                this, MaterialFeaturesOptionName, MaterialFeatureMask.None);
+        }
+    }
+
+    [Serializable]
     [Node("Material/Closure", "", "Horizontal Mix")]
     internal sealed class MaterialHorizontalMixNode : MaterialGraphEditorNode
     {

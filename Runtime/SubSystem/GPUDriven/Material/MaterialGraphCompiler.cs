@@ -594,6 +594,17 @@ namespace VividRP.Runtime.GPUDriven
                                 values[4],
                                 node.Features);
                             break;
+                        case MaterialGraphClosureOpcode.OpenPBROpaque:
+                            if (node.Features != ClosureFeatureMask.None)
+                            {
+                                throw new NotSupportedException(
+                                    "OpenPBROpaqueV1 does not accept legacy slab feature flags.");
+                            }
+                            closure = m_Closures.OpenPBROpaque(
+                                values[0], values[1], values[2], values[3],
+                                values[4], values[5], values[6], values[7],
+                                values[8], values[9], values[10]);
+                            break;
                         case MaterialGraphClosureOpcode.HorizontalMix:
                             closure = m_Closures.HorizontalMix(
                                 closures[0],
@@ -925,6 +936,8 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGraphClosureOpcode opcode,
             int valueIndex)
         {
+            if (opcode == MaterialGraphClosureOpcode.OpenPBROpaque)
+                return ((OpenPBROpaqueFieldSemantic) valueIndex).ToString();
             if (opcode == MaterialGraphClosureOpcode.Slab)
             {
                 return new[]

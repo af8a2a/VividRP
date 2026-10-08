@@ -68,7 +68,10 @@ namespace VividRP.Runtime.VirtualShadowMap
             var pool = VirtualShadowMapPrototypeRuntime.PhysicalPagePool.rt;
             int entries = VirtualShadowMapPrototypeRuntime.PageTableEntryCount;
             int projections = VirtualShadowMapPrototypeRuntime.Projections.Buffer.count;
-            if (s_Pool == pool && Texture != null && PreviousTable.count == entries
+            // The managed RTHandle can survive destruction/release of its native texture.
+            // ImportTexture requires a live RenderTexture, not just its stale nameID.
+            if (s_Pool == pool && Texture?.rt != null && Texture.rt.IsCreated()
+                && PreviousTable.count == entries
                 && PreviousProjections.count == projections) return;
             ReleaseResources();
             s_Pool = pool;
@@ -79,7 +82,13 @@ namespace VividRP.Runtime.VirtualShadowMap
                 msaaSamples = 1, useMipMap = true, autoGenerateMips = false,
                 mipCount = 7, enableRandomWrite = true
             };
-            var texture = new RenderTexture(descriptor) { name = "VSMShadowHZB", filterMode = FilterMode.Point };
+            // Match RTHandleSystem-owned textures: this persistent, manually created
+            // texture must not be reclaimed by the Editor's unused-asset cleanup.
+            var texture = new RenderTexture(descriptor)
+            {
+                name = "VSMShadowHZB", filterMode = FilterMode.Point,
+                hideFlags = HideFlags.HideAndDontSave
+            };
             texture.Create();
             Texture = RTHandles.Alloc(texture, transferOwnership: true);
             PreviousTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, entries, 4) { name = "VSMHZBPreviousTable" };

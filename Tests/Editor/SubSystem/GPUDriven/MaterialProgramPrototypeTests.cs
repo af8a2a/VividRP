@@ -1131,27 +1131,27 @@ namespace VividRP.Editor.Tests
         [Test]
         public void CompilationContract_BuiltinCatalogHasFrozenAbi()
         {
-            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.CanonicalIRVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(1u));
+            Assert.That(MaterialProgramContract.IRSchemaVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.CanonicalIRVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.ClosureExpressionVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.StageLIRVersion, Is.EqualTo(1u));
             Assert.That(MaterialProgramContract.DerivativeLegalizationVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(7u));
+            Assert.That(MaterialProgramContract.ProgramLoweringVersion, Is.EqualTo(8u));
             Assert.That(MaterialProgramContract.GenericLayoutVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.LayoutFingerprintVersion, Is.EqualTo(3u));
-            Assert.That(MaterialProgramContract.DeferredExportContractVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.DeferredExportFingerprintVersion, Is.EqualTo(1u));
-            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(9u));
-            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(14u));
-            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(9u));
+            Assert.That(MaterialProgramContract.DeferredExportContractVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.DeferredExportFingerprintVersion, Is.EqualTo(2u));
+            Assert.That(MaterialProgramContract.ProgramCatalogVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.ProgramCatalogManifestVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.SemanticHashVersion, Is.EqualTo(6u));
+            Assert.That(MaterialProgramContract.CompiledHashVersion, Is.EqualTo(10u));
+            Assert.That(MaterialProgramContract.CompilerVersion, Is.EqualTo(15u));
+            Assert.That(MaterialProgramContract.NativeTemplateBackendVersion, Is.EqualTo(10u));
             Assert.That(MaterialProgramContract.CoverageHlslArtifactVersion, Is.EqualTo(2u));
             Assert.That(MaterialProgramContract.CoverageHlslBackendVersion, Is.EqualTo(5u));
-            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(4u));
-            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(8u));
-            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(4u));
+            Assert.That(MaterialProgramContract.SurfaceHlslArtifactVersion, Is.EqualTo(5u));
+            Assert.That(MaterialProgramContract.SurfaceHlslBackendVersion, Is.EqualTo(9u));
+            Assert.That(MaterialProgramContract.VerifierVersion, Is.EqualTo(5u));
             Assert.That(MaterialProgramContract.RuntimeAbiVersion, Is.EqualTo(3u));
             Assert.That(GPUDrivenMaterialCompiler.RuntimeAbiVersion, Is.EqualTo(3u));
             Assert.That(GPUDrivenMaterialCompiler.ProgramVersion, Is.EqualTo(3u));
@@ -1173,24 +1173,24 @@ namespace VividRP.Editor.Tests
             Assert.That((uint) VividMaterialResourceLayoutID.GenericResourceRecords, Is.EqualTo(2u));
 
             VividMaterialProgramData[] runtimePrograms =
-                GPUDrivenMaterialCompiler.CreateRuntimeProgramTable();
+                GPUDrivenMaterialCompiler.ProgramCatalog.CreateRuntimeProgramTable();
             Assert.That(
                 runtimePrograms.Length,
                 Is.EqualTo(MaterialProgramContract.ProductionCatalogProgramCount));
 
             var expectedRuntimePrograms = new[]
             {
-                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u },
-                new uint[] { 2u, 0u, 1u, 0u, 2u, 2u, 7u, 0u },
-                new uint[] { 2u, 0u, 1u, 0u, 2u, 2u, 7u, 0u },
-                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { MaterialProgramContract.RuntimeAbiVersion, 0u, 0u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { MaterialProgramContract.RuntimeAbiVersion, 0u, 1u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { MaterialProgramContract.RuntimeAbiVersion, 0u, 1u, 0u, 2u, 2u, 7u, 0u },
+                new uint[] { MaterialProgramContract.RuntimeAbiVersion, 0u, 0u, 0u, 2u, 2u, 7u, 0u },
             };
             var expectedSemanticHashes = new[]
             {
-                0xF934E6AEDE283181ul,
-                0x7B58B734ED0EDE45ul,
-                0x2E8FA4336811E656ul,
-                0ul,
+                0xCF736FC328583F29ul,
+                0xEB5F27ED99B4E6DCul,
+                0xAF4AABA92F81E00Ful,
+                0xE1F1ADA1EF4B0C20ul,
             };
             var semanticHashes = new List<ulong>();
             var compiledHashes = new List<ulong>();
@@ -1212,12 +1212,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     program.SemanticHash.Version,
                     Is.EqualTo(MaterialProgramContract.SemanticHashVersion));
-                if (expectedSemanticHashes[programIndex] != 0ul)
-                {
-                    Assert.That(
-                        program.SemanticHash.Value,
-                        Is.EqualTo(expectedSemanticHashes[programIndex]));
-                }
+                Assert.That(
+                    program.SemanticHash.Value,
+                    Is.EqualTo(expectedSemanticHashes[programIndex]));
                 Assert.That(
                     program.Module.CanonicalIR.PayloadHash,
                     Is.EqualTo(program.SemanticHash.Value));
@@ -1373,7 +1370,7 @@ namespace VividRP.Editor.Tests
 
             AssertRuntimeProgramData(
                 compiledUnlitOnly.RuntimeData,
-                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u });
+                new uint[] { MaterialProgramContract.RuntimeAbiVersion, 0u, 0u, 0u, 2u, 2u, 7u, 0u });
             Assert.That(
                 compiledUnlitOnly.DeferredExportContract.ShadingModels,
                 Is.EqualTo(MaterialShadingModelMask.Unlit));
@@ -1405,7 +1402,8 @@ namespace VividRP.Editor.Tests
                         MaterialProgramContract.RuntimeAbiVersion + 1u));
 
             Assert.That(exception.ParamName, Is.EqualTo("programVersion"));
-            Assert.That(exception.Message, Does.Contain("Only material runtime ABI version 1"));
+            Assert.That(exception.Message, Does.Contain(
+                $"Only material runtime ABI version {MaterialProgramContract.RuntimeAbiVersion}"));
         }
 
         [Test]
@@ -2352,7 +2350,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(runtimeTable[holeIndex].Version, Is.Zero);
             AssertRuntimeProgramData(
                 runtimeTable[4],
-                new uint[] { 2u, 0u, 0u, 0u, 2u, 2u, 7u, 0u });
+                new uint[] { MaterialProgramContract.RuntimeAbiVersion, 0u, 0u, 0u, 2u, 2u, 7u, 0u });
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 catalog.GetMaterialProgram(VividMaterialProgramID.StandardSingleSlab));
             Assert.Throws<InvalidOperationException>(() =>
@@ -3393,7 +3391,8 @@ namespace VividRP.Editor.Tests
             int nodeIndex = -1)
         {
             MaterialIRDiagnostic diagnostic = diagnostics.First(entry =>
-                string.Equals(entry.Code, expectedCode, StringComparison.Ordinal));
+                string.Equals(entry.Code, expectedCode, StringComparison.Ordinal)
+                && entry.NodeIndex == nodeIndex);
             Assert.That(diagnostic.Code, Is.EqualTo(expectedCode));
             Assert.That(diagnostic.NodeIndex, Is.EqualTo(nodeIndex));
         }
@@ -3794,11 +3793,24 @@ namespace VividRP.Editor.Tests
                 source.ParameterLayout.LayoutID,
                 source.ParameterLayout.Stride + 16,
                 source.ParameterLayout.Bindings.ToArray());
+            MaterialResourceLayoutBinding[] physicalResources =
+                source.ResourceLayout.Bindings.ToArray();
+            for (int index = 0; index < physicalResources.Length; index++)
+            {
+                MaterialResourceLayoutBinding binding = physicalResources[index];
+                if (binding.Resource == MaterialTextureResource.BaseColor)
+                {
+                    physicalResources[index] = new MaterialResourceLayoutBinding(
+                        MaterialTextureResource.TopBaseColor,
+                        binding.RecordOffset,
+                        binding.ByteOffset);
+                }
+            }
             var resourceLayout = new CompiledResourceLayout(
                 source.ResourceLayout.LayoutID,
                 source.ResourceLayout.RecordStride + 16,
                 source.ResourceLayout.RecordCount,
-                source.ResourceLayout.Bindings.ToArray());
+                physicalResources);
 
             MaterialNativeParameterBinding[] parameterBindings =
                 source.ParameterBindings.ToArray();
@@ -3830,7 +3842,7 @@ namespace VividRP.Editor.Tests
                     resourceBindings[bindingIndex];
                 MaterialTextureResource target = binding.Target
                     == MaterialTextureResource.BaseColor
-                        ? MaterialTextureResource.BaseNormal
+                        ? MaterialTextureResource.TopBaseColor
                         : binding.Target;
                 resourceBindings[bindingIndex] =
                     new MaterialNativeResourceBinding(

@@ -5,7 +5,15 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal enum MaterialDeferredExportSurfaceSummaryAbi : uint
     {
+        None = 0u,
         SurfaceSummaryV1 = 1u,
+    }
+
+    // A typed compiler export contract, not a frozen GBuffer/storage layout.
+    internal enum MaterialDeferredExportNativePayloadAbi : uint
+    {
+        None = 0u,
+        OpenPBROpaqueV1 = 1u,
     }
 
     internal enum MaterialDeferredExportSidecarAbi : uint
@@ -19,6 +27,7 @@ namespace VividRP.Runtime.GPUDriven
         None = 0u,
         FastSlab = 2u,
         DualSlab = 4u,
+        OpenPBROpaque = 6u,
     }
 
     internal enum MaterialDeferredExportTopology : uint
@@ -36,6 +45,7 @@ namespace VividRP.Runtime.GPUDriven
         DiffuseIrradiance = 1u << 1,
         DualSlabSidecar = 1u << 2,
         SharedNormalAndAmbientOcclusion = 1u << 3,
+        NativeOpenPBROpaque = 1u << 4,
     }
 
     [Flags]
@@ -114,7 +124,9 @@ namespace VividRP.Runtime.GPUDriven
             uint expectedClosureCount,
             MaterialDeferredExportTopology topology,
             MaterialDeferredExportPayloadFlags payloadFlags,
-            MaterialDeferredExportPolicyFlags policyFlags)
+            MaterialDeferredExportPolicyFlags policyFlags,
+            MaterialDeferredExportNativePayloadAbi nativePayloadAbi =
+                MaterialDeferredExportNativePayloadAbi.None)
         {
             Version = MaterialProgramContract.DeferredExportContractVersion;
             SurfaceSummaryAbi = surfaceSummaryAbi;
@@ -125,6 +137,13 @@ namespace VividRP.Runtime.GPUDriven
             Topology = topology;
             PayloadFlags = payloadFlags;
             PolicyFlags = policyFlags;
+            NativePayloadAbi = nativePayloadAbi;
+            NativeProfileVersion = nativePayloadAbi
+                    == MaterialDeferredExportNativePayloadAbi.OpenPBROpaqueV1
+                ? OpenPBROpaqueContract.Version : 0u;
+            NativeProfileFingerprint = nativePayloadAbi
+                    == MaterialDeferredExportNativePayloadAbi.OpenPBROpaqueV1
+                ? OpenPBROpaqueContract.Fingerprint : 0ul;
             Validate();
             Fingerprint = MaterialDeferredExportContractHashBuilder.Compute(this);
         }
@@ -147,6 +166,12 @@ namespace VividRP.Runtime.GPUDriven
 
         internal MaterialDeferredExportPolicyFlags PolicyFlags { get; }
 
+        internal MaterialDeferredExportNativePayloadAbi NativePayloadAbi { get; }
+
+        internal uint NativeProfileVersion { get; }
+
+        internal ulong NativeProfileFingerprint { get; }
+
         internal MaterialDeferredExportContractFingerprint Fingerprint { get; }
 
         internal bool PayloadEquals(MaterialDeferredExportContract other)
@@ -161,11 +186,35 @@ namespace VividRP.Runtime.GPUDriven
                 && ExpectedClosureCount == other.ExpectedClosureCount
                 && Topology == other.Topology
                 && PayloadFlags == other.PayloadFlags
-                && PolicyFlags == other.PolicyFlags;
+                && PolicyFlags == other.PolicyFlags
+                && NativePayloadAbi == other.NativePayloadAbi
+                && NativeProfileVersion == other.NativeProfileVersion
+                && NativeProfileFingerprint == other.NativeProfileFingerprint;
         }
 
         private void Validate()
         {
+            if (NativePayloadAbi == MaterialDeferredExportNativePayloadAbi.OpenPBROpaqueV1)
+            {
+                if (SurfaceSummaryAbi != MaterialDeferredExportSurfaceSummaryAbi.None
+                    || DualSlabSidecarAbi != MaterialDeferredExportSidecarAbi.None
+                    || ShadingModels != MaterialShadingModelMask.OpenPBROpaque
+                    || LitClass != MaterialDeferredExportLitClass.OpenPBROpaque
+                    || ExpectedClosureCount != OpenPBROpaqueContract.ClosureCount
+                    || Topology != MaterialDeferredExportTopology.None
+                    || PayloadFlags != MaterialDeferredExportPayloadFlags.NativeOpenPBROpaque
+                    || PolicyFlags != MaterialDeferredExportPolicyFlags.None)
+                {
+                    throw new ArgumentException(
+                        "Native OpenPBR export must contain one opaque profile and no legacy deferred payload or policy.");
+                }
+                return;
+            }
+            if (NativePayloadAbi != MaterialDeferredExportNativePayloadAbi.None
+                || NativeProfileVersion != 0u || NativeProfileFingerprint != 0ul)
+            {
+                throw new ArgumentOutOfRangeException(nameof(NativePayloadAbi));
+            }
             if (SurfaceSummaryAbi
                 != MaterialDeferredExportSurfaceSummaryAbi.SurfaceSummaryV1)
             {
@@ -274,6 +323,24 @@ namespace VividRP.Runtime.GPUDriven
             if (module == null)
                 throw new ArgumentNullException(nameof(module));
 
+            ClosureExpressionNode root = module.ClosureGraph.GetNode(module.SurfaceClosure);
+            if (root.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+            {
+                if (topology != MaterialProgramTopologySpecialization.OpenPBROpaque
+                    || module.Topology.ClosureCount != OpenPBROpaqueContract.ClosureCount)
+                    throw new NotSupportedException("Native OpenPBR export requires one closure.");
+                return new MaterialDeferredExportContract(
+                    MaterialDeferredExportSurfaceSummaryAbi.None,
+                    MaterialDeferredExportSidecarAbi.None,
+                    module.ShadingModels,
+                    MaterialDeferredExportLitClass.OpenPBROpaque,
+                    OpenPBROpaqueContract.ClosureCount,
+                    MaterialDeferredExportTopology.None,
+                    MaterialDeferredExportPayloadFlags.NativeOpenPBROpaque,
+                    MaterialDeferredExportPolicyFlags.None,
+                    MaterialDeferredExportNativePayloadAbi.OpenPBROpaqueV1);
+            }
+
             MaterialDeferredExportTopology exportTopology;
             uint expectedClosureCount;
             switch (topology)
@@ -380,6 +447,9 @@ namespace VividRP.Runtime.GPUDriven
             MaterialProgramHashUtility.Add(ref hash, (uint) contract.Topology);
             MaterialProgramHashUtility.Add(ref hash, (uint) contract.PayloadFlags);
             MaterialProgramHashUtility.Add(ref hash, (uint) contract.PolicyFlags);
+            MaterialProgramHashUtility.Add(ref hash, (uint) contract.NativePayloadAbi);
+            MaterialProgramHashUtility.Add(ref hash, contract.NativeProfileVersion);
+            MaterialProgramHashUtility.Add(ref hash, contract.NativeProfileFingerprint);
         }
     }
 }

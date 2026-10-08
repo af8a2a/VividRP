@@ -270,6 +270,10 @@ namespace VividRP.Editor.GPUDriven
                     m_Status.text = "Compiled · not in Frozen Catalog";
                     m_Status.style.color = new Color(0.95f, 0.68f, 0.25f);
                     break;
+                case MaterialGraphPreviewStatus.UnsupportedProfile:
+                    m_Status.text = "Compiled · OpenPBR preview unavailable";
+                    m_Status.style.color = new Color(0.95f, 0.68f, 0.25f);
+                    break;
                 case MaterialGraphPreviewStatus.OverBudget:
                     m_Status.text = "Rejected · cost budget exceeded";
                     m_Status.style.color = new Color(0.95f, 0.38f, 0.32f);
@@ -290,7 +294,7 @@ namespace VividRP.Editor.GPUDriven
             m_Metadata.Add(CreateKeyValue("Program ID", programID));
             m_Metadata.Add(CreateKeyValue(
                 "Topology",
-                $"{viewModel.ClosureCount} slab(s), {viewModel.OperatorCount} operator(s)"));
+                $"{viewModel.ClosureCount} closure(s), {viewModel.OperatorCount} operator(s)"));
             m_Metadata.Add(CreateKeyValue(
                 "Compiled hash",
                 ShortHash(viewModel.CompiledHash)));
@@ -441,6 +445,8 @@ namespace VividRP.Editor.GPUDriven
         private static string GetPreviewUnavailableMessage(
             MaterialGraphPreviewStatus status)
         {
+            if (status == MaterialGraphPreviewStatus.UnsupportedProfile)
+                return "OpenPBR shading is not yet available in the Editor preview.";
             return status == MaterialGraphPreviewStatus.CatalogMiss
                 ? "Bake the Frozen Catalog to generate a preview dispatcher entry."
                 : "Resolve compile and budget diagnostics to enable preview.";

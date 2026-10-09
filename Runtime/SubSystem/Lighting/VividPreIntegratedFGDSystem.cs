@@ -83,5 +83,13 @@ namespace VividRP.Runtime
             data.SetTextures(null, null);
             data.slabLutTexture = slabLutReady ? m_SlabLut.Texture : null;
         }
+
+        internal static void BindOpenPBRLuts(CommandBuffer cmd)
+        {
+            var luts = PipelineResourceManager.Get<VividRPCoreResources>()?.OpenPBRLuts;
+            if (luts == null)
+                throw new System.InvalidOperationException("OpenPBR LUT asset is missing. Re-sync PipelineResources.");
+            luts.Bind(cmd);
+        }
     }
 }

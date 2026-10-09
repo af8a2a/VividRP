@@ -149,6 +149,7 @@ namespace VividRP.Runtime
             {
                 BlueNoise.Instance?.Bind(cmd);
             }
+            VividPreIntegratedFGDSystem.BindOpenPBRLuts(cmd);
         }
     }
 }

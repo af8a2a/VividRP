@@ -37,7 +37,8 @@ namespace VividRP.Editor
                     path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".tga", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".exr", StringComparison.OrdinalIgnoreCase) ||
-                    path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
+                    path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".openpbrlut", StringComparison.OrdinalIgnoreCase))
                 {
                     relevant = true;
                     break;

@@ -2,6 +2,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -25,6 +26,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 results.SetData(cleared);
+                VividPreIntegratedFGDSystem.BindOpenPBRLuts(command);
                 command.SetKeyword(shader, keyword, baseOnly);
                 command.SetRayTracingBufferParam(shader, "_Results", results);
                 command.DispatchRays(shader, "EvaluateReference", caseCount, 1, 1);
@@ -32,6 +34,7 @@ namespace VividRP.Editor.Tests
                 results.GetData(reference);
                 command.Clear();
                 results.SetData(cleared);
+                VividPreIntegratedFGDSystem.BindOpenPBRLuts(command);
                 command.SetKeyword(shader, keyword, baseOnly);
                 command.SetRayTracingBufferParam(shader, "_Results", results);
                 command.DispatchRays(shader, "EvaluateCombined", caseCount, 1, 1);

@@ -174,6 +174,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/VividSlabLut.compute")]
         public ComputeShader SlabLutCompute;
 
+        [VividResourcePath("Runtime/Resources/OpenPBRLuts.openpbrlut")]
+        public VividOpenPBRLuts OpenPBRLuts;
+
         [VividResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;
 

@@ -1,10 +1,14 @@
 ﻿#ifndef __OPENPBR_BRIDGE__
 #define __OPENPBR_BRIDGE__
-// Use the self-contained array LUT path. OpenPBR translucency is required for
-// non-thin-walled reflection/refraction; dispersion and fuzz remain disabled by
-// the StandardLit adapter while coat and metallic stay enabled.
+// Surface energy and LTC textures are imported from the original vendor data.
+// Keep the array mode overridable for numerical reference checks.
 #define OPENPBR_LANGUAGE_TARGET_SLANG 1
-#define OPENPBR_USE_TEXTURE_LUTS 0
+#ifndef OPENPBR_USE_TEXTURE_LUTS
+#define OPENPBR_USE_TEXTURE_LUTS 1
+#endif
+#if OPENPBR_USE_TEXTURE_LUTS
+#include "OpenPBRTextureLuts.hlsl"
+#endif
 #define OPENPBR_FAST_RCP_SQRT(value) rsqrt(value)
 #define OPENPBR_FAST_SQRT(value) sqrt(value)
 #define OPENPBR_FAST_NORMALIZE(value) normalize(value)

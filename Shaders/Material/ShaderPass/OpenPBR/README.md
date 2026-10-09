@@ -1,5 +1,29 @@
 # Adobe's OpenPBR BSDF
 
+## VividRP texture integration
+
+`OpenPBR.hlsl` defaults to `OPENPBR_USE_TEXTURE_LUTS = 1`. The
+`Runtime/Resources/OpenPBRLuts.openpbrlut` source imports the original Vendor
+energy and LTC data through `VividOpenPBRLutImporter`; source dependencies
+trigger regeneration when those tables change. The pipeline resource sync
+registers the imported asset, and frame globals bind its three textures:
+
+- Two 32³ R32F volumes, for ideal and opaque dielectric energy.
+- One 32 × 32 × 6 RGBA32F array. Layers 0–5 map to Vendor IDs 1, 2, 4, 5, 6, 7.
+  Scalar values use R; LTC coefficients use RGB. The 1D metal average table
+  repeats across rows, preserving the Vendor's `uv.y = 0.5` lookup.
+
+All textures use linear filtering, clamp addressing and no mipmaps. The total
+texel payload is 352 KiB. Import preserves the original UNORM-to-float decode
+and LTC float values; hardware interpolation can differ slightly from shader
+`lerp`. Unity owns texture upload and lifetime, with no per-frame allocation
+or table construction. Standalone GPU consumers must bind these globals too.
+
+Define `OPENPBR_USE_TEXTURE_LUTS = 0` before including the bridge to compile the
+original array implementation for comparisons. The volume-only RayGen bridge
+does not require surface LUTs. GPU regression tests compare all imported texels
+and boundary/random lookups against the Vendor array interpolation functions.
+
 A self-contained, portable implementation of the [OpenPBR 1.1](https://academysoftwarefoundation.github.io/OpenPBR/) BSDF, extracted from Adobe's proprietary renderer, Eclair. Written in a GLSL-style language with macros that target C++, GLSL, CUDA, MSL (Metal Shading Language), or Slang, it's designed to drop into any path tracer with minimal setup.
 
 ---

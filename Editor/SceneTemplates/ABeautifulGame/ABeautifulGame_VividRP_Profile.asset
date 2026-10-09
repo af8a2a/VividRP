@@ -247,7 +247,7 @@ MonoBehaviour:
     m_Value: 1
   fixedSeed:
     m_OverrideState: 1
-    m_Value: 12648430
+    m_Value: 33035932
   pathSamplingMode:
     m_OverrideState: 1
     m_Value: 0
@@ -271,7 +271,10 @@ MonoBehaviour:
     m_Value: 0
   enableShaderExecutionReordering:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
+  enableFP16:
+    m_OverrideState: 1
+    m_Value: 1
   enableRTXTF:
     m_OverrideState: 1
     m_Value: 1

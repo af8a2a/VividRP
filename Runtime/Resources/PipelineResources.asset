@@ -14,6 +14,8 @@ MonoBehaviour:
   m_Name: PipelineResources
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.PipelineResourcesContainer
   m_Entries:
+  - ResourceName: Runtime/Resources/OpenPBRLuts.openpbrlut
+    ResourceObject: {fileID: 8237776664536028983, guid: 4c4e05512ce52ed46be5cfbccfeeb0be, type: 3}
   - ResourceName: Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering
     ResourceObject: {fileID: 4800000, guid: fd39a162e87340c2a2030ebea00552f6, type: 3}
   - ResourceName: Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute

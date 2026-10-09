@@ -1,0 +1,55 @@
+#pragma kernel EvaluateArray VIVID_TEST_ARRAY
+#pragma kernel EvaluateTexture
+#pragma kernel EvaluateArrayFP16 VIVID_TEST_ARRAY VIVIDRP_REFERENCE_PT_FP16
+#pragma kernel EvaluateTextureFP16 VIVIDRP_REFERENCE_PT_FP16
+#pragma target 5.0
+#if defined(VIVID_TEST_ARRAY)
+#define OPENPBR_USE_TEXTURE_LUTS 0
+// Keep vendor interpolation, but supply the original uint16 values in SRVs.
+// Large static arrays in an unconstrained compute kernel exceed driver limits.
+#define OPENPBR_ENERGY_ARRAYS_H
+#define OPENPBR_LTC_ARRAY_H
+#define OpenPBR_EnergyTableElement uint
+StructuredBuffer<uint> OpenPBR_IdealDielectricEnergyComplement_Array;
+StructuredBuffer<uint> OpenPBR_IdealDielectricAverageEnergyComplement_Array;
+StructuredBuffer<uint> OpenPBR_IdealDielectricReflectionRatio_Array;
+StructuredBuffer<uint> OpenPBR_OpaqueDielectricEnergyComplement_Array;
+StructuredBuffer<uint> OpenPBR_OpaqueDielectricAverageEnergyComplement_Array;
+StructuredBuffer<uint> OpenPBR_IdealMetalEnergyComplement_Array;
+StructuredBuffer<uint> OpenPBR_IdealMetalAverageEnergyComplement_Array;
+StructuredBuffer<float3> OpenPBR_LTC_Array;
+#endif
+#include "../../../../Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl"
+
+StructuredBuffer<float4> _Inputs;
+RWStructuredBuffer<float4> _Output;
+
+void Evaluate(uint id)
+{
+    uint count, stride;
+    _Inputs.GetDimensions(count, stride);
+    if (id >= count) return;
+    float3 p = _Inputs[id].xyz; // IOR, alpha, cos(theta)
+    _Output[id * 3] = float4(
+        openpbr_look_up_ideal_dielectric_energy_complement(p.x, p.y, p.z),
+        openpbr_look_up_ideal_dielectric_average_energy_complement(p.x, p.y),
+        openpbr_look_up_ideal_dielectric_reflection_ratio(p.x, p.y),
+        openpbr_look_up_opaque_dielectric_energy_complement(p.x, p.y, p.z));
+    _Output[id * 3 + 1] = float4(
+        openpbr_look_up_opaque_dielectric_average_energy_complement(p.x, p.y),
+        openpbr_look_up_ideal_metal_energy_complement(p.y, p.z),
+        openpbr_look_up_ideal_metal_average_energy_complement(p.y), 0);
+    OpenPBR_FuzzLobe_CoatingLobe_AggregateLobe lobe = (OpenPBR_FuzzLobe_CoatingLobe_AggregateLobe)0;
+    lobe.alpha = p.y;
+    _Output[id * 3 + 2] = float4(openpbr_disney_sheen_fetch_coeffs(
+        lobe, float3(sqrt(saturate(1 - p.z * p.z)), 0, p.z)), 0);
+}
+
+[numthreads(64, 1, 1)]
+void EvaluateTexture(uint id : SV_DispatchThreadID) { Evaluate(id); }
+[numthreads(64, 1, 1)]
+void EvaluateArray(uint id : SV_DispatchThreadID) { Evaluate(id); }
+[numthreads(64, 1, 1)]
+void EvaluateArrayFP16(uint id : SV_DispatchThreadID) { Evaluate(id); }
+[numthreads(64, 1, 1)]
+void EvaluateTextureFP16(uint id : SV_DispatchThreadID) { Evaluate(id); }

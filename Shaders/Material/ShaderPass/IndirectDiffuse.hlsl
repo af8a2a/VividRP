@@ -335,14 +335,13 @@ float2 VividIndirectDiffuseFetchLightmapUV(IntersectionVertex currentVertex)
 #endif
 }
 
-VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeData attributeData)
+VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(
+    IntersectionVertex currentVertex,
+    float3 geometricNormalWS)
 {
-    IntersectionVertex currentVertex;
-    GetCurrentIntersectionVertex(attributeData, currentVertex);
-
     VividIndirectDiffuseHitGeometry geometry;
     geometry.positionWS = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-    GetCurrentIntersectionGeometricNormal(attributeData, geometry.faceNormalWS);
+    geometry.faceNormalWS = geometricNormalWS;
     geometry.normalWS = VividIndirectDiffuseTransformNormalToWorld(currentVertex.normalOS);
     geometry.tangentWS = VividIndirectDiffuseTransformDirToWorld(currentVertex.tangentOS.xyz);
     geometry.tangentSign = sign(currentVertex.tangentOS.w);
@@ -363,6 +362,15 @@ VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeDa
     }
 
     return geometry;
+}
+
+VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeData attributeData)
+{
+    IntersectionVertex currentVertex;
+    GetCurrentIntersectionVertex(attributeData, currentVertex);
+    float3 geometricNormalWS;
+    GetCurrentIntersectionGeometricNormal(attributeData, geometricNormalWS);
+    return VividIndirectDiffuseBuildHitGeometry(currentVertex, geometricNormalWS);
 }
 
 float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry, float textureLod)

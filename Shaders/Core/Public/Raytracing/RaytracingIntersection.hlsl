@@ -137,17 +137,13 @@ void FetchIntersectionVertex(uint vertexIndex, out IntersectionVertex outVertex)
     #endif
 }
 
-void GetCurrentIntersectionVertex(AttributeData attributeData, out IntersectionVertex outVertex)
+void InterpolateIntersectionVertex(
+    AttributeData attributeData,
+    IntersectionVertex v0,
+    IntersectionVertex v1,
+    IntersectionVertex v2,
+    out IntersectionVertex outVertex)
 {
-    // Fetch the indices of the currentr triangle
-    uint3 triangleIndices = UnityRayTracingFetchTriangleIndices(PrimitiveIndex());
-
-    // Fetch the 3 vertices
-    IntersectionVertex v0, v1, v2;
-    FetchIntersectionVertex(triangleIndices.x, v0);
-    FetchIntersectionVertex(triangleIndices.y, v1);
-    FetchIntersectionVertex(triangleIndices.z, v2);
-
     // Compute the full barycentric coordinates
     float3 barycentricCoordinates = float3(1.0 - attributeData.barycentrics.x - attributeData.barycentrics.y, attributeData.barycentrics.x, attributeData.barycentrics.y);
 
@@ -198,6 +194,16 @@ void GetCurrentIntersectionVertex(AttributeData attributeData, out IntersectionV
     outVertex.texCoord2Area = abs((v1.texCoord2.x - v0.texCoord2.x) * (v2.texCoord2.y - v0.texCoord2.y) - (v2.texCoord2.x - v0.texCoord2.x) * (v1.texCoord2.y - v0.texCoord2.y));
     outVertex.texCoord3Area = abs((v1.texCoord3.x - v0.texCoord3.x) * (v2.texCoord3.y - v0.texCoord3.y) - (v2.texCoord3.x - v0.texCoord3.x) * (v1.texCoord3.y - v0.texCoord3.y));
 #endif
+}
+
+void GetCurrentIntersectionVertex(AttributeData attributeData, out IntersectionVertex outVertex)
+{
+    uint3 triangleIndices = UnityRayTracingFetchTriangleIndices(PrimitiveIndex());
+    IntersectionVertex v0, v1, v2;
+    FetchIntersectionVertex(triangleIndices.x, v0);
+    FetchIntersectionVertex(triangleIndices.y, v1);
+    FetchIntersectionVertex(triangleIndices.z, v2);
+    InterpolateIntersectionVertex(attributeData, v0, v1, v2, outVertex);
 }
 
 // Compute the proper world space geometric normal from the intersected triangle

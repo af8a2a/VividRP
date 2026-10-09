@@ -17,32 +17,51 @@ float3 ReferencedPathtracingTransformPositionToWorld(float3 positionOS)
     return mul(ObjectToWorld3x4(), float4(positionOS, 1.0));
 }
 
+VividIndirectDiffuseHitGeometry BuildReferencedPathtracingHitGeometry(
+    AttributeData attributeData,
+    out float triangleAreaWS,
+    out float triangleAreaUV)
+{
+    // Share the triangle fetch across shading attributes, geometric normal and
+    // ray-cone footprint. Keep positions/UVs at their original precision and
+    // preserve the existing transform and interpolation order.
+    uint3 triangleIndices = UnityRayTracingFetchTriangleIndices(PrimitiveIndex());
+    IntersectionVertex v0, v1, v2, currentVertex;
+    FetchIntersectionVertex(triangleIndices.x, v0);
+    FetchIntersectionVertex(triangleIndices.y, v1);
+    FetchIntersectionVertex(triangleIndices.z, v2);
+    InterpolateIntersectionVertex(attributeData, v0, v1, v2, currentVertex);
+
+    float3 position0OS = UnityRayTracingFetchVertexAttribute3(triangleIndices.x, kVertexAttributePosition);
+    float3 position1OS = UnityRayTracingFetchVertexAttribute3(triangleIndices.y, kVertexAttributePosition);
+    float3 position2OS = UnityRayTracingFetchVertexAttribute3(triangleIndices.z, kVertexAttributePosition);
+    float3 geometricNormalWS = normalize(mul(
+        cross(position1OS - position0OS, position2OS - position0OS),
+        (float3x3)WorldToObject3x4()));
+
+    float3 position0WS = ReferencedPathtracingTransformPositionToWorld(position0OS);
+    float3 position1WS = ReferencedPathtracingTransformPositionToWorld(position1OS);
+    float3 position2WS = ReferencedPathtracingTransformPositionToWorld(position2OS);
+    triangleAreaWS = length(cross(position1WS - position0WS, position2WS - position0WS));
+
+    float2 uv0 = v0.texCoord0.xy * _BaseMap_ST.xy;
+    float2 uv1 = v1.texCoord0.xy * _BaseMap_ST.xy;
+    float2 uv2 = v2.texCoord0.xy * _BaseMap_ST.xy;
+    float2 uvEdge1 = uv1 - uv0;
+    float2 uvEdge2 = uv2 - uv0;
+    triangleAreaUV = abs(uvEdge1.x * uvEdge2.y - uvEdge1.y * uvEdge2.x);
+
+    return VividIndirectDiffuseBuildHitGeometry(currentVertex, geometricNormalWS);
+}
+
 float ComputeReferencedPathtracingTextureBaseLambda(
     VividIndirectDiffuseHitGeometry geometry,
+    float triangleAreaWS,
+    float triangleAreaUV,
     float rayConeWidth,
     float rayConeSpreadAngle,
     out float hitConeWidth)
 {
-    uint3 triangleIndices = UnityRayTracingFetchTriangleIndices(PrimitiveIndex());
-
-    float3 position0WS = ReferencedPathtracingTransformPositionToWorld(
-        UnityRayTracingFetchVertexAttribute3(triangleIndices.x, kVertexAttributePosition));
-    float3 position1WS = ReferencedPathtracingTransformPositionToWorld(
-        UnityRayTracingFetchVertexAttribute3(triangleIndices.y, kVertexAttributePosition));
-    float3 position2WS = ReferencedPathtracingTransformPositionToWorld(
-        UnityRayTracingFetchVertexAttribute3(triangleIndices.z, kVertexAttributePosition));
-    float triangleAreaWS = length(cross(position1WS - position0WS, position2WS - position0WS));
-
-    float2 uv0 = UnityRayTracingFetchVertexAttribute4(triangleIndices.x, kVertexAttributeTexCoord0).xy
-        * _BaseMap_ST.xy;
-    float2 uv1 = UnityRayTracingFetchVertexAttribute4(triangleIndices.y, kVertexAttributeTexCoord0).xy
-        * _BaseMap_ST.xy;
-    float2 uv2 = UnityRayTracingFetchVertexAttribute4(triangleIndices.z, kVertexAttributeTexCoord0).xy
-        * _BaseMap_ST.xy;
-    float2 uvEdge1 = uv1 - uv0;
-    float2 uvEdge2 = uv2 - uv0;
-    float triangleAreaUV = abs(uvEdge1.x * uvEdge2.y - uvEdge1.y * uvEdge2.x);
-
     hitConeWidth = max(rayConeWidth + geometry.hitDistance * rayConeSpreadAngle, 0.000001);
     return computeBaseTextureLOD(
         WorldRayDirection(),
@@ -66,10 +85,14 @@ void StandardLitReferencedPathtracingClosestHit(
     result.stochasticTransparencyDiagnostics =
         LoadReferencedPathtracingStochasticTransparencyDiagnostics(payload);
 
-    VividIndirectDiffuseHitGeometry geometry = VividIndirectDiffuseBuildHitGeometry(attributeData);
+    float triangleAreaWS, triangleAreaUV;
+    VividIndirectDiffuseHitGeometry geometry = BuildReferencedPathtracingHitGeometry(
+        attributeData, triangleAreaWS, triangleAreaUV);
     float hitConeWidth;
     float textureBaseLambda = ComputeReferencedPathtracingTextureBaseLambda(
         geometry,
+        triangleAreaWS,
+        triangleAreaUV,
         payloadInput.rayConeWidth,
         payloadInput.rayConeSpreadAngle,
         hitConeWidth);

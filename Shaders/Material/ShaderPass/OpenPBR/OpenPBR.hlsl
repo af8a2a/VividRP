@@ -9,7 +9,9 @@
 #define OPENPBR_FAST_SQRT(value) sqrt(value)
 #define OPENPBR_FAST_NORMALIZE(value) normalize(value)
 
-#define VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat true
+#ifndef VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat
+    #define VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat true
+#endif
 #define VIVIDRP_OPENPBR_FEATURE_EnableDispersion false
 #define VIVIDRP_OPENPBR_FEATURE_EnableTranslucency true
 #define VIVIDRP_OPENPBR_FEATURE_EnableMetallic true

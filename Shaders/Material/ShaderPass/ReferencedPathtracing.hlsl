@@ -8,6 +8,11 @@
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracingRTXTF.hlsl"
+// StandardLit fixes fuzz_weight to zero, and variants without _CLEARCOAT also
+// fix coat_weight to zero. Use OpenPBR's base-lobe specialization for these hits.
+#if !defined(_CLEARCOAT)
+    #define VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat false
+#endif
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
 
 static const float kReferencedPathtracingTextureLodBias = 0.5;

@@ -34,7 +34,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(volume.lightSpatialIndex.value, Is.True);
                 Assert.That(
                     volume.enableShaderExecutionReordering.value,
-                    Is.False);
+                    Is.True);
                 Assert.That(volume.enableRTXTF.value, Is.True);
                 Assert.That(
                     volume.rtxtfFilter.value,

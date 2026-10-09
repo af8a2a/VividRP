@@ -313,12 +313,13 @@ void StandardLitReferencedPathtracingClosestHit(
             material.shadingNormalWS,
             allowsThinWalledTransmission))
     {
-        OpenPBR_DiffuseSpecular neeResponse = openpbr_eval(
+        OpenPBR_DiffuseSpecular neeResponse;
+        float neeBsdfPdf;
+        VividOpenPBREvaluateWithPdf(
             preparedBsdf,
-            neeCandidate.directionWS);
-        float neeBsdfPdf = openpbr_pdf(
-            preparedBsdf,
-            neeCandidate.directionWS);
+            neeCandidate.directionWS,
+            neeResponse,
+            neeBsdfPdf);
         float3 neeDiffuseBsdf =
             openpbr_extract_diffuse_from_diffuse_specular(neeResponse);
         float3 neeSpecularBsdf =

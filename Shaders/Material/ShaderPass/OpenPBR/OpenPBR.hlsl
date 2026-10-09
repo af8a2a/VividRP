@@ -22,5 +22,6 @@
 #include "OpenPBRUnityHLSLInterop.hlsl"
 #include "Vendor/openpbr.h"
 #include "OpenPBRUnityHLSLStructFactories.hlsl"
+#include "OpenPBRNEE.hlsl"
 
 #endif

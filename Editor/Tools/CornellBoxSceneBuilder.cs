@@ -767,7 +767,7 @@ namespace VividRP.Editor.Tools
             Set(pathTracing.enableReGIR, false);
             Set(pathTracing.shadingPointLightSelection, false);
             Set(pathTracing.lightSpatialIndex, false);
-            Set(pathTracing.enableShaderExecutionReordering, false);
+            Set(pathTracing.enableShaderExecutionReordering, true);
             Set(pathTracing.targetSampleCount, 4096);
             Set(
                 pathTracing.environmentMode,

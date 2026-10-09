@@ -1,0 +1,135 @@
+#pragma max_recursion_depth 1
+#pragma multi_compile_local _ VIVIDRP_NEE_BASE_ONLY
+#if defined(VIVIDRP_NEE_BASE_ONLY)
+#define VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat false
+#endif
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl"
+
+RWStructuredBuffer<float4> _Results;
+
+uint HashNeeCase(uint value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16);
+}
+
+float RandomNeeCase(uint value)
+{
+    return (HashNeeCase(value) >> 8) * (1.0 / 16777216.0);
+}
+
+float3 NeeDirection(uint seed)
+{
+    float z = RandomNeeCase(seed) * 2.0 - 1.0;
+    float phi = RandomNeeCase(seed + 77u) * 6.28318530718;
+    float radius = sqrt(max(0.0, 1.0 - z * z));
+    return float3(radius * cos(phi), radius * sin(phi), z);
+}
+
+void EvaluateNeeCase(uint index, bool combined)
+{
+    uint materialCase = index / 1024u;
+    uint directionCase = index % 1024u;
+    if (materialCase >= 24u)
+        return;
+
+    OpenPBR_ResolvedInputs inputs = openpbr_make_default_resolved_inputs();
+    inputs.geometry_basis = openpbr_make_identity_basis();
+    inputs.geometry_coat_basis = inputs.geometry_basis;
+    inputs.base_color = float3(0.15, 0.6, 0.85);
+    inputs.specular_roughness = 0.02 + 0.96 * RandomNeeCase(directionCase + 7u);
+    inputs.specular_roughness_anisotropy = 0.8 * RandomNeeCase(directionCase + 13u);
+    inputs.specular_color = float3(0.9, 0.7, 0.3);
+    inputs.transmission_color = float3(0.2, 0.75, 0.95);
+    inputs.coat_color = float3(0.6, 0.9, 0.85);
+    inputs.coat_roughness = 0.2;
+    inputs.fuzz_color = float3(0.9, 0.2, 0.1);
+    float3 throughput = float3(0.2, 0.6, 0.9);
+    float exteriorIor = 1.0;
+
+    switch (materialCase)
+    {
+        case 0: inputs.specular_weight = 0.0; break;
+        case 1: inputs.base_metalness = 1.0; break;
+        case 2: inputs.base_metalness = 0.45; break;
+        case 3: inputs.transmission_weight = 1.0; break;
+        case 4: inputs.transmission_weight = 0.4; break;
+        case 5: inputs.transmission_weight = 1.0; inputs.geometry_thin_walled = true; break;
+        case 6: inputs.coat_weight = 0.8; break;
+        case 7: inputs.fuzz_weight = 0.7; break;
+        case 8: inputs.coat_weight = 0.65; inputs.fuzz_weight = 0.4; break;
+        case 9: inputs.thin_film_weight = 0.6; inputs.thin_film_thickness = 0.7; break;
+        case 10: inputs.thin_film_weight = 1.0; inputs.base_metalness = 1.0; break;
+        case 11: inputs.thin_film_weight = 1.0; inputs.transmission_weight = 1.0; break;
+        case 12: inputs.base_weight = 0.0; inputs.specular_weight = 0.0; break;
+        case 13: inputs.specular_roughness = 0.0; break;
+        case 14: inputs.specular_roughness = 1.0; break;
+        case 15: inputs.subsurface_weight = 0.65; break;
+        case 16: inputs.specular_roughness_anisotropy = 0.95; break;
+        case 17:
+            inputs.specular_roughness_anisotropy = 0.9;
+            inputs.specular_anisotropy_rotation_cos_sin = float2(0.6, 0.8);
+            break;
+        case 18: inputs.coat_weight = 1.0; inputs.transmission_weight = 1.0; break;
+        case 19: throughput = 0.0; break;
+        case 20: inputs.transmission_weight = 1.0; exteriorIor = 1.33; break;
+        case 21:
+            inputs.transmission_weight = 1.0;
+            inputs.geometry_thin_walled = true;
+            inputs.coat_weight = 0.7;
+            inputs.thin_film_weight = 0.8;
+            break;
+        case 22:
+            inputs.coat_weight = 0.7;
+            inputs.geometry_coat_basis = openpbr_make_basis(normalize(float3(0.3, -0.2, 1.0)));
+            break;
+        case 23:
+            inputs.base_metalness = 0.8;
+            inputs.coat_weight = 0.3;
+            inputs.fuzz_weight = 0.6;
+            inputs.thin_film_weight = 0.5;
+            break;
+    }
+
+    float3 viewDirection = NeeDirection(directionCase * 13u + 71u);
+    float3 lightDirection = NeeDirection(directionCase * 19u + 37u);
+    switch (directionCase % 64u)
+    {
+        case 0: viewDirection = float3(0, 0, 1); lightDirection = float3(0, 0, 1); break;
+        case 1: viewDirection = float3(0, 0, 1); lightDirection = float3(0, 0, -1); break;
+        case 2:
+            viewDirection = normalize(float3(1, 0, 1e-6));
+            lightDirection = normalize(float3(0, 1, 1e-6));
+            break;
+        case 3: lightDirection = float3(1, 0, 0); break;
+        case 4: lightDirection = -viewDirection; break;
+        case 5: viewDirection = float3(0, 0, -1); lightDirection = float3(0, 0, 1); break;
+        case 6:
+            viewDirection = float3(0.8, 0, -0.6);
+            lightDirection = normalize(float3(-0.9, 0, 0.1));
+            break;
+    }
+
+    OpenPBR_PreparedBsdf prepared = openpbr_prepare(
+        inputs, throughput, OpenPBR_BaseRgbWavelengths_nm, exteriorIor, viewDirection);
+    OpenPBR_DiffuseSpecular value;
+    float pdf;
+    if (combined)
+        VividOpenPBREvaluateWithPdf(prepared, lightDirection, value, pdf);
+    else
+    {
+        value = openpbr_eval(prepared, lightDirection);
+        pdf = openpbr_pdf(prepared, lightDirection);
+    }
+    _Results[index * 2u] = float4(openpbr_extract_diffuse_from_diffuse_specular(value), index + 1u);
+    _Results[index * 2u + 1u] = float4(openpbr_extract_specular_from_diffuse_specular(value), pdf);
+}
+
+[shader("raygeneration")]
+void EvaluateReference() { EvaluateNeeCase(DispatchRaysIndex().x, false); }
+[shader("raygeneration")]
+void EvaluateCombined() { EvaluateNeeCase(DispatchRaysIndex().x, true); }
+

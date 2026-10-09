@@ -246,7 +246,7 @@ namespace VividRP.Runtime
         [Tooltip(
             "Uses NVIDIA Shader Execution Reordering for surface rays when running Direct3D 12 " +
             "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
-        public BoolParameter enableShaderExecutionReordering = new(false);
+        public BoolParameter enableShaderExecutionReordering = new(true);
 
         [Header("RTX Texture Filtering")]
         [Tooltip(
@@ -412,7 +412,7 @@ namespace VividRP.Runtime
             globalLightProposalProbability ??=
                 new ClampedFloatParameter(0.25f, 0.05f, 1.0f);
             lightSpatialIndex ??= new BoolParameter(true);
-            enableShaderExecutionReordering ??= new BoolParameter(false);
+            enableShaderExecutionReordering ??= new BoolParameter(true);
             targetSampleCount ??=
                 new ClampedIntParameter(
                     2048,

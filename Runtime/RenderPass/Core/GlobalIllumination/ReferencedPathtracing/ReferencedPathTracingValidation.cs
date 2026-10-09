@@ -182,8 +182,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     : ReferencedPathTracingLightProposalPolicy
                         .DefaultGlobalProposalProbability,
                 !useVolumeSettings || settings.lightSpatialIndex.value,
-                useVolumeSettings
-                    && settings.enableShaderExecutionReordering.value,
+                !useVolumeSettings
+                    || settings.enableShaderExecutionReordering.value,
                 !useVolumeSettings || settings.enableRTXTF.value,
                 useVolumeSettings
                     ? settings.rtxtfFilter.value

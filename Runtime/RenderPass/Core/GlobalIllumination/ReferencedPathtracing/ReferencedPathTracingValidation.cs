@@ -12,7 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 15;
+        internal const int Version = 16;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -25,6 +25,7 @@ namespace VividRP.Runtime.RenderPass.Core
             float globalLightProposalProbability,
             bool lightSpatialIndex,
             bool enableShaderExecutionReordering,
+            bool enableFP16,
             bool enableRTXTF,
             ReferencedPathTracingRTXTFMode rtxtfFilter,
             float rtxtfGaussianSigma,
@@ -54,6 +55,7 @@ namespace VividRP.Runtime.RenderPass.Core
             this.lightSpatialIndex = lightSpatialIndex;
             this.enableShaderExecutionReordering =
                 enableShaderExecutionReordering;
+            this.enableFP16 = enableFP16;
             this.enableRTXTF = enableRTXTF;
             this.rtxtfFilter = SanitizeRTXTFMode(rtxtfFilter);
             this.rtxtfGaussianSigma = Mathf.Clamp(
@@ -110,6 +112,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ref hash,
                 lightSpatialIndex);
             ReferencedPathTracingStableHash.Add(ref hash, enableRTXTF);
+            ReferencedPathTracingStableHash.Add(ref hash, enableFP16);
             if (enableRTXTF)
             {
                 ReferencedPathTracingStableHash.Add(
@@ -137,6 +140,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal float globalLightProposalProbability { get; }
         internal bool lightSpatialIndex { get; }
         internal bool enableShaderExecutionReordering { get; }
+        internal bool enableFP16 { get; }
         internal bool enableRTXTF { get; }
         internal ReferencedPathTracingRTXTFMode rtxtfFilter { get; }
         internal float rtxtfGaussianSigma { get; }
@@ -184,6 +188,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 !useVolumeSettings || settings.lightSpatialIndex.value,
                 !useVolumeSettings
                     || settings.enableShaderExecutionReordering.value,
+                useVolumeSettings && settings.enableFP16.value,
                 !useVolumeSettings || settings.enableRTXTF.value,
                 useVolumeSettings
                     ? settings.rtxtfFilter.value

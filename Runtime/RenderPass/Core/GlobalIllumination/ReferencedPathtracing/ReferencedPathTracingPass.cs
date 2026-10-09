@@ -68,6 +68,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string IndexedBndKeywordName =
             "VIVID_REFERENCE_PT_INDEXED_BND";
         internal const uint ShaderExecutionReorderingUavSlot = 31;
+        internal const string FP16KeywordName = "VIVIDRP_REFERENCE_PT_FP16";
+        private static readonly GlobalKeyword s_FP16Keyword =
+            GlobalKeyword.Create(FP16KeywordName);
         internal const float DlssInfiniteHitDistance = 65504.0f;
 
         private const string AccelerationStructureName = "_AccelerationStructure";
@@ -743,6 +746,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     LightSpatialIndexEnabledId,
                     lightSpatialIndexEnabled ? 1 : 0);
+                // Material hit shaders use a global variant, independent of the
+                // RayTracingShader's local SER keyword. Scope it to this dispatch.
+                cmd.SetKeyword(s_FP16Keyword, m_IntegratorState.enableFP16);
                 cmd.DispatchRays(
                     m_RayTracingShader,
                     RayGenerationShaderName,
@@ -750,6 +756,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     (uint)m_Height,
                     1,
                     null);
+                cmd.SetKeyword(s_FP16Keyword, false);
             }
         }
 

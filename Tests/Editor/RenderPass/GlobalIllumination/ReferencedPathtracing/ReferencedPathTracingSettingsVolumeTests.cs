@@ -8,6 +8,43 @@ namespace VividRP.Editor.Tests
     public sealed class ReferencedPathTracingSettingsVolumeTests
     {
         [Test]
+        public void FP16Variant_ResetsIntegratorSignatureAndResolvesWithoutAllocating()
+        {
+            var volume = ScriptableObject.CreateInstance<ReferencedPathTracingSettingsVolume>();
+            try
+            {
+                var fp32 = ReferencedPathTracingIntegratorState.Resolve(volume);
+                Assert.That(fp32.enableFP16, Is.False);
+                volume.enableFP16.value = true;
+                var fp16 = ReferencedPathTracingIntegratorState.Resolve(volume);
+                Assert.That(fp16.enableFP16, Is.True);
+                Assert.That(fp16.signature, Is.Not.EqualTo(fp32.signature));
+                Assert.That(fp16.Equals(fp32), Is.False);
+
+                for (var i = 0; i < 64; ++i)
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                var before = System.GC.GetAllocatedBytesForCurrentThread();
+                ulong signature = 0;
+                for (var i = 0; i < 128; ++i)
+                    signature = ReferencedPathTracingIntegratorState.Resolve(volume).signature;
+                var allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(signature, Is.EqualTo(fp16.signature));
+                Assert.That(allocated, Is.Zero);
+
+                volume.active = false;
+                Assert.That(ReferencedPathTracingIntegratorState.Resolve(volume).enableFP16, Is.False);
+                volume.active = true;
+                volume.enableFP16.value = false;
+                Assert.That(ReferencedPathTracingIntegratorState.Resolve(volume).signature,
+                    Is.EqualTo(fp32.signature));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
         public void Defaults_EnableHdriLightingVisibilityImportanceSamplingAndMis()
         {
             var volume = ScriptableObject.CreateInstance<ReferencedPathTracingSettingsVolume>();
@@ -36,6 +73,7 @@ namespace VividRP.Editor.Tests
                     volume.enableShaderExecutionReordering.value,
                     Is.True);
                 Assert.That(volume.enableRTXTF.value, Is.True);
+                Assert.That(volume.enableFP16.value, Is.False);
                 Assert.That(
                     volume.rtxtfFilter.value,
                     Is.EqualTo(ReferencedPathTracingRTXTFMode.Linear));
@@ -229,7 +267,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(15));
+                    Is.EqualTo(16));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));

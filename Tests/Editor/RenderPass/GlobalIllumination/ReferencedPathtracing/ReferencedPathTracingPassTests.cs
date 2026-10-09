@@ -24,6 +24,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FP16Variant_DeclaresMatchingGlobalKeywordsForRayGenAndHitShaders()
+        {
+            var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                typeof(ReferencedPathTracingPass).Assembly);
+            Assert.That(package, Is.Not.Null);
+            var rayGen = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.RayTracingShader>(
+                package.assetPath + "/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracing.raytrace");
+            var hitShader = AssetDatabase.LoadAssetAtPath<Shader>(
+                package.assetPath + "/Shaders/Material/StandardLit/StandardLit.shader");
+            Assert.That(rayGen, Is.Not.Null);
+            Assert.That(hitShader, Is.Not.Null);
+            var rayGenKeyword = rayGen.keywordSpace.FindKeyword(ReferencedPathTracingPass.FP16KeywordName);
+            var hitKeyword = hitShader.keywordSpace.FindKeyword(ReferencedPathTracingPass.FP16KeywordName);
+            Assert.That(rayGenKeyword.isValid, Is.True);
+            Assert.That(hitKeyword.isValid, Is.True);
+            Assert.That(rayGenKeyword.isOverridable, Is.True);
+            Assert.That(hitKeyword.isOverridable, Is.True);
+        }
+
+        [Test]
         public void Pass_DeclaresRequiredRecorderCapabilities()
         {
             Assert.That(

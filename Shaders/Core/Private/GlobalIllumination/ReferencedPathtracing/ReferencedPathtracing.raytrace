@@ -1,4 +1,6 @@
 #pragma multi_compile_local _ VIVID_REFERENCE_PT_SER
 #pragma multi_compile_local _ VIVID_REFERENCE_PT_INDEXED_BND
+// Keep the pipeline variant aligned with the StandardLit hit shaders.
+#pragma multi_compile _ VIVIDRP_REFERENCE_PT_FP16
 
 #include_with_pragmas "ReferencedPathtracing.rgen.hlsl"

@@ -84,7 +84,16 @@ vec3 openpbr_f_EON(const vec3 rho, const float roughness, const vec3 wi_local, c
     const float EFi = exact ? openpbr_E_FON_exact(mu_i, roughness) :              // FON w_i albedo (exact)
                           openpbr_E_FON_approx(mu_i, roughness);                  // FON w_i albedo (approx)
     const float avgEF = AF * (1.0f + OpenPBR_FONConstantB * roughness);           // avg. albedo
+#if defined(VIVIDRP_REFERENCE_PT_FP16)
+    // Keep the near-zero energy differences and grazing-angle factors in FP32.
+    const min16float3 rho16 = (min16float3)rho;
+    const min16float avg16 = (min16float)avgEF;
+    const min16float3 rho_ms16 = (rho16 * rho16) * avg16
+        / ((min16float)1.0 - rho16 * (min16float)(1.0f - avgEF));
+    const vec3 rho_ms = (float3)rho_ms16;
+#else
     const vec3 rho_ms = (rho * rho) * avgEF / (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - rho * (1.0f - avgEF));
+#endif
     OPENPBR_CONSTEXPR_LOCAL float Eps = 1.0e-7f;
     const vec3 f_ms = (rho_ms * OpenPBR_RcpPi) * max(Eps, 1.0f - EFo)  // multi-scatter lobe
                       * max(Eps, 1.0f - EFi) / max(Eps, 1.0f - avgEF);

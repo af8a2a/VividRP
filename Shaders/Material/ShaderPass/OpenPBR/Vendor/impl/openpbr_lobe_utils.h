@@ -282,6 +282,21 @@ vec3 openpbr_compute_metal_schlick_b_factor(const vec3 f0, const vec3 f82_tint)
 
 vec3 openpbr_metal_schlick_with_f82_tint(const vec3 f0, const vec3 f82_tint, const float cos_theta)
 {
+#if defined(VIVIDRP_REFERENCE_PT_FP16)
+    // Experimental bounded color arithmetic. Geometry and sampling PDFs stay FP32.
+    const min16float3 r = (min16float3)f0;
+    const min16float3 t = (min16float3)f82_tint;
+    const min16float3 whiteMinusR = (min16float)1.0 - r;
+    const min16float3 whiteMinusT = (min16float)1.0 - t;
+    // (6/7)^5 and 7/(6/7)^6 from the FP32 b-factor above, rounded only at the cast.
+    const min16float3 b = (r + whiteMinusR * (min16float)(0.462664366))
+        * whiteMinusT * (min16float)(17.6513846);
+    const min16float c = (min16float)cos_theta;
+    const min16float m = (min16float)1.0 - c;
+    const min16float m2 = m * m;
+    const min16float m5 = m2 * m2 * m;
+    return (float3)saturate(r + (whiteMinusR - b * c * m) * m5);
+#else
     OPENPBR_ASSERT(cos_theta >= 0.0f, "F82-tint input cosine must be non-negative");
     const vec3 r = f0;  // switch to terminology from the "Fresnel Equations Considered Harmful" slides
     const vec3 white_minus_r = OPENPBR_MAKE_VEC3_SPLAT(1.0f) - r;
@@ -290,6 +305,7 @@ vec3 openpbr_metal_schlick_with_f82_tint(const vec3 f0, const vec3 f82_tint, con
     const vec3 offset_from_r = (white_minus_r - b * cos_theta * one_minus_cos_theta) * openpbr_fifth_power(one_minus_cos_theta);
     const vec3 f_theta = r + offset_from_r;
     return saturate(f_theta);
+#endif
 }
 
 // Returns the cosine-weighted average of the F82 metallic Fresnel function over the hemisphere.

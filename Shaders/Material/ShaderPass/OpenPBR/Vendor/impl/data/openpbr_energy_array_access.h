@@ -87,6 +87,14 @@ int openpbr_flatten_index_3d(const int ix, const int iy, const int iz)
     return ix * NN + iy * N + iz;
 }
 
+// Experimental minimum precision for bounded energy values and interpolation weights.
+// Index construction and UNORM decoding remain FP32.
+#if defined(VIVIDRP_REFERENCE_PT_FP16)
+    #define VIVIDRP_OPENPBR_ENERGY_INTERPOLANT min16float
+#else
+    #define VIVIDRP_OPENPBR_ENERGY_INTERPOLANT float
+#endif
+
 // Linear interpolation for 1D energy tables
 float openpbr_energy_array_lookup_linear(const OpenPBR_LutId lut_id, const float clamped_exact_index_x)
 {
@@ -95,10 +103,10 @@ float openpbr_energy_array_lookup_linear(const OpenPBR_LutId lut_id, const float
 
     const int i0 = int(floor(clamped_exact_index_x));
     const int i1 = min(i0 + 1, OpenPBR_EnergyTableSize - 1);
-    const float t = clamped_exact_index_x - float(i0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT t = clamped_exact_index_x - float(i0);
 
-    const float v0 = openpbr_fetch_lut_float(lut_id, i0);
-    const float v1 = openpbr_fetch_lut_float(lut_id, i1);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v0 = openpbr_fetch_lut_float(lut_id, i0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v1 = openpbr_fetch_lut_float(lut_id, i1);
 
     return mix(v0, v1, t);
 }
@@ -115,16 +123,16 @@ float openpbr_energy_array_lookup_bilinear(const OpenPBR_LutId lut_id, const flo
     const int iy0 = int(floor(clamped_exact_index_y));
     const int ix1 = min(ix0 + 1, OpenPBR_EnergyTableSize - 1);
     const int iy1 = min(iy0 + 1, OpenPBR_EnergyTableSize - 1);
-    const float tx = clamped_exact_index_x - float(ix0);
-    const float ty = clamped_exact_index_y - float(iy0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT tx = clamped_exact_index_x - float(ix0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT ty = clamped_exact_index_y - float(iy0);
 
-    const float v00 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix0, iy0));
-    const float v01 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix0, iy1));
-    const float v10 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix1, iy0));
-    const float v11 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix1, iy1));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v00 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix0, iy0));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v01 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix0, iy1));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v10 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix1, iy0));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v11 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_2d(ix1, iy1));
 
-    const float v0 = mix(v00, v10, tx);
-    const float v1 = mix(v01, v11, tx);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v0 = mix(v00, v10, tx);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v1 = mix(v01, v11, tx);
 
     return mix(v0, v1, ty);
 }
@@ -148,29 +156,31 @@ float openpbr_energy_array_lookup_trilinear(const OpenPBR_LutId lut_id,
     const int ix1 = min(ix0 + 1, OpenPBR_EnergyTableSize - 1);
     const int iy1 = min(iy0 + 1, OpenPBR_EnergyTableSize - 1);
     const int iz1 = min(iz0 + 1, OpenPBR_EnergyTableSize - 1);
-    const float tx = clamped_exact_index_x - float(ix0);
-    const float ty = clamped_exact_index_y - float(iy0);
-    const float tz = clamped_exact_index_z - float(iz0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT tx = clamped_exact_index_x - float(ix0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT ty = clamped_exact_index_y - float(iy0);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT tz = clamped_exact_index_z - float(iz0);
 
-    const float v000 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy0, iz0));
-    const float v001 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy0, iz1));
-    const float v010 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy1, iz0));
-    const float v011 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy1, iz1));
-    const float v100 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy0, iz0));
-    const float v101 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy0, iz1));
-    const float v110 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy1, iz0));
-    const float v111 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy1, iz1));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v000 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy0, iz0));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v001 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy0, iz1));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v010 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy1, iz0));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v011 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix0, iy1, iz1));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v100 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy0, iz0));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v101 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy0, iz1));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v110 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy1, iz0));
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v111 = openpbr_fetch_lut_float(lut_id, openpbr_flatten_index_3d(ix1, iy1, iz1));
 
-    const float v00 = mix(v000, v100, tx);
-    const float v01 = mix(v001, v101, tx);
-    const float v10 = mix(v010, v110, tx);
-    const float v11 = mix(v011, v111, tx);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v00 = mix(v000, v100, tx);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v01 = mix(v001, v101, tx);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v10 = mix(v010, v110, tx);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v11 = mix(v011, v111, tx);
 
-    const float v0 = mix(v00, v10, ty);
-    const float v1 = mix(v01, v11, ty);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v0 = mix(v00, v10, ty);
+    const VIVIDRP_OPENPBR_ENERGY_INTERPOLANT v1 = mix(v01, v11, ty);
 
     return mix(v0, v1, tz);
 }
+
+#undef VIVIDRP_OPENPBR_ENERGY_INTERPOLANT
 
 #endif  // !OPENPBR_USE_TEXTURE_LUTS
 

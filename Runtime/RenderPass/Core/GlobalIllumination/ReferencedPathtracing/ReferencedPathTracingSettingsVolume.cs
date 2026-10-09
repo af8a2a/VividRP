@@ -248,6 +248,13 @@ namespace VividRP.Runtime
             "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
         public BoolParameter enableShaderExecutionReordering = new(true);
 
+        [Tooltip(
+            "Enables the experimental FP16 minimum-precision variant for StandardLit BSDF colors " +
+            "and energy-table interpolation. Geometry, PDF arithmetic and radiance accumulation " +
+            "remain FP32. The driver may use higher precision; performance depends on the GPU. " +
+            "Changing this setting resets accumulation.")]
+        public BoolParameter enableFP16 = new(false);
+
         [Header("RTX Texture Filtering")]
         [Tooltip(
             "Uses NVIDIA RTXTF stochastic texture filtering for opaque StandardLit " +
@@ -413,6 +420,7 @@ namespace VividRP.Runtime
                 new ClampedFloatParameter(0.25f, 0.05f, 1.0f);
             lightSpatialIndex ??= new BoolParameter(true);
             enableShaderExecutionReordering ??= new BoolParameter(true);
+            enableFP16 ??= new BoolParameter(false);
             targetSampleCount ??=
                 new ClampedIntParameter(
                     2048,

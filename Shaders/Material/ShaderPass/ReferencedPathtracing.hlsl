@@ -13,6 +13,8 @@
 #if !defined(_CLEARCOAT)
     #define VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat false
 #endif
+// VIVIDRP_REFERENCE_PT_FP16 is selected by the reference pass's global keyword.
+// Keep native 16-bit library mode disabled: only bounded BSDF/LUT math opts in.
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
 
 static const float kReferencedPathtracingTextureLodBias = 0.5;

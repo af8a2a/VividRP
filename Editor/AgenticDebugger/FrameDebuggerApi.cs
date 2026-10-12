@@ -126,3 +126,120 @@ namespace VividRP.AgenticDebugger
         }
     }
 }
+
+namespace VividRP.AgenticDebugger
+{
+    // Temporary, read-only diagnostics for event-list flicker. Never selects events,
+    // requests native event details, or repaints the Editor from the observer.
+    [InitializeOnLoad]
+    internal static class FrameDebuggerEventChangeLogger
+    {
+        private static FrameDebuggerApi api;
+        private static string[] previous;
+        private static int previousHash, previousLimit, samples;
+        private static bool active, failed;
+        private static readonly string LogPath = System.IO.Path.GetFullPath(
+            System.IO.Path.Combine(Application.dataPath, "../Library/VividRP/FrameDebuggerEventChanges.log"));
+
+        static FrameDebuggerEventChangeLogger()
+        {
+            EditorApplication.update += Observe;
+        }
+
+        private static void Observe()
+        {
+            if (failed)
+                return;
+            try
+            {
+                bool enabled = UnityEngine.FrameDebugger.enabled;
+                if (!enabled)
+                {
+                    if (active)
+                        Append("DISABLED");
+                    active = false;
+                    previous = null;
+                    samples = 0;
+                    return;
+                }
+
+                if (!active)
+                {
+                    api ??= new FrameDebuggerApi();
+                    Append("ENABLED unity=" + Application.unityVersion + " local=" + api.Local());
+                    active = true;
+                }
+                // Bound diagnostic I/O. Toggle Frame Debugger to start another batch.
+                if (samples >= 256)
+                    return;
+                int hash = api.EventsHash();
+                int limit = api.Limit();
+                int count = api.Count();
+                if (previous != null && hash == previousHash && limit == previousLimit && count == previous.Length)
+                    return;
+
+                Array events = api.Events();
+                var current = new string[events.Length];
+                for (int i = 0; i < events.Length; i++)
+                {
+                    object frameEvent = events.GetValue(i);
+                    current[i] = api.Name(i) + " " + FrameDebuggerApi.Describe(frameEvent)
+                        .ToString(Newtonsoft.Json.Formatting.None);
+                }
+                if (hash != api.EventsHash() || count != api.Count() || events.Length != count)
+                    return; // Retry a snapshot that changed during enumeration.
+
+                var text = new System.Text.StringBuilder();
+                text.Append("snapshot=").Append(samples).Append(" count=").Append(count)
+                    .Append(" previousCount=").Append(previous?.Length ?? -1)
+                    .Append(" hash=").Append(hash).Append(" selectedIndex=").Append(limit - 1)
+                    .Append(" frame=").Append(Time.frameCount);
+                if (limit > 0 && limit <= current.Length)
+                    text.Append("\nSELECTED ").Append(current[limit - 1]);
+                if (previous == null)
+                {
+                    for (int i = 0; i < current.Length; i++)
+                        text.Append("\nBASE [").Append(i).Append("] ").Append(current[i]);
+                }
+                else
+                {
+                    int prefix = 0;
+                    while (prefix < previous.Length && prefix < current.Length && previous[prefix] == current[prefix])
+                        prefix++;
+                    int oldEnd = previous.Length, newEnd = current.Length;
+                    while (oldEnd > prefix && newEnd > prefix && previous[oldEnd - 1] == current[newEnd - 1])
+                    {
+                        oldEnd--;
+                        newEnd--;
+                    }
+                    text.Append("\nchangedRangeStart=").Append(prefix)
+                        .Append(" removed=").Append(oldEnd - prefix).Append(" added=").Append(newEnd - prefix);
+                    for (int i = prefix; i < oldEnd; i++)
+                        text.Append("\nREMOVED [").Append(i).Append("] ").Append(previous[i]);
+                    for (int i = prefix; i < newEnd; i++)
+                        text.Append("\nADDED [").Append(i).Append("] ").Append(current[i]);
+                }
+                if (++samples == 256)
+                    text.Append("\nSAMPLE LIMIT: toggle Frame Debugger to resume logging.");
+                Append(text.ToString());
+                previous = current;
+                previousHash = hash;
+                previousLimit = limit;
+            }
+            catch (Exception exception)
+            {
+                failed = true;
+                Debug.LogWarning("[VividRP] Frame Debugger event logging stopped: " + exception);
+            }
+        }
+
+        private static void Append(string text)
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(LogPath));
+            System.IO.File.AppendAllText(LogPath,
+                DateTime.UtcNow.ToString("O") + " editorTime="
+                + EditorApplication.timeSinceStartup.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)
+                + " " + text + "\n");
+        }
+    }
+}

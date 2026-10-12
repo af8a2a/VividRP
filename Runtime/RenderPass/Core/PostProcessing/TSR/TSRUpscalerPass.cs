@@ -410,8 +410,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 var invCurrentVP = currentVP.inverse;
                 passData.CurrentViewProjection = currentVP;
                 int readSlot = cameraState.PersistentReadSlot;
-                passData.PersistentStoreSlot = cameraState.PersistentStoreSlot;
-                passData.CanResurrect = cameraState.CanResurrect;
+                // Persistent history resurrection is disabled; keep ordinary temporal history active.
+                // Retain valid texture bindings for the shared reprojection kernel.
+                passData.PersistentStoreSlot = -1;
+                passData.CanResurrect = false;
                 passData.ClipToPersistent = cameraState.PersistentViewProjection[readSlot] * invCurrentVP;
                 var snapshotJitter = cameraState.PersistentJitter[readSlot] * 0.5f;
                 if (SystemInfo.graphicsUVStartsAtTop) snapshotJitter.y = -snapshotJitter.y;

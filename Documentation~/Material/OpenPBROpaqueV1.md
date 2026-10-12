@@ -2,7 +2,7 @@
 
 本合约冻结 VividRP 下一代默认 PBR 的原生输入和 BSDF 调用语义。默认家族选择包内的 OpenPBR 1.1 实现，首个 profile 为 `OpenPBROpaqueV1`：不透明、各向同性、单个 OpenPBR 叶 Closure。OpenPBR 内部的漫反射、介电反射和金属反射仍由 Vendor 实现组合；“单 Closure”不表示只保留一个反射 lobe。
 
-合约冻结与生产路径迁移、GPU 验收分别推进。新增的原生材质编译入口见“材质编译链接入”；默认创建/导入路径和 Deferred 默认 evaluator 仍保持当前行为，现有 StandardLit/PT adapter 不变。
+原生编译入口与 Native Catalog → Resolve → Deferred 已接通，详见“原生 Deferred 接入”。旧单层／双层材质继续使用 SimpleSlab；默认创建、导入、预览和现有 StandardLit/PT adapter 不变。生产代码接入与 GPU 画面／性能验收分别记录。
 
 ## 版本与权威来源
 
@@ -117,7 +117,7 @@ Vendor 自带其 OpenPBR 多重散射和能量补偿。接入后不得再叠加 
 
 未来需要一个独立版本的 StandardLit → OpenPBR compatibility mapping，明确旧资产 smoothness、颜色、metalness、emission、Coverage 以及超出 V1 能力的处理，并让 Raster/PT 共享同一映射。迁移映射的版本与原生输入合约分别维护。不能在本轮静默改变旧材质的 PT 外观，也不能把旧图或 Catalog 的 SimpleSlab export 自动重解释为 OpenPBR。
 
-Native authoring 和 typed export 接入后，下一阶段是版本化 GPU payload 与方向/点光生产闭环。之后补 IBL/面积光/SSR 验收，再切换默认创建、导入、预览和生产 evaluator。General Closure 的 Mix/Layer 组合另行定义，不能继承 DualSlab 当前的颜色反推 opacity 公式。
+Native authoring、typed export、GPU payload 与方向／点光代码闭环已接通。后续补 IBL／面积光误差、SSR 策略与画面验收，再考虑默认创建、导入和预览切换。General Closure 的 Mix/Layer 组合另行定义，不能继承 DualSlab 当前的颜色反推 opacity 公式。
 
 ## 材质编译链接入
 
@@ -133,13 +133,42 @@ Output 未连接的 Coverage/AlphaClipThreshold 分别为 `1`/`0`；Material Fea
 
 模板注册表包含 4 个 template；原有 3 个 builtin programs 和生产 P0–P3 共 4 个槽继续保留。OpenPBR 图通过动态 Catalog 槽发布，不占用旧程序 ID。Native selection 只声明 `OpenPBROpaqueExport` 和独立 Coverage/AlphaClip 能力，使用实际 generic 参数与资源布局；没有 StandardLit 兼容字段映射。
 
-Editor cost model 继续展示原生编译的 hash、预算和诊断，但原生 profile 的预览状态明确为 `UnsupportedProfile`，`CanPreview = false`。当前预览尚未实现 OpenPBR shading；即使 program 已进入 Frozen Catalog，也不显示旧 Slab 球体作为原生 OpenPBR 的预览。Native export 的 Surface Summary 和 DualSlab Sidecar ABI 均为 `None`，不声明现有 IBL/SSR/Decal 语义。当前 `VisibilityBufferGBufferResolve` 明确拒绝 Native payload 并走错误路径；AOT 编译通过不代表生产光照闭环完成。
+Editor cost model 继续展示原生编译的 hash、预算和诊断，但原生 profile 的预览状态明确为 `UnsupportedProfile`，`CanPreview = false`。当前预览尚未实现 OpenPBR shading；即使 program 已进入 Frozen Catalog，也不显示旧 Slab 球体作为原生 OpenPBR 的预览。Native export 的 Surface Summary 和 DualSlab Sidecar ABI 均为 `None`，不继承旧材质的 SSR／Decal 策略；Resolve 通过独立原生存储规则消费该 payload。
+
+## 原生 Deferred 接入（2026-10-12）
+
+`VividOpenPBROpaqueGBuffer.hlsl` 定义存储版本 `1`，Deferred class 为 `6`。AOT 先检查 profile、指纹、单 Closure 拓扑和输入合法性，Resolve 再进入原生分支。旧 Catalog、编译语义指纹、GPU buffer struct 和旧 Slab GBuffer 布局保持不变，无需手工修改生成资产。
+
+| 目标 | 原生像素存储 | 精度 |
+| --- | --- | --- |
+| Core RT0／RT2 | 供其他 pass 使用的 diffuse／F0 摘要，不能反推 BSDF | 原有 sRGB8／UNorm8 |
+| Core RT1 | NormalWS、SpecularRoughness、原有 ABI tag | 原有 10-bit |
+| Core RT3 | EmissionLuminance × EmissionColor | R11G11B10 HDR |
+| RT4 / DiffuseIrradiance | BaseDiffuseRoughness、BaseMetalness、SpecularIor | R11G11B10 HDR |
+| LayerAux0 | BaseColor.rgb、BaseWeight | sRGB8 RGB／UNorm8 alpha |
+| LayerAux1 | SpecularColor.rgb、SpecularWeight | UNorm8 |
+
+所有 BSDF 输入来自原生通道；发光只保存最终乘积，最终 compositor 加入一次。现有 HDR 目标不能表示超出 `(65024, 65024, 64512)` 的 emission，Resolve 对该存储溢出显示错误材质。输入合约仍允许更大有限值，这是 Deferred 存储限制。原生权重为零也是有效值，不能使用 DualSlab 的 layer-weight 有效性判断。
+
+原生 RT4 不含 GI：header 不设置 `HAS_DIFFUSE_IRRADIANCE`，通用 summary 解码返回零 irradiance。Deferred 从 APV／ambient probe 获取 GI。Sidecar 分配与 tile 分类同时纳入 native class，保留现有端口与两 MRT 写入，原生单层材质独立存在时也会分配完整分辨率。混合 tile 沿用四级调度，像素 evaluator 按实际 class 分支。
+
+原生着色由 `VividOpenPBROpaqueDeferredLighting.hlsl` 和共享 `VividDeferredLighting.hlsl` 实现：
+
+- 每个像素先 `openpbr_prepare`，方向／点／聚光直接调用 `openpbr_eval`，只在外部乘光源 radiance、attenuation 和主方向光阴影，不重复乘 cosine，也不使用 Slab 能量补偿。
+- 间接光以 32 个确定性 Vendor BSDF 样本估计 diffuse／specular 方向反照率；仅在 `pdf > 0` 时读取样本输出，使用已经包含 `f*cos/pdf` 的 weight。再结合 APV／SH 和现有 GGX 环境预滤波。这是实时 split-sum 近似，不是完整环境积分，32 次采样的成本尚未做硬件性能验收。
+- 矩形／线面积光复用现有范围、barn-door 和 Lambert／GGX LTC 形状，以 OpenPBR 方向反照率作为幅度。EON 与多重散射的形状并未重新拟合，需保留误差验收。
+- AO 仅作用于间接光；曝光和发光仍由公共 compositor 处理。Native v1 不启用 SSR／decal，也不从旧材质继承这两个 flag。
+- immutable Vendor LUT 每帧由现有 FGD 子系统绑定；原生像素独立检查资源就绪与侧车尺寸，缺资源或非法 payload 显示诊断色，不回退 SimpleSlab。
+
+`OpenPBROpaqueDeferredTests` 覆盖 96 组 roughness、metalness、IOR、view-angle 及零权重组合，并比较 4096 次采样参考。独立 D3D12 WARP 检查通过，直接光与 Vendor 结果一致，方向反照率最大绝对差 `0.051595`。该检查通过 `VIVID_OPENPBR_DEFERRED_ARRAY_REFERENCE` 使用 Vendor 数组 LUT 和未经过真实纹理格式量化的 packing；不等于 Unity GPU 集成或实际 MRT 精度验收。硬件 D3D12 创建此数组参考 PSO 返回 `E_OUTOFMEMORY`；Unity fixture 使用生产纹理 LUT，不嵌入大型参考数组，尚未执行该 fixture。
 
 `Runtime/Resources/MaterialGraphs/OpenPBROpaque.vmatg` 是通过 GraphToolkit API 创建的原生示例：一个 Closure、一个 Native Output，以及显式 `SpecularIor = 2` 常量连接。其余输入使用冻结的 authoring 默认值；该常量不会改变 profile 的默认 IOR `1.5`。2026-10-07 的正常 bake 将它发布为 ProgramID `4`，编译 hash 为 `hash_v=10 0xAA8D2823E94C38EE`。动态 ID 是当前 Catalog 的分配结果，调用方仍须通过 importer 的完整 identity 绑定，不能硬编码 `4`。
 
 纯托管 authoring 检查位于 `MaterialOpenPBROpaqueAuthoringTests`，调用真实 adapter 和 runtime compiler，无 GraphToolkit/AssetDatabase 调用。`MaterialGraphEditorTests` 另有 Native 缺省图 parity、保存/加载、节点发现和禁用预览测试；这些是 Unity Editor 集成检查，不能把纯托管用例通过当成它们已执行。
 
 ## 验收状态与剩余检查
+
+2026-10-12 本轮：Runtime／Editor／Tests 的项目 Bee/Roslyn 编译通过，151 个纯托管用例通过、0 失败、5 个 Unity native 用例跳过；运行中 Editor 的 C# 编译成功，Deferred 强制重新导入后无 shader 错误，D3D12 kernel 可用，3 张 OpenPBR LUT 的全局绑定和 readiness 均有效。`Validate-SimpleSlab.ps1` 覆盖 43 个 Deferred／回归／分类入口与变体；实际 Resolve 的 10 个 Bindless／VT／Sidecar／Decal 组合另行通过 DXC。新增 fixture 的生产纹理 LUT 版本也通过独立 DXC。Editor 运行中，未启动 Unity Test Framework；需手动运行 `OpenPBROpaqueDeferredTests`、`OpenPBROpaqueSurfaceExportTests` 和 `SimpleSlabDeferredLightingTests`，并完成原生材质的实际场景 HDR 对照。上述编译和绑定检查不表示图像或性能验收完成。
 
 冻结前已对照包内 Vendor 的 OpenPBR 1.1 参数默认值、eval/sample 约定、零粗糙度数值下限和 IOR LUT 外推代码。2026-10-07 的 focused checks 已通过：
 
@@ -173,9 +202,9 @@ Editor cost model 继续展示原生编译的 hash、预算和诊断，但原生
 
 剩余生产验收：
 
-- 版本化 GPU payload，以及 Native Catalog → VisibilityBuffer Resolve → OpenPBR direct lighting 的生产链路。
+- Native Catalog → VisibilityBuffer Resolve → OpenPBR lighting 的 Unity 实际 MRT、资源绑定和完整场景验收。
 - Unity/GPU 的 direct lighting、白炉、roughness/metalness/IOR 扫描及掠射角对照。
 - IBL、面积光、SSR 与 OpenPBR 数值参考的误差，以及固定曝光 HDR 对照。
 - 原生/兼容材质的 Raster/PT 参数一致性与稳定帧 managed allocation 验收。
 
-当前可以声明输入合约已冻结、原生材质编译链及正常 Catalog 发布已接通。剩余检查完成前，不能声明 GPU 视觉一致、性能改善或新默认生产路径通过。
+当前可以声明输入合约、原生材质编译链、Catalog 发布和原生 Deferred 代码接入已完成。剩余检查完成前，不能声明 GPU 视觉一致、性能改善或新默认生产路径通过。

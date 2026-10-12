@@ -2,7 +2,7 @@
 #define VIVIDRP_DEFERRED_DIRECTIONAL_LIGHTING_INDIRECT_PASS_INCLUDED
 
 // Retained raster entrypoint; use the same resources and Surface Summary ABI
-// as DeferredLit.compute, including _DiffuseIrradiance, Sidecar and Slab LUT.
+// as DeferredLit.compute, including native OpenPBR payload and LUT bindings.
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividDeferredLighting.hlsl"
 
 StructuredBuffer<uint> _MaterialPixelIndices;

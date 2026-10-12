@@ -1,4 +1,4 @@
-# Focused DXC validation for the frozen Simple Slab implementation.
+# Focused DXC validation for Deferred's Simple Slab and native OpenPBR paths.
 # This does not launch Unity, run GPU tests or modify imported assets.
 [CmdletBinding()]
 param(
@@ -61,7 +61,8 @@ try {
             Compile-Entry $path 'Frag' 'ps' $variant
         }
     }
-    foreach ($entry in @('ClearDeferredVariantArgs', 'ClassifyDeferredExports', 'BuildDeferredVariantIndirectArgs')) {
+    foreach ($entry in @('ClearDeferredVariantArgs', 'ClassifyDeferredExports', 'BuildDeferredVariantIndirectArgs',
+            'ClearDualSlabSidecarDrawArgs', 'ClassifyDualSlabSidecarTiles')) {
         Compile-Entry 'Shaders/Material/MaterialClassification.compute' $entry 'cs'
     }
     # Bake and all focused BSDF/LUT/pixel-reference kernels.
@@ -70,14 +71,15 @@ try {
         'Tests/Editor/SubSystem/GPUDriven/SimpleSlabBSDFTests.compute',
         'Tests/Editor/SubSystem/GPUDriven/SimpleSlabDirectLightingTests.compute',
         'Tests/Editor/SubSystem/GPUDriven/SimpleSlabEnergyTests.compute',
-        'Tests/Editor/SubSystem/GPUDriven/SimpleSlabDeferredLightingTests.compute'
+        'Tests/Editor/SubSystem/GPUDriven/SimpleSlabDeferredLightingTests.compute',
+        'Tests/Editor/RenderPass/Lighting/OpenPBROpaqueDeferredTests.compute'
     )) {
         $source = Get-Content -Raw -LiteralPath (Join-Path $packageRoot $path)
         foreach ($match in [regex]::Matches($source, '(?m)^#pragma kernel (\w+)')) {
             Compile-Entry $path $match.Groups[1].Value 'cs'
         }
     }
-    Write-Output "Simple Slab DXC validation passed: $script:compiledCount entrypoints/variants."
+    Write-Output "Deferred DXC validation passed: $script:compiledCount entrypoints/variants."
 }
 finally {
     foreach ($path in $links) {

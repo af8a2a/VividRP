@@ -8,6 +8,30 @@ namespace VividRP.Editor.Tests
     public sealed class OpenPBROpaqueSurfaceExportTests
     {
         [Test]
+        public void NativeSurface_RequiresSidecar_AndStableQueriesAllocateNothing()
+        {
+            var scene = new VividGPUDrivenSceneData();
+            scene.MutableMaterialPrograms.Clear();
+            scene.MutableMaterialPrograms.Add(BuildNative(false).RuntimeData);
+            scene.MutableMaterialRuntimeHeaders.Add(new VividMaterialRuntimeHeader
+            {
+                ProgramID = (VividMaterialProgramID)0u,
+            });
+            for (int i = 0; i < 32; ++i) scene.RequiresDualSlabSidecar(0u);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool requires = true;
+            for (int i = 0; i < 128; ++i) requires &= scene.RequiresDualSlabSidecar(0u);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(requires, Is.True);
+            Assert.That(allocated, Is.Zero);
+            var header = scene.MutableMaterialRuntimeHeaders[0];
+            header.Flags = VividMaterialRuntimeFlags.Unlit;
+            scene.MutableMaterialRuntimeHeaders[0] = header;
+            Assert.That(scene.RequiresDualSlabSidecar(0u), Is.False);
+            Assert.That(scene.RequiresDualSlabSidecar(1u), Is.False);
+        }
+
+        [Test]
         public void NativeSurface_ExportsAllElevenDeclaredInputsWithoutLegacyMapping()
         {
             CompiledMaterialProgram program = BuildNative(namedParameters: true);

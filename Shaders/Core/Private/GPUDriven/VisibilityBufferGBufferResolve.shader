@@ -27,6 +27,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma use_dxc
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBROpaqueGBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividPostSurfaceSummary.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
@@ -320,7 +321,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         && (programData.SurfaceProgramID
                                 == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
                             || programData.SurfaceProgramID
-                                == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB);
+                                == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB
+                            || programData.SurfaceProgramID
+                                == VIVIDMATERIALSURFACEPROGRAMID_OPEN_PBROPAQUE);
                     result.isDualSlab = loadedMaterialProgram
                         && programData.SurfaceProgramID
                             == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB
@@ -360,8 +363,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 const InterpolatedUV visibilityUV,
                 const float4 positionCS,
                 out VividSurfaceSummaryData surfaceData,
-                out VividDualSlabLayerData dualSlabLayerData)
+                out VividDualSlabLayerData dualSlabLayerData,
+                out VividOpenPBROpaqueInputs nativeInputs)
             {
+                nativeInputs = (VividOpenPBROpaqueInputs)0;
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
                 const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
                     SafeNormalize(DecodeVertexNormalOS(triangleData.vertex0.PackedNormal)),
@@ -429,11 +434,24 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                         deferredExportContract,
                         aotSurfaceOutput);
                 }
+                // AOT admission checks the native profile, fingerprint, topology
+                // and all input ranges before this storage boundary.
+                if (dispatchedAOTSurface
+                    && VividIsAOTDeferredExportContractSupported(deferredExportContract)
+                    && deferredExportContract.NativePayloadAbi
+                        == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_OPENPBR_OPAQUE_V1
+                    && aotSurfaceOutput.Profile == VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE
+                    && VividCanStoreOpenPBROpaqueGBuffer(aotSurfaceOutput.OpenPBROpaque)
+                    && (triangleData.materialRuntimeFlags & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) == 0u)
+                {
+                    nativeInputs = aotSurfaceOutput.OpenPBROpaque;
+                    surfaceData = VividBuildOpenPBROpaqueSummary(nativeInputs);
+                    dualSlabLayerData = (VividDualSlabLayerData)0;
+                    return;
+                }
                 const bool supportedDeferredExport = dispatchedAOTSurface
                     && VividIsAOTDeferredExportContractSupported(
                         deferredExportContract)
-                    // Native OpenPBR compiles into the catalog, but its lighting
-                    // payload is not implemented in this legacy GBuffer path.
                     && deferredExportContract.NativePayloadAbi
                         == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE
                     && aotSurfaceOutput.Profile == VIVID_AOT_SURFACE_PROFILE_SLAB
@@ -617,7 +635,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
                 TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
                 #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
-                if (triangleData.isDualSlab == 0u)
+                if (triangleData.isDualSlab == 0u
+                    && triangleData.materialProgramData.SurfaceProgramID
+                        != VIVIDMATERIALSURFACEPROGRAMID_OPEN_PBROPAQUE)
                     return (VividDualSlabLayerSidecarOutput) 0;
                 #endif
                 const float4 clipPosition0 = TransformWorldToHClip(
@@ -641,13 +661,24 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     triangleData.vertex2);
                 VividSurfaceSummaryData surfaceData;
                 VividDualSlabLayerData dualSlabLayerData;
+                VividOpenPBROpaqueInputs nativeInputs;
                 ResolveSurfaceData(
                     triangleData,
                     barycentric,
                     interpolatedUV,
                     input.positionCS,
                     surfaceData,
-                    dualSlabLayerData);
+                    dualSlabLayerData,
+                    nativeInputs);
+                if (VividGetDeferredExportClass(surfaceData.deferredExportHeader)
+                    == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+                {
+                    #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
+                    return VividPackOpenPBROpaqueSidecar(nativeInputs);
+                    #else
+                    return VividPackOpenPBROpaqueGBuffer(nativeInputs);
+                    #endif
+                }
                 #if defined(VIVID_DUAL_SLAB_SIDECAR_OUTPUT)
                 if (VividGetDeferredExportClass(
                         surfaceData.deferredExportHeader)

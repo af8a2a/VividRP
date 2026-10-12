@@ -16,6 +16,7 @@
 #define VIVID_DEFERRED_EXPORT_CLASS_GENERAL_SLAB 3u
 #define VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB 4u
 #define VIVID_DEFERRED_EXPORT_CLASS_SUBSURFACE 5u
+#define VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE 6u
 #define VIVID_DEFERRED_EXPORT_CLASS_CATCH_ALL 14u
 #define VIVID_DEFERRED_EXPORT_CLASS_ERROR 15u
 
@@ -84,7 +85,7 @@ struct VividDualSlabLayerSidecarOutput
 
 bool VividIsDeferredExportClassValid(uint exportClass)
 {
-    return exportClass <= VIVID_DEFERRED_EXPORT_CLASS_SUBSURFACE
+    return exportClass <= VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE
         || exportClass == VIVID_DEFERRED_EXPORT_CLASS_CATCH_ALL
         || exportClass == VIVID_DEFERRED_EXPORT_CLASS_ERROR;
 }
@@ -323,7 +324,8 @@ VividSurfaceSummaryData VividUnpackSurfaceSummaryGBuffer(
         ? max(rt3.rgb, 0.0)
         : float3(1.0, 0.0, 1.0);
     surfaceData.diffuseIrradiance =
-        VividUnpackSurfaceSummaryDiffuseIrradiance(rt4);
+        VividGetDeferredExportClass(surfaceData.deferredExportHeader) == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE
+        ? 0.0 : VividUnpackSurfaceSummaryDiffuseIrradiance(rt4);
     return surfaceData;
 }
 

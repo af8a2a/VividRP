@@ -73,13 +73,27 @@ namespace VividRP.Runtime
         private void PrepareFrameCore(ContextContainer frameData, CommandBuffer cmd)
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var openPbrLuts = resources?.OpenPBRLuts;
+            bool openPbrReady = openPbrLuts != null && openPbrLuts.IsReady;
+            cmd.SetGlobalInt(VividOpenPBRLuts.ReadyId, openPbrReady ? 1 : 0);
+            if (openPbrReady)
+                openPbrLuts.Bind(cmd);
+            else
+            {
+                // Compute validates declared resources even when all pixels
+                // take the Slab branch. Bind inert resources; Ready=0 still
+                // rejects native shading instead of using zero-energy LUTs.
+                cmd.SetGlobalTexture(VividOpenPBRLuts.TextureIds[0], CoreUtils.blackVolumeTexture);
+                cmd.SetGlobalTexture(VividOpenPBRLuts.TextureIds[1], CoreUtils.blackVolumeTexture);
+                cmd.SetGlobalTexture(VividOpenPBRLuts.TextureIds[2], TextureXR.GetBlackTextureArray());
+            }
             m_SlabLut ??= new VividSlabLut();
             bool slabLutReady = m_SlabLut.Create(
                 resources?.SlabLutCompute, cmd);
 
             var data = frameData.GetOrCreate<VividPreIntegratedFGDData>();
-            // All default Deferred entrypoints use the native Slab LUT. Legacy
-            // FGD tools remain available, but are no longer baked every session.
+            // Compatibility Slab pixels still need their LUT. Native OpenPBR
+            // uses the immutable vendor textures bound above, without Slab FGD.
             data.SetTextures(null, null);
             data.slabLutTexture = slabLutReady ? m_SlabLut.Texture : null;
         }

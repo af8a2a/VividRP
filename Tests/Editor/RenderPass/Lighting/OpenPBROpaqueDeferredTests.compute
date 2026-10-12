@@ -1,0 +1,68 @@
+#pragma kernel EvaluateNativeDeferred
+#pragma use_dxc
+
+// Standalone WARP can use embedded reference arrays without texture binding.
+// Hardware/Unity use production textures: large embedded arrays exceed some
+// drivers' compute PSO limits. Texture-vs-array parity has a separate fixture.
+#if defined(VIVID_OPENPBR_DEFERRED_ARRAY_REFERENCE)
+#define OPENPBR_USE_TEXTURE_LUTS 0
+#endif
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBROpaqueDeferredLighting.hlsl"
+
+RWStructuredBuffer<float4> _Output : register(u0);
+
+[numthreads(64, 1, 1)]
+void EvaluateNativeDeferred(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= 96u) return;
+    const float roughness[4] = {0.0, 0.1, 0.5, 1.0};
+    const float iors[4] = {1.0, 1.5, 2.5, 3.0};
+    VividOpenPBROpaqueInputs inputs = (VividOpenPBROpaqueInputs)0;
+    inputs.baseWeight = id.x % 11u == 0u ? 0.0 : 0.8;
+    inputs.baseColor = float3(0.72, 0.4, 0.15);
+    inputs.baseDiffuseRoughness = 0.8;
+    inputs.baseMetalness = ((id.x / 4u) % 3u) * 0.5;
+    inputs.specularWeight = id.x % 13u == 0u ? 0.0 : 0.7;
+    inputs.specularColor = float3(0.8, 0.5, 0.3);
+    inputs.specularRoughness = roughness[id.x % 4u];
+    inputs.specularIor = iors[(id.x / 12u) % 4u];
+    inputs.normalWS = float3(0, 0, 1);
+    inputs.emissionLuminance = 4.0;
+    inputs.emissionColor = float3(0.5, 0.25, 0.125);
+    float nDotV = id.x < 48u ? 1.0 : 0.2;
+    float3 view = float3(sqrt(1.0 - nDotV * nDotV), 0, nDotV);
+    float3 direction = float3(0, sqrt(0.75), 0.5);
+    float3 radiance = float3(1.2, 0.8, 0.4) * 0.37;
+    OpenPBR_ResolvedInputs resolved;
+    bool valid = VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved);
+    OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, view);
+    OpenPBR_DiffuseSpecular actual = VividEvaluateOpenPBROpaqueLight(prepared, inputs.normalWS, direction, radiance);
+    OpenPBR_DiffuseSpecular reference = openpbr_scale_diffuse_specular(openpbr_eval(prepared, direction), radiance);
+    uint offset = id.x * 8u;
+    _Output[offset] = float4(abs(actual.diffuse - reference.diffuse), valid ? 1.0 : 0.0);
+    _Output[offset + 1u] = float4(abs(actual.specular - reference.specular), 0);
+    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared);
+    OpenPBR_DiffuseSpecular referenceAlbedo = VividIntegrateOpenPBROpaqueAlbedo(prepared, 4096u);
+    _Output[offset + 2u] = float4(albedo.diffuse, 0);
+    _Output[offset + 3u] = float4(albedo.specular, 0);
+    _Output[offset + 4u] = float4(referenceAlbedo.diffuse, 0);
+    _Output[offset + 5u] = float4(referenceAlbedo.specular, 0);
+
+    VividSurfaceSummaryGBufferOutput core = VividPackOpenPBROpaqueGBuffer(inputs);
+    VividDualSlabLayerSidecarOutput aux = VividPackOpenPBROpaqueSidecar(inputs);
+    VividSurfaceSummaryData summary = VividUnpackSurfaceSummaryGBuffer(core.rt0, core.rt1, core.rt2, core.rt3, core.rt4);
+    VividOpenPBROpaqueInputs restored;
+    bool restoredValid = VividTryUnpackOpenPBROpaqueGBuffer(summary, core.rt4, aux.rt0, aux.rt1, restored);
+    float error = length(restored.baseColor - inputs.baseColor) + abs(restored.baseWeight - inputs.baseWeight)
+        + length(restored.specularColor - inputs.specularColor) + abs(restored.specularWeight - inputs.specularWeight)
+        + abs(restored.baseDiffuseRoughness - inputs.baseDiffuseRoughness) + abs(restored.baseMetalness - inputs.baseMetalness)
+        + abs(restored.specularIor - inputs.specularIor) + abs(restored.specularRoughness - inputs.specularRoughness)
+        + length(restored.normalWS - inputs.normalWS) + length(core.rt3.rgb - inputs.emissionColor * inputs.emissionLuminance)
+        + length(summary.diffuseIrradiance);
+    bool invalidIorRejected = !VividTryUnpackOpenPBROpaqueGBuffer(summary, 0.0, aux.rt0, aux.rt1, restored);
+    inputs.emissionLuminance = 1e10;
+    bool overflowRejected = !VividCanStoreOpenPBROpaqueGBuffer(inputs);
+    _Output[offset + 6u] = float4(error, restoredValid, invalidIorRejected, overflowRejected);
+    OpenPBR_DiffuseSpecular backface = VividEvaluateOpenPBROpaqueLight(prepared, inputs.normalWS, -direction, radiance);
+    _Output[offset + 7u] = float4(backface.diffuse + backface.specular, 0);
+}

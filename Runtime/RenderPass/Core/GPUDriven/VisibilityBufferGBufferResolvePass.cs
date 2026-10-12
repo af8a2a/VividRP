@@ -288,7 +288,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 false,
                 "DiffuseIrradiance");
             // Preserve the static RenderGraph ports while avoiding two
-            // full-resolution allocations on frames without Dual Slab pixels.
+            // full-resolution allocations on frames without Dual Slab or native
+            // OpenPBR pixels. Both profiles share the sidecar resource ports.
             ConfigurePassOwnedTarget(
                 m_LayerAux0,
                 m_DefaultLayerAux0,

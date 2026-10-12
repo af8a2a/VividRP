@@ -408,6 +408,16 @@ namespace VividRP.Editor.Tests
                     Bind(pair.shader, pair.kernel, "_AreaLights", area);
                 }
                 Texture(production, shade, "_LayerAux0", layerAux0);
+                // The shared production kernel declares native OpenPBR textures
+                // even when this fixture shades only compatibility Slab pixels.
+                for (int i = 0; i < VividOpenPBRLuts.Count; ++i)
+                {
+                    Texture unusedNativeTexture = i < 2 ? CoreUtils.blackVolumeTexture : atlas;
+                    m_Cmd.SetComputeTextureParam(production, shade,
+                        VividOpenPBRLuts.TextureIds[i], unusedNativeTexture);
+                    m_RasterProperties.SetTexture(VividOpenPBRLuts.TextureIds[i], unusedNativeTexture);
+                }
+                Int(production, "_VividOpenPBRLutsReady", 0);
                 Texture(production, shade, "_LayerAux1", layerAux1);
                 Texture(production, shade, "_GTAOTexture", ao);
                 Texture(production, shade, "_DirectionalShadowTexture", shadow);

@@ -5,10 +5,11 @@
 #include "SurfaceSummaryGBuffer.hlsl"
 #include "VividSimpleSlabDirectLighting.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
+#include "VividOpenPBROpaqueDeferredLighting.hlsl"
 
 // Shared 2D Deferred input contract for compute and retained raster entrypoints.
-// GBuffer contains Surface Summary, never a legacy material ID. Sidecar is read
-// only for Dual Slab. All callers bind the native Slab LUT and readiness flag.
+// GBuffer contains Surface Summary, never a legacy material ID. Sidecar stores
+// either Dual Slab or native OpenPBR data, selected by the explicit class.
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
@@ -23,6 +24,7 @@ Texture2D<float4> _ScreenSpaceReflectionTexture;
 
 uint _ScreenSpaceReflectionEnabled;
 uint _VividSlabLutReady;
+uint _VividOpenPBRLutsReady;
 
 VividSurfaceSummaryData LoadVividSurfaceSummary(uint2 pixelCoord)
 {
@@ -92,6 +94,64 @@ float EvaluateDeferredDirectionalShadowAttenuation(
 
     float directionalShadow = saturate(SampleDirectionalShadow(pixelCoord));
     return lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
+}
+
+bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
+    uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result)
+{
+    result = (VividSimpleSlabDeferredLighting)0;
+    uint width, height, auxWidth, auxHeight, aux1Width, aux1Height;
+    _GBuffer0.GetDimensions(width, height);
+    _LayerAux0.GetDimensions(auxWidth, auxHeight);
+    _LayerAux1.GetDimensions(aux1Width, aux1Height);
+    if (_VividOpenPBRLutsReady == 0u || width != auxWidth || height != auxHeight
+        || width != aux1Width || height != aux1Height)
+        return false;
+    VividOpenPBROpaqueInputs inputs;
+    if (!VividTryUnpackOpenPBROpaqueGBuffer(summary, _DiffuseIrradiance.Load(int3(pixelCoord, 0)),
+        _LayerAux0.Load(int3(pixelCoord, 0)), _LayerAux1.Load(int3(pixelCoord, 0)), inputs))
+        return false;
+    OpenPBR_ResolvedInputs resolved;
+    if (!VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
+        return false;
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
+    if (dot(inputs.normalWS, viewDirectionWS) <= 0.0)
+        return true;
+    OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, viewDirectionWS);
+    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared);
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+    result = VividEvaluateOpenPBROpaqueIndirect(inputs, albedo, lightLoop,
+        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion));
+    [loop]
+    for (uint i = 0u; i < _DirectionalLightCount; ++i)
+    {
+        DirectionalLightData light = GetDirectionalLight(i);
+        float shadow = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, i, light);
+        VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueLight(prepared,
+            inputs.normalWS, SafeNormalize(light.directionWS), max(light.color, 0.0) * shadow), result);
+    }
+    uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < punctualCount; ++i)
+    {
+        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        float3 direction;
+        float4 distances;
+        GetVividPunctualLightVectors(positionWS, light, direction, distances);
+        if (distances.y <= VIVID_SIMPLE_SLAB_MIN_PUNCTUAL_DISTANCE_SQ)
+            continue;
+        float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+            light, positionWS - light.positionWS, distances);
+        if (attenuation > 0.0)
+            VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueLight(prepared,
+                inputs.normalWS, direction, max(light.color, 0.0) * attenuation), result);
+    }
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < areaCount; ++i)
+        VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueAreaLight(inputs,
+            albedo, positionWS, viewDirectionWS, VividLightingLoop::LoadAreaLight(lightLoop, i)), result);
+    return true;
 }
 
 VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
@@ -399,19 +459,21 @@ float3 VividEvaluateDeferredSurfacePixel(
     uint deferredExportClass = VividGetDeferredExportClass(
         summary.deferredExportHeader);
     // Empty/Unlit need no BSDF resources. Reserved lit classes are not silently
-    // treated as Unlit: V1 implements FastSlab and DualSlab only.
+    // treated as Unlit. Native OpenPBR has its own payload and resource gate.
     if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_EMPTY
         || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_UNLIT)
         return emission;
 
     if (deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
-        && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
+        && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
+        && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
     {
         debugLighting = float4(1.0, 0.0, 1.0, 1.0);
         return VividApplyPreExposure(float3(1.0, 0.0, 1.0));
     }
 
-    if (_VividSlabLutReady == 0u)
+    if (deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE
+        && _VividSlabLutReady == 0u)
     {
         debugLighting = float4(1.0, 0.0, 1.0, 1.0);
         return VividApplyPreExposure(float3(1.0, 0.0, 1.0));
@@ -423,7 +485,15 @@ float3 VividEvaluateDeferredSurfacePixel(
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     VividSimpleSlabDeferredLighting lightLoopOutput;
     UNITY_BRANCH
-    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+    {
+        if (!TryEvaluateDeferredOpenPBROpaqueLighting(summary, pixelCoord, positionWS, lightLoopOutput))
+        {
+            debugLighting = float4(1.0, 0.0, 1.0, 1.0);
+            return VividApplyPreExposure(float3(1.0, 0.0, 1.0));
+        }
+    }
+    else if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
     {
         VividDualSlabLayerData topLayer;
         if (!TryLoadVividDualSlabLayerData(pixelCoord, topLayer))

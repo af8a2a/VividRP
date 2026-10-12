@@ -91,6 +91,7 @@ namespace VividRP.Editor.Tests
             AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_GENERAL_SLAB", "3u");
             AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB", "4u");
             AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_SUBSURFACE", "5u");
+            AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE", "6u");
             AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_CATCH_ALL", "14u");
             AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_ERROR", "15u");
             AssertDefine(source, "VIVID_DEFERRED_EXPORT_CLASS_MASK", "0x0Fu");

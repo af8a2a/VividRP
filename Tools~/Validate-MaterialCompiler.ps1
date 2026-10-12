@@ -44,7 +44,8 @@ $addedSources = @{
         'Tests/Editor/SubSystem/GPUDriven/OpenPBROpaqueContractTests.cs',
         'Tests/Editor/SubSystem/GPUDriven/OpenPBROpaqueMaterialIRTests.cs',
         'Tests/Editor/SubSystem/GPUDriven/MaterialOpenPBROpaqueAuthoringTests.cs',
-        'Tests/Editor/SubSystem/GPUDriven/OpenPBROpaqueSurfaceExportTests.cs')
+        'Tests/Editor/SubSystem/GPUDriven/OpenPBROpaqueSurfaceExportTests.cs',
+        'Tests/Editor/RenderPass/Lighting/OpenPBROpaqueDeferredTests.cs')
 }
 
 function Invoke-Compiler([string] $Name, [string] $ResponsePath) {
@@ -202,6 +203,7 @@ internal static class Program
     private static bool RequiresUnityNative(MethodInfo method)
     {
         return method.Name == "GeneratedInclude_IsSynchronizedWithFrozenProgramCatalog"
+            || method.Name == "NativeSurface_RequiresSidecar_AndStableQueriesAllocateNothing"
             || method.Name == "CompileStandardSingleSlab_ProducesSingleClosureProgramPrototype"
             || method.Name == "CompileDualSlab_AssignsTopologySpecificStableProgramID";
     }

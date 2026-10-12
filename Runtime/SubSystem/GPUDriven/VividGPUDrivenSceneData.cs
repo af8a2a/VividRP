@@ -160,7 +160,9 @@ namespace VividRP.Runtime.GPUDriven
 
             VividMaterialProgramData program = m_MaterialPrograms[(int) programIndex];
             return program.Version == GPUDrivenMaterialCompiler.ProgramVersion
-                && program.SurfaceProgramID == VividMaterialSurfaceProgramID.DualSlab;
+                // The existing sidecar ports also store native OpenPBR inputs.
+                && (program.SurfaceProgramID == VividMaterialSurfaceProgramID.DualSlab
+                    || program.SurfaceProgramID == VividMaterialSurfaceProgramID.OpenPBROpaque);
         }
 
         internal bool HasDualSlabSidecarMaterial()

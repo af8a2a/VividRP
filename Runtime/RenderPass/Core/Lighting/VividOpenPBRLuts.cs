@@ -9,6 +9,7 @@ namespace VividRP.Runtime
         internal const int Resolution = 32;
         internal const int Count = 3;
         internal const int ArrayLayers = 6;
+        internal static readonly int ReadyId = Shader.PropertyToID("_VividOpenPBRLutsReady");
         internal static readonly int[] TextureIds =
         {
             Shader.PropertyToID("_OpenPBRIdealDielectricEnergy"),
@@ -21,6 +22,9 @@ namespace VividRP.Runtime
 
         internal Texture GetTexture(int index) => index == 0 ? m_IdealDielectricEnergy
             : index == 1 ? m_OpaqueDielectricEnergy : m_Tables2D;
+
+        internal bool IsReady => m_IdealDielectricEnergy != null
+            && m_OpaqueDielectricEnergy != null && m_Tables2D != null;
 
         internal void SetTextures(Texture3D ideal, Texture3D opaque, Texture2DArray tables)
         {

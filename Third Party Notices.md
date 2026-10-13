@@ -10,8 +10,9 @@ Version / Revision: v5.2.1, commit f5ae915a84d3bbf1508b529af90292dd7085b9ec
 License Type: Apache-2.0
 
 The unmodified upstream source and license are redistributed under
-`PluginSource~/METIS~/Source`. VividRP's Windows x86_64 DLL is built from this
-source.
+`PluginSource~/METIS~/Source`. The legacy Windows x86_64 DLL and bindings
+are retained for compatibility; GPUDriven no longer uses METIS and the geometry
+plugin build no longer builds or deploys it.
 
 ---------
 

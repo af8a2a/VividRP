@@ -1,259 +1,95 @@
-using System;
-using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
-using Unity.Jobs;
-using Unity.Mathematics;
-using UnityEngine;
-using UnityEngine.Assertions;
 using VividRP.Runtime;
-using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
 {
     internal static partial class VividMeshletCollectionBuilder
     {
-        private static NativeArray<NativeList<int>> GroupMeshlets(MeshLODNodeLevel meshLODNodeLevel, int meshletsPerGroup, Allocator allocator)
+        // Like vk_lod_clusters' clusterlod partition/lockBoundary: connectivity is based on
+        // position, while group compaction retains the original vertex IDs (including seams).
+        private static unsafe NativeArray<uint> CreatePositionRemap(in VividMeshOptimizer.VertexLayout layout)
         {
-            int graphNodeCount = meshLODNodeLevel.Nodes.Length;
-            int partitionsCount = Mathf.CeilToInt((float) graphNodeCount / meshletsPerGroup);
-            if (partitionsCount <= 1)
-            {
-                var groups = new NativeArray<NativeList<int>>(1, allocator, NativeArrayOptions.UninitializedMemory);
-                var allNodes = new NativeList<int>(graphNodeCount, allocator);
-                for (int index = 0; index < graphNodeCount; index++)
-                {
-                    allNodes.Add(index);
-                }
+            int vertexCount = layout.Vertices.Length * sizeof(float) / (int) layout.PositionStride;
+            var remap = new NativeArray<uint>(vertexCount, Allocator.Temp);
+            MeshOptimizerBindings.meshopt_generatePositionRemap(
+                (uint*) remap.GetUnsafePtr(),
+                (float*) ((byte*) layout.Vertices.GetUnsafeReadOnlyPtr() + layout.PositionOffset),
+                (nuint) vertexCount, layout.PositionStride);
+            return remap;
+        }
 
-                groups[0] = allNodes;
-                return groups;
+        private static unsafe NativeArray<NativeList<int>> GroupMeshlets(MeshLODNodeLevel level, int meshletsPerGroup,
+            in VividMeshOptimizer.VertexLayout layout, NativeArray<uint> positionRemap, Allocator allocator)
+        {
+            int nodeCount = level.Nodes.Length;
+            using var clusterIndices = new NativeList<uint>(Allocator.Temp);
+            var clusterCounts = new NativeArray<uint>(nodeCount, Allocator.Temp);
+            using var partitions = new NativeArray<uint>(nodeCount, Allocator.Temp);
+            for (int nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
+            {
+                MeshLODNode node = level.Nodes[nodeIndex];
+                VividMeshOptimizer.MeshletBuildResults build = level.MeshletsNodeLists[node.MeshletNodeListIndex].MeshletBuildResults;
+                meshopt_Meshlet meshlet = build.Meshlets[node.MeshletIndex];
+                clusterCounts[nodeIndex] = meshlet.TriangleCount * 3;
+                for (int i = 0; i < meshlet.TriangleCount * 3; i++)
+                {
+                    uint vertex = build.Vertices[(int) meshlet.VertexOffset + build.Indices[(int) meshlet.TriangleOffset + i]];
+                    clusterIndices.Add(positionRemap[(int) vertex]);
+                }
             }
 
-            NativeArray<NativeHashSet<Edge>> edgeSets = CollectEdgeSets(meshLODNodeLevel, Allocator.TempJob);
-            NativeArray<int> adjacencyMatrix = CreateAdjacencyMatrix(edgeSets, Allocator.TempJob);
-            DisposeEdgeSets(edgeSets);
+            int partitionCount = nodeCount <= meshletsPerGroup ? 1 : (int) MeshOptimizerBindings.meshopt_partitionClusters(
+                (uint*) partitions.GetUnsafePtr(), clusterIndices.GetUnsafePtr(), (nuint) clusterIndices.Length,
+                (uint*) clusterCounts.GetUnsafeReadOnlyPtr(), (nuint) nodeCount,
+                (float*) ((byte*) layout.Vertices.GetUnsafeReadOnlyPtr() + layout.PositionOffset),
+                (nuint) positionRemap.Length, layout.PositionStride, (nuint) meshletsPerGroup);
 
-            var adjacencyIndexList = new NativeArray<int>(graphNodeCount + 1, Allocator.Temp);
-            adjacencyIndexList[0] = 0;
-            var adjacencyList = new NativeList<int>(graphNodeCount, Allocator.Temp);
-            var adjacencyWeightList = new NativeList<int>(graphNodeCount, Allocator.Temp);
-
-            for (int node1 = 0; node1 < graphNodeCount; node1++)
+            // partition size is a target, not a hard limit; use the returned count and grow lists as needed.
+            var groups = new NativeArray<NativeList<int>>(partitionCount, allocator);
+            for (int i = 0; i < groups.Length; i++)
             {
-                int totalEdgeCount = 0;
+                groups[i] = new NativeList<int>(meshletsPerGroup, allocator);
+            }
+            for (int i = 0; i < nodeCount; i++)
+            {
+                groups[(int) partitions[i]].Add(i);
+            }
+            clusterCounts.Dispose();
+            return groups;
+        }
 
-                for (int node2 = 0; node2 < graphNodeCount; node2++)
+        private static NativeArray<byte> LockGroupBoundaries(MeshLODNodeLevel level,
+            NativeArray<NativeList<int>> groups, NativeArray<uint> positionRemap)
+        {
+            var owners = new NativeArray<int>(positionRemap.Length, Allocator.Temp);
+            var locks = new NativeArray<byte>(positionRemap.Length, Allocator.Temp);
+            for (int groupIndex = 0; groupIndex < groups.Length; groupIndex++)
+            {
+                foreach (int nodeIndex in groups[groupIndex])
                 {
-                    int weight = adjacencyMatrix[node1 * graphNodeCount + node2];
-                    if (weight > 0)
+                    MeshLODNode node = level.Nodes[nodeIndex];
+                    VividMeshOptimizer.MeshletBuildResults build = level.MeshletsNodeLists[node.MeshletNodeListIndex].MeshletBuildResults;
+                    meshopt_Meshlet meshlet = build.Meshlets[node.MeshletIndex];
+                    for (int i = 0; i < meshlet.VertexCount; i++)
                     {
-                        adjacencyList.Add(node2);
-                        adjacencyWeightList.Add(weight);
-                        totalEdgeCount++;
+                        int canonical = (int) positionRemap[(int) build.Vertices[(int) meshlet.VertexOffset + i]];
+                        if (owners[canonical] != 0 && owners[canonical] != groupIndex + 1)
+                        {
+                            locks[canonical] = (byte) meshopt_SimplifyVertexFlags.Lock;
+                        }
+                        owners[canonical] = groupIndex + 1;
                     }
                 }
-
-                adjacencyIndexList[node1 + 1] = adjacencyIndexList[node1] + totalEdgeCount;
             }
 
-            adjacencyMatrix.Dispose();
-
-            var graphAdjacencyStructure = new VividMETIS.GraphAdjacencyStructure
+            // The remap points to canonical fixed points, so this propagation is safe in place.
+            for (int i = 0; i < locks.Length; i++)
             {
-                VertexCount = graphNodeCount,
-                AdjacencyIndexList = adjacencyIndexList,
-                AdjacencyList = adjacencyList.AsArray(),
-                AdjacencyWeightList = adjacencyWeightList.AsArray(),
-            };
-
-            NativeArray<METISOptions> options = VividMETIS.CreateOptions(Allocator.Temp);
-            METISStatus status = VividMETIS.PartGraphKway(graphAdjacencyStructure, Allocator.Temp, partitionsCount, options,
-                out NativeArray<int> vertexPartitioning);
-            Assert.IsTrue(status == METISStatus.METIS_OK);
-
-            adjacencyIndexList.Dispose();
-            adjacencyList.Dispose();
-            adjacencyWeightList.Dispose();
-            options.Dispose();
-
-            NativeArray<NativeList<int>> meshletGrouping = ConstructMeshletGroupingFromVertexPartitioning(
-                vertexPartitioning,
-                allocator,
-                partitionsCount,
-                meshletsPerGroup
-            );
-
-            vertexPartitioning.Dispose();
-            return meshletGrouping;
-        }
-
-        private static NativeArray<NativeList<int>> ConstructMeshletGroupingFromVertexPartitioning(NativeArray<int> meshletPartitioning, Allocator allocator,
-            int partitionsCount, int meshletsPerGroup)
-        {
-            var reversedGroups = new NativeArray<NativeList<int>>(partitionsCount, allocator, NativeArrayOptions.UninitializedMemory);
-            for (int groupIndex = 0; groupIndex < reversedGroups.Length; groupIndex++)
-            {
-                reversedGroups[groupIndex] = new NativeList<int>(meshletsPerGroup, allocator);
+                locks[i] = locks[(int) positionRemap[i]];
             }
-
-            for (int nodeIndex = 0; nodeIndex < meshletPartitioning.Length; nodeIndex++)
-            {
-                int groupIndex = meshletPartitioning[nodeIndex];
-                reversedGroups[groupIndex].Add(nodeIndex);
-            }
-
-            return reversedGroups;
-        }
-
-        private static NativeArray<NativeHashSet<Edge>> CollectEdgeSets(MeshLODNodeLevel nodeLevel, Allocator allocator)
-        {
-            var edgeSets = new NativeArray<NativeHashSet<Edge>>(nodeLevel.Nodes.Length, allocator);
-            for (int index = 0; index < edgeSets.Length; index++)
-            {
-                edgeSets[index] = new NativeHashSet<Edge>((int) (VividMeshletConfiguration.MaxMeshletTriangles * 3), allocator);
-            }
-
-            new CollectMeshletEdgesJob
-            {
-                EdgeSets = edgeSets,
-                NodeLevel = nodeLevel,
-            }.Schedule(edgeSets.Length, 4).Complete();
-
-            return edgeSets;
-        }
-
-        private static void DisposeEdgeSets(NativeArray<NativeHashSet<Edge>> edgeSets)
-        {
-            foreach (NativeHashSet<Edge> edgeSet in edgeSets)
-            {
-                if (edgeSet.IsCreated)
-                {
-                    edgeSet.Dispose();
-                }
-            }
-
-            edgeSets.Dispose();
-        }
-
-        private static NativeArray<int> CreateAdjacencyMatrix(NativeArray<NativeHashSet<Edge>> edgeSets, Allocator allocator)
-        {
-            int graphNodeCount = edgeSets.Length;
-            var adjacencyMatrix = new NativeArray<int>(graphNodeCount * graphNodeCount, allocator);
-            var nodePairs = new NativeList<int2>(graphNodeCount * graphNodeCount, Allocator.TempJob);
-
-            for (int node1 = 0; node1 < graphNodeCount; node1++)
-            {
-                for (int node2 = node1 + 1; node2 < graphNodeCount; node2++)
-                {
-                    nodePairs.Add(new int2(node1, node2));
-                }
-            }
-
-            new FillAdjacencyMatrixJob
-            {
-                NodeCount = graphNodeCount,
-                AdjacencyMatrix = adjacencyMatrix,
-                EdgeSets = edgeSets,
-                NodePairs = nodePairs.AsArray(),
-            }.Schedule(nodePairs.Length, 4).Complete();
-
-            nodePairs.Dispose();
-            return adjacencyMatrix;
-        }
-
-        [BurstCompile]
-        private struct FillAdjacencyMatrixJob : IJobParallelFor
-        {
-            public int NodeCount;
-
-            [ReadOnly]
-            public NativeArray<int2> NodePairs;
-
-            [ReadOnly]
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<NativeHashSet<Edge>> EdgeSets;
-
-            [WriteOnly]
-            [NativeDisableParallelForRestriction]
-            public NativeArray<int> AdjacencyMatrix;
-
-            public void Execute(int index)
-            {
-                int2 nodes = NodePairs[index];
-                NativeHashSet<Edge> edgeSet1 = EdgeSets[nodes.x];
-                NativeHashSet<Edge> edgeSet2 = EdgeSets[nodes.y];
-                int sharedEdgeCount = 0;
-
-                foreach (Edge edge in edgeSet1)
-                {
-                    if (edgeSet2.Contains(edge))
-                    {
-                        sharedEdgeCount++;
-                    }
-                }
-
-                AdjacencyMatrix[nodes.x * NodeCount + nodes.y] = sharedEdgeCount;
-                AdjacencyMatrix[nodes.y * NodeCount + nodes.x] = sharedEdgeCount;
-            }
-        }
-
-        [BurstCompile]
-        private struct CollectMeshletEdgesJob : IJobParallelFor
-        {
-            [NativeDisableContainerSafetyRestriction]
-            public MeshLODNodeLevel NodeLevel;
-
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<NativeHashSet<Edge>> EdgeSets;
-
-            public void Execute(int index)
-            {
-                MeshLODNode lodNode = NodeLevel.Nodes[index];
-                MeshLODNodeLevel.MeshletNodeList meshletNodeList = NodeLevel.MeshletsNodeLists[lodNode.MeshletNodeListIndex];
-                VividMeshOptimizer.MeshletBuildResults meshletBuildResults = meshletNodeList.MeshletBuildResults;
-                meshopt_Meshlet meshlet = meshletBuildResults.Meshlets[lodNode.MeshletIndex];
-                NativeHashSet<Edge> edgeSet = EdgeSets[index];
-
-                for (int triangleIndex = 0; triangleIndex < meshlet.TriangleCount; triangleIndex++)
-                {
-                    int baseIndex = (int) (meshlet.TriangleOffset + triangleIndex * 3);
-                    uint index0 = meshletBuildResults.Vertices[(int) meshlet.VertexOffset + meshletBuildResults.Indices[baseIndex + 0]];
-                    uint index1 = meshletBuildResults.Vertices[(int) meshlet.VertexOffset + meshletBuildResults.Indices[baseIndex + 1]];
-                    uint index2 = meshletBuildResults.Vertices[(int) meshlet.VertexOffset + meshletBuildResults.Indices[baseIndex + 2]];
-
-                    edgeSet.Add(new Edge(index0, index1));
-                    edgeSet.Add(new Edge(index1, index2));
-                    edgeSet.Add(new Edge(index2, index0));
-                }
-            }
-        }
-
-        private readonly struct Edge : IEquatable<Edge>
-        {
-            public readonly uint Index0;
-            public readonly uint Index1;
-
-            public Edge(uint index0, uint index1)
-            {
-                Index0 = math.min(index0, index1);
-                Index1 = math.max(index0, index1);
-            }
-
-            public bool Equals(Edge other)
-            {
-                return Index0 == other.Index0 && Index1 == other.Index1;
-            }
-
-            public override bool Equals(object obj)
-            {
-                return obj is Edge other && Equals(other);
-            }
-
-            public override int GetHashCode()
-            {
-                return unchecked((int) (Index0 * 397u ^ Index1));
-            }
+            owners.Dispose();
+            return locks;
         }
     }
 }

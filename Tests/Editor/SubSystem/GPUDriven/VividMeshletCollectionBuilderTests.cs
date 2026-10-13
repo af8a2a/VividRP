@@ -2,6 +2,8 @@ using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
+using Unity.Collections;
+using VividRP.Runtime;
 using UnityEngine;
 using Object = UnityEngine.Object;
 using VividRP.Editor.GPUDriven.Meshlets;
@@ -254,7 +256,7 @@ namespace VividRP.Editor.Tests
                 string[] createdAssets = VividMeshletCollectionAssetImporter.CreateAssetsForSelection(new Object[] { modelAsset });
 
                 Assert.That(createdAssets, Has.Length.EqualTo(1));
-                Assert.That(createdAssets[0], Does.StartWith(TempFolder + "/TestMesh_Meshlets"));
+                Assert.That(createdAssets[0], Does.StartWith(TempFolder + "/GPUDrivenGenerated/MeshletAsset/TestMesh_Meshlets"));
 
                 VividMeshletCollectionAsset asset = AssetDatabase.LoadAssetAtPath<VividMeshletCollectionAsset>(createdAssets[0]);
                 Assert.That(asset, Is.Not.Null);
@@ -277,6 +279,163 @@ namespace VividRP.Editor.Tests
                     Object.DestroyImmediate(mesh, true);
                 }
             }
+        }
+
+        [Test]
+        public void Generate_ClusterHierarchy_PreservesLeafCoverageAndConservativeBounds()
+        {
+            Mesh mesh = CreateGridMesh(64, 64);
+            var asset = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+            try
+            {
+                var parameters = CreateParameters(mesh);
+                parameters.MaxMeshLODLevelCount = 0;
+                parameters.DisableSloppySimplification = true;
+                VividMeshletCollectionBuilder.Generate(asset, parameters);
+                Assert.That(asset.MeshLODLevelCount, Is.GreaterThan(1));
+                uint leafTriangles = 0;
+                foreach (VividMeshLODNode node in asset.MeshLODNodes)
+                {
+                    Assert.That(float.IsNaN(node.Error) || float.IsInfinity(node.Error), Is.False);
+                    Assert.That(node.Error, Is.GreaterThanOrEqualTo(0));
+                    if (node.LevelIndex == 0)
+                        Assert.That(node.ParentError, Is.LessThan(0));
+                    else
+                    {
+                        Assert.That(node.ParentError, Is.GreaterThanOrEqualTo(node.Error));
+                        Assert.That(node.ParentBounds.w, Is.GreaterThanOrEqualTo(node.Bounds.w));
+                    }
+                    Assert.That(node.MeshletCount, Is.EqualTo(1));
+                    VividMeshlet meshlet = asset.Meshlets[node.MeshletStartIndex];
+                    Assert.That(meshlet.VertexCount, Is.InRange(1u, VividMeshletConfiguration.MaxMeshletVertices));
+                    Assert.That(meshlet.TriangleCount, Is.InRange(1u, VividMeshletConfiguration.MaxMeshletTriangles));
+                    for (uint i = 0; i < meshlet.TriangleCount * 3; i++)
+                        Assert.That(asset.IndexBuffer[meshlet.TriangleOffset + i], Is.LessThan(meshlet.VertexCount));
+                    if (node.LevelIndex == asset.MeshLODLevelCount - 1)
+                        leafTriangles += meshlet.TriangleCount;
+                }
+                Assert.That(leafTriangles, Is.EqualTo(64 * 64 * 2));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [TestCase(VividMeshOptimizer.SimplifyMode.Normal)]
+        [TestCase(VividMeshOptimizer.SimplifyMode.Sloppy)]
+        public void SimplifyMeshlets_LockedVertices_RetainsAllTriangles(VividMeshOptimizer.SimplifyMode mode)
+        {
+            Mesh mesh = CreateGridMesh(20, 20);
+            try
+            {
+                using var positions = CopyPositions(mesh, 1.0f);
+                using var indices = new NativeArray<uint>(System.Array.ConvertAll(mesh.triangles, i => (uint) i), Allocator.TempJob);
+                var locks = new NativeArray<byte>(mesh.vertexCount, Allocator.TempJob);
+                for (int i = 0; i < locks.Length; i++)
+                    locks[i] = (byte) meshopt_SimplifyVertexFlags.Lock;
+                var settings = VividMeshletCollectionAsset.MeshletGenerationParams;
+                using var source = VividMeshOptimizer.BuildMeshlets(Allocator.TempJob, positions, 0, 12, indices, settings);
+                var groups = new NativeArray<VividMeshOptimizer.MeshletBuildResults>(1, Allocator.Temp);
+                groups[0] = source;
+                try
+                {
+                    var layout = new VividMeshOptimizer.VertexLayout { Vertices = positions, PositionStride = 12 };
+                    using var result = VividMeshOptimizer.SimplifyMeshlets(Allocator.TempJob, groups, layout, settings,
+                        mode, 1.0f, out float error, locks);
+                    Assert.That(CountTriangles(result), Is.EqualTo(indices.Length / 3));
+                    Assert.That(error, Is.EqualTo(0.0f));
+                }
+                finally
+                {
+                    groups.Dispose();
+                    locks.Dispose();
+                }
+            }
+            finally { Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void SimplifyMeshlets_MergesSharedVertexIds_AndReturnsObjectSpaceError()
+        {
+            Mesh mesh = CreateGridMesh(20, 20);
+            try
+            {
+                Vector3[] vertices = mesh.vertices;
+                for (int i = 0; i < vertices.Length; i++)
+                    vertices[i].z = Mathf.Sin(vertices[i].x * 0.7f) * Mathf.Cos(vertices[i].y * 0.6f);
+                mesh.vertices = vertices;
+                float unitError = SimplifyAtScale(mesh, 1, out int unitTriangles);
+                float scaledError = SimplifyAtScale(mesh, 8, out int scaledTriangles);
+                Assert.That(unitTriangles, Is.LessThan(mesh.triangles.Length / 3 * 0.8f));
+                Assert.That(scaledTriangles, Is.EqualTo(unitTriangles));
+                Assert.That(unitError, Is.GreaterThan(0));
+                Assert.That(scaledError, Is.EqualTo(unitError * 8).Within(unitError * 0.001f));
+            }
+            finally { Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void SimplifyMeshlets_EmptySloppyResult_KeepsSourceGeometry()
+        {
+            using var positions = new NativeArray<float>(new[] { 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f }, Allocator.TempJob);
+            using var indices = new NativeArray<uint>(new[] { 0u, 1u, 2u }, Allocator.TempJob);
+            var settings = VividMeshletCollectionAsset.MeshletGenerationParams;
+            using var source = VividMeshOptimizer.BuildMeshlets(Allocator.TempJob, positions, 0, 12, indices, settings);
+            var groups = new NativeArray<VividMeshOptimizer.MeshletBuildResults>(1, Allocator.Temp);
+            groups[0] = source;
+            try
+            {
+                var layout = new VividMeshOptimizer.VertexLayout { Vertices = positions, PositionStride = 12 };
+                using var result = VividMeshOptimizer.SimplifyMeshlets(Allocator.TempJob, groups, layout, settings,
+                    VividMeshOptimizer.SimplifyMode.Sloppy, 1.0f, out float error);
+                Assert.That(CountTriangles(result), Is.EqualTo(1));
+                Assert.That(error, Is.EqualTo(0));
+                CollectionAssert.AreEquivalent(source.Vertices.ToArray(), result.Vertices.ToArray());
+            }
+            finally { groups.Dispose(); }
+        }
+
+        private static float SimplifyAtScale(Mesh mesh, float scale, out int triangleCount)
+        {
+            using var positions = CopyPositions(mesh, scale);
+            using var indices = new NativeArray<uint>(System.Array.ConvertAll(mesh.triangles, i => (uint) i), Allocator.TempJob);
+            var settings = VividMeshletCollectionAsset.MeshletGenerationParams;
+            using var source = VividMeshOptimizer.BuildMeshlets(Allocator.TempJob, positions, 0, 12, indices, settings);
+            Assert.That(source.Meshlets.Length, Is.GreaterThan(1));
+            var groups = new NativeArray<VividMeshOptimizer.MeshletBuildResults>(1, Allocator.Temp);
+            groups[0] = source;
+            try
+            {
+                var layout = new VividMeshOptimizer.VertexLayout { Vertices = positions, PositionStride = 12 };
+                using var result = VividMeshOptimizer.SimplifyMeshlets(Allocator.TempJob, groups, layout, settings,
+                    VividMeshOptimizer.SimplifyMode.Normal, 0.1f, out float error);
+                triangleCount = CountTriangles(result);
+                return error;
+            }
+            finally { groups.Dispose(); }
+        }
+
+        private static NativeArray<float> CopyPositions(Mesh mesh, float scale)
+        {
+            Vector3[] vertices = mesh.vertices;
+            var result = new NativeArray<float>(vertices.Length * 3, Allocator.TempJob);
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                result[i * 3] = vertices[i].x * scale;
+                result[i * 3 + 1] = vertices[i].y * scale;
+                result[i * 3 + 2] = vertices[i].z * scale;
+            }
+            return result;
+        }
+
+        private static int CountTriangles(VividMeshOptimizer.MeshletBuildResults build)
+        {
+            int count = 0;
+            foreach (meshopt_Meshlet meshlet in build.Meshlets)
+                count += (int) meshlet.TriangleCount;
+            return count;
         }
 
         private static VividMeshletCollectionBuilder.Parameters CreateParameters(Mesh mesh)

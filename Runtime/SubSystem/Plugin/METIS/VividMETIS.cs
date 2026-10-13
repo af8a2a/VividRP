@@ -4,6 +4,7 @@ using UnityEngine.Assertions;
 
 namespace VividRP.Runtime
 {
+    [System.Obsolete("GPUDriven cluster LOD generation now uses meshoptimizer. Retained for source compatibility only.")]
     public static class VividMETIS
     {
         public static unsafe NativeArray<METISOptions> CreateOptions(Allocator allocator)

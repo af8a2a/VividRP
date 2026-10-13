@@ -317,11 +317,10 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                         }
                     }
                 }
-            }
-
-            if (jobHandles.Length > 0)
-            {
-                JobHandle.CombineDependencies(jobHandles.AsArray()).Complete();
+                if (jobHandles.Length > 0)
+                {
+                    JobHandle.CombineDependencies(jobHandles.AsArray()).Complete();
+                }
             }
             jobHandles.Dispose();
 
@@ -392,6 +391,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
         private static void BuildLodGraph(NativeList<MeshLODNodeLevel> levels, Allocator allocator, in VividMeshOptimizer.VertexLayout vertexLayout,
             VividMeshOptimizer.MeshletGenerationParams meshletGenerationParams, in Parameters parameters)
         {
+            using NativeArray<uint> positionRemap = CreatePositionRemap(vertexLayout);
             VividMeshOptimizer.SimplifyMode simplifyMode = VividMeshOptimizer.SimplifyMode.Normal;
 
             while (levels[^1].Nodes.Length > 1)
@@ -407,7 +407,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 uint newTriangleCount = 0;
                 const int meshletsPerGroup = 4;
 
-                NativeArray<NativeList<int>> childMeshletGroups = GroupMeshlets(previousLevel, meshletsPerGroup, Allocator.TempJob);
+                NativeArray<NativeList<int>> childMeshletGroups = GroupMeshlets(previousLevel, meshletsPerGroup, vertexLayout, positionRemap, Allocator.TempJob);
+                using NativeArray<byte> vertexLocks = LockGroupBoundaries(previousLevel, childMeshletGroups, positionRemap);
 
                 for (int childGroupIndex = 0; childGroupIndex < childMeshletGroups.Length; childGroupIndex++)
                 {
@@ -442,7 +443,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                         meshletGenerationParams,
                         simplifyMode,
                         targetError,
-                        out float localError
+                        out float localError,
+                        vertexLocks
                     );
                     Assert.IsTrue(localError >= 0.0f);
                     sourceMeshlets.Dispose();
@@ -483,10 +485,22 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 var newMeshLODNodeLevel = new MeshLODNodeLevel
                 {
                     TriangleCount = newTriangleCount,
-                    Nodes = newLevelNodes.AsArray(),
-                    MeshletsNodeLists = meshletNodeLists.AsArray(),
+                    Nodes = newLevelNodes.ToArray(allocator),
+                    MeshletsNodeLists = meshletNodeLists.ToArray(allocator),
                 };
 
+                newLevelNodes.Dispose();
+                meshletNodeLists.Dispose();
+
+                // A failed normal pass can retry this level in sloppy mode. Release the old partition first.
+                if (previousLevel.Groups.IsCreated)
+                {
+                    foreach (NativeList<int> group in previousLevel.Groups)
+                    {
+                        group.Dispose();
+                    }
+                    previousLevel.Groups.Dispose();
+                }
                 previousLevel.Groups = childMeshletGroups;
 
                 if (newTriangleCount < previousLevel.TriangleCount * parameters.MinTriangleReductionPerStep)

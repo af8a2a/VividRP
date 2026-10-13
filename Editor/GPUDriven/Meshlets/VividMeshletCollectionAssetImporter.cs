@@ -12,7 +12,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
 {
-    [ScriptedImporter(2, Extension)]
+    [ScriptedImporter(3, Extension)]
     internal sealed class VividMeshletCollectionAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vmeshletcollection";
@@ -164,7 +164,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             string folder = !string.IsNullOrEmpty(sourceSelection.TargetFolder)
                 ? sourceSelection.TargetFolder
                 : (File.Exists(sourcePath) ? Path.GetDirectoryName(sourcePath) : sourcePath);
-            string assetPath = AssetDatabase.GenerateUniqueAssetPath(Path.Combine(folder ?? "Assets", sourceSelection.AssetBaseName + "_Meshlets." + Extension));
+            string targetFolder = GPUDrivenGeneratedAssetPathUtility.EnsureMeshletAssetFolder(folder);
+            string assetPath = AssetDatabase.GenerateUniqueAssetPath(targetFolder + "/" + sourceSelection.AssetBaseName + "_Meshlets." + Extension);
 
             File.WriteAllText(assetPath, string.Empty);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
@@ -191,8 +192,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             string assetBaseName = mesh.subMeshCount > 1
                 ? $"{mesh.name}_SubMesh{clampedSubMeshIndex}"
                 : mesh.name;
-            string targetFolder = GPUDrivenGeneratedAssetPathUtility.EnsureMeshletAssetFolder(
-                GetTargetFolder(mesh));
+            string targetFolder = GetTargetFolder(mesh);
 
             return CreateAssetForMesh(
                 new MeshSourceSelection(

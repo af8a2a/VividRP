@@ -665,12 +665,19 @@ namespace VividRP.Editor.Tests
             AssetDatabase.CreateAsset(mesh, meshPath);
             mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
 
-            string[] legacyAssets = VividMeshletCollectionAssetImporter.CreateAssetsForSelection(
-                new Object[] { mesh });
+            // Build a legacy adjacent fixture explicitly; current generation uses MeshletAsset.
+            string legacyAssetPath = TempFolder + "/LegacyMeshletAsset_Meshlets." + VividMeshletCollectionAssetImporter.Extension;
+            File.WriteAllText(legacyAssetPath, string.Empty);
+            AssetDatabase.ImportAsset(legacyAssetPath, ImportAssetOptions.ForceSynchronousImport);
+            var importer = AssetImporter.GetAtPath(legacyAssetPath) as VividMeshletCollectionAssetImporter;
+            Assert.That(importer, Is.Not.Null);
+            importer.Mesh = mesh;
+            importer.SaveAndReimport();
             string[] generatedAssets = MeshletRendererEditorUtility.GenerateMissingMeshletCollections(mesh);
 
-            Assert.That(legacyAssets, Has.Length.EqualTo(1));
-            Assert.That(legacyAssets[0], Does.StartWith(TempFolder + "/LegacyMeshletAsset_Meshlets"));
+            VividMeshletCollectionAsset[] collections = MeshletRendererEditorUtility.CollectMeshletCollections(mesh);
+            Assert.That(collections, Has.Length.EqualTo(1));
+            Assert.That(AssetDatabase.GetAssetPath(collections[0]), Is.EqualTo(legacyAssetPath));
             Assert.That(generatedAssets, Is.Empty);
             Assert.That(AssetDatabase.IsValidFolder(GeneratedRoot), Is.False);
         }

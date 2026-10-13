@@ -103,6 +103,9 @@ namespace VividRP.Runtime
 
             return new MeshletBuildResults
             {
+                OwnedMeshlets = meshlets,
+                OwnedVertices = meshletVertices,
+                OwnedIndices = meshletIndices,
                 Meshlets = meshlets.GetSubArray(0, (int) meshletCount),
                 Vertices = meshletVertices.GetSubArray(0, usedVertexCount),
                 Indices = meshletIndices.GetSubArray(0, usedIndexCount),
@@ -125,13 +128,23 @@ namespace VividRP.Runtime
             );
         }
 
-        public static unsafe MeshletBuildResults SimplifyMeshlets(Allocator allocator, NativeArray<MeshletBuildResults> meshletGroups,
+        public static MeshletBuildResults SimplifyMeshlets(Allocator allocator, NativeArray<MeshletBuildResults> meshletGroups,
             in VertexLayout vertexLayout, in MeshletGenerationParams meshletGenerationParams, SimplifyMode simplifyMode, float targetError,
             out float resultError)
         {
-            var localVertices = new NativeList<ClusterVertex>(Allocator.Temp);
-            var localVerticesGlobalIndices = new NativeList<uint>(Allocator.Temp);
-            var localIndices = new NativeList<uint>(Allocator.Temp);
+            return SimplifyMeshlets(allocator, meshletGroups, vertexLayout, meshletGenerationParams, simplifyMode, targetError,
+                out resultError, default);
+        }
+
+        public static unsafe MeshletBuildResults SimplifyMeshlets(Allocator allocator, NativeArray<MeshletBuildResults> meshletGroups,
+            in VertexLayout vertexLayout, in MeshletGenerationParams meshletGenerationParams, SimplifyMode simplifyMode, float targetError,
+            out float resultError, NativeArray<byte> vertexLocks)
+        {
+            using var localVertices = new NativeList<ClusterVertex>(Allocator.Temp);
+            using var vertexRemap = new NativeHashMap<uint, uint>(128, Allocator.Temp);
+            using var localLocks = new NativeList<byte>(Allocator.Temp);
+            using var localVerticesGlobalIndices = new NativeList<uint>(Allocator.Temp);
+            using var localIndices = new NativeList<uint>(Allocator.Temp);
 
             byte* pVertexPositionsBytes = (byte*) vertexLayout.Vertices.GetUnsafeReadOnlyPtr() + vertexLayout.PositionOffset;
 
@@ -139,45 +152,45 @@ namespace VividRP.Runtime
             {
                 foreach (meshopt_Meshlet meshlet in group.Meshlets)
                 {
-                    int localOffset = localVertices.Length;
-
-                    for (uint vertexIndex = 0; vertexIndex < meshlet.VertexCount; vertexIndex++)
+                    // Merge meshlet-local duplicates by source ID, without welding attribute seams.
+                    for (uint i = 0; i < meshlet.TriangleCount * 3; i++)
                     {
-                        uint globalIndex = group.Vertices[(int) (meshlet.VertexOffset + vertexIndex)];
-                        localVertices.Add(new ClusterVertex
+                        uint globalIndex = group.Vertices[(int) meshlet.VertexOffset + group.Indices[(int) (meshlet.TriangleOffset + i)]];
+                        if (!vertexRemap.TryGetValue(globalIndex, out uint localIndex))
                         {
-                            Position = *(float3*) (pVertexPositionsBytes + globalIndex * vertexLayout.PositionStride),
-                        });
-                        localVerticesGlobalIndices.Add(globalIndex);
-                    }
-
-                    for (uint triangleIndex = 0; triangleIndex < meshlet.TriangleCount; triangleIndex++)
-                    {
-                        int triangleOffset = (int) (meshlet.TriangleOffset + triangleIndex * 3);
-                        localIndices.Add((uint) (localOffset + group.Indices[triangleOffset + 0]));
-                        localIndices.Add((uint) (localOffset + group.Indices[triangleOffset + 1]));
-                        localIndices.Add((uint) (localOffset + group.Indices[triangleOffset + 2]));
+                            localIndex = (uint) localVertices.Length;
+                            vertexRemap.Add(globalIndex, localIndex);
+                            localVertices.Add(new ClusterVertex
+                            {
+                                Position = *(float3*) (pVertexPositionsBytes + globalIndex * vertexLayout.PositionStride),
+                            });
+                            localVerticesGlobalIndices.Add(globalIndex);
+                            localLocks.Add(vertexLocks.IsCreated ? vertexLocks[(int) globalIndex] : (byte) 0);
+                        }
+                        localIndices.Add(localIndex);
                     }
                 }
             }
 
-            int targetIndexCount = (int) (localIndices.Length / 3 * 0.5f * 3);
+            int targetIndexCount = (localIndices.Length / 3 / 2) * 3;
+            using var simplifiedIndices = new NativeArray<uint>(localIndices.Length, Allocator.Temp);
             float resultErrorValue = 0.0f;
 
-            uint* pDestination = localIndices.GetUnsafePtr();
+            uint* pDestination = (uint*) simplifiedIndices.GetUnsafePtr();
             nuint indexCount = (nuint) localIndices.Length;
             float* pVertexPositions = (float*) localVertices.GetUnsafePtr();
             nuint vertexCount = (nuint) localVertices.Length;
             nuint vertexPositionsStride = (nuint) UnsafeUtility.SizeOf<ClusterVertex>();
             int simplifiedIndexCount = simplifyMode switch
             {
-                SimplifyMode.Normal => (int) meshopt_simplify(
+                SimplifyMode.Normal => (int) meshopt_simplifyWithAttributes(
                     pDestination,
-                    pDestination,
+                    localIndices.GetUnsafePtr(),
                     indexCount,
                     pVertexPositions,
                     vertexCount,
                     vertexPositionsStride,
+                    null, 0, null, 0, localLocks.GetUnsafePtr(),
                     (nuint) targetIndexCount,
                     targetError,
                     (uint) meshopt_SimplifyOptions.LockBorder,
@@ -185,12 +198,12 @@ namespace VividRP.Runtime
                 ),
                 SimplifyMode.Sloppy => (int) meshopt_simplifySloppy(
                     pDestination,
-                    pDestination,
+                    localIndices.GetUnsafePtr(),
                     indexCount,
                     pVertexPositions,
                     vertexCount,
                     vertexPositionsStride,
-                    null,
+                    localLocks.GetUnsafePtr(),
                     (nuint) targetIndexCount,
                     targetError,
                     &resultErrorValue
@@ -198,10 +211,19 @@ namespace VividRP.Runtime
                 _ => throw new ArgumentOutOfRangeException(nameof(simplifyMode), simplifyMode, null),
             };
 
-            localIndices.Length = simplifiedIndexCount;
+            // Both APIs return relative error here. The runtime compares object-space distances.
+            resultErrorValue *= meshopt_simplifyScale(pVertexPositions, vertexCount, vertexPositionsStride);
+            // An empty representation cannot replace a child group: retain its geometry.
+            if (simplifiedIndexCount == 0)
+            {
+                resultErrorValue = 0.0f;
+            }
 
-            var globalIndices = new NativeList<uint>(localIndices.Length, Allocator.Temp);
-            foreach (uint localIndex in localIndices)
+            using var globalIndices = new NativeList<uint>(localIndices.Length, Allocator.Temp);
+            NativeArray<uint> resultIndices = simplifiedIndexCount > 0
+                ? simplifiedIndices.GetSubArray(0, simplifiedIndexCount)
+                : localIndices.AsArray();
+            foreach (uint localIndex in resultIndices)
             {
                 globalIndices.Add(localVerticesGlobalIndices[(int) localIndex]);
             }
@@ -214,11 +236,6 @@ namespace VividRP.Runtime
                 globalIndices.AsArray(),
                 meshletGenerationParams
             );
-
-            globalIndices.Dispose();
-            localIndices.Dispose();
-            localVerticesGlobalIndices.Dispose();
-            localVertices.Dispose();
 
             resultError = resultErrorValue;
             return result;
@@ -282,24 +299,35 @@ namespace VividRP.Runtime
             public NativeArray<uint> Vertices;
             public NativeArray<byte> Indices;
 
+            // Public arrays are bounded views; keep the actual allocations for disposal.
+            internal NativeArray<meshopt_Meshlet> OwnedMeshlets;
+            internal NativeArray<uint> OwnedVertices;
+            internal NativeArray<byte> OwnedIndices;
+
             public JobHandle Dispose(JobHandle inputDeps)
             {
                 JobHandle handle = inputDeps;
                 if (Meshlets.IsCreated)
                 {
-                    handle = Meshlets.Dispose(handle);
+                    handle = (OwnedMeshlets.IsCreated ? OwnedMeshlets : Meshlets).Dispose(handle);
                 }
 
                 if (Vertices.IsCreated)
                 {
-                    handle = Vertices.Dispose(handle);
+                    handle = (OwnedVertices.IsCreated ? OwnedVertices : Vertices).Dispose(handle);
                 }
 
                 if (Indices.IsCreated)
                 {
-                    handle = Indices.Dispose(handle);
+                    handle = (OwnedIndices.IsCreated ? OwnedIndices : Indices).Dispose(handle);
                 }
 
+                Meshlets = default;
+                Vertices = default;
+                Indices = default;
+                OwnedMeshlets = default;
+                OwnedVertices = default;
+                OwnedIndices = default;
                 return handle;
             }
 

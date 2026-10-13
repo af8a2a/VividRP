@@ -1,5 +1,5 @@
 # Compile every production meshlet-culling kernel, verify half instructions,
-# and execute the shared predicate on D3D12 against an independent corner oracle.
+# and execute the shared predicates on D3D12, including parent/child LOD cuts.
 [CmdletBinding()]
 param(
     [string] $DxcPath = 'dxc',
@@ -74,6 +74,24 @@ try {
     if ($productionAssembly -notmatch 'dx.op.dot3.f16') { throw 'Production CS has no FP16 dot products.' }
     if ($productionAssembly -notmatch 'Native low precision') { throw 'Production CS does not declare native 16-bit operations.' }
     if ($productionAssembly -match 'Minimum-precision data types') { throw 'Expected strict native FP16, not minimum precision.' }
+
+    # LOD selection shares VividGPUDrivenCommon with culling. Compile all its
+    # variants and run the real selection function, without forcing leaf LOD.
+    $lodArguments = @('-T', 'cs_6_0', '-HV', '2018',
+        '-D', 'SHADER_API_D3D11', '-D', 'UNITY_COMPILER_HLSL', '-D', 'UNITY_COMPILER_DXC',
+        '-D', 'SHADER_STAGE_COMPUTE', '-D', 'SHADER_TARGET=50',
+        '-I', $includeRoot, '-I', $UnityCgIncludes)
+    $lodSource = Join-Path $packageRoot 'Shaders/Core/Private/GPUDriven/MeshletListBuild.compute'
+    foreach ($line in Get-Content $lodSource) {
+        if ($line -notmatch '^#pragma kernel (\w+)(.*)$') { continue }
+        $kernel = $Matches[1]
+        $defines = $Matches[2].Trim() -split '\s+'
+        $arguments = $lodArguments + @('-E', $kernel, '-Fo', (Join-Path $outputRoot ("LOD-$kernel.dxil")))
+        foreach ($define in $defines) { if ($define) { $arguments += @('-D', $define) } }
+        Compile-Shader "LOD-$kernel" ($arguments + $lodSource)
+    }
+    Compile-Shader 'lod-probe' ($lodArguments + @('-E', 'Main',
+        '-Fo', (Join-Path $outputRoot 'lod-probe.dxil'), (Join-Path $PSScriptRoot 'MeshLODSelectionProbe.hlsl')))
 } finally {
     # Delete only the links created here. Never traverse their source targets.
     foreach ($path in $createdLinks) {
@@ -104,4 +122,11 @@ foreach ($mode in @('native16', 'fp32')) {
     & $python (Join-Path $PSScriptRoot 'Validate-MeshletCulling.py') check $outputRoot --results $result
     if ($LASTEXITCODE -ne 0) { throw "Meshlet oracle comparison failed: $mode" }
 }
+& $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') generate $outputRoot
+if ($LASTEXITCODE -ne 0) { throw 'LOD case generation failed.' }
+& $exe (Join-Path $outputRoot 'lod-probe.dxil') (Join-Path $outputRoot 'lod-cases.bin') `
+    (Join-Path $outputRoot 'lod-results.bin') 208 32
+if ($LASTEXITCODE -ne 0) { throw 'D3D12 LOD execution failed.' }
+& $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') check $outputRoot
+if ($LASTEXITCODE -ne 0) { throw 'LOD cut regression failed.' }
 Write-Output 'Production kernels and independent GPU regressions passed. No Unity tests or scene rendering were run.'

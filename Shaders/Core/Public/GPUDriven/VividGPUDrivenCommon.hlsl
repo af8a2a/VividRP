@@ -10,6 +10,7 @@
 #define VIVID_MAX_MESHLET_INDICES MAX_MESHLET_INDICES
 #define VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH 0xffffffffu
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMeshletDecode.hlsli"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMeshLODError.hlsli"
 
 static const uint VIVID_INDIRECT_DRAW_ARGS_STRIDE = 16u;
 static const uint VIVID_INDIRECT_DRAW_ARGS_VERTEX_COUNT_OFFSET = 0u;
@@ -334,31 +335,6 @@ bool LightSphereCulling(const VividGPUCullingContext cullingContext, const float
     return DoLightSphereCulling(cullingContext.CullingSphereLS, casterBoundingSphereWS, worldToLightSpaceRotation);
 }
 
-float2 GetNormalizedScreenCoordinates(const float4x4 viewProjectionMatrix, const float3 positionWS)
-{
-    float4 clipPosition = mul(viewProjectionMatrix, float4(positionWS, 1.0f));
-    clipPosition.xy /= max(clipPosition.w, 1e-5f);
-    clipPosition.xy = clipPosition.xy * 0.5f + 0.5f;
-    return clipPosition.xy;
-}
-
-float GetScreenBoundRadiusSq(const VividGPULODSelectionContext lodSelectionContext, const float4 boundsWS)
-{
-    const float2 center = GetNormalizedScreenCoordinates(lodSelectionContext.ViewProjectionMatrix, boundsWS.xyz);
-    const float2 up = GetNormalizedScreenCoordinates(
-        lodSelectionContext.ViewProjectionMatrix,
-        boundsWS.xyz + lodSelectionContext.CameraUp.xyz * boundsWS.w
-    );
-    const float2 right = GetNormalizedScreenCoordinates(
-        lodSelectionContext.ViewProjectionMatrix,
-        boundsWS.xyz + lodSelectionContext.CameraRight.xyz * boundsWS.w
-    );
-
-    const float2 screenUp = (up - center) * lodSelectionContext.ScreenSizePixels;
-    const float2 screenRight = (right - center) * lodSelectionContext.ScreenSizePixels;
-    return max(dot(screenUp, screenUp), dot(screenRight, screenRight));
-}
-
 uint GetRendererListID(
     const VividInstanceData instanceData,
     const VividMaterialData materialData,
@@ -418,11 +394,12 @@ bool ShouldSelectMeshLODNode(
                (meshLODNode.LevelIndex < forcedMeshLODNodeDepth && isLeaf);
     }
 
-    const float4 boundsWS = TransformSphere(meshLODNode.Bounds, instanceData.ObjectToWorldMatrix);
-    const float4 parentBoundsWS = TransformSphere(meshLODNode.ParentBounds, instanceData.ObjectToWorldMatrix);
-    const float error = meshLODNode.Error * GetScreenBoundRadiusSq(lodSelectionContext, boundsWS);
+    const float4x4 localToClip = mul(lodSelectionContext.ViewProjectionMatrix, instanceData.ObjectToWorldMatrix);
+    const float error = meshLODNode.Error * VividLODProjectedSphereRadiusSq(
+        meshLODNode.Bounds, localToClip, lodSelectionContext.ScreenSizePixels);
     const float parentError = meshLODNode.ParentError >= 0.0f
-        ? meshLODNode.ParentError * GetScreenBoundRadiusSq(lodSelectionContext, parentBoundsWS)
+        ? meshLODNode.ParentError * VividLODProjectedSphereRadiusSq(
+            meshLODNode.ParentBounds, localToClip, lodSelectionContext.ScreenSizePixels)
         : 3.402823466e+38f;
     const float threshold = meshLODErrorThreshold * distanceToViewSq * instanceData.LODErrorScale;
     return parentError > threshold && error <= threshold;

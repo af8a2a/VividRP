@@ -75,7 +75,8 @@ cannot pass. The FP32 diagnostic variant keeps the same outward margins.
 Both native FP16 and diagnostic FP32 passed on RTX 5070 Ti with no false frustum,
 cone or occlusion rejections and no rectangle/depth containment failures. The
 shared instance predicate is separately regressed by its existing 41,024 cases.
-This is GPU predicate and compilation evidence. Unity scene rendering, temporal
-occlusion/VSM integration and frame-time improvement still require validation in
-the actual scene; no performance improvement is inferred from the presence of
-FP16 instructions.
+The command also compiles six LOD-build kernels and checks 16,448 parent/child
+LOD selection cases; see `GPUDrivenClusterLOD.md` for the Camera_1 roof gap fix
+and its live D3D12 GameView verification. These checks do not establish general
+temporal occlusion/VSM integration or frame-time improvement; no performance
+improvement is inferred from the presence of FP16 instructions.

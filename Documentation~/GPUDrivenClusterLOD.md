@@ -32,11 +32,48 @@ in the local `E:/vk_lod_clusters` reference, based on meshoptimizer's
 This adapts the reference to VividRP's existing level-based representation;
 it does not adopt the reference's asynchronous iteration or independent terminal
 groups. Import settings remain relative error tolerances. Vertex quantization
-and its serialization changes are described below; LOD selection remains unchanged.
+and its serialization changes are described below. Conservative runtime LOD
+selection is described in the next section.
 
 The builder also retains owning native allocations separately from bounded
 meshlet views, releases retry partitions and list storage, and completes vertex
 write jobs before unpinning managed output buffers.
+
+## Conservative runtime LOD selection
+
+The compact parent bound uses the child's center and an upward-rounded radius
+large enough to contain the original parent sphere. Its projected error must
+therefore never be smaller than the original parent's error. Otherwise the
+parent can request refinement while the child rejects that same refinement,
+leaving missing triangles in the LOD cut.
+
+`VividMeshLODError.hlsli` evaluates the local sphere using the full local-to-clip
+matrix, including nonuniform scale and shear. The radius metric uses the nearest
+clip W of the sphere with an outward FP32 allowance. An enclosing sphere has a
+larger radius and a no-greater nearest W. Spheres touching or crossing W=0 return
+the largest finite radius metric, requesting refinement for nonzero errors;
+zero-error leaves remain selectable without `0 * infinity` producing NaN.
+Orthographic views use the same calculation with constant W. This can select
+finer LODs near large bounds; the error threshold, forced LOD behavior, buffer
+layout and asset format are unchanged. Existing assets do not need a rebake.
+
+The Sponza `Camera_1` roof regression came from projecting radius at the sphere's
+center. Original parent nodes 2722/2723 measured about 1.05 times the threshold,
+but recentered parent bounds for leaves 2727/2728 measured only 0.96/0.84 times
+the threshold. Both sides were rejected. The spheres cross the eye plane; the
+new metric consistently requests refinement. The missing outer roof strip was
+verified restored in the live D3D12 GameView with automatic LOD, frustum, cone
+and HZB culling enabled, at position `(6.181255, 18.638472, -10.503865)`, Euler
+`(43.272297, 304.76556, 1.6177362)`, FOV 60 and clip planes 0.3/1000.
+
+`Tools~/Validate-MeshletCulling.ps1` also compiles all six `MeshletListBuild`
+kernels and runs `MeshLODSelectionProbe.hlsl` through the production selection
+function on D3D12. Its 16,448 deterministic cases include the captured roof
+bounds, perspective/orthographic views, recentered bfloat16 bounds/errors,
+affine scale/shear/reflection, eye-plane crossings, zero-error leaves and forced
+LOD controls. They passed on RTX 5070 Ti with no parent/child cut holes or metric
+containment failures. Coarse and refined controls prevent always selecting the
+finest level from passing. This does not measure frame-time performance.
 
 ## Existing assets
 

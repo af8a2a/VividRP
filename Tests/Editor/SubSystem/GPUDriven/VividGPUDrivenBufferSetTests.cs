@@ -26,7 +26,111 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(32));
-            Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
+        }
+
+        [Test]
+        public void MeshletVertexLayout_HasHlslFieldOffsets()
+        {
+            Assert.That(typeof(VividMeshletVertex).IsLayoutSequential, Is.True);
+            AssertFieldOffset<VividMeshletVertex>(nameof(VividMeshletVertex.PositionXY), 0);
+            AssertFieldOffset<VividMeshletVertex>(nameof(VividMeshletVertex.PositionYZ), 4);
+            AssertFieldOffset<VividMeshletVertex>(nameof(VividMeshletVertex.PositionZUV), 8);
+            AssertFieldOffset<VividMeshletVertex>(nameof(VividMeshletVertex.UVAndFlags), 12);
+            AssertFieldOffset<VividMeshletVertex>(nameof(VividMeshletVertex.TangentFrame), 16);
+        }
+
+        [Test]
+        public void MeshletVertexQuantization_HasBoundedRelativeErrorAndPreservesSpecialValues()
+        {
+            var random = new System.Random(1234);
+            for (int i = 0; i < 10000; i++)
+            {
+                uint bits = (uint) random.Next() | ((i & 1) != 0 ? 0x80000000u : 0u);
+                float value = math.asfloat(bits);
+                float decoded = VividMeshletVertexPacking.DecodeFloat(VividMeshletVertexPacking.EncodeFloat(value));
+                if (float.IsNaN(value)) Assert.That(float.IsNaN(decoded), Is.True);
+                else if (math.abs(value) < math.asfloat(0x00800000u)) Assert.That(decoded, Is.Zero);
+                else if (math.isfinite(value))
+                {
+                    Assert.That(math.isfinite(decoded), Is.True);
+                    Assert.That(math.abs((decoded - value) / value), Is.LessThanOrEqualTo(1f / 65536f));
+                    Assert.That(VividMeshletVertexPacking.EncodeFloat(decoded), Is.EqualTo(VividMeshletVertexPacking.EncodeFloat(value)));
+                }
+            }
+            foreach (float value in new[] { float.NaN, math.asfloat(0x7F800001u), float.PositiveInfinity, float.NegativeInfinity, float.MaxValue, float.MinValue })
+            {
+                float decoded = VividMeshletVertexPacking.DecodeFloat(VividMeshletVertexPacking.EncodeFloat(value));
+                if (float.IsNaN(value)) Assert.That(float.IsNaN(decoded), Is.True);
+                else if (float.IsInfinity(value)) Assert.That(decoded, Is.EqualTo(value));
+                else Assert.That(math.isfinite(decoded), Is.True);
+            }
+        }
+
+        [Test]
+        public void MeshletVertexQuantization_SettersPreserveOtherBitFields()
+        {
+            var vertex = VividMeshletVertexPacking.Pack(new float3(12.123f, -34.321f, 56.987f),
+                new float3(0, 0, 1), new float4(1, 0, 0, -1), new float2(-9.876f, 1234.567f));
+            uint frame = vertex.TangentFrame;
+            uint flags = vertex.UVAndFlags & 0xE0000000u;
+            float2 uv = vertex.UV;
+            vertex.Position = new float3(-654.123f, 0.00321f, 76.987f);
+            Assert.That(vertex.UV, Is.EqualTo(uv));
+            float3 position = vertex.Position;
+            vertex.UV = new float2(0.12345f, -0.67891f);
+            Assert.That(vertex.Position, Is.EqualTo(position));
+            Assert.That(vertex.TangentFrame, Is.EqualTo(frame));
+            Assert.That(vertex.UVAndFlags & 0xE0000000u, Is.EqualTo(flags));
+        }
+
+        [Test]
+        public void MeshletVertexQuantization_ExpandsRendererBoundsConservatively()
+        {
+            var random = new System.Random(4312);
+            for (int sample = 0; sample < 2500; sample++)
+            {
+                float scale = math.exp2(sample % 41 - 20);
+                var source = new Bounds(new Vector3((float) random.NextDouble() - 0.5f,
+                        (float) random.NextDouble() - 0.5f, (float) random.NextDouble() - 0.5f) * scale,
+                    new Vector3((float) random.NextDouble(), (float) random.NextDouble(),
+                        (float) random.NextDouble()) * scale);
+                Bounds expanded = VividMeshletVertexPacking.ExpandBoundsForQuantization(source);
+                for (int i = 0; i < 8; i++)
+                {
+                    var p = new float3((i & 1) == 0 ? source.min.x : source.max.x,
+                        (i & 2) == 0 ? source.min.y : source.max.y,
+                        (i & 4) == 0 ? source.min.z : source.max.z);
+                    float3 q = VividMeshletVertexPacking.QuantizePosition(p);
+                    Assert.That(math.all(q >= (float3) expanded.min) && math.all(q <= (float3) expanded.max), Is.True);
+                    Assert.That(math.all(p >= (float3) expanded.min) && math.all(p <= (float3) expanded.max), Is.True);
+                }
+            }
+        }
+
+        [Test]
+        public void MeshletVertexQuantization_StableCallsAllocateNothing()
+        {
+            var position = new float3(1.234f, 5.678f, -9.1011f);
+            var normal = new float3(0, 0, -1);
+            var tangent = new float4(1, 0, 0, -1);
+            var uv = new float2(0.123f, -6.789f);
+            var bounds = new Bounds(Vector3.one, Vector3.one * 3f);
+            float sum = 0;
+            for (int i = 0; i < 32; i++)
+            {
+                sum += VividMeshletVertexPacking.UnpackTangent(VividMeshletVertexPacking.Pack(position, normal, tangent, uv)).x;
+                sum += VividMeshletVertexPacking.ExpandBoundsForQuantization(bounds).extents.x;
+            }
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++)
+            {
+                sum += VividMeshletVertexPacking.UnpackTangent(VividMeshletVertexPacking.Pack(position, normal, tangent, uv)).x;
+                sum += VividMeshletVertexPacking.ExpandBoundsForQuantization(bounds).extents.x;
+            }
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Assert.That(math.isfinite(sum), Is.True);
         }
 
         [Test]
@@ -335,7 +439,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MeshletVertexPacking_PreservesLosslessFieldsAndDirectionPrecision()
+        public void MeshletVertexPacking_QuantizesFieldsAndPreservesDirectionPrecision()
         {
             var random = new System.Random(918273);
             var position = new float3(-1234.125f, 0.0009765625f, 87654.5f);
@@ -344,7 +448,7 @@ namespace VividRP.Editor.Tests
             for (int index = 0; index < 4096; index++)
             {
                 float3 normal = NextUnitVector(random);
-                float3 tangentDirection = NextUnitVector(random);
+                float3 tangentDirection = math.normalizesafe(math.cross(normal, NextUnitVector(random)));
                 float handedness = (index & 1) == 0 ? 1.0f : -1.0f;
                 VividMeshletVertex packed = VividMeshletVertexPacking.Pack(
                     position,
@@ -353,16 +457,18 @@ namespace VividRP.Editor.Tests
                     uv
                 );
 
-                Assert.That(math.all(math.asuint(packed.Position) == math.asuint(position)), Is.True);
-                Assert.That(math.all(math.asuint(packed.UV) == math.asuint(uv)), Is.True);
+                Assert.That(math.all(math.asuint(packed.Position) == math.asuint(VividMeshletVertexPacking.QuantizePosition(position))), Is.True);
+                Assert.That(math.all(math.asuint(packed.UV) == math.asuint(new float2(
+                    VividMeshletVertexPacking.DecodeFloat(VividMeshletVertexPacking.EncodeFloat(uv.x)),
+                    VividMeshletVertexPacking.DecodeFloat(VividMeshletVertexPacking.EncodeFloat(uv.y))))), Is.True);
                 Assert.That(packed.Reserved, Is.Zero);
 
-                float3 decodedNormal = VividMeshletVertexPacking.UnpackNormal(packed.PackedNormal);
-                float4 decodedTangent = VividMeshletVertexPacking.UnpackTangent(packed.PackedTangent);
-                Assert.That(DirectionErrorDegrees(normal, decodedNormal), Is.LessThanOrEqualTo(0.02f));
+                float3 decodedNormal = VividMeshletVertexPacking.UnpackNormal(packed);
+                float4 decodedTangent = VividMeshletVertexPacking.UnpackTangent(packed);
+                Assert.That(DirectionErrorDegrees(normal, decodedNormal), Is.LessThanOrEqualTo(0.1f));
                 Assert.That(
                     DirectionErrorDegrees(tangentDirection, decodedTangent.xyz),
-                    Is.LessThanOrEqualTo(0.02f)
+                    Is.LessThanOrEqualTo(0.5f)
                 );
                 Assert.That(decodedTangent.w, Is.EqualTo(handedness));
             }
@@ -380,8 +486,8 @@ namespace VividRP.Editor.Tests
 
             Assert.That(packed.PackedNormal, Is.Zero);
             Assert.That(packed.PackedTangent, Is.Zero);
-            Assert.That(VividMeshletVertexPacking.UnpackNormal(packed.PackedNormal), Is.EqualTo(float3.zero));
-            Assert.That(VividMeshletVertexPacking.UnpackTangent(packed.PackedTangent), Is.EqualTo(float4.zero));
+            Assert.That(VividMeshletVertexPacking.UnpackNormal(packed), Is.EqualTo(float3.zero));
+            Assert.That(VividMeshletVertexPacking.UnpackTangent(packed), Is.EqualTo(float4.zero));
         }
 
         [Test]
@@ -461,7 +567,7 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.MeshLODNodesBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletsBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SharedVertexBuffer.count, Is.EqualTo(1));
-            Assert.That(bufferSet.SharedVertexBuffer.stride, Is.EqualTo(32));
+            Assert.That(bufferSet.SharedVertexBuffer.stride, Is.EqualTo(20));
             Assert.That(bufferSet.SharedIndexBuffer.count, Is.EqualTo(1));
             // Exercise the upload itself, not the unchanged-data skip path.
             bufferSet.Upload(sceneData);

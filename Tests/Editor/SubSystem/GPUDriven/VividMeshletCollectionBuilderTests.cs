@@ -68,6 +68,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Generate_QuantizesBeforeClusteringAndKeepsBoundsConservative()
+        {
+            Mesh mesh = CreateGridMesh(20, 20);
+            var asset = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+            try
+            {
+                Vector3[] positions = mesh.vertices;
+                var quantized = new System.Collections.Generic.HashSet<Vector3>();
+                for (int i = 0; i < positions.Length; i++)
+                {
+                    positions[i] = positions[i] * 0.1234567f + new Vector3(123.4567f, -23.4567f, 34.5678f);
+                    quantized.Add(VividMeshletVertexPacking.QuantizePosition(positions[i]));
+                }
+                mesh.vertices = positions;
+                mesh.RecalculateBounds();
+                VividMeshletCollectionBuilder.Generate(asset, CreateParameters(mesh));
+                Assert.That(asset.Meshlets, Is.Not.Empty);
+                foreach (VividMeshlet meshlet in asset.Meshlets)
+                {
+                    for (uint i = 0; i < meshlet.VertexCount; i++)
+                    {
+                        Unity.Mathematics.float3 p = asset.VertexBuffer[meshlet.VertexOffset + i].Position;
+                        Assert.That(quantized.Contains(p), Is.True, "LOD output must retain the shared quantized position grid.");
+                        Assert.That(asset.Bounds.Contains(p), Is.True);
+                        Assert.That(Unity.Mathematics.math.distance(p, meshlet.BoundingSphere.xyz),
+                            Is.LessThanOrEqualTo(meshlet.BoundingSphere.w + 1e-5f));
+                    }
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
         public void Generate_PreserveFinestLODLevels_KeepsOriginalLeafMeshletsWhenTruncated()
         {
             Mesh mesh = CreateGridMesh(64, 64);

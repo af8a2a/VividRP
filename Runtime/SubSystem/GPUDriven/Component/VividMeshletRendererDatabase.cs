@@ -575,7 +575,7 @@ namespace VividRP.Runtime.GPUDriven
             bool isValid = meshletRenderer.TryValidateGeometryBindings(out _);
             Matrix4x4 objectToWorldMatrix = meshletRenderer.transform.localToWorldMatrix;
             Matrix4x4 worldToObjectMatrix = meshletRenderer.transform.worldToLocalMatrix;
-            Bounds localBounds = sourceMesh != null ? sourceMesh.bounds : default;
+            Bounds localBounds = meshletRenderer.localBounds;
             Bounds worldBounds = TransformBounds(localBounds, objectToWorldMatrix);
             int materialCount = meshletRenderer.sourceMaterials.Count;
 
@@ -678,12 +678,12 @@ namespace VividRP.Runtime.GPUDriven
         {
             IReadOnlyList<VividTerrainChunkData> chunks = terrainData?.Chunks;
             if (chunks == null || chunks.Count == 0)
-                return terrainData != null ? terrainData.LocalBounds : default;
+                return terrainData != null ? VividMeshletVertexPacking.ExpandBoundsForQuantization(terrainData.LocalBounds) : default;
 
             Bounds localBounds = chunks[0].LocalBounds;
             for (int chunkIndex = 1; chunkIndex < chunks.Count; chunkIndex++)
                 localBounds.Encapsulate(chunks[chunkIndex].LocalBounds);
-            return localBounds;
+            return VividMeshletVertexPacking.ExpandBoundsForQuantization(localBounds);
         }
 
         private static VividMeshletRendererResources CreateTerrainResources(VividTerrain terrain)
@@ -706,7 +706,7 @@ namespace VividRP.Runtime.GPUDriven
             for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
             {
                 meshletCollections[chunkIndex] = chunks[chunkIndex].MeshletCollection;
-                localBounds[chunkIndex] = chunks[chunkIndex].LocalBounds;
+                localBounds[chunkIndex] = VividMeshletVertexPacking.ExpandBoundsForQuantization(chunks[chunkIndex].LocalBounds);
             }
 
             return new VividMeshletRendererResources(

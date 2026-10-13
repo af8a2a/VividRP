@@ -88,7 +88,9 @@ namespace VividRP.Runtime.GPUDriven
 
         public int subMeshCount => m_SourceMesh != null ? Mathf.Max(1, m_SourceMesh.subMeshCount) : 0;
 
-        public Bounds localBounds => m_SourceMesh != null ? m_SourceMesh.bounds : default;
+        public Bounds localBounds => m_SourceMesh != null
+            ? VividMeshletVertexPacking.ExpandBoundsForQuantization(m_SourceMesh.bounds)
+            : default;
 
         public bool RefreshSource()
         {

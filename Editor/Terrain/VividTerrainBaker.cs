@@ -175,7 +175,7 @@ namespace VividRP.Editor.TerrainTools
                         );
 
                         VividMeshletCollectionAsset meshletCollection = null;
-                        Bounds chunkBounds = mesh.bounds;
+                        Bounds chunkBounds = VividMeshletVertexPacking.ExpandBoundsForQuantization(mesh.bounds);
                         try
                         {
                             if (mesh.GetIndexCount(0) > 0)

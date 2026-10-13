@@ -47,7 +47,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 throw new InvalidOperationException($"Submesh {subMeshIndex} on mesh '{parameters.Mesh.name}' has no indices.");
             }
 
-            meshletCollection.Bounds = subMeshDescriptor.bounds;
+            meshletCollection.Bounds = VividMeshletVertexPacking.ExpandBoundsForQuantization(subMeshDescriptor.bounds);
 
             int positionStream = data.GetVertexAttributeStream(VertexAttribute.Position);
             if (positionStream < 0)
@@ -58,6 +58,18 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             uint positionStride = (uint) data.GetVertexBufferStride(positionStream);
             uint positionOffset = (uint) data.GetVertexAttributeOffset(VertexAttribute.Position);
             NativeArray<float> positionData = data.GetVertexData<float>(positionStream);
+
+            using var quantizedPositions = new NativeArray<float>(data.vertexCount * 3, Allocator.TempJob);
+            float3* quantizedPositionPtr = (float3*) quantizedPositions.GetUnsafePtr();
+            byte* originalPositionPtr = (byte*) positionData.GetUnsafeReadOnlyPtr() + positionOffset;
+            for (int i = 0; i < data.vertexCount; i++)
+            {
+                quantizedPositionPtr[i] = VividMeshletVertexPacking.QuantizePosition(
+                    *(float3*) (originalPositionPtr + i * positionStride));
+            }
+            positionData = quantizedPositions;
+            positionOffset = 0;
+            positionStride = 12;
 
             int normalStream = data.GetVertexAttributeStream(VertexAttribute.Normal);
             NativeArray<float> normalData = normalStream >= 0 ? data.GetVertexData<float>(normalStream) : default;

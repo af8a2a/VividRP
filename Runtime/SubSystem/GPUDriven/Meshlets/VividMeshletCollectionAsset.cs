@@ -156,6 +156,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     out m_VertexBuffer,
                     out m_IndexBuffer
                 );
+                if (m_MeshDataSerializationVersion < VividMeshletCollectionBinarySerializer.CurrentVersion)
+                {
+                    Bounds = VividMeshletVertexPacking.ExpandBoundsForQuantization(Bounds);
+                }
             }
             catch (Exception exception)
             {

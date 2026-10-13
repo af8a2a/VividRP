@@ -786,52 +786,175 @@ namespace VividRP.Runtime.GPUDriven
     [Serializable]
     public struct VividMeshletVertex
     {
-        public float PositionX;
-        public float PositionY;
-        public float PositionZ;
-        public uint PackedNormal;
-        public uint PackedTangent;
-        public float2 UV;
-        public uint Reserved;
+        // Five 25-bit floats (sign/exponent/16-bit mantissa), two validity flags,
+        // and a 22-bit octahedral normal + 10-bit tangent angle/handedness.
+        public uint PositionXY;
+        public uint PositionYZ;
+        public uint PositionZUV;
+        public uint UVAndFlags;
+        public uint TangentFrame;
 
         public float3 Position
         {
-            readonly get => new(PositionX, PositionY, PositionZ);
+            readonly get => new(
+                VividMeshletVertexPacking.DecodeFloat(PositionXY),
+                VividMeshletVertexPacking.DecodeFloat((PositionXY >> 25) | (PositionYZ << 7)),
+                VividMeshletVertexPacking.DecodeFloat((PositionYZ >> 18) | (PositionZUV << 14)));
             set
             {
-                PositionX = value.x;
-                PositionY = value.y;
-                PositionZ = value.z;
+                uint x = VividMeshletVertexPacking.EncodeFloat(value.x);
+                uint y = VividMeshletVertexPacking.EncodeFloat(value.y);
+                uint z = VividMeshletVertexPacking.EncodeFloat(value.z);
+                PositionXY = x | (y << 25);
+                PositionYZ = (y >> 7) | (z << 18);
+                PositionZUV = (PositionZUV & 0xFFFFF800u) | (z >> 14);
             }
         }
+
+        public float2 UV
+        {
+            readonly get => new(
+                VividMeshletVertexPacking.DecodeFloat((PositionZUV >> 11) | (UVAndFlags << 21)),
+                VividMeshletVertexPacking.DecodeFloat(UVAndFlags >> 4));
+            set
+            {
+                uint u = VividMeshletVertexPacking.EncodeFloat(value.x);
+                uint v = VividMeshletVertexPacking.EncodeFloat(value.y);
+                PositionZUV = (PositionZUV & 0x7FFu) | (u << 11);
+                UVAndFlags = (UVAndFlags & 0xE0000000u) | (u >> 21) | (v << 4);
+            }
+        }
+
+        // Compatibility accessors for CPU consumers of the former 32-byte vertex.
+        public float PositionX { readonly get => Position.x; set { float3 p = Position; p.x = value; Position = p; } }
+        public float PositionY { readonly get => Position.y; set { float3 p = Position; p.y = value; Position = p; } }
+        public float PositionZ { readonly get => Position.z; set { float3 p = Position; p.z = value; Position = p; } }
+        public readonly uint PackedNormal => VividMeshletVertexPacking.PackNormal(VividMeshletVertexPacking.UnpackNormal(this));
+        public readonly uint PackedTangent => VividMeshletVertexPacking.PackTangent(VividMeshletVertexPacking.UnpackTangent(this));
+        public readonly uint Reserved => 0u;
     }
 
     public static class VividMeshletVertexPacking
     {
+        // Legacy oct15 helpers remain available for v1-v4 conversion and CPU compatibility.
         public const uint OctahedralComponentMask = 0x7FFFu;
         public const uint NormalValidBit = 1u << 30;
         public const uint TangentNegativeHandednessBit = 1u << 30;
         public const uint TangentValidBit = 1u << 31;
+        public const uint QuantizedNormalValidBit = 1u << 29;
+        public const uint QuantizedTangentValidBit = 1u << 30;
+        public const uint FloatMask = 0x1FFFFFFu;
+        public const int DroppedMantissaBits = 7;
 
         private const float DirectionLengthSquaredEpsilon = 1e-20f;
         private const float OctahedralComponentMaximum = OctahedralComponentMask;
 
-        public static VividMeshletVertex Pack(
-            float3 position,
-            float3 normal,
-            float4 tangent,
-            float2 uv)
+        public static uint EncodeFloat(float value)
         {
-            return new VividMeshletVertex
+            uint bits = math.asuint(value);
+            uint magnitude = bits & 0x7FFFFFFFu;
+            if (magnitude < 0x00800000u) return 0u; // reference flushes denormals and signed zero
+            if (magnitude > 0x7F800000u) return 0xFF8001u; // canonical NaN survives truncation
+            if (magnitude == 0x7F800000u) return bits >> DroppedMantissaBits;
+            // Round to 16 mantissa bits; keep finite extremes finite.
+            uint rounded = math.min((magnitude + 64u) & 0xFFFFFF80u, 0x7F7FFF80u);
+            return (rounded | (bits & 0x80000000u)) >> DroppedMantissaBits;
+        }
+
+        public static float DecodeFloat(uint bits) => math.asfloat((bits & FloatMask) << DroppedMantissaBits);
+        public static float3 QuantizePosition(float3 value) => new(
+            DecodeFloat(EncodeFloat(value.x)), DecodeFloat(EncodeFloat(value.y)), DecodeFloat(EncodeFloat(value.z)));
+
+        public static Bounds ExpandBoundsForQuantization(Bounds bounds)
+        {
+            float3 lo = bounds.min;
+            float3 hi = bounds.max;
+            float3 center = bounds.center;
+            float3 extents = math.max((float3) bounds.extents,
+                math.max(math.abs(QuantizePosition(lo) - center), math.abs(QuantizePosition(hi) - center)));
+            // Round outward by one ULP: center/extent reconstruction must not shrink
+            // a rounded endpoint back inside the quantized geometry.
+            bounds.extents = (Vector3) math.asfloat(math.asuint(extents) + new uint3(1u));
+            return bounds;
+        }
+
+        public static VividMeshletVertex Pack(float3 position, float3 normal, float4 tangent, float2 uv)
+        {
+            var vertex = new VividMeshletVertex { Position = position, UV = uv };
+            bool normalValid = TryPackDirection(normal, out _);
+            bool tangentValid = TryPackDirection(tangent.xyz, out _);
+            if (normalValid)
             {
-                PositionX = position.x,
-                PositionY = position.y,
-                PositionZ = position.z,
-                PackedNormal = PackNormal(normal),
-                PackedTangent = PackTangent(tangent),
-                UV = uv,
-                Reserved = 0u,
-            };
+                vertex.UVAndFlags |= QuantizedNormalValidBit;
+                normal = math.normalize(normal);
+                float2 oct = normal.xy / math.csum(math.abs(normal));
+                if (normal.z < 0) oct = (1 - math.abs(oct.yx)) * SignNotZero(oct);
+                // Search the four neighboring oct11 points, as in vk_lod_clusters' precise encoder.
+                float2 scaled = math.saturate(oct * 0.5f + 0.5f) * 2047f;
+                uint2 lo = (uint2) math.floor(scaled);
+                float best = -2f;
+                for (uint i = 0; i < 4; i++)
+                {
+                    uint2 q = math.min(lo + new uint2(i & 1, i >> 1), new uint2(2047));
+                    uint packed = q.x | (q.y << 11);
+                    float score = math.dot(normal, UnpackNormal11(packed));
+                    if (score > best) { best = score; vertex.TangentFrame = packed; }
+                }
+                if (tangentValid)
+                {
+                    // Use the decoded normal for both encoder and decoder's basis.
+                    float3 decodedNormal = UnpackNormal11(vertex.TangentFrame);
+                    BuildTangentBasis(decodedNormal, out float3 t, out float3 b);
+                    float angle = math.atan2(math.dot(t, tangent.xyz), math.dot(b, tangent.xyz));
+                    uint angleBits = (uint) math.floor(math.saturate(angle / math.PI * 0.5f + 0.5f) * 511f + 0.5f);
+                    uint frame = (angleBits << 1) | (tangent.w < 0 ? 0u : 1u);
+                    vertex.TangentFrame |= frame << 22;
+                }
+            }
+            else if (tangentValid)
+            {
+                // No normal: the whole word stores a standalone oct15 tangent.
+                vertex.TangentFrame = PackTangent(tangent);
+            }
+            if (tangentValid) vertex.UVAndFlags |= QuantizedTangentValidBit;
+            return vertex;
+        }
+
+        public static float3 UnpackNormal(in VividMeshletVertex vertex) =>
+            (vertex.UVAndFlags & QuantizedNormalValidBit) != 0 ? UnpackNormal11(vertex.TangentFrame) : default;
+
+        public static float4 UnpackTangent(in VividMeshletVertex vertex)
+        {
+            if ((vertex.UVAndFlags & QuantizedTangentValidBit) == 0) return default;
+            if ((vertex.UVAndFlags & QuantizedNormalValidBit) == 0) return UnpackTangent(vertex.TangentFrame);
+            BuildTangentBasis(UnpackNormal11(vertex.TangentFrame), out float3 t, out float3 b);
+            uint frame = vertex.TangentFrame >> 22;
+            float angle = ((frame >> 1) / 511f * 2f - 1f) * math.PI;
+            math.sincos(angle, out float sine, out float cosine);
+            return new float4(cosine * b + sine * t, (frame & 1) != 0 ? 1f : -1f);
+        }
+
+        private static float3 UnpackNormal11(uint packed)
+        {
+            float2 oct = new float2(packed & 2047u, (packed >> 11) & 2047u) / 2047f * 2f - 1f;
+            float3 n = new(oct, 1f - math.csum(math.abs(oct)));
+            float fold = math.saturate(-n.z);
+            n.xy -= SignNotZero(n.xy) * fold;
+            return math.normalizesafe(n);
+        }
+
+        private static void BuildTangentBasis(float3 normal, out float3 tangent, out float3 bitangent)
+        {
+            if (normal.z < -0.99998796f)
+            {
+                tangent = new float3(0, -1, 0);
+                bitangent = new float3(-1, 0, 0);
+                return;
+            }
+            float a = 1f / (1f + normal.z);
+            float b = -normal.x * normal.y * a;
+            tangent = new float3(1f - normal.x * normal.x * a, b, -normal.x);
+            bitangent = new float3(b, 1f - normal.y * normal.y * a, -normal.y);
         }
 
         public static uint PackNormal(float3 normal)

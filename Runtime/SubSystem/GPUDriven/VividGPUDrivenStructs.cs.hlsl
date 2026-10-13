@@ -318,13 +318,11 @@ struct VividMeshletRenderRequestPacked
 // PackingRules = Exact
 struct VividMeshletVertex
 {
-    float PositionX;
-    float PositionY;
-    float PositionZ;
-    uint PackedNormal;
-    uint PackedTangent;
-    float2 UV;
-    uint Reserved;
+    uint PositionXY;
+    uint PositionYZ;
+    uint PositionZUV;
+    uint UVAndFlags;
+    uint TangentFrame;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMeshLODNode

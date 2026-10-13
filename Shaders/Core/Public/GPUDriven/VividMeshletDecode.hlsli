@@ -113,25 +113,71 @@ VividDecodedMeshLODNode DecodeVividMeshLODNode(const VividMeshLODNode packedNode
     return node;
 }
 
+// v5 resident vertex: five uints / 20 bytes. Float payloads retain sign, exponent,
+// and 16 mantissa bits. Shared positions decode identically across all clusters.
+float DecodeVividMeshletFloat25(uint bits)
+{
+    return asfloat((bits & 0x1FFFFFFu) << 7);
+}
+
+float3 DecodeVividMeshletPosition(VividMeshletVertex vertex)
+{
+    return float3(DecodeVividMeshletFloat25(vertex.PositionXY),
+        DecodeVividMeshletFloat25((vertex.PositionXY >> 25) | (vertex.PositionYZ << 7)),
+        DecodeVividMeshletFloat25((vertex.PositionYZ >> 18) | (vertex.PositionZUV << 14)));
+}
+
+float2 DecodeVividMeshletUV(VividMeshletVertex vertex)
+{
+    return float2(DecodeVividMeshletFloat25((vertex.PositionZUV >> 11) | (vertex.UVAndFlags << 21)),
+        DecodeVividMeshletFloat25(vertex.UVAndFlags >> 4));
+}
+
+float3 DecodeVividMeshletNormal(VividMeshletVertex vertex)
+{
+    if ((vertex.UVAndFlags & (1u << 29)) == 0u) return 0.0f;
+    float2 oct = float2(vertex.TangentFrame & 2047u, (vertex.TangentFrame >> 11) & 2047u) / 2047.0f * 2.0f - 1.0f;
+    float3 normal = float3(oct, 1.0f - abs(oct.x) - abs(oct.y));
+    normal.xy -= (step(0.0f, normal.xy) * 2.0f - 1.0f) * saturate(-normal.z);
+    return normalize(normal);
+}
+
+float4 DecodeVividMeshletTangent(VividMeshletVertex vertex)
+{
+    if ((vertex.UVAndFlags & (1u << 30)) == 0u) return 0.0f;
+    if ((vertex.UVAndFlags & (1u << 29)) == 0u)
+    {
+        return float4(DecodeVividMeshletOctahedral15(vertex.TangentFrame),
+            (vertex.TangentFrame & VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT) != 0u ? -1.0f : 1.0f);
+    }
+    float3 normal = DecodeVividMeshletNormal(vertex);
+    float3 tangent, bitangent;
+    if (normal.z < -0.99998796f)
+    {
+        tangent = float3(0, -1, 0);
+        bitangent = float3(-1, 0, 0);
+    }
+    else
+    {
+        float a = 1.0f / (1.0f + normal.z);
+        float b = -normal.x * normal.y * a;
+        tangent = float3(1.0f - normal.x * normal.x * a, b, -normal.x);
+        bitangent = float3(b, 1.0f - normal.y * normal.y * a, -normal.y);
+    }
+    uint frame = vertex.TangentFrame >> 22;
+    float angle = ((frame >> 1) / 511.0f * 2.0f - 1.0f) * 3.14159265358979323846f;
+    float sine, cosine;
+    sincos(angle, sine, cosine);
+    return float4(cosine * bitangent + sine * tangent, (frame & 1u) != 0u ? 1.0f : -1.0f);
+}
+
 VividDecodedMeshletVertex DecodeVividMeshletVertex(const VividMeshletVertex packedVertex)
 {
     VividDecodedMeshletVertex vertex;
-    vertex.Position = float4(
-        packedVertex.PositionX,
-        packedVertex.PositionY,
-        packedVertex.PositionZ,
-        1.0f);
-    vertex.Normal = (packedVertex.PackedNormal & VIVID_MESHLET_NORMAL_VALID_BIT) != 0u
-        ? float4(DecodeVividMeshletOctahedral15(packedVertex.PackedNormal), 0.0f)
-        : 0.0f;
-    vertex.Tangent = (packedVertex.PackedTangent & VIVID_MESHLET_TANGENT_VALID_BIT) != 0u
-        ? float4(
-            DecodeVividMeshletOctahedral15(packedVertex.PackedTangent),
-            (packedVertex.PackedTangent & VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT) != 0u
-                ? -1.0f
-                : 1.0f)
-        : 0.0f;
-    vertex.UV = float4(packedVertex.UV, 0.0f, 0.0f);
+    vertex.Position = float4(DecodeVividMeshletPosition(packedVertex), 1.0f);
+    vertex.Normal = float4(DecodeVividMeshletNormal(packedVertex), 0.0f);
+    vertex.Tangent = DecodeVividMeshletTangent(packedVertex);
+    vertex.UV = float4(DecodeVividMeshletUV(packedVertex), 0.0f, 0.0f);
     return vertex;
 }
 

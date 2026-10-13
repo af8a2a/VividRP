@@ -153,26 +153,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             float3 GetPositionOS(const VividMeshletVertex vertex)
             {
-                return float3(vertex.PositionX, vertex.PositionY, vertex.PositionZ);
-            }
-
-            float3 DecodeVertexNormalOS(const uint packedNormal)
-            {
-                return (packedNormal & VIVID_MESHLET_NORMAL_VALID_BIT) != 0u
-                    ? DecodeVividMeshletOctahedral15(packedNormal)
-                    : 0.0f;
-            }
-
-            float4 DecodeVertexTangentOS(const uint packedTangent)
-            {
-                if ((packedTangent & VIVID_MESHLET_TANGENT_VALID_BIT) == 0u)
-                    return 0.0f;
-
-                return float4(
-                    DecodeVividMeshletOctahedral15(packedTangent),
-                    (packedTangent & VIVID_MESHLET_TANGENT_NEGATIVE_HANDEDNESS_BIT) != 0u
-                        ? -1.0f
-                        : 1.0f);
+                return DecodeVividMeshletPosition(vertex);
             }
 
             InterpolatedUV InterpolateUV(
@@ -183,14 +164,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 const float3 u = InterpolateWithBarycentric(
                     barycentric,
-                    vertex0.UV.x,
-                    vertex1.UV.x,
-                    vertex2.UV.x);
+                    DecodeVividMeshletUV(vertex0).x,
+                    DecodeVividMeshletUV(vertex1).x,
+                    DecodeVividMeshletUV(vertex2).x);
                 const float3 v = InterpolateWithBarycentric(
                     barycentric,
-                    vertex0.UV.y,
-                    vertex1.UV.y,
-                    vertex2.UV.y);
+                    DecodeVividMeshletUV(vertex0).y,
+                    DecodeVividMeshletUV(vertex1).y,
+                    DecodeVividMeshletUV(vertex2).y);
 
                 InterpolatedUV result;
                 result.uv = float2(u.x, v.x);
@@ -369,13 +350,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 nativeInputs = (VividOpenPBROpaqueInputs)0;
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
                 const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex0.PackedNormal)),
+                    SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex0)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const float3 vertexNormalWS1 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex1.PackedNormal)),
+                    SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex1)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const float3 vertexNormalWS2 = normalFlipSign * TransformInstanceObjectToWorldNormal(
-                    SafeNormalize(DecodeVertexNormalOS(triangleData.vertex2.PackedNormal)),
+                    SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex2)),
                     triangleData.instanceData.WorldToObjectMatrix);
                 const VividBarycentricDerivatives barycentricVertexNormalWS =
                     InterpolateWithBarycentric(
@@ -393,9 +374,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
                 const float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
                     barycentric,
-                    DecodeVertexTangentOS(triangleData.vertex0.PackedTangent),
-                    DecodeVertexTangentOS(triangleData.vertex1.PackedTangent),
-                    DecodeVertexTangentOS(triangleData.vertex2.PackedTangent));
+                    DecodeVividMeshletTangent(triangleData.vertex0),
+                    DecodeVividMeshletTangent(triangleData.vertex1),
+                    DecodeVividMeshletTangent(triangleData.vertex2));
                 float3 tangentWS = TransformInstanceObjectToWorldDir(
                     tangentOS.xyz,
                     triangleData.instanceData.ObjectToWorldMatrix,

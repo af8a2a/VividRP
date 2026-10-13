@@ -45,7 +45,7 @@ namespace VividRP.Editor.Tests
             VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out _, out _, out var second, out var indices);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             // Only the owned vertex/index arrays and small reader/stream objects remain.
-            Assert.That(allocated, Is.LessThan(vertices.Length * 32L + 4096));
+            Assert.That(allocated, Is.LessThan(vertices.Length * 20L + 4096));
             Assert.That(first, Is.Not.SameAs(second));
             first[0].Position = new float3(4, 5, 6);
             Assert.That(second[0].Position, Is.EqualTo(vertices[0].Position));
@@ -221,10 +221,10 @@ namespace VividRP.Editor.Tests
             Assert.That(vertices[0].UV, Is.EqualTo(legacyVertex.UV.xy));
             Assert.That(
                 DirectionErrorDegrees(legacyVertex.Normal.xyz, VividMeshletVertexPacking.UnpackNormal(vertices[0].PackedNormal)),
-                Is.LessThanOrEqualTo(0.02f)
+                Is.LessThanOrEqualTo(0.5f)
             );
             float4 tangent = VividMeshletVertexPacking.UnpackTangent(vertices[0].PackedTangent);
-            Assert.That(DirectionErrorDegrees(legacyVertex.Tangent.xyz, tangent.xyz), Is.LessThanOrEqualTo(0.02f));
+            Assert.That(DirectionErrorDegrees(math.normalize(legacyVertex.Tangent.xyz - math.normalize(legacyVertex.Normal.xyz) * math.dot(math.normalize(legacyVertex.Normal.xyz), legacyVertex.Tangent.xyz)), tangent.xyz), Is.LessThanOrEqualTo(0.5f));
             Assert.That(tangent.w, Is.EqualTo(-1.0f));
             Assert.That(vertices[0].Reserved, Is.Zero);
             CollectionAssert.AreEqual(new byte[] { 0, 1, 2 }, indices);
@@ -278,7 +278,15 @@ namespace VividRP.Editor.Tests
             Assert.That(nodes[0].MeshletStartIndex, Is.EqualTo(77u));
             Assert.That(meshlets, Has.Length.EqualTo(1));
             Assert.That(meshlets[0].VertexCount, Is.EqualTo(33u));
-            CollectionAssert.AreEqual(new[] { packedVertex }, vertices);
+            Assert.That(vertices, Has.Length.EqualTo(1));
+            Assert.That(vertices[0].Position, Is.EqualTo(packedVertex.Position));
+            Assert.That(vertices[0].UV, Is.EqualTo(packedVertex.UV));
+            Assert.That(DirectionErrorDegrees(VividMeshletVertexPacking.UnpackNormal(packedVertex),
+                VividMeshletVertexPacking.UnpackNormal(vertices[0])), Is.LessThan(0.1f));
+            Assert.That(DirectionErrorDegrees(VividMeshletVertexPacking.UnpackTangent(packedVertex).xyz,
+                VividMeshletVertexPacking.UnpackTangent(vertices[0]).xyz), Is.LessThan(0.5f));
+            Assert.That(VividMeshletVertexPacking.UnpackTangent(vertices[0]).w,
+                Is.EqualTo(VividMeshletVertexPacking.UnpackTangent(packedVertex).w));
             CollectionAssert.AreEqual(new byte[] { 0, 1, 2 }, indices);
         }
 
@@ -375,6 +383,56 @@ namespace VividRP.Editor.Tests
                 Array.Empty<byte>());
 
             Assert.That(version4Blob.Length, Is.LessThan(version3Blob.Length));
+        }
+
+        [Test]
+        public void Deserialize_Version4Quantization_ExpandsBoundsAndDisablesStaleCones()
+        {
+            var sourcePosition = new float3(12345.123f, -6789.456f, 2345.678f);
+            var sourceSphere = new float4(sourcePosition, 1f);
+            byte[] payload;
+            using (var stream = new MemoryStream())
+            {
+                using var w = new BinaryWriter(stream, System.Text.Encoding.UTF8, true);
+                w.Write(1); w.Write(1); // level counts
+                w.Write(1); // packed node, 32 bytes
+                WriteFloat4(w, sourceSphere);
+                w.Write(0f); w.Write(0xBF80u); // leaf error, negative parent sentinel
+                w.Write(0u); w.Write(1u); // meshlet start, count/level
+                w.Write(1); // packed meshlet, 32 bytes
+                w.Write(0u); w.Write(0u); w.Write(3u | (1u << 16));
+                w.Write(VividMeshletMetadataPacking.PackMeshlet(0, 0, 3, 1, sourceSphere, new float3(0, 0, 1), 0).PackedCone);
+                WriteFloat4(w, sourceSphere);
+                w.Write(1); // legacy vertex, 32 bytes
+                w.Write(sourcePosition.x); w.Write(sourcePosition.y); w.Write(sourcePosition.z);
+                w.Write(VividMeshletVertexPacking.PackNormal(new float3(0, 0, 1)));
+                w.Write(VividMeshletVertexPacking.PackTangent(new float4(1, 0, 0, -1)));
+                w.Write(0.12345f); w.Write(-0.67891f); w.Write(0u);
+                w.Write(0); // indices are irrelevant to this conversion check
+                payload = stream.ToArray();
+            }
+            byte[] compressed = VividLZ4Codec.Compress(payload);
+            using var blob = new MemoryStream();
+            using var header = new BinaryWriter(blob, System.Text.Encoding.UTF8, true);
+            header.Write(MeshletBlobMagic); header.Write(4u);
+            header.Write(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec);
+            header.Write(payload.Length); header.Write(compressed.Length); header.Write(compressed);
+            VividMeshletCollectionBinarySerializer.Deserialize(blob.ToArray(), out _, out var nodes,
+                out var meshlets, out var vertices, out _);
+            float error = math.distance(sourcePosition, vertices[0].Position);
+            Assert.That(error, Is.GreaterThan(0));
+            Assert.That(vertices[0].Position, Is.EqualTo(VividMeshletVertexPacking.QuantizePosition(sourcePosition)));
+            Assert.That(nodes[0].Bounds.w, Is.GreaterThanOrEqualTo(1f + error));
+            Assert.That(nodes[0].Error, Is.GreaterThanOrEqualTo(error));
+            Assert.That(nodes[0].ParentError, Is.LessThan(0));
+            Assert.That(meshlets[0].BoundingSphere.w, Is.GreaterThanOrEqualTo(1f + error));
+            Assert.That(VividMeshletMetadataPacking.IsConeValid(meshlets[0].PackedCone), Is.False);
+            byte[] migrated = VividMeshletCollectionBinarySerializer.Serialize(new[] { 1 }, nodes, meshlets, vertices, Array.Empty<byte>());
+            VividMeshletCollectionBinarySerializer.Deserialize(migrated, out _, out var reloadedNodes,
+                out var reloadedMeshlets, out var reloadedVertices, out _);
+            CollectionAssert.AreEqual(nodes, reloadedNodes);
+            CollectionAssert.AreEqual(meshlets, reloadedMeshlets);
+            CollectionAssert.AreEqual(vertices, reloadedVertices);
         }
 
         private static byte[] CreateLegacyBlob(

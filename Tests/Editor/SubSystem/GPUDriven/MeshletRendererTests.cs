@@ -33,6 +33,88 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShaderUserValue_UpdatesRenderStateWithoutRebuildingResourcesOrAllocating()
+        {
+            var gameObject = new GameObject("MeshletRenderer_ShaderUserValue");
+            var renderer = gameObject.AddComponent<MeshletRenderer>();
+            var update = (System.Action) typeof(MeshletRenderer)
+                .GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+                .CreateDelegate(typeof(System.Action), renderer);
+            var database = VividMeshletRendererDatabase.instance;
+            try
+            {
+                Assert.That(renderer.GetShaderUserValue(), Is.Zero);
+                update();
+                uint structureRevision = database.StructureRevision;
+                uint resourceRevision = database.ResourceRevision;
+                uint instanceRevision = database.InstanceRevision;
+                renderer.SetShaderUserValue(0xA1234567u);
+                update();
+                Assert.That(database.TryGetRendererData(renderer, out var data), Is.True);
+                Assert.That(data.shaderUserValue, Is.EqualTo(0xA1234567u));
+                Assert.That(database.InstanceRevision, Is.Not.EqualTo(instanceRevision));
+                Assert.That(database.StructureRevision, Is.EqualTo(structureRevision));
+                Assert.That(database.ResourceRevision, Is.EqualTo(resourceRevision));
+
+                instanceRevision = database.InstanceRevision;
+                renderer.SetShaderUserValue(0xA1234567u);
+                update();
+                Assert.That(database.InstanceRevision, Is.EqualTo(instanceRevision));
+
+                for (uint i = 0; i < 32; i++)
+                    renderer.SetShaderUserValue(i);
+                uint lastValue = 0;
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (uint i = 0; i < 1024; i++)
+                {
+                    renderer.SetShaderUserValue(0xA0000000u | i);
+                    lastValue = renderer.GetShaderUserValue();
+                    renderer.SetShaderUserValue(lastValue);
+                }
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(lastValue, Is.EqualTo(0xA00003FFu));
+                update();
+                Assert.That(database.ResourceRevision, Is.EqualTo(resourceRevision));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void ShaderUserValue_IsRuntimeOwnedAcrossSourceCaptureAndEnableChanges()
+        {
+            var gameObject = new GameObject("MeshletRenderer_RuntimeUserValue");
+            var mesh = CreateSingleSubMeshMesh("UserValueSource");
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var source = gameObject.AddComponent<MeshRenderer>();
+            var renderer = gameObject.AddComponent<MeshletRenderer>();
+            try
+            {
+                source.SetShaderUserValue(0xA0000010u);
+                renderer.SetShaderUserValue(uint.MaxValue);
+                renderer.CaptureSourceFromRenderer(source);
+                Assert.That(renderer.GetShaderUserValue(), Is.EqualTo(uint.MaxValue));
+                Assert.That(source.GetShaderUserValue(), Is.EqualTo(0xA0000010u));
+                Assert.That(JsonUtility.ToJson(renderer), Does.Not.Contain("m_ShaderUserValue"));
+                renderer.enabled = false;
+                renderer.SetShaderUserValue(0xA0000020u);
+                renderer.enabled = true;
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(renderer, out var data), Is.True);
+                Assert.That(data.shaderUserValue, Is.EqualTo(0xA0000020u));
+                renderer.SetShaderUserValue(0u);
+                Assert.That(renderer.GetShaderUserValue(), Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
         public void CaptureSourceFromRenderer_UsesMeshFilterMesh_WhenMeshRendererIsAttached()
         {
             var gameObject = new GameObject("MeshletRenderer_MeshFilter");

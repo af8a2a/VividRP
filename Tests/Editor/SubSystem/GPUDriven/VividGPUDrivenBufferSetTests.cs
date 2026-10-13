@@ -14,6 +14,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GPUDataLayouts_HaveExpectedStrides()
         {
+            Assert.That(UnsafeUtility.SizeOf<VividInstanceData>(), Is.EqualTo(192));
             Assert.That(UnsafeUtility.SizeOf<VividGPUCullingContext>(), Is.EqualTo(288));
             Assert.That(UnsafeUtility.SizeOf<VividGPULODSelectionContext>(), Is.EqualTo(128));
             Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(128));
@@ -27,6 +28,24 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(32));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
+        }
+
+        [Test]
+        public void InstanceDataLayout_HasHlslFieldOffsets()
+        {
+            Assert.That(typeof(VividInstanceData).IsLayoutSequential, Is.True);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.ObjectToWorldMatrix), 0);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.WorldToObjectMatrix), 64);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.AABBMin), 128);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.AABBMax), 144);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.TopMeshLODStartIndex), 160);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.TotalMeshLODCount), 164);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.MaterialIndex), 168);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.MeshLODLevelCount), 172);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.LODErrorScale), 176);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.PassMask), 180);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.Flags), 184);
+            AssertFieldOffset<VividInstanceData>(nameof(VividInstanceData.ShaderUserValue), 188);
         }
 
         [Test]

@@ -227,7 +227,7 @@ struct VividInstanceData
     float LODErrorScale;
     int PassMask;
     int Flags;
-    uint Padding0;
+    uint ShaderUserValue;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMaterialData

@@ -626,7 +626,7 @@ namespace VividRP.Runtime.GPUDriven
                    && lhs.LODErrorScale == rhs.LODErrorScale
                    && lhs.PassMask == rhs.PassMask
                    && lhs.Flags == rhs.Flags
-                   && lhs.Padding0 == rhs.Padding0;
+                   && lhs.ShaderUserValue == rhs.ShaderUserValue;
         }
 
         private static bool Float4x4Equals(in float4x4 lhs, in float4x4 rhs)
@@ -2280,6 +2280,7 @@ namespace VividRP.Runtime.GPUDriven
                 LODErrorScale = 1.0f,
                 PassMask = ExtractPassMask(trackedData.shadowCastingMode),
                 Flags = ExtractInstanceFlags(trackedData),
+                ShaderUserValue = trackedData.shaderUserValue,
             };
         }
 

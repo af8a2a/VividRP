@@ -74,6 +74,25 @@ VividPerObjectBuffer.Bind(renderer, CharacterPerObjectLayout.Instance);
 同一 Renderer 重复绑定等价布局会复用记录；切换到其他布局会分配带默认值的新记录并使旧 block
 失效。`Unbind` 会恢复绑定前的 ShaderUserValue。所有 API 仅允许在 Unity 主线程调用。
 
+## MeshletRenderer 的 RSUV 接口
+
+`MeshletRenderer` 提供与 `MeshRenderer` 同名的运行时接口，供后续 PerObjectBuffer 适配：
+
+```csharp
+meshletRenderer.SetShaderUserValue(123u); // uint，默认 0
+uint value = meshletRenderer.GetShaderUserValue();
+```
+
+值在下一次 Renderer 数据库同步时进入 `VividInstanceData.ShaderUserValue`，所有子网格共享
+同一 RSUV；更改只使实例数据失效，重复设置相同值不触发更新。该字段复用原有 padding，
+GPU 实例步长仍为 192 字节，字段偏移为 188。Shader 可以用它调用
+`VividPerObjectCreateContextFromUserValue(instanceData.ShaderUserValue, layoutSignature)`。
+
+RSUV 为不解释其内容的运行时 `uint`，不保存到场景或 Prefab，也不从源 Renderer 复制，
+以免复制由其他 Renderer 拥有的缓冲区地址。禁用再启用组件保留该值，脚本域重载后重置为 0。
+当前 `VividPerObjectBuffer.Bind/Unbind` 仍只接收 Unity `Renderer`；MeshletRenderer 的
+记录分配、释放以及材质读取接入留待后续适配。调用仅限 Unity 主线程。
+
 ## 集中生成的 Shader 接口
 
 脚本重载和 Player 构建前，生成器会扫描 Player Assembly 中所有具体的

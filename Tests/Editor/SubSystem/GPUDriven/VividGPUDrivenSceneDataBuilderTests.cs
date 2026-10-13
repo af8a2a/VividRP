@@ -843,7 +843,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(1));
 
                 VividInstanceData retainedInstanceData = sceneData.MutableInstances[0];
-                retainedInstanceData.Padding0 = 123u;
+                retainedInstanceData.ShaderUserValue = 123u;
                 sceneData.MutableInstances[0] = retainedInstanceData;
 
                 bool staticDataChanged = builder.Build(
@@ -859,11 +859,65 @@ namespace VividRP.Editor.Tests
                 Assert.That(instanceDataChanged, Is.False);
                 Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(1));
-                Assert.That(sceneData.Instances[0].Padding0, Is.EqualTo(123u));
+                Assert.That(sceneData.Instances[0].ShaderUserValue, Is.EqualTo(123u));
             }
             finally
             {
                 DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+            }
+        }
+
+        [Test]
+        public void Build_UpdatesOnlyInstances_WhenShaderUserValueChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset collection = null;
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("UserValueMesh");
+                material = CreateTestMaterial();
+                collection = CreateMeshletCollectionAsset("UserValueCollection", 0, 1,
+                    new[] { CreateMeshLODNode(0, 1, 0) }, new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0, 0, 0), CreateVertex(1, 0, 0), CreateVertex(0, 1, 0) },
+                    new byte[] { 0, 1, 2 });
+                gameObject = CreateMeshletRendererObject("Renderer_UserValue", mesh,
+                    new[] { material }, out MeshletRenderer renderer);
+                renderer.SetMeshletCollections(new[] { collection });
+                renderer.SetShaderUserValue(0xA1234567u);
+                var database = VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(renderer);
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textures = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
+                builder.Build(sceneData, database, textures);
+                Assert.That(sceneData.Instances[0].ShaderUserValue, Is.EqualTo(0xA1234567u));
+
+                foreach (uint value in new[] { uint.MaxValue, 0u })
+                {
+                    renderer.SetShaderUserValue(value);
+                    database.UpdateRendererRenderData(renderer);
+                    bool geometryChanged = builder.Build(sceneData, database, textures,
+                        out bool materialsChanged, out bool instancesChanged);
+                    Assert.That(geometryChanged, Is.False);
+                    Assert.That(materialsChanged, Is.False);
+                    Assert.That(instancesChanged, Is.True);
+                    Assert.That(sceneData.Instances[0].ShaderUserValue, Is.EqualTo(value));
+                    using var buffers = new VividGPUDrivenBufferSet();
+                    buffers.Upload(sceneData);
+                    var uploaded = new VividInstanceData[1];
+                    buffers.InstanceDataBuffer.GetData(uploaded);
+                    Assert.That(uploaded[0].ShaderUserValue, Is.EqualTo(value));
+
+                    builder.Build(sceneData, database, textures, out materialsChanged, out instancesChanged);
+                    Assert.That(materialsChanged, Is.False);
+                    Assert.That(instancesChanged, Is.False);
+                }
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, collection);
             }
         }
 
@@ -1160,7 +1214,7 @@ namespace VividRP.Editor.Tests
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
                 VividInstanceData retainedInstanceData = sceneData.MutableInstances[0];
-                retainedInstanceData.Padding0 = 123u;
+                retainedInstanceData.ShaderUserValue = 123u;
                 sceneData.MutableInstances[0] = retainedInstanceData;
 
                 untrackedMeshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
@@ -1177,7 +1231,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(staticDataChanged, Is.False);
                 Assert.That(materialDataChanged, Is.False);
                 Assert.That(instanceDataChanged, Is.False);
-                Assert.That(sceneData.Instances[0].Padding0, Is.EqualTo(123u));
+                Assert.That(sceneData.Instances[0].ShaderUserValue, Is.EqualTo(123u));
             }
             finally
             {

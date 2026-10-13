@@ -62,6 +62,11 @@ namespace VividRP.Runtime.GPUDriven
         [NonSerialized]
         private int m_TrackedGameObjectLayer = -1;
 
+        // Runtime-owned payload, like MeshRenderer's RSUV. It can contain a
+        // PerObjectBuffer address, so never serialize or copy it from a source renderer.
+        [NonSerialized]
+        private uint m_ShaderUserValue;
+
         public Renderer sourceRenderer => null;
 
         public Mesh sourceMesh => m_SourceMesh;
@@ -77,6 +82,23 @@ namespace VividRP.Runtime.GPUDriven
         public MotionVectorGenerationMode motionVectorGenerationMode => m_MotionVectorGenerationMode;
 
         public uint renderingLayerMask => m_RenderingLayerMask;
+
+        /// <summary>Returns this renderer's runtime 32-bit shader user value (RSUV).</summary>
+        public uint GetShaderUserValue() => m_ShaderUserValue;
+
+        /// <summary>
+        /// Sets an opaque RSUV shared by all submeshes. Like other renderer state,
+        /// changes reach the GPU through the next renderer database synchronization.
+        /// Call from the Unity main thread. This does not allocate a PerObjectBuffer record.
+        /// </summary>
+        public void SetShaderUserValue(uint value)
+        {
+            if (m_ShaderUserValue == value)
+                return;
+
+            m_ShaderUserValue = value;
+            MarkRenderDataDirty();
+        }
 
         public bool sourceWasSkinned => m_SourceWasSkinned;
 

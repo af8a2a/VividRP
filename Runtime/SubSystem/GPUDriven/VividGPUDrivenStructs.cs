@@ -42,7 +42,7 @@ namespace VividRP.Runtime.GPUDriven
         public float LODErrorScale;
         public VividInstancePassMask PassMask;
         public VividInstanceFlags Flags;
-        public uint Padding0;
+        public uint ShaderUserValue;
     }
 
     [GenerateHLSL(PackingRules.Exact)]

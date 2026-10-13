@@ -55,6 +55,7 @@ namespace VividRP.Runtime.GPUDriven
         public Bounds worldBounds;
         internal uint cameraLayerMask;
         public uint renderingLayerMask;
+        public uint shaderUserValue;
         public ShadowCastingMode shadowCastingMode;
         public MotionVectorGenerationMode motionVectorGenerationMode;
         public VividMeshletRendererFlags flags;
@@ -590,6 +591,7 @@ namespace VividRP.Runtime.GPUDriven
                 worldBounds = worldBounds,
                 cameraLayerMask = GetCameraLayerMask(meshletRenderer.gameObject),
                 renderingLayerMask = meshletRenderer.renderingLayerMask,
+                shaderUserValue = meshletRenderer.GetShaderUserValue(),
                 shadowCastingMode = meshletRenderer.shadowCastingMode,
                 motionVectorGenerationMode = meshletRenderer.motionVectorGenerationMode,
                 flags = BuildFlags(meshletRenderer, isValid),

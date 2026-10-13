@@ -135,6 +135,7 @@ internal static class Program
             foreach (MethodInfo method in type.GetMethods().OrderBy(m => m.Name))
             {
                 if (fixtureName == "VividGPUDrivenBufferSetTests" && !method.Name.StartsWith("MeshletVertex")
+                    && method.Name != "InstanceDataLayout_HasHlslFieldOffsets"
                     && method.Name != "GPUDataLayouts_HaveExpectedStrides") continue;
                 var cases = method.GetCustomAttributes<TestCaseAttribute>().ToArray();
                 if (method.GetCustomAttribute<TestAttribute>() == null && cases.Length == 0) continue;

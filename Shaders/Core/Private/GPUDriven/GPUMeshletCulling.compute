@@ -14,9 +14,10 @@
 #pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
 #pragma kernel CSVSMGeometryBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS
 #pragma use_dxc
-#pragma require Native16Bit
+#pragma require native16bit
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMeshletCull.hlsli"
 #if defined(VIVID_VSM_EARLY_CULL)
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Culling/VSMPageCulling.hlsl"
 #endif
@@ -88,27 +89,6 @@ uint _OcclusionTestMode;
 float _OcclusionDepthBias;
 uint _OccludedMeshletCapacity;
 
-bool IsFiniteFloat4(const float4 value)
-{
-    return all(value == value) && all(abs(value) < 3.402823466e+38f);
-}
-
-float FarthestDepth(const float lhs, const float rhs)
-{
-#if UNITY_REVERSED_Z
-    return min(lhs, rhs);
-#else
-    return max(lhs, rhs);
-#endif
-}
-
-float FarthestDepth4(const float4 depths)
-{
-    return FarthestDepth(
-        FarthestDepth(depths.x, depths.y),
-        FarthestDepth(depths.z, depths.w));
-}
-
 groupshared uint spdCounter;
 groupshared float spdIntermediateR[16][16];
 groupshared float spdIntermediateG[16][16];
@@ -117,11 +97,7 @@ groupshared float spdIntermediateA[16][16];
 
 float SpdReductionIdentity()
 {
-#if UNITY_REVERSED_Z
     return 1.0f;
-#else
-    return 0.0f;
-#endif
 }
 
 float4 SpdLoadSourceImage(const int2 pixelCoord)
@@ -195,153 +171,33 @@ void SpdStoreIntermediate(const uint x, const uint y, const float4 value)
 
 float4 SpdReduce4(const float4 v0, const float4 v1, const float4 v2, const float4 v3)
 {
-#if UNITY_REVERSED_Z
     return min(min(v0, v1), min(v2, v3));
-#else
-    return max(max(v0, v1), max(v2, v3));
-#endif
 }
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/FidelityFX/ffx_spd.hlsl"
 
-bool IsVisibleAgainstOccluderDepth(const float occluderDepth, const float queryClosestDepth)
+bool IsMeshletVisibleAfterOcclusion(VividInstanceCullBounds bounds)
 {
-#if UNITY_REVERSED_Z
-    return saturate(queryClosestDepth + _OcclusionDepthBias) > occluderDepth;
-#else
-    return saturate(queryClosestDepth - _OcclusionDepthBias) < occluderDepth;
-#endif
-}
+    if (_OcclusionTestMode == 0u || _OccluderDepthPyramidMipCount == 0u) return true;
 
-bool TryBuildConservativeOcclusionQuery(
-    const float4 boundingSphereWS,
-    out uint2 minPixel,
-    out uint2 maxPixel,
-    out float queryClosestDepth)
-{
-    float2 minUv = float2(1.0f, 1.0f);
-    float2 maxUv = float2(0.0f, 0.0f);
-#if UNITY_REVERSED_Z
-    queryClosestDepth = 0.0f;
-#else
-    queryClosestDepth = 1.0f;
-#endif
-
-    [unroll]
-    for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
-    {
-        const float3 cornerSign = float3(
-            (cornerIndex & 1u) != 0u ? 1.0f : -1.0f,
-            (cornerIndex & 2u) != 0u ? 1.0f : -1.0f,
-            (cornerIndex & 4u) != 0u ? 1.0f : -1.0f);
-        const float3 cornerWS = boundingSphereWS.xyz + cornerSign * boundingSphereWS.w;
-        float4 cornerCS = mul(_OccluderViewProjectionMatrix, float4(cornerWS, 1.0f));
-        if (!IsFiniteFloat4(cornerCS) || cornerCS.w <= 1e-5f)
-        {
-            minPixel = 0u;
-            maxPixel = 0u;
-            return false;
-        }
-
-#if UNITY_UV_STARTS_AT_TOP
-        cornerCS.y = -cornerCS.y;
-#endif
-        const float3 cornerNdc = cornerCS.xyz / cornerCS.w;
-        if (!IsFiniteFloat4(float4(cornerNdc, 0.0f)))
-        {
-            minPixel = 0u;
-            maxPixel = 0u;
-            return false;
-        }
-
-        const float2 cornerUv = cornerNdc.xy * 0.5f + 0.5f;
-        minUv = min(minUv, cornerUv);
-        maxUv = max(maxUv, cornerUv);
-#if UNITY_REVERSED_Z
-        queryClosestDepth = max(queryClosestDepth, cornerNdc.z);
-#else
-        queryClosestDepth = min(queryClosestDepth, cornerNdc.z);
-#endif
-    }
-
-    const float2 pyramidSize = max(_OccluderDepthPyramidSize.xy, 1.0f);
-    const float2 expandedMinPixel = minUv * pyramidSize - 2.0f;
-    const float2 expandedMaxPixel = maxUv * pyramidSize + 2.0f;
-    if (any(expandedMinPixel < 0.0f)
-        || any(expandedMaxPixel >= pyramidSize)
-        || any(expandedMaxPixel < expandedMinPixel))
-    {
-        minPixel = 0u;
-        maxPixel = 0u;
-        return false;
-    }
-
-    const float2 footprintSize = expandedMaxPixel - expandedMinPixel + 1.0f;
-    if (max(footprintSize.x, footprintSize.y) > max(pyramidSize.x, pyramidSize.y) * 0.5f)
-    {
-        minPixel = 0u;
-        maxPixel = 0u;
-        return false;
-    }
-
-    minPixel = uint2(floor(expandedMinPixel));
-    maxPixel = uint2(floor(expandedMaxPixel));
-    return true;
-}
-
-bool IsMeshletVisibleAfterOcclusion(const float4 boundingSphereWS)
-{
-    if (_OcclusionTestMode == 0u
-        || _OccluderDepthPyramidMipCount == 0u
-        || any(_OccluderDepthPyramidSize.xy <= 0.0f))
-    {
-        return true;
-    }
-
-    uint2 minPixel;
-    uint2 maxPixel;
+    uint2 minPixel, maxPixel;
     float queryClosestDepth;
-    if (!TryBuildConservativeOcclusionQuery(
-            boundingSphereWS,
-            minPixel,
-            maxPixel,
-            queryClosestDepth))
-    {
-        return true;
-    }
+    if (!VividBuildMeshletOcclusionQuery(bounds, _OccluderViewProjectionMatrix,
+            _OccluderDepthPyramidSize.xy, UNITY_UV_STARTS_AT_TOP != 0,
+            minPixel, maxPixel, queryClosestDepth)) return true;
 
-    uint mipLevel = 0u;
-    [unroll]
-    for (uint mipIndex = 0u; mipIndex < 16u; ++mipIndex)
-    {
-        mipLevel = mipIndex;
-        const uint2 minCoord = minPixel >> mipIndex;
-        const uint2 maxCoord = maxPixel >> mipIndex;
-        if (all(maxCoord - minCoord <= 1u))
-            break;
-    }
-
-    if (mipLevel >= _OccluderDepthPyramidMipCount)
-        return true;
-
-    const uint2 mipSize = max(uint2(1u, 1u), uint2(_OccluderDepthPyramidTextureSize.xy) >> mipLevel);
-    const uint2 minCoord = minPixel >> mipLevel;
-    const uint2 maxCoord = maxPixel >> mipLevel;
-    // Hardware mip chains truncate odd dimensions. Queries reaching a truncated
-    // tail must fail open instead of sampling the preceding texel block.
-    if (any(maxCoord >= mipSize))
-        return true;
-
-    if (any(maxCoord - minCoord > 1u))
-        return true;
+    uint mipLevel;
+    uint2 minCoord, maxCoord;
+    if (!VividMeshletHZBFootprint(minPixel, maxPixel, uint2(_OccluderDepthPyramidTextureSize.xy),
+            _OccluderDepthPyramidMipCount, mipLevel, minCoord, maxCoord)) return true;
 
     const float4 occluderDepths = float4(
         _OccluderDepthPyramid.Load(int3(minCoord, mipLevel)),
         _OccluderDepthPyramid.Load(int3(uint2(maxCoord.x, minCoord.y), mipLevel)),
         _OccluderDepthPyramid.Load(int3(uint2(minCoord.x, maxCoord.y), mipLevel)),
         _OccluderDepthPyramid.Load(int3(maxCoord, mipLevel)));
-    const float occluderDepth = FarthestDepth4(occluderDepths);
-    return IsVisibleAgainstOccluderDepth(occluderDepth, queryClosestDepth);
+    return VividMeshletVisibleAgainstHZB(occluderDepths, queryClosestDepth,
+        _OcclusionDepthBias);
 }
 
 void AppendVisibleMeshlet(
@@ -371,14 +227,14 @@ bool TryResolveCulledMeshlet(
     const uint cullingContextIndex,
     out VividMeshletRenderRequestPacked renderRequest,
     out uint rendererListIndex,
-    out float4 boundingSphereWS)
+    out VividInstanceCullBounds cullBounds)
 {
     if (candidateIndex >= _VisibleMeshletRenderRequestCounter[cullingContextIndex])
     {
         renderRequest.InstanceID_LOD = 0u;
         renderRequest.MeshletID = 0u;
         rendererListIndex = 0u;
-        boundingSphereWS = 0.0f;
+        cullBounds = (VividInstanceCullBounds)0;
         return false;
     }
 
@@ -388,7 +244,7 @@ bool TryResolveCulledMeshlet(
     if (renderRequest.MeshletID >= _MeshletCount)
     {
         rendererListIndex = 0u;
-        boundingSphereWS = 0.0f;
+        cullBounds = (VividInstanceCullBounds)0;
         return false;
     }
 
@@ -398,30 +254,33 @@ bool TryResolveCulledMeshlet(
         GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
         VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
-    boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
 
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
     VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(renderRequest.MeshletID, meshlet.BoundingSphere);
-    if (!VividVSMFrustumVsLocalBounds(cullingContext.FrustumPlanes, bounds.center,
-            bounds.extent, bounds.radius, bounds.sphere, instanceData.ObjectToWorldMatrix)
-        || !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, bounds.center,
+    cullBounds = VividBuildCullBoundsFromCenterExtent(bounds.center,
+        bounds.sphere ? bounds.radius.xxx : bounds.extent, instanceData.ObjectToWorldMatrix);
+    if (!VividInstanceFrustumVisible(cullBounds, cullingContext.FrustumPlanes)) return false;
+    if (cullBounds.Valid && !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, bounds.center,
             bounds.extent, bounds.radius, bounds.sphere,
             mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) return false;
 #else
-    if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
-        !LightSphereCulling(cullingContext, boundingSphereWS))
+    cullBounds = VividBuildMeshletCullBounds(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+    if (!VividInstanceFrustumVisible(cullBounds, cullingContext.FrustumPlanes)) return false;
+    if (cullBounds.Valid && cullingContext.CullingSphereLS.w > 0.0f)
     {
-        return false;
+        float4 sphereWS = VividInstanceConservativeSphereWS(cullBounds);
+        if (all(isfinite(sphereWS)) && !LightSphereCulling(cullingContext, sphereWS)) return false;
     }
-
 #endif
 
     // Use the material's local-facing side. GetRendererListID already compensates
     // mirrored winding in raster state; applying that flip to the local cone twice
     // would reject the visible side of reflected instances.
-    if ((rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
-        !ConeCulling(cullingContext, instanceData, meshlet,
-            (materialData.RendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u))
+    if (cullBounds.Valid && (rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
+        !VividMeshletConeVisible(meshlet.BoundingSphere, meshlet.ConeAxis, meshlet.ConeCutoff,
+            meshlet.ConeValid != 0u, (materialData.RendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u,
+            cullingContext.CameraIsPerspective != 0, cullingContext.CameraPosition.xyz,
+            GetViewForwardDir(cullingContext.ViewMatrix), instanceData.WorldToObjectMatrix))
     {
         return false;
     }
@@ -444,20 +303,22 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
 
     VividMeshletRenderRequestPacked renderRequest;
     uint rendererListIndex;
-    float4 boundingSphereWS;
+    VividInstanceCullBounds cullBounds;
     if (!TryResolveCulledMeshlet(
             dispatchThreadID.x,
             cullingContextIndex,
             renderRequest,
             rendererListIndex,
-            boundingSphereWS))
+            cullBounds))
     {
         return;
     }
 
 #if defined(VIVID_VSM_EARLY_CULL) && !defined(VIVID_VSM_AFFINE_BOUNDS)
-    // Reuse the sphere from frustum/cone culling before visible-list atomics.
-    if (!VividVSMCasterSphereOverlaps(cullingContextIndex, boundingSphereWS)) return;
+    // The affine box's enclosing sphere also covers nonuniform scale and shear.
+    float4 sphereWS = VividInstanceConservativeSphereWS(cullBounds);
+    if (cullBounds.Valid && all(isfinite(sphereWS))
+        && !VividVSMCasterSphereOverlaps(cullingContextIndex, sphereWS)) return;
 #endif
 
     AppendVisibleMeshlet(renderRequest, rendererListIndex, cullingContextIndex);
@@ -474,18 +335,18 @@ void CSOcclusionTestAll(const uint3 dispatchThreadID : SV_DispatchThreadID)
 
     VividMeshletRenderRequestPacked renderRequest;
     uint rendererListIndex;
-    float4 boundingSphereWS;
+    VividInstanceCullBounds cullBounds;
     if (!TryResolveCulledMeshlet(
             dispatchThreadID.x,
             cullingContextIndex,
             renderRequest,
             rendererListIndex,
-            boundingSphereWS))
+            cullBounds))
     {
         return;
     }
 
-    if (!IsMeshletVisibleAfterOcclusion(boundingSphereWS))
+    if (!IsMeshletVisibleAfterOcclusion(cullBounds))
     {
         uint occludedIndex;
         InterlockedAdd(_OccludedMeshletRenderRequestCounter[0], 1u, occludedIndex);
@@ -546,8 +407,9 @@ void ExecuteOcclusionTestCulled(const uint3 dispatchThreadID)
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
     const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
-    const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
-    if (!IsMeshletVisibleAfterOcclusion(boundingSphereWS))
+    VividInstanceCullBounds cullBounds = VividBuildMeshletCullBounds(
+        meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+    if (!IsMeshletVisibleAfterOcclusion(cullBounds))
         return;
 
     const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
@@ -589,11 +451,7 @@ void CSCopyOccluderDepth(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-#if UNITY_REVERSED_Z
     _OccluderDepthPyramidDestination[pixelCoord] = 0.0f;
-#else
-    _OccluderDepthPyramidDestination[pixelCoord] = 1.0f;
-#endif
 }
 
 [numthreads(256, 1, 1)]

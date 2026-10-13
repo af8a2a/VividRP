@@ -18,12 +18,9 @@ struct VividInstanceCullBounds
     bool Valid;
 };
 
-VividInstanceCullBounds VividBuildInstanceCullBounds(float3 boundsMin, float3 boundsMax, float4x4 objectToWorld)
+VividInstanceCullBounds VividBuildCullBoundsFromCenterExtent(float3 center, float3 extent, float4x4 objectToWorld)
 {
     VividInstanceCullBounds bounds;
-    // Separate half products avoid overflow in min + max / max - min.
-    float3 center = boundsMin * 0.5f + boundsMax * 0.5f;
-    float3 extent = boundsMax * 0.5f - boundsMin * 0.5f;
     bounds.CenterWS = mul(objectToWorld, float4(center, 1.0f)).xyz;
     bounds.AxisX = float3(objectToWorld._m00, objectToWorld._m10, objectToWorld._m20) * extent.x;
     bounds.AxisY = float3(objectToWorld._m01, objectToWorld._m11, objectToWorld._m21) * extent.y;
@@ -32,7 +29,7 @@ VividInstanceCullBounds VividBuildInstanceCullBounds(float3 boundsMin, float3 bo
         + abs(float3(objectToWorld._m03, objectToWorld._m13, objectToWorld._m23));
     float3 maximumAxis = max(abs(bounds.AxisX), max(abs(bounds.AxisY), abs(bounds.AxisZ)));
     bounds.AxisScale = max(1e-30f, max(maximumAxis.x, max(maximumAxis.y, maximumAxis.z)));
-    bounds.Valid = all(isfinite(boundsMin)) && all(isfinite(boundsMax)) && all(boundsMax >= boundsMin)
+    bounds.Valid = all(isfinite(center)) && all(isfinite(extent)) && all(extent >= 0.0f)
         && all(isfinite(bounds.CenterWS)) && all(isfinite(bounds.WorldMagnitude))
         && isfinite(bounds.AxisScale) && bounds.AxisScale < 1e30f
         && all(objectToWorld[3] == float4(0, 0, 0, 1));
@@ -44,6 +41,15 @@ VividInstanceCullBounds VividBuildInstanceCullBounds(float3 boundsMin, float3 bo
     bounds.UnitAxisX = (float16_t3)(bounds.AxisX * inverseScale);
     bounds.UnitAxisY = (float16_t3)(bounds.AxisY * inverseScale);
     bounds.UnitAxisZ = (float16_t3)(bounds.AxisZ * inverseScale);
+    return bounds;
+}
+
+VividInstanceCullBounds VividBuildInstanceCullBounds(float3 boundsMin, float3 boundsMax, float4x4 objectToWorld)
+{
+    // Separate half products avoid overflow in min + max / max - min.
+    VividInstanceCullBounds bounds = VividBuildCullBoundsFromCenterExtent(boundsMin * 0.5f + boundsMax * 0.5f,
+        boundsMax * 0.5f - boundsMin * 0.5f, objectToWorld);
+    bounds.Valid = bounds.Valid && all(isfinite(boundsMin)) && all(isfinite(boundsMax)) && all(boundsMax >= boundsMin);
     return bounds;
 }
 

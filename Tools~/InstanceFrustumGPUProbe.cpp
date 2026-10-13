@@ -1,4 +1,4 @@
-// Standalone D3D12 runner for the production instance-frustum predicate.
+// Standalone D3D12 runner for production culling predicates (64 threads/group).
 #define NOMINMAX
 #include <windows.h>
 #include <d3d12.h>
@@ -33,10 +33,14 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 4) throw std::runtime_error("Usage: probe shader.dxil cases.bin results.bin");
+        if (argc != 4 && argc != 6)
+            throw std::runtime_error("Usage: probe shader.dxil cases.bin results.bin [inputStride outputStride]");
+        const size_t inputStride = argc == 6 ? std::stoul(argv[4]) : 192;
+        const size_t outputStride = argc == 6 ? std::stoul(argv[5]) : 32;
+        if (!inputStride || !outputStride) throw std::runtime_error("Zero probe stride");
         auto shader = read(argv[1]), vertices = read(argv[2]);
-        size_t count = vertices.size() / 192;
-        if (vertices.size() % 192 || count % 64)
+        size_t count = vertices.size() / inputStride;
+        if (vertices.size() % inputStride || count % 64 || count / 64 > 65535)
             throw std::runtime_error("Probe data stride/count mismatch");
         ComPtr<IDXGIFactory6> factory;
         check(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)));
@@ -62,8 +66,8 @@ int main(int argc, char** argv)
             return result;
         };
         auto input = buffer(vertices.size(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE);
-        auto output = buffer(count * 32, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-        auto readback = buffer(count * 32, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_NONE);
+        auto output = buffer(count * outputStride, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+        auto readback = buffer(count * outputStride, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_NONE);
         void* mapped = nullptr;
         D3D12_RANGE empty{};
         check(input->Map(0, &empty, &mapped)); std::memcpy(mapped, vertices.data(), vertices.size()); input->Unmap(0, nullptr);
@@ -104,12 +108,12 @@ int main(int argc, char** argv)
         check(fence->SetEventOnCompletion(1, event));
         DWORD waited = WaitForSingleObject(event, 30000); CloseHandle(event);
         if (waited != WAIT_OBJECT_0) throw std::runtime_error("GPU probe timed out");
-        D3D12_RANGE range{0, count * 32}; check(readback->Map(0, &range, &mapped));
+        D3D12_RANGE range{0, count * outputStride}; check(readback->Map(0, &range, &mapped));
         std::ofstream results(argv[3], std::ios::binary);
-        results.write(static_cast<const char*>(mapped), count * 32);
+        results.write(static_cast<const char*>(mapped), count * outputStride);
         if (!results) throw std::runtime_error("Cannot write GPU results");
         readback->Unmap(0, &empty);
-        std::cout << "Executed " << count << " instance-frustum cases\n";
+        std::cout << "Executed " << count << " culling cases\n";
         return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << "\n"; return 1; }

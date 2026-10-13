@@ -1,35 +1,6 @@
 This package contains third-party software components governed by the license(s) indicated below:
 ---------
 
-Component Name: METIS
-
-Source: https://github.com/KarypisLab/METIS
-
-Version / Revision: v5.2.1, commit f5ae915a84d3bbf1508b529af90292dd7085b9ec
-
-License Type: Apache-2.0
-
-The unmodified upstream source and license are redistributed under
-`PluginSource~/METIS~/Source`. The legacy Windows x86_64 DLL and bindings
-are retained for compatibility; GPUDriven no longer uses METIS and the geometry
-plugin build no longer builds or deploys it.
-
----------
-
-Component Name: GKlib
-
-Source: https://github.com/KarypisLab/GKlib
-
-Version / Revision: commit 3b7d61b9f885063c89901f3901fb4426f9cfb58f
-
-License Types: Apache-2.0 AND LGPL-2.1-or-later AND BSD-3-Clause
-
-GKlib is statically linked into VividRP's METIS DLL. The unmodified upstream
-source, license inventory, and full license texts are redistributed under
-`PluginSource~/METIS~/GKlib`.
-
----------
-
 Component Name: MeshOptimizer
 
 Source: https://github.com/zeux/meshoptimizer

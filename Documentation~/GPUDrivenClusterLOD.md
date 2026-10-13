@@ -1,9 +1,8 @@
 # GPUDriven cluster LOD generation
 
 The meshlet collection builder uses the vendored meshoptimizer v1.1 DLL for
-clustering, partitioning, simplification, and reclustering. METIS is no longer
-called by GPUDriven. Its legacy public wrapper is obsolete; its source, binary,
-and license notices remain for compatibility. `PluginSource~/Build-GeometryPlugins.ps1`
+clustering, partitioning, simplification, and reclustering.
+`PluginSource~/Build-GeometryPlugins.ps1`
 builds and deploys only meshoptimizer.
 
 ## Algorithm and compatibility

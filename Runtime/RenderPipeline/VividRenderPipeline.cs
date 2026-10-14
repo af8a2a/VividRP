@@ -12,6 +12,8 @@ namespace VividRP.Runtime
 {
     public class VividRenderPipeline : RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
+        private static readonly ProfilingSampler s_LODABCameraSampler = new("VividLODAB.CameraGPU");
+        private static readonly ProfilingSampler s_LODABPreGraphSampler = new("VividLODAB.PreGraphGPU");
         private const string RenderGraphName = "VividRP RenderGraph";
         private const string CoreBlitShaderName = "Hidden/VividRP/CoreBlit";
         private const string CoreBlitColorAndDepthShaderName = "Hidden/VividRP/CoreBlitColorAndDepth";
@@ -213,6 +215,8 @@ namespace VividRP.Runtime
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
+            bool lodABSampleStarted = false;
+            ProfilingScope lodABCameraScope = default;
             CameraHistory cameraHistory = null;
             var cameraHistoryFrameActive = false;
             var projectionState = camera.CaptureProjectionState();
@@ -303,12 +307,16 @@ namespace VividRP.Runtime
                     context.SetupCameraProperties(camera);
                 }
 
+                lodABCameraScope = new ProfilingScope(cmdBuffer, s_LODABCameraSampler);
+                var lodABPreGraphScope = new ProfilingScope(cmdBuffer, s_LODABPreGraphSampler);
+                lodABSampleStarted = true;
                 using (s_PrepareFrameMarker.Auto())
                 {
                     PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
                 }
 
                 shouldSubmit = true;
+                lodABPreGraphScope.Dispose();
                 using (s_ExecutePreGraphCommandsMarker.Auto())
                 {
                     context.ExecuteCommandBuffer(cmdBuffer);
@@ -387,6 +395,12 @@ namespace VividRP.Runtime
 
                 if (cmdBuffer != null)
                 {
+                    if (lodABSampleStarted)
+                    {
+                        cmdBuffer.Clear();
+                        lodABCameraScope.Dispose();
+                        context.ExecuteCommandBuffer(cmdBuffer);
+                    }
                     using (s_CommandBufferReleaseMarker.Auto())
                     {
                         cmdBuffer.Clear();

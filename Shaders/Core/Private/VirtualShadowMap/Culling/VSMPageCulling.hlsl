@@ -14,6 +14,13 @@ bool VividVSMProjectCasterSphere(float4 sphereWS, float4x4 worldToShadow, uint r
     float4 center = mul(worldToShadow, float4(sphereWS.xyz, 1.0));
     float inverseW = rcp(max(abs(center.w), 1e-6));
     float2 radius = sphereWS.w * float2(length(worldToShadow[0].xyz), length(worldToShadow[1].xyz)) * inverseW;
+    // A resident LOD overflow record can represent an unbounded sphere. Keep
+    // the whole viewport instead of converting NaN/Inf coordinates to texels.
+    if (!all(isfinite(center)) || !all(isfinite(radius)))
+    {
+        low = 0u; high = resolution - 1u;
+        return true;
+    }
     float2 minUV = center.xy * inverseW - radius, maxUV = center.xy * inverseW + radius;
     low = high = 0u;
     if (any(maxUV < 0.0) || any(minUV > 1.0)) return false;

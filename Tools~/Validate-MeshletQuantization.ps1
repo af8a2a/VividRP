@@ -122,6 +122,13 @@ internal static class Program
             References.TryAdd(Path.GetFileNameWithoutExtension(path), path);
         AssemblyLoadContext.Default.Resolving += (_, name) => References.TryGetValue(name.Name, out string path)
             ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
+        if (args.Length == 3 && args[1] == "--pack-lod")
+        {
+            var tests = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(output, "VividRP.Editor.Tests.dll"));
+            tests.GetType("VividRP.Editor.Tests.VividGPUDrivenBufferSetTests", true)
+                .GetMethod("ExportQuantizedLODProbe").Invoke(null, new object[] { args[2] });
+            return 0;
+        }
         return Run(output);
     }
     static int Run(string output)
@@ -234,6 +241,7 @@ $runnerRspPath = Join-Path $outputRoot 'Validate.rsp'
 Invoke-Compiler 'Validate' $runnerRspPath
 [IO.File]::WriteAllText((Join-Path $outputRoot 'Validate.runtimeconfig.json'),
     '{"runtimeOptions":{"tfm":"net10.0","framework":{"name":"Microsoft.NETCore.App","version":"10.0.0"}}}', $utf8)
+[IO.File]::WriteAllText((Join-Path $outputRoot 'dotnet-path.txt'), $dotnet, $utf8)
 $ErrorActionPreference = 'Continue'
 $runnerArguments = @((Join-Path $outputRoot 'Validate.dll'), $outputRoot)
 $testOutput = @(& $dotnet @runnerArguments 2>&1)

@@ -42,6 +42,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly Dictionary<EntityId, MeshletAssetMetadata> m_MeshMetadataByObjectId = new(s_EntityIdComparer);
         private readonly Dictionary<VividMeshLODGroup, uint> m_MeshLODGroupIndices = new();
         private uint[] m_MeshLODGroupRemap = Array.Empty<uint>();
+        private readonly VividMeshLODGroupQuantizer m_MeshLODGroupQuantizer = new();
         private readonly HashSet<EntityId> m_PreviousReferencedMeshletAssetIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_CurrentReferencedMeshletAssetIds = new(s_EntityIdComparer);
         private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new(s_EntityIdComparer);
@@ -260,6 +261,9 @@ namespace VividRP.Runtime.GPUDriven
                     }
                 }
 
+                if (staticDataChanged && !VividMeshLODGroupQuantizer.FullPrecisionAB)
+                    m_MeshLODGroupQuantizer.Build(sceneData.MutableMeshLODNodes, sceneData.MutableMeshLODGroups,
+                        sceneData.MutablePackedMeshLODGroups, sceneData.MutableMeshLODGroupOverflow);
                 bindingLifecycle?.EndSurfaceBindingUpdate();
             }
             catch

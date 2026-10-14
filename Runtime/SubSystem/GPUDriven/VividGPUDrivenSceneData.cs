@@ -56,6 +56,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividTerrainLayerGPUData> m_TerrainLayers = new();
         private readonly List<VividMeshLODNodePacked> m_MeshLODNodes = new();
         private readonly List<VividMeshLODGroup> m_MeshLODGroups = new();
+        private readonly List<VividMeshLODGroupPacked> m_PackedMeshLODGroups = new();
+        private readonly List<VividMeshLODGroupOverflow> m_MeshLODGroupOverflow = new();
         private readonly List<VividMeshlet> m_Meshlets = new();
         private readonly List<VividMeshletVertex> m_Vertices = new();
         private readonly List<byte> m_Indices = new();
@@ -91,6 +93,8 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<VividMeshLODNodePacked> MeshLODNodes => m_MeshLODNodes;
 
         public IReadOnlyList<VividMeshLODGroup> MeshLODGroups => m_MeshLODGroups;
+        public IReadOnlyList<VividMeshLODGroupPacked> PackedMeshLODGroups => m_PackedMeshLODGroups;
+        public IReadOnlyList<VividMeshLODGroupOverflow> MeshLODGroupOverflow => m_MeshLODGroupOverflow;
 
         public IReadOnlyList<VividMeshlet> Meshlets => m_Meshlets;
 
@@ -212,6 +216,8 @@ namespace VividRP.Runtime.GPUDriven
         internal List<VividMeshLODNodePacked> MutableMeshLODNodes => m_MeshLODNodes;
 
         internal List<VividMeshLODGroup> MutableMeshLODGroups => m_MeshLODGroups;
+        internal List<VividMeshLODGroupPacked> MutablePackedMeshLODGroups => m_PackedMeshLODGroups;
+        internal List<VividMeshLODGroupOverflow> MutableMeshLODGroupOverflow => m_MeshLODGroupOverflow;
 
         internal List<VividMeshlet> MutableMeshlets => m_Meshlets;
 
@@ -433,6 +439,8 @@ namespace VividRP.Runtime.GPUDriven
             ClearDynamic();
             m_MeshLODNodes.Clear();
             m_MeshLODGroups.Clear();
+            m_PackedMeshLODGroups.Clear();
+            m_MeshLODGroupOverflow.Clear();
             m_Meshlets.Clear();
             m_Vertices.Clear();
             m_Indices.Clear();

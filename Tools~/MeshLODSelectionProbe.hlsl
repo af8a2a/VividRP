@@ -21,7 +21,29 @@ struct Result
     uint4 Chain;
 };
 StructuredBuffer<Case> Cases : register(t0);
+StructuredBuffer<VividMeshLODGroup> ExpectedGroups : register(t4);
 RWStructuredBuffer<Result> Results : register(u0);
+
+bool SameGroup(VividMeshLODGroup a, VividMeshLODGroup b)
+{
+    return all(asuint(a.Bounds) == asuint(b.Bounds)) && asuint(a.Error) == asuint(b.Error);
+}
+
+bool ConservativeBounds(float4 original, float4 decoded, float4x4 objectToWorld, float4x4 vp)
+{
+    float4x4 shadow = float4x4(.05,0,0,.5, 0,.05,0,.5, 0,0,.05,.5, 0,0,0,1);
+    uint2 a, b, c, d;
+    bool before = VividVSMProjectLocalBounds(original.xyz, 0, original.w, true, mul(shadow, objectToWorld), 16384, a, b);
+    bool after = VividVSMProjectLocalBounds(decoded.xyz, 0, decoded.w, true, mul(shadow, objectToWorld), 16384, c, d);
+    bool valid = !before || (after && all(c <= a) && all(d >= b));
+    before = VividVSMProjectCasterSphere(TransformSphere(original, objectToWorld), shadow, 16384, a, b);
+    after = VividVSMProjectCasterSphere(TransformSphere(decoded, objectToWorld), shadow, 16384, c, d);
+    valid = valid && (!before || (after && all(c <= a) && all(d >= b)));
+    float4 planes[6] = { vp[3] + vp[0], vp[3] - vp[0], vp[3] + vp[1], vp[3] - vp[1], vp[2], vp[3] - vp[2] };
+    before = VividVSMFrustumVsLocalBounds(planes, original.xyz, 0, original.w, true, objectToWorld);
+    after = VividVSMFrustumVsLocalBounds(planes, decoded.xyz, 0, decoded.w, true, objectToWorld);
+    return valid && (!before || after);
+}
 [numthreads(64, 1, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
@@ -33,16 +55,20 @@ void Main(uint3 id : SV_DispatchThreadID)
     instance.ObjectToWorldMatrix = c.ObjectToWorld;
     instance.MeshLODLevelCount = 2;
     instance.LODErrorScale = c.Screen.z;
-    // Exercise the production structured-buffer loads (16-byte nodes / 20-byte
-    // shared groups), including a root with an invalid parent sentinel.
+    // Production 16-byte nodes/groups and 8-byte overflow records. t1/t2/t3
+    // contain production C# bytes; t4 holds that encoder's expected FP32 values.
     VividDecodedMeshLODNode parent = PullMeshLODNode(id.x * 3);
     VividDecodedMeshLODNode child = PullMeshLODNode(id.x * 3 + 1);
+    VividDecodedMeshLODNode grandparent = PullMeshLODNode(id.x * 3 + 2);
+    uint parentId = _MeshLODNodes[id.x * 3].GroupIndex;
+    uint childId = _MeshLODNodes[id.x * 3 + 1].GroupIndex;
+    uint grandId = _MeshLODNodes[id.x * 3 + 2].GroupIndex;
 
     float4x4 localToClip = mul(c.ViewProjection, c.ObjectToWorld);
     Result r;
     r.Metrics.x = VividLODProjectedError(parent.Bounds, parent.Error, localToClip, c.Screen.xy);
-    r.Metrics.y = VividLODProjectedError(c.ChildBounds, c.Metrics.w, localToClip, c.Screen.xy);
-    r.Metrics.z = VividLODProjectedError(c.GrandparentBounds, c.Metrics.y, localToClip, c.Screen.xy);
+    r.Metrics.y = VividLODProjectedError(child.Bounds, child.Error, localToClip, c.Screen.xy);
+    r.Metrics.z = VividLODProjectedError(grandparent.Bounds, grandparent.Error, localToClip, c.Screen.xy);
     r.Metrics.w = VividLODOrthographicPixelScale(localToClip, c.Screen.xy);
     float budget = c.Metrics.z;
     if (c.Screen.w == 1) budget = r.Metrics.x; // exact GPU equality
@@ -63,11 +89,10 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     // Three nested transitions catch non-monotone projection/error metrics,
     // which a complementary two-node test alone cannot detect.
-    VividDecodedMeshLODNode grandparent = PullMeshLODNode(id.x * 3 + 2);
     VividMeshLODNodePacked middle = _MeshLODNodes[id.x * 3];
     middle.ParentGroupIndex = _MeshLODNodes[id.x * 3 + 2].GroupIndex;
     middle.PackedMeshletCountLevel = 1u | (1u << 16);
-    parent = DecodeVividMeshLODNode(middle, _MeshLODGroups[middle.GroupIndex], _MeshLODGroups[middle.ParentGroupIndex]);
+    parent = DecodeVividMeshLODNode(middle, PullMeshLODGroup(middle.GroupIndex), PullMeshLODGroup(middle.ParentGroupIndex));
     child.LevelIndex = 2;
     instance.MeshLODLevelCount = 3;
     r.Chain.x = ShouldSelectMeshLODNode(context, grandparent, instance,
@@ -80,8 +105,8 @@ void Main(uint3 id : SV_DispatchThreadID)
     // node's leaf decision. Loose intervals model a multi-record branch.
     VSMLodHierarchyNode range = (VSMLodHierarchyNode)0;
     range.Max.w = 1;
-    range.ErrorBounds.x = c.Metrics.x * 0.5f;
-    range.ErrorBounds.z = c.Metrics.y * 2.0f;
+    range.ErrorBounds.x = ExpectedGroups[parentId].Error * ((id.x & 1) ? 0.5f : 1.0f);
+    range.ErrorBounds.z = ExpectedGroups[grandId].Error * ((id.x & 1) ? 2.0f : 1.0f);
     bool branchKept = VSMLodRangeMaySelect(range, 2, r.Metrics.w, c.Metrics.z * instance.LODErrorScale);
     bool middleSelected = ShouldSelectShadowMeshLODNode(parent, instance, r.Metrics.w,
         VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH, c.Metrics.z);
@@ -91,5 +116,17 @@ void Main(uint3 id : SV_DispatchThreadID)
     range.Max.w = 2;
     range.ErrorBounds.z = asfloat(0x7f800000u);
     r.Chain.w |= uint(VSMLodRangeMaySelect(range, 2, r.Metrics.w, c.Metrics.z)) << 2;
+    bool exactDecode = SameGroup(PullMeshLODGroup(parentId), ExpectedGroups[parentId])
+        && SameGroup(PullMeshLODGroup(childId), ExpectedGroups[childId])
+        && SameGroup(PullMeshLODGroup(grandId), ExpectedGroups[grandId]);
+    r.Chain.w |= uint(exactDecode) << 3;
+    bool outer = all(asuint(parent.Bounds.xyz) == asuint(c.ParentBounds.xyz))
+        && parent.Bounds.w >= c.ParentBounds.w && parent.Error >= c.Metrics.x
+        && child.Bounds.w >= c.ChildBounds.w && child.Error >= c.Metrics.w
+        && grandparent.Bounds.w >= c.GrandparentBounds.w && grandparent.Error >= c.Metrics.y;
+    r.Chain.w |= uint(outer) << 4;
+    r.Chain.w |= uint(ConservativeBounds(c.ParentBounds, parent.Bounds, c.ObjectToWorld, c.ViewProjection)) << 5;
+    r.Chain.w |= uint(all(asuint(child.ParentBounds) == asuint(parent.Bounds))
+        && asuint(child.ParentError) == asuint(parent.Error)) << 6;
     Results[id.x] = r;
 }

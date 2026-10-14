@@ -53,7 +53,12 @@ uint _TerrainMaterialDataCount;
 StructuredBuffer<VividTerrainLayerGPUData> _TerrainLayerData;
 uint _TerrainLayerDataCount;
 StructuredBuffer<VividMeshLODNodePacked> _MeshLODNodes;
+#if defined(VIVID_LOD_AB_FP32)
 StructuredBuffer<VividMeshLODGroup> _MeshLODGroups;
+#else
+StructuredBuffer<VividMeshLODGroupPacked> _MeshLODGroups;
+#endif
+StructuredBuffer<VividMeshLODGroupOverflow> _MeshLODGroupOverflow;
 StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
 uint _MeshletCount;
@@ -235,13 +240,31 @@ VividTerrainLayerGPUData PullTerrainLayerData(const uint terrainLayerIndex)
     return _TerrainLayerData[terrainLayerIndex];
 }
 
+VividMeshLODGroup PullMeshLODGroup(const uint groupIndex)
+{
+#if defined(VIVID_LOD_AB_FP32)
+    return _MeshLODGroups[groupIndex];
+#else
+    const VividMeshLODGroupPacked packed = _MeshLODGroups[groupIndex];
+    float2 values;
+    if ((packed.RadiusError & 0x80000000u) != 0u)
+        values = _MeshLODGroupOverflow[packed.RadiusError & 0x7fffffffu].RadiusError;
+    else
+        values = float2(f16tof32(packed.RadiusError & 0xffffu), f16tof32(packed.RadiusError >> 16u));
+    VividMeshLODGroup group;
+    group.Bounds = float4(packed.CenterX, packed.CenterY, packed.CenterZ, values.x);
+    group.Error = values.y;
+    return group;
+#endif
+}
+
 VividDecodedMeshLODNode PullMeshLODNode(const uint nodeIndex)
 {
     const VividMeshLODNodePacked node = _MeshLODNodes[nodeIndex];
-    const VividMeshLODGroup own = _MeshLODGroups[node.GroupIndex];
+    const VividMeshLODGroup own = PullMeshLODGroup(node.GroupIndex);
     VividMeshLODGroup parent = (VividMeshLODGroup)0;
     if (node.ParentGroupIndex != 0xffffffffu)
-        parent = _MeshLODGroups[node.ParentGroupIndex];
+        parent = PullMeshLODGroup(node.ParentGroupIndex);
     return DecodeVividMeshLODNode(node, own, parent);
 }
 

@@ -338,6 +338,23 @@ struct VividMeshLODGroup
     float Error;
 };
 
+// Generated from VividRP.Runtime.GPUDriven.VividMeshLODGroupOverflow
+// PackingRules = Exact
+struct VividMeshLODGroupOverflow
+{
+    float2 RadiusError;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividMeshLODGroupPacked
+// PackingRules = Exact
+struct VividMeshLODGroupPacked
+{
+    float CenterX;
+    float CenterY;
+    float CenterZ;
+    uint RadiusError;
+};
+
 // Generated from VividRP.Runtime.GPUDriven.VividMeshLODNodePacked
 // PackingRules = Exact
 struct VividMeshLODNodePacked

@@ -1405,7 +1405,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(scene.MeshLODNodes[1].ParentGroupIndex, Is.EqualTo(uint.MaxValue));
                 Assert.That(scene.MeshLODNodes[1].MeshletStartIndex, Is.EqualTo(1u));
                 Assert.That(scene.MeshLODNodes[2].MeshletStartIndex, Is.EqualTo(2u));
-                Assert.That(scene.MeshLODGroups[2], Is.EqualTo(near), "One-ULP errors must remain distinct.");
+                Assert.That(scene.MeshLODGroups[2].Bounds, Is.EqualTo(near.Bounds));
+                Assert.That(scene.MeshLODGroups[2].Error, Is.EqualTo(VividMeshLODGroupQuantizer.RoundUpHalf(near.Error)));
+                Assert.That(scene.MeshLODGroups[2].Error, Is.GreaterThan(shared.Error), "Values across a half boundary must remain distinct.");
                 Assert.That(secondNodes[0].GroupIndex, Is.EqualTo(2u));
                 Assert.That(secondNodes[1].ParentGroupIndex, Is.EqualTo(1u));
                 var savedNodes = scene.MutableMeshLODNodes.ToArray();

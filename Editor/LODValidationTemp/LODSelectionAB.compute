@@ -1,0 +1,34 @@
+#pragma kernel CS
+#pragma kernel CopyDepth
+#pragma multi_compile_local _ VIVID_LOD_AB_FP32
+#pragma use_dxc
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+StructuredBuffer<uint2> _Cases;
+StructuredBuffer<VividGPUCullingContext> _CullingContexts;
+StructuredBuffer<VividGPULODSelectionContext> _LODSelectionContexts;
+RWStructuredBuffer<uint4> _Results;
+uint _CaseCount, _ViewCount, _ForcedMeshLODNodeDepth;
+float _MeshLODErrorThreshold;
+[numthreads(64,1,1)]
+void CS(uint3 id:SV_DispatchThreadID) {
+ if(id.x>=_CaseCount || id.y>=_ViewCount)return;
+ uint2 c=_Cases[id.x];
+ VividInstanceData inst=PullInstanceData(c.x);
+ VividDecodedMeshLODNode node=PullMeshLODNode(c.y);
+ VividGPUCullingContext ctx=_CullingContexts[id.y];
+ VividGPULODSelectionContext lod=_LODSelectionContexts[0];
+ bool shadow=lod.CameraPosition.w==0 && ctx.CameraIsPerspective==0 && (ctx.PassMask&VIVIDINSTANCEPASSMASK_SHADOWS)!=0;
+ float scale=VividLODOrthographicPixelScale(mul(ctx.ViewProjectionMatrix,inst.ObjectToWorldMatrix),lod.ScreenSizePixels);
+ bool selected=shadow?ShouldSelectShadowMeshLODNode(node,inst,scale,_ForcedMeshLODNodeDepth,_MeshLODErrorThreshold):ShouldSelectMeshLODNode(lod,node,inst,_ForcedMeshLODNodeDepth,_MeshLODErrorThreshold);
+ float4x4 clip=mul(lod.ViewProjectionMatrix,inst.ObjectToWorldMatrix);
+ float own=shadow?node.Error*scale:VividLODProjectedError(node.Bounds,node.Error,clip,lod.ScreenSizePixels);
+ float parent=shadow?node.ParentError*scale:VividLODProjectedError(node.ParentBounds,node.ParentError,clip,lod.ScreenSizePixels);
+ _Results[id.y*_CaseCount+id.x]=uint4(selected,asuint(own),asuint(parent),asuint(_MeshLODErrorThreshold*inst.LODErrorScale));
+}
+Texture2D<float> _SourceDepth;
+RWTexture2D<float> _CopiedDepth;
+[numthreads(8,8,1)]
+void CopyDepth(uint3 id:SV_DispatchThreadID) {
+ uint w,h;_CopiedDepth.GetDimensions(w,h);if(id.x>=w || id.y>=h)return;
+ _CopiedDepth[id.xy]=_SourceDepth.Load(int3(id.xy,0));
+}

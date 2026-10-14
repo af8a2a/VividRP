@@ -37,7 +37,12 @@ namespace VividRP.Editor.Tests
             if (packed.HasParent) packed.ParentGroupIndex += offset;
             scene.MutableMeshLODGroups.AddRange(table.Groups);
             scene.MutableMeshLODNodes.Add(packed);
+            PrepareMeshLODGroups(scene);
         }
+
+        internal static void PrepareMeshLODGroups(VividGPUDrivenSceneData scene) =>
+            new VividMeshLODGroupQuantizer().Build(scene.MutableMeshLODNodes, scene.MutableMeshLODGroups,
+                scene.MutablePackedMeshLODGroups, scene.MutableMeshLODGroupOverflow);
 
         [Test]
         public void GPUDataLayouts_HaveExpectedStrides()
@@ -57,6 +62,8 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(48)); // legacy v6/input layout
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNodePacked>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroup>(), Is.EqualTo(20));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroupPacked>(), Is.EqualTo(16));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroupOverflow>(), Is.EqualTo(8));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
         }
 
@@ -83,6 +90,13 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshLODNodePacked>(nameof(VividMeshLODNodePacked.PackedMeshletCountLevel), 12);
             AssertFieldOffset<VividMeshLODGroup>(nameof(VividMeshLODGroup.Bounds), 0);
             AssertFieldOffset<VividMeshLODGroup>(nameof(VividMeshLODGroup.Error), 16);
+            Assert.That(typeof(VividMeshLODGroupPacked).IsLayoutSequential, Is.True);
+            Assert.That(typeof(VividMeshLODGroupOverflow).IsLayoutSequential, Is.True);
+            AssertFieldOffset<VividMeshLODGroupPacked>(nameof(VividMeshLODGroupPacked.CenterX), 0);
+            AssertFieldOffset<VividMeshLODGroupPacked>(nameof(VividMeshLODGroupPacked.CenterY), 4);
+            AssertFieldOffset<VividMeshLODGroupPacked>(nameof(VividMeshLODGroupPacked.CenterZ), 8);
+            AssertFieldOffset<VividMeshLODGroupPacked>(nameof(VividMeshLODGroupPacked.RadiusError), 12);
+            AssertFieldOffset<VividMeshLODGroupOverflow>(nameof(VividMeshLODGroupOverflow.RadiusError), 0);
         }
 
         [Test]
@@ -141,6 +155,173 @@ namespace VividRP.Editor.Tests
             Assert.That(table.Groups.Count, Is.EqualTo(4));
             for (int i = 0; i < source.Length; i++)
                 Assert.That(math.asuint(VividGPUDrivenBufferSetTests.ExpandMeshLODNode(table.Nodes[i], table.Groups).Error), Is.EqualTo(math.asuint(source[i].Error)));
+        }
+
+        [Test]
+        public void MeshLODSharedQuantization_RoundsAllHalfBoundariesUpward()
+        {
+            for (uint bits = 0; bits <= 0x7bff; bits++)
+            {
+                float exact = math.f16tof32(bits);
+                Assert.That(VividMeshLODGroupQuantizer.RoundUpHalf(exact), Is.EqualTo(exact));
+                if (bits > 0)
+                {
+                    float below = math.asfloat(math.asuint(exact) - 1);
+                    Assert.That(VividMeshLODGroupQuantizer.RoundUpHalf(below), Is.EqualTo(exact));
+                }
+                float above = math.asfloat(math.asuint(exact) + 1);
+                Assert.That(VividMeshLODGroupQuantizer.RoundUpHalf(above), Is.GreaterThanOrEqualTo(above));
+                if (bits < 0x7bff)
+                    Assert.That(VividMeshLODGroupQuantizer.RoundUpHalf(above), Is.EqualTo(math.f16tof32(bits + 1)));
+            }
+            Assert.That(VividMeshLODGroupQuantizer.RoundUpHalf(float.MaxValue), Is.EqualTo(float.MaxValue));
+        }
+
+        [Test]
+        public void MeshLODSharedQuantization_ClosesHierarchyAndInternsFinalValues()
+        {
+            float childRadius = 1.0003999471664429f;
+            var source = new[] {
+                new VividMeshLODGroup { Bounds = new float4(0, 0, 0, 2), Error = .10001f },
+                new VividMeshLODGroup { Bounds = new float4(2 - childRadius, 0, 0, childRadius), Error = .05f },
+                new VividMeshLODGroup { Bounds = new float4(0, 0, 0, 3), Error = .2f },
+                new VividMeshLODGroup { Bounds = new float4(0, 0, 0, 2), Error = .10001f },
+            };
+            var nodes = new List<VividMeshLODNodePacked> {
+                new() { GroupIndex = 0, ParentGroupIndex = 2, MeshletStartIndex = 9 },
+                new() { GroupIndex = 1, ParentGroupIndex = 0 },
+                new() { GroupIndex = 2, ParentGroupIndex = uint.MaxValue },
+                new() { GroupIndex = 3, ParentGroupIndex = uint.MaxValue, MeshletStartIndex = 80 },
+                new() { GroupIndex = 1, ParentGroupIndex = 3 },
+            };
+            var groups = new List<VividMeshLODGroup>(source);
+            var packed = new List<VividMeshLODGroupPacked>();
+            var overflow = new List<VividMeshLODGroupOverflow>();
+            var quantizer = new VividMeshLODGroupQuantizer();
+            quantizer.Build(nodes, groups, packed, overflow);
+            Assert.That(groups.Count, Is.EqualTo(3));
+            Assert.That(groups[0].Bounds.w, Is.GreaterThan(2f), "Individually rounded spheres would break containment.");
+            Assert.That(nodes[0].GroupIndex, Is.EqualTo(nodes[3].GroupIndex));
+            Assert.That(nodes[1].ParentGroupIndex, Is.EqualTo(nodes[0].GroupIndex));
+            Assert.That(nodes[2].ParentGroupIndex, Is.EqualTo(uint.MaxValue));
+            Assert.That(nodes[3].MeshletStartIndex, Is.EqualTo(80));
+            for (int i = 0; i < groups.Count; i++) Assert.That(packed[i].Decode(overflow), Is.EqualTo(groups[i]));
+            foreach (var node in nodes)
+            {
+                if (!node.HasParent) continue;
+                var child = groups[(int)node.GroupIndex]; var parent = groups[(int)node.ParentGroupIndex];
+                double distance = math.length((double3)child.Bounds.xyz - (double3)parent.Bounds.xyz);
+                Assert.That((double)parent.Bounds.w, Is.GreaterThanOrEqualTo(distance + child.Bounds.w));
+                Assert.That(parent.Error, Is.GreaterThanOrEqualTo(child.Error));
+            }
+            var saved = groups.ToArray();
+            for (int i = 0; i < 4; i++) quantizer.Build(nodes, groups, packed, overflow);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 64; i++) quantizer.Build(nodes, groups, packed, overflow);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            CollectionAssert.AreEqual(saved, groups, "Re-encoding stable decoded data must not accumulate inflation.");
+            Assert.That(source[0].Bounds.w, Is.EqualTo(2f));
+            nodes.Clear(); groups.Clear(); quantizer.Build(nodes, groups, packed, overflow);
+            Assert.That(packed, Is.Empty); Assert.That(overflow, Is.Empty);
+        }
+
+        [Test]
+        public void MeshLODSharedQuantization_OverflowAndInvalidBoundsRemainConservative()
+        {
+            var nodes = new List<VividMeshLODNodePacked>();
+            var groups = new List<VividMeshLODGroup> {
+                new() { Bounds = new float4(1e20f, -1e20f, 1, 70000), Error = .123456f },
+                new() { Bounds = new float4(1, 2, 3, 1), Error = 70000 },
+                new() { Bounds = new float4(1, 2, 3, 1), Error = math.asfloat(1u) },
+                new() { Bounds = new float4(float.NaN, 0, 0, 1), Error = 0 },
+                new() { Bounds = new float4(1, 2, 3, 1), Error = -1 },
+            };
+            for (int i = 0; i < groups.Count; i++) nodes.Add(new() { GroupIndex = (uint)i, ParentGroupIndex = uint.MaxValue });
+            var packed = new List<VividMeshLODGroupPacked>(); var overflow = new List<VividMeshLODGroupOverflow>();
+            new VividMeshLODGroupQuantizer().Build(nodes, groups, packed, overflow);
+            Assert.That(overflow.Count, Is.EqualTo(4));
+            Assert.That(groups[0].Bounds.xyz, Is.EqualTo(new float3(1e20f, -1e20f, 1)));
+            Assert.That(groups[0].Bounds.w, Is.EqualTo(70000));
+            Assert.That(groups[1].Error, Is.EqualTo(70000));
+            Assert.That(packed[2].HasOverflow, Is.False);
+            Assert.That(groups[2].Error, Is.EqualTo(math.f16tof32(1u)));
+            Assert.That(groups[3].Bounds.w, Is.EqualTo(float.PositiveInfinity));
+            Assert.That(groups[3].Error, Is.EqualTo(float.MaxValue));
+            for (int i = 0; i < groups.Count; i++) Assert.That(packed[i].Decode(overflow), Is.EqualTo(groups[i]));
+        }
+
+        [Test]
+        public void MeshLODSharedQuantization_UnboundedRepairRemainsStable()
+        {
+            var nodes = new List<VividMeshLODNodePacked> {
+                new() { GroupIndex = 0, ParentGroupIndex = uint.MaxValue },
+                new() { GroupIndex = 1, ParentGroupIndex = 0 },
+            };
+            var groups = new List<VividMeshLODGroup> {
+                new() { Bounds = new float4(-3e38f, 0, 0, 1), Error = .01f },
+                new() { Bounds = new float4(3e38f, 0, 0, 1), Error = .02f },
+            };
+            var packed = new List<VividMeshLODGroupPacked>(); var overflow = new List<VividMeshLODGroupOverflow>();
+            var quantizer = new VividMeshLODGroupQuantizer();
+            quantizer.Build(nodes, groups, packed, overflow);
+            Assert.That(groups[0].Bounds.x, Is.EqualTo(-3e38f));
+            Assert.That(groups[0].Bounds.w, Is.EqualTo(float.PositiveInfinity));
+            Assert.That(groups[0].Error, Is.EqualTo(groups[1].Error));
+            Assert.That(packed[0].HasOverflow, Is.True);
+            var saved = groups.ToArray();
+            quantizer.Build(nodes, groups, packed, overflow);
+            CollectionAssert.AreEqual(saved, groups);
+        }
+
+        [Test]
+        public void MeshLODSharedQuantization_ClosureGuardsSmallCenterDisplacements()
+        {
+            var nodes = new List<VividMeshLODNodePacked> {
+                new() { GroupIndex = 0, ParentGroupIndex = uint.MaxValue },
+                new() { GroupIndex = 1, ParentGroupIndex = 0 },
+            };
+            var groups = new List<VividMeshLODGroup> {
+                new() { Bounds = new float4(0, 0, 0, 1e30f), Error = 0 },
+                new() { Bounds = new float4(1, 0, 0, 1e30f), Error = 0 },
+            };
+            new VividMeshLODGroupQuantizer().Build(nodes, groups, new(), new());
+            // Even FP64 rounds (1e30f + 1) back to 1e30f. Exact containment
+            // still requires the parent radius to exceed the child's radius.
+            Assert.That(groups[0].Bounds.w, Is.GreaterThan(groups[1].Bounds.w));
+        }
+
+        // The standalone runner calls this outside Unity to feed the production
+        // C# encoder's bytes to D3D12. This is not a Unity Test Framework test.
+        public static void ExportQuantizedLODProbe(string directory)
+        {
+            var nodes = new List<VividMeshLODNodePacked>(); var groups = new List<VividMeshLODGroup>();
+            using (var reader = new System.IO.BinaryReader(System.IO.File.OpenRead(System.IO.Path.Combine(directory, "lod-source-nodes.bin"))))
+                while (reader.BaseStream.Position < reader.BaseStream.Length)
+                    nodes.Add(new() { GroupIndex = reader.ReadUInt32(), ParentGroupIndex = reader.ReadUInt32(),
+                        MeshletStartIndex = reader.ReadUInt32(), PackedMeshletCountLevel = reader.ReadUInt32() });
+            using (var reader = new System.IO.BinaryReader(System.IO.File.OpenRead(System.IO.Path.Combine(directory, "lod-source-groups.bin"))))
+                while (reader.BaseStream.Position < reader.BaseStream.Length)
+                    groups.Add(new() { Bounds = new float4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()), Error = reader.ReadSingle() });
+            // Include the grandparent dependency for hierarchy closure, then expose
+            // the middle as a root for the probe's independent two-level test.
+            for (int i = 0; i < nodes.Count; i += 3) { var n = nodes[i]; n.ParentGroupIndex = nodes[i + 2].GroupIndex; nodes[i] = n; }
+            var packed = new List<VividMeshLODGroupPacked>(); var overflow = new List<VividMeshLODGroupOverflow>();
+            new VividMeshLODGroupQuantizer().Build(nodes, groups, packed, overflow);
+            using (var writer = new System.IO.BinaryWriter(System.IO.File.Create(System.IO.Path.Combine(directory, "lod-nodes.bin"))))
+                for (int i = 0; i < nodes.Count; i++) {
+                    var n = nodes[i]; if (i % 3 == 0) n.ParentGroupIndex = uint.MaxValue;
+                    writer.Write(n.GroupIndex); writer.Write(n.ParentGroupIndex); writer.Write(n.MeshletStartIndex); writer.Write(n.PackedMeshletCountLevel);
+                }
+            using (var writer = new System.IO.BinaryWriter(System.IO.File.Create(System.IO.Path.Combine(directory, "lod-groups.bin"))))
+                foreach (var g in packed) { writer.Write(g.Center.x); writer.Write(g.Center.y); writer.Write(g.Center.z); writer.Write(g.RadiusError); }
+            using (var writer = new System.IO.BinaryWriter(System.IO.File.Create(System.IO.Path.Combine(directory, "lod-overflow.bin")))) {
+                foreach (var g in overflow) { writer.Write(g.RadiusError.x); writer.Write(g.RadiusError.y); }
+                if (overflow.Count == 0) { writer.Write(0f); writer.Write(0f); }
+            }
+            using (var writer = new System.IO.BinaryWriter(System.IO.File.Create(System.IO.Path.Combine(directory, "lod-decoded.bin"))))
+                foreach (var g in groups) { writer.Write(g.Bounds.x); writer.Write(g.Bounds.y); writer.Write(g.Bounds.z); writer.Write(g.Bounds.w); writer.Write(g.Error); }
+            System.Console.WriteLine($"Encoded {nodes.Count} LOD nodes, {groups.Count} shared groups, {overflow.Count} overflow records with production C#.");
         }
 
         [Test]
@@ -680,7 +861,8 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.MeshLODNodesBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshLODGroupsBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshLODNodesBuffer.stride, Is.EqualTo(16));
-            Assert.That(bufferSet.MeshLODGroupsBuffer.stride, Is.EqualTo(20));
+            Assert.That(bufferSet.MeshLODGroupsBuffer.stride, Is.EqualTo(16));
+            Assert.That(bufferSet.MeshLODGroupOverflowBuffer.stride, Is.EqualTo(8));
             Assert.That(bufferSet.MeshletsBuffer, Is.Not.Null);
             Assert.That(bufferSet.SharedVertexBuffer, Is.Not.Null);
             Assert.That(bufferSet.SharedIndexBuffer, Is.Not.Null);

@@ -453,6 +453,164 @@ namespace VividRP.Runtime.GPUDriven
         public override readonly int GetHashCode() => unchecked((int)(math.hash(math.asuint(Bounds)) * 397u ^ math.asuint(Error)));
     }
 
+    // Resident-only layout. v7 assets keep VividMeshLODGroup at full precision.
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMeshLODGroupPacked
+    {
+        // Scalar fields prevent CoreRP's HLSL generator from promoting float3
+        // storage to float4. All three FP32 coordinates remain bit-identical.
+        public float CenterX;
+        public float CenterY;
+        public float CenterZ;
+        public uint RadiusError; // low/high half, or bit 31 + overflow-table index
+
+        public float3 Center
+        {
+            readonly get => new(CenterX, CenterY, CenterZ);
+            set { CenterX = value.x; CenterY = value.y; CenterZ = value.z; }
+        }
+
+        public readonly bool HasOverflow => (RadiusError & 0x80000000u) != 0;
+
+        public readonly VividMeshLODGroup Decode(IReadOnlyList<VividMeshLODGroupOverflow> overflow)
+        {
+            float2 values = HasOverflow
+                ? overflow[(int)(RadiusError & 0x7fffffffu)].RadiusError
+                : new float2(math.f16tof32(RadiusError & 0xffffu), math.f16tof32(RadiusError >> 16));
+            return new VividMeshLODGroup { Bounds = new float4(Center, values.x), Error = values.y };
+        }
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMeshLODGroupOverflow
+    {
+        public float2 RadiusError;
+    }
+
+    // Owned by the scene builder. Encoding, hierarchy closure and interning never
+    // run during upload. All storage survives static rebuilds without shrinking.
+    internal sealed class VividMeshLODGroupQuantizer
+    {
+        public static bool FullPrecisionAB; // Temporary A/B harness; restored after capture.
+        private readonly List<VividMeshLODGroup> m_Working = new();
+        private readonly Dictionary<VividMeshLODGroup, uint> m_Indices = new();
+        private uint[] m_Remap = Array.Empty<uint>();
+
+        internal static float RoundUpHalf(float value)
+        {
+            // Large values use the FP32 side table, not a downward clamp to 65504.
+            if (value > 65504f) return value;
+            if (value == 0f) return 0f;
+            uint bits = math.f32tof16(value);
+            if (math.f16tof32(bits) < value) bits++;
+            return math.f16tof32(bits);
+        }
+
+        private static float RequiredRadius(in VividMeshLODGroup parent, in VividMeshLODGroup child)
+        {
+            if (float.IsPositiveInfinity(child.Bounds.w)) return float.PositiveInfinity;
+            double x = (double)parent.Bounds.x - child.Bounds.x;
+            double y = (double)parent.Bounds.y - child.Bounds.y;
+            double z = (double)parent.Bounds.z - child.Bounds.z;
+            // Identical centers need no arithmetic margin; this also makes shared
+            // self-edges and zero-distance cycles converge instead of inflating.
+            if (x == 0 && y == 0 && z == 0) return child.Bounds.w;
+            double distance = Math.Sqrt(x * x + y * y + z * z);
+            // Cover the addition too: a tiny center displacement can otherwise
+            // disappear when added to a large, exactly representable radius.
+            double required = (distance + child.Bounds.w) * (1.0 + 8.0 * 2.2204460492503131e-16);
+            float radius = (float)required;
+            if ((double)radius < required) radius = math.asfloat(math.asuint(radius) + 1u);
+            return RoundUpHalf(radius);
+        }
+
+        internal void Build(List<VividMeshLODNodePacked> nodes, List<VividMeshLODGroup> groups,
+            List<VividMeshLODGroupPacked> packed, List<VividMeshLODGroupOverflow> overflow)
+        {
+            VividMeshLODGroupTable.Validate(nodes, groups.Count);
+            m_Working.Clear();
+            if (m_Working.Capacity < groups.Count) m_Working.Capacity = groups.Count;
+            m_Indices.Clear();
+            m_Indices.EnsureCapacity(groups.Count);
+            if (m_Remap.Length < groups.Count) m_Remap = new uint[groups.Count];
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var group = groups[i];
+                if (!math.all(math.isfinite(group.Bounds.xyz)) || float.IsNaN(group.Bounds.w) || group.Bounds.w < 0f)
+                {
+                    // Invalid bounds cannot justify spatial or coarse-LOD rejection.
+                    if (!math.all(math.isfinite(group.Bounds.xyz))) group.Bounds.xyz = 0f;
+                    group.Bounds.w = float.PositiveInfinity;
+                    group.Error = float.MaxValue;
+                }
+                if (!math.isfinite(group.Error) || group.Error < 0f) group.Error = float.MaxValue;
+                group.Bounds.w = RoundUpHalf(group.Bounds.w);
+                group.Error = RoundUpHalf(group.Error);
+                m_Working.Add(group);
+            }
+
+            // Reverse node order usually visits fine -> coarse within each asset.
+            // Repeat for cross-asset aliases; every dependency participates. An
+            // acyclic group graph converges in <= groupCount passes. Equal-center
+            // cycles also converge; a growing cycle indicates invalid LOD data.
+            bool changed = true;
+            for (int pass = 0; changed && pass <= groups.Count; pass++)
+            {
+                changed = false;
+                for (int i = nodes.Count - 1; i >= 0; i--)
+                {
+                    var node = nodes[i];
+                    if (!node.HasParent || node.GroupIndex == node.ParentGroupIndex) continue;
+                    var child = m_Working[(int)node.GroupIndex];
+                    var parent = m_Working[(int)node.ParentGroupIndex];
+                    float radius = math.max(parent.Bounds.w, RequiredRadius(parent, child));
+                    float error = math.max(parent.Error, child.Error);
+                    if (radius == parent.Bounds.w && error == parent.Error) continue;
+                    parent.Bounds.w = radius;
+                    parent.Error = error;
+                    m_Working[(int)node.ParentGroupIndex] = parent;
+                    changed = true;
+                }
+            }
+            if (changed) throw new InvalidDataException("Mesh LOD group containment contains a growing cycle.");
+
+            groups.Clear();
+            packed.Clear();
+            overflow.Clear();
+            if (packed.Capacity < m_Working.Count) packed.Capacity = m_Working.Count;
+            for (int i = 0; i < m_Working.Count; i++)
+            {
+                var group = m_Working[i];
+                if (!m_Indices.TryGetValue(group, out uint index))
+                {
+                    index = (uint)groups.Count;
+                    m_Indices.Add(group, index);
+                    var record = new VividMeshLODGroupPacked { Center = group.Bounds.xyz };
+                    if (group.Bounds.w > 65504f || group.Error > 65504f)
+                    {
+                        record.RadiusError = 0x80000000u | (uint)overflow.Count;
+                        overflow.Add(new VividMeshLODGroupOverflow { RadiusError = new float2(group.Bounds.w, group.Error) });
+                    }
+                    else record.RadiusError = math.f32tof16(group.Bounds.w) | (math.f32tof16(group.Error) << 16);
+                    packed.Add(record);
+                    // CPU VSM consumes precisely the GPU decoder's inputs, including
+                    // the side table. This is a shared per-group cache, never 48B nodes.
+                    groups.Add(record.Decode(overflow));
+                }
+                m_Remap[i] = index;
+            }
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                var node = nodes[i];
+                node.GroupIndex = m_Remap[node.GroupIndex];
+                if (node.HasParent) node.ParentGroupIndex = m_Remap[node.ParentGroupIndex];
+                nodes[i] = node;
+            }
+        }
+    }
+
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
     [StructLayout(LayoutKind.Sequential)]
     public struct VividMeshLODNodePacked

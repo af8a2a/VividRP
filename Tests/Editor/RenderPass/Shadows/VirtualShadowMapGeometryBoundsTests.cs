@@ -24,6 +24,7 @@ namespace VividRP.Editor.Tests
             scene.MutableMeshLODNodes.Add(new VividMeshLODNodePacked { MeshletCount = 1,
                 GroupIndex = 0, ParentGroupIndex = 1, LevelIndex = 2 });
             scene.MutableInstances.Add(new VividInstanceData { TotalMeshLODCount = 1, MeshLODLevelCount = 3 });
+            VividGPUDrivenBufferSetTests.PrepareMeshLODGroups(scene);
             return scene;
         }
 
@@ -86,12 +87,15 @@ namespace VividRP.Editor.Tests
             var parent = scene.MutableMeshLODGroups[1]; parent.Error = .5f;
             scene.MutableMeshLODGroups[0] = own;
             scene.MutableMeshLODGroups[1] = parent;
+            VividGPUDrivenBufferSetTests.PrepareMeshLODGroups(scene);
             buffers.Upload(scene, false, false, true);
             Assert.That(buffers.MeshLODNodesBuffer, Is.SameAs(nodeBuffer));
             Assert.That(buffers.MeshLODGroupsBuffer, Is.SameAs(groupBuffer));
-            var groups = new VividMeshLODGroup[2]; groupBuffer.GetData(groups);
-            CollectionAssert.AreEqual(scene.MeshLODGroups, groups);
-            Assert.That(buffers.VSMLODHierarchy.CpuNodes[0].ErrorBounds, Is.EqualTo(new float4(.2f, 12f, .5f, 14f)));
+            var groups = new VividMeshLODGroupPacked[2]; groupBuffer.GetData(groups);
+            CollectionAssert.AreEqual(scene.PackedMeshLODGroups, groups);
+            Assert.That(buffers.VSMLODHierarchy.CpuNodes[0].ErrorBounds,
+                Is.EqualTo(new float4(groups[0].Decode(scene.MeshLODGroupOverflow).Error, 12f,
+                    groups[1].Decode(scene.MeshLODGroupOverflow).Error, 14f)));
             for (int i = 0; i < 8; i++) buffers.Upload(scene, false, false, true);
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 32; i++) buffers.Upload(scene, false, false, true);

@@ -33,8 +33,8 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 4 && argc != 6 && argc != 8)
-            throw std::runtime_error("Usage: probe shader.dxil cases.bin results.bin [inputStride outputStride [srv1.bin srv2.bin]]");
+        if (argc != 4 && argc < 6)
+            throw std::runtime_error("Usage: probe shader.dxil cases.bin results.bin [inputStride outputStride [srv1.bin ...]]");
         const size_t inputStride = argc >= 6 ? std::stoul(argv[4]) : 192;
         const size_t outputStride = argc >= 6 ? std::stoul(argv[5]) : 32;
         if (!inputStride || !outputStride) throw std::runtime_error("Zero probe stride");
@@ -72,9 +72,9 @@ int main(int argc, char** argv)
         D3D12_RANGE empty{};
         check(input->Map(0, &empty, &mapped)); std::memcpy(mapped, vertices.data(), vertices.size()); input->Unmap(0, nullptr);
         std::vector<ComPtr<ID3D12Resource>> extraInputs;
-        if (argc == 8)
+        if (argc > 6)
         {
-            for (int i = 6; i < 8; ++i)
+            for (int i = 6; i < argc; ++i)
             {
                 auto data = read(argv[i]);
                 auto resource = buffer(data.size(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE);

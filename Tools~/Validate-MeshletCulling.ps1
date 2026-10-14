@@ -6,7 +6,8 @@ param(
     [string] $ClangClPath = 'clang-cl',
     [string] $PythonPath = 'python',
     [string] $UnityCgIncludes = '',
-    [string] $OutputDirectory = ''
+    [string] $OutputDirectory = '',
+    [string] $ManagedValidationDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 $packageRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -124,9 +125,19 @@ foreach ($mode in @('native16', 'fp32')) {
 }
 & $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') generate $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'LOD case generation failed.' }
+if (!$ManagedValidationDirectory) {
+    $ManagedValidationDirectory = Join-Path $outputRoot 'managed'
+    & (Join-Path $PSScriptRoot 'Validate-MeshletQuantization.ps1') -OutputDirectory $ManagedValidationDirectory
+    if ($LASTEXITCODE -ne 0) { throw 'Managed LOD encoder validation failed.' }
+}
+$managedRoot = (Resolve-Path $ManagedValidationDirectory).Path
+$dotnet = (Get-Content (Join-Path $managedRoot 'dotnet-path.txt') -Raw).Trim()
+& $dotnet (Join-Path $managedRoot 'Validate.dll') $managedRoot --pack-lod $outputRoot
+if ($LASTEXITCODE -ne 0) { throw 'Production C# LOD encoding failed.' }
 & $exe (Join-Path $outputRoot 'lod-probe.dxil') (Join-Path $outputRoot 'lod-cases.bin') `
     (Join-Path $outputRoot 'lod-results.bin') 208 64 `
-    (Join-Path $outputRoot 'lod-nodes.bin') (Join-Path $outputRoot 'lod-groups.bin')
+    (Join-Path $outputRoot 'lod-nodes.bin') (Join-Path $outputRoot 'lod-groups.bin') `
+    (Join-Path $outputRoot 'lod-overflow.bin') (Join-Path $outputRoot 'lod-decoded.bin')
 if ($LASTEXITCODE -ne 0) { throw 'D3D12 LOD execution failed.' }
 & $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') check $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'LOD cut regression failed.' }

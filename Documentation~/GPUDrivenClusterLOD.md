@@ -44,8 +44,9 @@ write jobs before unpinning managed output buffers.
 Each simplification group produces one canonical sphere and one accumulated
 linear object-space error. All resulting coarse clusters and their source
 children reference the same group record, as own and parent data respectively.
-Both CPU and GPU retain shared FP32 Bounds/Error without recentering or
-independently rounding the parent.
+CPU and GPU use the same canonical decoded Bounds/Error, without recentering or
+independently rounding the parent. Source assets retain FP32 data; resident
+radius/error storage uses upward-rounded FP16 with an FP32 overflow table.
 This follows the group-data
 contract in UE 5.7.4 `NaniteBuilder/Private/ClusterDAG.cpp` (`FClusterDAG::ReduceGroup`), while
 keeping meshoptimizer as the builder.
@@ -59,10 +60,13 @@ The sequential CPU/GPU `VividMeshLODNodePacked` is **16 bytes**:
 | 8 | MeshletStartIndex (uint) |
 | 12 | PackedMeshletCountLevel (uint) |
 
-`_MeshLODGroups` contains sequential **20-byte** `VividMeshLODGroup` records:
-Bounds (float4) at offset 0 and Error (float) at offset 16. A child's parent index
-and the corresponding coarse nodes' own indices refer to the same record.
-`VividMeshLODGroupTable` interns these records when building an asset or
+Assets contain **20-byte** `VividMeshLODGroup` records: Bounds (float4) at offset 0
+and Error (float) at offset 16. `_MeshLODGroups` instead contains sequential
+**16-byte** `VividMeshLODGroupPacked` records: three FP32 center coordinates at
+offsets 0/4/8 and packed radius/error at offset 12. `_MeshLODGroupOverflow` has
+8-byte FP32 radius/error pairs. A child's parent index and the corresponding
+coarse nodes' own indices refer to the same canonical record.
+`VividMeshLODGroupTable` interns source records when building an asset or
 converting old metadata, by the exact bits of all five floats. One-ULP differences
 and signed zeros are not silently merged. v7 loads preserve both arrays and
 their indices directly, including unused or duplicate records, without a
@@ -76,8 +80,12 @@ The scene-owned dictionary and remap storage retain capacity between rebuilds.
 They are populated only on the initial static build or when the referenced asset
 set or a referenced asset's content version changes. Instance/material-only
 updates and changes to unrelated assets reuse the existing groups and node IDs.
-GPU upload continues to copy the scene arrays directly, without interning or
-index remapping during upload.
+After assembling all assets, `VividMeshLODGroupQuantizer` rounds scalars upward,
+repairs every child-to-parent containment/error constraint, interns the final
+decoded values and remaps node indices. This includes dependencies introduced
+by cross-asset sharing. Its work storage also retains capacity. GPU upload copies
+the prepared packed groups, overflow records and nodes directly, without encoding,
+interning or index remapping during upload.
 
 `VividMeshletCollectionAsset.MeshLODNodes` and `VividGPUDrivenSceneData.MeshLODNodes`
 now expose indexed nodes; `MeshLODGroups` exposes the shared records. Use
@@ -86,15 +94,17 @@ an asset's data together, then `MarkChanged()` after editing. The old five-argum
 `SetMeshData` overload accepts 48-byte `VividMeshLODNode` input and converts it
 once for source compatibility. That struct otherwise serves old blob conversion;
 assets and scenes never retain an expanded node array. The meshoptimizer builder
-also emits shared records directly. CPU VSM hierarchy construction reads own
-and parent data from the same scene group table that is uploaded to the GPU.
+also emits shared records directly. The scene's `MeshLODGroups` is a 20-byte
+per-group CPU cache decoded from the final packed records and overflow table.
+CPU VSM hierarchy construction reads this cache; `PackedMeshLODGroups` and
+`MeshLODGroupOverflow` are the directly uploaded arrays. No node expansion occurs.
 
-LOD metadata uses `16 * nodeCount + 20 * groupCount` bytes instead of
-`48 * nodeCount`; savings depend on the actual sharing ratio. The extra group
-lookups preserve the existing FP32 cut calculation. This formula now applies to
-CPU node/group payloads as well as GPU buffers; it excludes collection overhead,
-serialized blobs and other rendering resources. No frame-time improvement is
-claimed.
+Resident GPU LOD metadata uses `16 * nodeCount + 16 * groupCount + 8 * overflowCount`
+bytes, plus one 8-byte dummy record when the overflow table is empty. Savings
+depend on sharing and overflow frequency. CPU memory additionally retains the
+decoded 20-byte group cache and reusable build storage; this change reduces GPU
+payload, not CPU memory. The extra lookups preserve FP32 cut calculations. These
+figures exclude other rendering resources; no frame-time improvement is claimed.
 
 The shader selects a node when its parent needs refinement and the node itself
 does not. Both sides evaluate identical group data with complementary `>` / `<=`
@@ -131,7 +141,7 @@ ranges containing the finest retained level. Forced-depth behavior is retained.
 ## Existing assets
 
 The blob format remains **v7** and `.vmeshletcollection` importer version **6**;
-this CPU change requires no asset reimport or rebake. Vertices remain 20 bytes
+this resident-only change requires no asset reimport or rebake. Vertices remain 20 bytes
 and meshlets remain 32 bytes. The LZ4 payload stores level counts,
 the shared group array, indexed nodes, meshlets, vertices and indices in that
 order. Both own and parent group indices are validated before accepting data.
@@ -153,62 +163,51 @@ FBX/glTF files are unchanged.
 ## LOD validation (2026-10-14)
 
 - Runtime, Editor and Editor.Tests compile against Unity 7000.0.0a9 references.
-  All 35 pure managed checks pass, covering v1-v7 decoding, exact shared-data round
-  trips, invalid group indices, table rebuild/empty state, distinct float bits,
-  allocation-free warmed table builds, v4/v5 finest-cut migration, all node/group
-  offsets and strides, and vertex quantization. A new 8,192-node v7 regression
-  preserves unused/duplicate group IDs and binary round trips, checks independent
-  array ownership, and bounds warmed load allocation to compact array payloads
-  plus less than 4 KiB (excluding a 48-byte expansion or rebuilt dictionary).
-- The unchanged GPU layout/selection path was previously validated by DXC for
-  all 6 MeshletListBuild, 8 GPUInstanceCulling and 12
-  GPUMeshletCulling kernels. The production selection and VSM hierarchy predicate
-  run on D3D12 (RTX 5070 Ti) in `Tools~/MeshLODSelectionProbe.hlsl`.
-- 16,448 cases pass with zero holes/overlap for main-view, shadow and three-level
-  cuts, including exact equality +/- one float ULP, zero error/budget, viewport,
-  FOV, instance bias, affine transforms and the captured Camera_1 roof bounds.
-  An FP64 oracle checks projected error. VSM branches never reject a selected
-  contained node or the truncated finest level. The probe loads the production
-  16-byte nodes and 20-byte groups from actual D3D12 structured buffers, with
-  different offsets per case. All 1,052,672 result bytes match the previous
-  expanded-node implementation exactly. Existing 24,640 meshlet and
-  41,024 instance-frustum cases also pass in native16 and FP32 modes.
-- The running Sponza scene has 217 instances, 2,888 distinct LOD nodes and 2,014
-  shared groups (down from 2,022 before scene-level cross-asset interning).
-  GPU readback matches all CPU geometry offsets and all own/parent
-  float bits, with no invalid indices or differences from the pre-change LOD
-  inputs. VSM hierarchy, root and geometry-bound buffers are byte-identical to
-  the pre-change capture. The CPU scene payload and GPU buffers each total
-  **86,488 bytes**, compared with the former **138,624-byte** CPU node payload
-  (37.61% smaller). Scene-level interning removes eight duplicate records,
-  saving 160 bytes relative to separate per-asset group ranges. This excludes
-  vertices, meshlets, collection overhead, reserved capacity, the scene builder's
-  dictionary/remap storage and other scene resources.
-  Sixteen full static uploads after warm-up allocate zero managed
-  bytes on the calling thread and reuse both GPU buffers. Readback reports 994
-  visible meshlets and 16 nonzero indirect argument records at the current view.
-  Auto LOD uses a 1-pixel budget. Live Editor compilation and console errors are
-  zero; production compute shaders have no errors (existing warnings remain).
-- Live scene-builder diagnostics measure zero managed bytes and zero static
-  rebuilds across 64 warmed stable builds; the interning dictionary is untouched.
-  An unrelated asset's content revision leaves the table unchanged. Updating a
-  referenced asset's in-memory content revision triggers a rebuild, preserves
-  all node/group values, and the next stable build reuses the table. No asset
-  content was edited or saved. The Editor regression test additionally covers
-  different local group ordering, duplicate groups, one-ULP differences,
-  transform/material-only updates, same-length group edits, and reference
-  removal/readdition; it compiled but awaits the manual Editor test run below.
-- A live in-memory meshoptimizer build of a 32x32-quad grid produces five levels,
-  34 indexed nodes and 24 groups. All parent links resolve to a coarse group's
-  exact ID, errors are monotone, all 2,048 finest triangles remain, and asset
-  serialization/reload preserves every node/group. No project asset was saved.
-- Before extracting the shared table, the original roof camera was captured at
-  `(6.181255, 18.638472, -10.503865)`,
-  Euler `(43.272297, 304.76556, 1.6177362)`, with GPUDriven/occlusion enabled and
-  automatic LOD. The previously missing outer roof strip is present in the
-  captured scene output. The user's camera pose was then restored. Capture:
-  `Temp~/lod-pixel-budget/roof.png`. This is a geometry check, not material or
-  frame-time validation.
+  All 40 pure managed checks pass outside the Unity Test Framework. They cover
+  v1-v7 serialization, indexed ownership, all field offsets/strides, every finite
+  nonnegative half boundary and adjacent FP32 values, subnormal ceilings,
+  overflow/invalid inputs, near-tangent containment repair, tiny displacements
+  beside very large radii, unbounded repairs, final interning/remapping, repeated
+  build stability, empty rebuilds and warmed zero-allocation quantization.
+- DXC compiles all 6 MeshletListBuild, 8 GPUInstanceCulling and 12
+  GPUMeshletCulling kernels. D3D12 execution on an RTX 5070 Ti passes **111,680**
+  LOD cases with production C# encoded 16-byte nodes/groups and 8-byte overflow
+  buffers. The corpus contains **6,613 overflow records** and covers every
+  finite nonnegative FP16 code, adjacent FP32 values, large coordinates, affine
+  transforms, eye-plane cases and the captured Camera_1 roof bounds.
+  CPU/GPU decode is bit-identical, source bounds/errors never decrease, main,
+  shadow and three-level cuts have zero holes/overlap, and an FP64 pixel-error
+  oracle agrees. VSM spatial projections retain at least the original coverage;
+  frustum and VSM hierarchy checks never newly reject a selected case.
+  Separate meshlet (24,640 cases per mode) and instance-frustum (41,024 per mode)
+  probes pass in both native16 and FP32 modes.
+- Live Sponza readback contains 217 instances, 2,888 distinct LOD nodes and 2,014
+  groups with **zero overflow records**. Node/group/overflow strides are 16/16/8.
+  All CPU/GPU decoded bits match, centers and geometry offsets match the original
+  FP32 capture, radii/errors never decrease, and all hierarchy containment checks
+  pass. VSM intervals match the decoded cache; VSM spatial topology, roots and
+  geometry-bound buffers remain unchanged.
+  GPU node/group payload decreases from **86,488 to 78,432 bytes**; including the
+  empty side table's dummy record gives **78,440 bytes**, a net **8,048-byte
+  (9.31%)** reduction in this metadata. Group records alone are 20% smaller.
+  These figures exclude vertices, meshlets, CPU caches, reserved capacity and
+  other scene resources. Final readback reports 1,088 visible meshlets and 16
+  nonzero indirect argument records at the current view. Live Editor compilation
+  and console errors are zero; existing warnings remain.
+- Sixteen warmed full static uploads allocate zero managed bytes on the calling
+  thread and reuse node/group/overflow buffers. Sixty-four warmed stable scene
+  builds allocate zero managed bytes and perform zero static rebuilds. Both the
+  source interning dictionary and packed-group list remain untouched. An
+  unrelated asset revision leaves them untouched; a referenced asset revision
+  rebuilds them once, reproduces identical data, and the next build reuses them.
+  Only in-memory revisions were changed; no asset content was edited or saved.
+- Evidence is in `Temp~/lod-group16/`: `managed-validation.log`,
+  `gpu-validation.log`, `final-lod-check.log`, `instance-validation.log`,
+  `readback.json` and `cache.json`. Reproduce the managed/D3D12 checks with
+  `Tools~/Validate-MeshletQuantization.ps1`, `Tools~/Validate-MeshletCulling.ps1`
+  and `Tools~/Validate-InstanceFrustumCulling.ps1`. The fixed-camera visual/GPU
+  follow-up is below. The earlier roof capture at
+  `Temp~/lod-pixel-budget/roof.png` predates this resident codec change.
 
 Unity Test Framework tests were not run in the active interactive Editor.
 Run `VividMeshletCollectionBuilderTests`, `VividGPUDrivenSceneDataBuilderTests`,
@@ -216,6 +215,198 @@ Run `VividMeshletCollectionBuilderTests`, `VividGPUDrivenSceneDataBuilderTests`,
 GPU buffer/serializer fixtures manually for the full Editor integration suite.
 These include cross-asset group remapping, root-sentinel preservation and
 same-count group edits refreshing VSM error intervals.
+
+### Roof camera A/B follow-up (2026-10-14)
+
+Report: `Temp~/lod-group16-ab/report/report.html`; reproducible analysis/plots:
+`Temp~/lod-group16-ab/analyze.py`, followed by `render_report.py` in that directory.
+Raw GPU readbacks, receiver depth/normal/shadow, screenshots, timing CSVs, settings
+snapshots and source hashes remain beside the report.
+
+- Fixed Camera_1 at `(6.181255, 18.638472, -10.503865)`, Euler
+  `(43.272297, 304.76556, 1.6177362)`, 1920x1080, vertical FOV 60, near/far
+  0.3/1000. GPUDriven, occlusion and automatic 1-pixel LOD remain enabled.
+  VSM/SMRT settings are unchanged. Game time is paused during the controlled
+  Play Mode comparison; the original camera/time/Play Mode state is restored.
+- A uses the original 20-byte FP32 groups without resident quantization or
+  hierarchy repair. B uses the production 16-byte path. Both GPU layouts and
+  CPU VSM caches change together; shader variants select the layout at compile
+  time. The baseline group bit-pattern set matches the pre-quantization capture.
+  All temporary source instrumentation is restored byte-for-byte and the probe
+  shader is removed through AssetDatabase.
+- Valid depth is identical at every one of 2,073,600 pixels. The main
+  view's 4,548 instance/node GPU decisions and actual draw lists match: 1,284
+  candidates, 912 visible meshlets, no recovered draws or duplicates. Across
+  the main view and 17 shadow views, each captured state checks 96,318 complete
+  leaf-to-root paths; six captures have zero holes, overlaps or unresolved
+  parent references. Shadow view 3 replaces two coarse nodes with four finer
+  nodes; the other views agree. This is conservative refinement, not a broken cut.
+- Final RGB is not bit-identical: A/B MAE is 0.07717/255 versus 0.05736/255 and
+  0.05128/255 for same-version repeats. Shadow MAE is 0.001598 on a 0-1 scale,
+  within the repeated-frame differences 0.001799 and 0.001611. SMRT frame noise
+  and shadow LOD changes affect lighting; not every RGB difference is attributed
+  to noise. Depth and draw/cut evidence exclude new missing or duplicate
+  geometry in this view.
+- Six alternating pairs use 192 warm-up camera frames and 384 valid samples per
+  window (2,304 per version). Readbacks and diagnostic dispatches run outside
+  timing windows. The GPU `VividLODAB.CameraGPU` range averages **1.571474 ms A**
+  versus **1.568078 ms B**. Paired B-A is **-3.396 us** (-0.216%), with a 95% t interval of
+  **[-13.519, +6.728] us** across six window pairs. No stable speedup or regression
+  is established. Clocks are not locked; telemetry and per-window dispersion are
+  retained. The temporary ProfilingSampler/ProfilingScope covers pre-graph
+  GPUDriven culling, the render graph, post-graph commands and submitted gizmos,
+  excluding Editor UI; nested ranges are never added together. Earlier graph-only
+  measurements (1.520192 ms A / 1.518290 ms B) are retained separately; they omit
+  the pre-graph main-view LOD build and are not the primary cost metric.
+- FrameTimingManager/FrameTime.GPU reports roughly 0.012 ms here, smaller than
+  individual passes, so it is excluded as a camera-cost metric. The first pilot
+  also lost Play Mode during compilation and produced no valid samples; it is
+  excluded. A plain-string marker pilot lacked SampleGPU registration and is
+  likewise excluded. Camera pose, frame extent, sample counts and compilation state are
+  checked before accepting the final windows. This validates the specified fixed
+  view, not arbitrary camera motion or a whole-application performance claim.
+- The packed normal readback is excluded: Unity rejects the diagnostic tool's
+  A2B10G10R10_UNormPack32-to-RGBAFloat conversion (formats 75 -> 52), returning
+  zeros without setting the readback error flag. Zero-filled normal equality is
+  not validation. Depth uses an explicit compute copy, contains 1,216,311 nonzero
+  finite pixels, and remains identical after restoring the production source.
+
+## Shared-group quantization design (implemented, 2026-10-14)
+
+The selected 16-byte format is now the resident format. The comparison below
+records the preceding investigation; source assets remain 20-byte FP32 groups.
+
+The local UE **5.7.4** source provides three relevant contracts:
+
+- `E:/UnrealEngine/Engine/Source/Developer/NaniteBuilder/Private/ClusterDAG.cpp:1072`
+  assigns one group's LOD bounds/error to all dependent coarse clusters.
+- `Encode/NaniteEncode.cpp:153` retains the cluster's FP32 LOD sphere, but packs
+  LOD error and edge length as two FP16 values. `NaniteDataDecode.ush:519` loads
+  the sphere with `asfloat` and decodes the scalars with `f16tof32`.
+- `Encode/NaniteEncodeHierarchy.cpp:488` and `:506` retain FP32 hierarchy LOD
+  spheres, round the minimum error downward, and pack it with the parent error.
+  Ordinary `FFloat16::Set` uses round-to-nearest-even; Nanite does **not** round
+  every error upward. Its interval lower bound serves a different purpose from
+  VividRP's shared transition error.
+
+Thus compressing the LOD sphere is a VividRP extension, not a direct Nanite port.
+Epic's [vertex precision documentation](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-technical-details)
+describes object-space, power-of-two **vertex position** quantization; that should
+not be mistaken for a compressed resident LOD sphere format.
+
+### Candidate formats and measured input distribution
+
+The offline experiment reads the preceding Sponza GPU capture in
+`Temp~/lod-scene-dedup/before-MeshLODGroupsBuffer.bin` and its node buffer,
+reproduces exact cross-asset interning (2,022 -> 2,014 groups), and examines
+2,025 distinct own-to-parent group edges across 2,888 nodes. This is captured
+scene data, not a new live render or GPU codec test. Reproduce with
+`python Temp~/lod-group-quantization/analyze.py`; results are in `result.json`
+beside that script.
+
+| Format | Group payload | Node + group bytes in this capture | Reduction from FP32 metadata |
+| --- | ---: | ---: | ---: |
+| Previous FP32 center/radius/error | 20 B | 86,488 | -- |
+| FP32 sphere + separate packed FP16 error stream | 18 B average | 82,460 | 4.66% |
+| **FP32 center + upward FP16 radius/error** | **16 B** | **78,432** | **9.31%** |
+| FP16 center/radius/error + reserved bits | 12 B | 70,376 | 18.63% |
+
+The 18-byte option needs a separate error stream (two FP16 errors per uint);
+putting one packed error uint after a float4 still occupies 20 bytes. The
+16/12-byte figures exclude any overflow table or quantization-domain metadata
+and conservatively retain all 2,014 group IDs, without claiming extra merging
+from quantization. These are payload savings, not whole-scene VRAM or timing.
+
+In this capture, maximum absolute center coordinate is 16.20624 object units,
+radii range from 0.01621 to 199.10589, and positive errors range from 0.00022149
+to 0.660371. Both half-based candidates fit without overflow records. With
+upward scalar rounding, the 16-byte candidate increases radius by at most
+**0.09357%** and error by at most **0.09127%**. It preserves centers exactly.
+The 12-byte candidate rounds centers to nearest FP16 and compensates radius
+for their displacement: maximum center shift is **0.005044 object units** and
+maximum radius increase is **0.73920%**. Pixel-error inflation is not bounded
+by those percentages near the eye plane; larger bounds can request much more
+detail there. No GPU time or visual-quality improvement is established.
+
+### Resident implementation: 16 bytes
+
+Keep three FP32 center coordinates at offsets 0/4/8 and a `uint RadiusError` at
+offset 12. C# declares the coordinates as scalar fields because CoreRP's HLSL
+generator promotes a `float3` field to `float4`, even with exact packing.
+Pack nonnegative radius/error in its low/high 16 bits with explicit upward
+rounding. Decode to **FP32** before projection, shadow error evaluation and
+comparisons. Existing strict `float16_t` frustum acceleration is independent
+of this storage encoding; do not move critical LOD comparisons into FP16.
+
+For a finite nonnegative scalar, encode the nearest half, decode it, and advance
+to the next half code if the decoded value is smaller than the source. Preserve
+exact zero; never flush a positive error to zero. Values above 65,504 must not
+be clamped down. An escape uses bit 31 of `RadiusError` (the unused
+sign bit of a valid nonnegative error) and the remaining bits as an index into
+an FP32 `float2(radius,error)` table. Either scalar exceeding 65,504 creates an
+escape; any representable partner scalar still uses its upward half ceiling.
+Positive tiny values round up to the minimum half subnormal; they do not escape.
+Storage is **16*G + 8*F** group bytes for G groups and F escapes (plus an 8-byte
+dummy when F is zero); it only beats 20*G when overflow is sufficiently rare.
+Invalid spatial bounds use an unbounded radius and maximum finite error; a nonfinite
+center is replaced with zero only in this unbounded fallback. Invalid errors
+use the maximum finite FP32 error. A radius that exceeds FP32 during hierarchy
+repair remains infinite in the side table. VSM projection retains the full
+viewport for nonfinite projected bounds; it never converts them to texel indices.
+
+The 12-byte candidate is a later experiment. Absolute half centers lose too much
+precision for small bounds far from the object origin and overflow on large
+coordinates. A shared origin plus power-of-two grid could improve it, but adds
+a decode-domain ID/header and reduces cross-asset sharing when domains differ.
+Identical packed words under different domains are not identical groups.
+
+### Correctness requirements
+
+1. **One canonical decoded record per shared transition.** Coarse own and fine
+   parent references must resolve to identical decoded bits, including escapes.
+   Preserve the root index sentinel and complementary `>` / `<=` decisions,
+   zero-error behavior, forced depth and the finest retained level.
+2. **Outward spatial rounding.** If the center changes from c to c', require
+   `r' >= r + length(c' - c)`, including encode/decode arithmetic error. The
+   16-byte candidate avoids center error, but still needs `r' >= r`.
+3. **Hierarchy closure after quantization.** For every child-to-parent group
+   edge, require `rParent' >= distance(cParent', cChild') + rChild'` and
+   `errorParent' >= errorChild'`. Propagate increases toward coarser groups,
+   round outward again, and include every dependency of a shared group. Apply
+   the same rule when an escape changes the precision of either endpoint.
+   Bounds/error inflation is based on source asset values on each static rebuild.
+   Repair uses FP64 distance plus addition margins, upward FP32 rounding and a
+   second half ceiling. Identical centers need no margin. A fixed-point pass
+   includes cross-asset aliases and rejects nonconvergent growing cycles.
+4. **Shared indices alone are insufficient for a multilevel cut.** They ensure
+   matching decisions at one transition, while nested bounds and monotone error
+   prevent a coarse ancestor and a finer descendant being selected together.
+   Independent outward rounding can break nesting: a parent at x=0 with r=2
+   contains a child at x=0.9996000528 with r=1.0003999472. Rounding each radius
+   upward to half leaves the parent at 2 but moves the child radius to
+   1.0009765625, which no longer fits. The captured scene has no such failures
+   for either candidate, but this explicit counterexample requires a regression.
+5. **VSM uses decoded values.** Build its `min own error` / `max parent error`
+   intervals from the same packed scene groups consumed by the GPU. Using the
+   original FP32 parent error can reject descendants that the quantized GPU
+   error would select. If hierarchy intervals are later compressed separately,
+   round interval minima down and maxima up. Keep existing geometric bounds
+   derived from actual vertices; sphere fallbacks use the decoded outer bounds.
+6. **Only static scene changes perform encoding and interning.** Keep v7 asset
+   group data at source FP32 precision. During the cached scene build,
+   quantize each source group once, repair hierarchy constraints, then intern
+   final canonical decoded/encoded values and remap node indices. Resolve escape
+   indices after canonicalization; do not treat different escape indices as
+   different values. The CPU scene table caches the decoder output, and VSM
+   reads it without expanding nodes to 48 bytes. GPU upload remains a direct
+   copy of prepared buffers. No reimport or disk format bump is necessary.
+
+The original offline FP64 experiment established the nesting counterexample.
+The production C# encoder and D3D12 decoder now exercise these requirements in
+the validation above, including escapes and the three-level near-tangent chain.
+A small increase in refinement is expected; bit-identical LOD selections to
+the original FP32 inputs are not the acceptance criterion. The fixed roof view
+is covered above; other camera routes and streaming workloads remain unmeasured.
 
 ## Resident vertex quantization
 

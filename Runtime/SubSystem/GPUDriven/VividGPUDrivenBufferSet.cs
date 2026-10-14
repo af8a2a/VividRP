@@ -23,6 +23,7 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_TerrainLayerDataBuffer;
         private GraphicsBuffer m_MeshLODNodesBuffer;
         private GraphicsBuffer m_MeshLODGroupsBuffer;
+        private GraphicsBuffer m_MeshLODGroupOverflowBuffer;
         private GraphicsBuffer m_MeshletsBuffer;
         private GraphicsBuffer m_SharedVertexBuffer;
         private GraphicsBuffer m_SharedIndexBuffer;
@@ -56,6 +57,7 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer MeshLODNodesBuffer => m_MeshLODNodesBuffer;
 
         public GraphicsBuffer MeshLODGroupsBuffer => m_MeshLODGroupsBuffer;
+        public GraphicsBuffer MeshLODGroupOverflowBuffer => m_MeshLODGroupOverflowBuffer;
 
         public int MeshLODGroupCount { get; private set; }
 
@@ -195,12 +197,22 @@ namespace VividRP.Runtime.GPUDriven
 
             if (shouldUploadStaticData)
             {
+                if (!VividMeshLODGroupQuantizer.FullPrecisionAB && sceneData.PackedMeshLODGroups.Count != sceneData.MeshLODGroupCount)
+                    throw new InvalidOperationException("Scene LOD groups must be quantized before upload.");
                 MeshLODGroupCount = sceneData.MeshLODGroupCount;
-                UploadStructuredBuffer(
+                if (VividMeshLODGroupQuantizer.FullPrecisionAB)
+                    UploadStructuredBuffer(ref m_MeshLODGroupsBuffer, sceneData.MutableMeshLODGroups, UnsafeUtility.SizeOf<VividMeshLODGroup>(), "VividGPUDriven_MeshLODGroups");
+                else UploadStructuredBuffer(
                     ref m_MeshLODGroupsBuffer,
-                    sceneData.MutableMeshLODGroups,
-                    UnsafeUtility.SizeOf<VividMeshLODGroup>(),
+                    sceneData.MutablePackedMeshLODGroups,
+                    UnsafeUtility.SizeOf<VividMeshLODGroupPacked>(),
                     "VividGPUDriven_MeshLODGroups"
+                );
+                UploadStructuredBuffer(
+                    ref m_MeshLODGroupOverflowBuffer,
+                    sceneData.MutableMeshLODGroupOverflow,
+                    UnsafeUtility.SizeOf<VividMeshLODGroupOverflow>(),
+                    "VividGPUDriven_MeshLODGroupOverflow"
                 );
                 UploadStructuredBuffer(
                     ref m_MeshLODNodesBuffer,
@@ -255,6 +267,7 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._TerrainLayerData, TerrainLayerDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshLODNodes, MeshLODNodesBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshLODGroups, MeshLODGroupsBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshLODGroupOverflow, MeshLODGroupOverflowBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._Meshlets, MeshletsBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SharedVertexBuffer, SharedVertexBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SharedIndexBuffer, SharedIndexBuffer);
@@ -306,6 +319,7 @@ namespace VividRP.Runtime.GPUDriven
             m_TerrainLayerDataBuffer?.Dispose();
             m_MeshLODNodesBuffer?.Dispose();
             m_MeshLODGroupsBuffer?.Dispose();
+            m_MeshLODGroupOverflowBuffer?.Dispose();
             MeshLODGroupCount = 0;
             m_MeshletsBuffer?.Dispose();
             m_SharedVertexBuffer?.Dispose();
@@ -323,6 +337,7 @@ namespace VividRP.Runtime.GPUDriven
             m_TerrainLayerDataBuffer = null;
             m_MeshLODNodesBuffer = null;
             m_MeshLODGroupsBuffer = null;
+            m_MeshLODGroupOverflowBuffer = null;
             m_MeshletsBuffer = null;
             m_SharedVertexBuffer = null;
             m_SharedIndexBuffer = null;
@@ -416,7 +431,8 @@ namespace VividRP.Runtime.GPUDriven
         private bool RequiresStaticBufferUpload(VividGPUDrivenSceneData sceneData)
         {
             return !IsStructuredBufferCompatible(m_MeshLODNodesBuffer, sceneData.MeshLODNodeCount, UnsafeUtility.SizeOf<VividMeshLODNodePacked>()) ||
-                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, sceneData.MeshLODGroupCount, UnsafeUtility.SizeOf<VividMeshLODGroup>()) ||
+                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, sceneData.MeshLODGroupCount, VividMeshLODGroupQuantizer.FullPrecisionAB ? UnsafeUtility.SizeOf<VividMeshLODGroup>() : UnsafeUtility.SizeOf<VividMeshLODGroupPacked>()) ||
+                   !IsStructuredBufferCompatible(m_MeshLODGroupOverflowBuffer, sceneData.MeshLODGroupOverflow.Count, UnsafeUtility.SizeOf<VividMeshLODGroupOverflow>()) ||
                    !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
                    !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||
                    !IsRawBufferCompatible(m_SharedIndexBuffer, sceneData.IndexCount);

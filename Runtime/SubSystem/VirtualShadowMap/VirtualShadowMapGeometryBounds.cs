@@ -67,7 +67,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             return FromMinMax(low, high);
         }
 
-        private Bounds BuildLod(VividMeshLODNode node)
+        private Bounds BuildLod(VividMeshLODNodePacked node)
         {
             if (node.MeshletCount == 0 || node.MeshletStartIndex > m_MeshletCount
                 || node.MeshletCount > (uint)m_MeshletCount - node.MeshletStartIndex) return default;

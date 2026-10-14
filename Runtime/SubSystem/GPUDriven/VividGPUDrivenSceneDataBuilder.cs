@@ -1152,6 +1152,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             int meshlets = 0;
             int nodes = 0;
+            int groups = 0;
             int vertices = 0;
             int indices = 0;
             // This list already contains only unique assets referenced by renderable renderers.
@@ -1160,6 +1161,7 @@ namespace VividRP.Runtime.GPUDriven
                 VividMeshletCollectionAsset asset = m_CurrentReferencedMeshletAssets[index];
                 meshlets = checked(meshlets + (asset.Meshlets?.Length ?? 0));
                 nodes = checked(nodes + (asset.MeshLODNodes?.Length ?? 0));
+                groups = checked(groups + asset.MeshLODGroups.Length);
                 vertices = checked(vertices + (asset.VertexBuffer?.Length ?? 0));
                 indices = checked(indices + (asset.IndexBuffer?.Length ?? 0));
             }
@@ -1167,6 +1169,8 @@ namespace VividRP.Runtime.GPUDriven
                 sceneData.MutableMeshlets.Capacity = meshlets;
             if (sceneData.MutableMeshLODNodes.Capacity < nodes)
                 sceneData.MutableMeshLODNodes.Capacity = nodes;
+            if (sceneData.MutableMeshLODGroups.Capacity < groups)
+                sceneData.MutableMeshLODGroups.Capacity = groups;
             if (sceneData.MutableVertices.Capacity < vertices)
                 sceneData.MutableVertices.Capacity = vertices;
             if (sceneData.MutableIndices.Capacity < indices)
@@ -1198,11 +1202,15 @@ namespace VividRP.Runtime.GPUDriven
                 sceneData.MutableMeshlets.Add(meshlet);
             }
 
-            VividMeshLODNode[] sourceMeshLODNodes = meshletCollection.MeshLODNodes ?? Array.Empty<VividMeshLODNode>();
+            var sourceMeshLODNodes = meshletCollection.MeshLODNodes;
+            uint groupBaseOffset = (uint)sceneData.MeshLODGroupCount;
+            sceneData.MutableMeshLODGroups.AddRange(meshletCollection.MeshLODGroups);
             int maxVisibleMeshletRenderRequestCount = 0;
             for (int nodeIndex = 0; nodeIndex < sourceMeshLODNodes.Length; nodeIndex++)
             {
-                VividMeshLODNode node = sourceMeshLODNodes[nodeIndex];
+                VividMeshLODNodePacked node = sourceMeshLODNodes[nodeIndex];
+                node.GroupIndex = checked(node.GroupIndex + groupBaseOffset);
+                if (node.HasParent) node.ParentGroupIndex = checked(node.ParentGroupIndex + groupBaseOffset);
                 node.MeshletStartIndex += meshletBaseOffset;
                 sceneData.MutableMeshLODNodes.Add(node);
                 maxVisibleMeshletRenderRequestCount = (int) Math.Min(

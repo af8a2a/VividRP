@@ -14,7 +14,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         [SerializeField, HideInInspector] private byte[] m_MeshDataBlob = Array.Empty<byte>();
 
         [NonSerialized] private int[] m_MeshLODLevelNodeCounts = Array.Empty<int>();
-        [NonSerialized] private VividMeshLODNode[] m_MeshLODNodes = Array.Empty<VividMeshLODNode>();
+        [NonSerialized] private VividMeshLODNodePacked[] m_MeshLODNodes = Array.Empty<VividMeshLODNodePacked>();
+        [NonSerialized] private VividMeshLODGroup[] m_MeshLODGroups = Array.Empty<VividMeshLODGroup>();
         [NonSerialized] private VividMeshlet[] m_Meshlets = Array.Empty<VividMeshlet>();
         [NonSerialized] private VividMeshletVertex[] m_VertexBuffer = Array.Empty<VividMeshletVertex>();
         [NonSerialized] private byte[] m_IndexBuffer = Array.Empty<byte>();
@@ -43,17 +44,26 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 EnsureMeshDataLoaded();
                 return m_MeshLODLevelNodeCounts;
             }
-            set => SetMeshData(value, MeshLODNodes, Meshlets, VertexBuffer, IndexBuffer);
+            set => SetMeshData(value, MeshLODNodes, MeshLODGroups, Meshlets, VertexBuffer, IndexBuffer);
         }
 
-        public VividMeshLODNode[] MeshLODNodes
+        public VividMeshLODNodePacked[] MeshLODNodes
         {
             get
             {
                 EnsureMeshDataLoaded();
                 return m_MeshLODNodes;
             }
-            set => SetMeshData(MeshLODLevelNodeCounts, value, Meshlets, VertexBuffer, IndexBuffer);
+            set => SetMeshData(MeshLODLevelNodeCounts, value, MeshLODGroups, Meshlets, VertexBuffer, IndexBuffer);
+        }
+
+        public VividMeshLODGroup[] MeshLODGroups
+        {
+            get
+            {
+                EnsureMeshDataLoaded();
+                return m_MeshLODGroups;
+            }
         }
 
         public VividMeshlet[] Meshlets
@@ -63,7 +73,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 EnsureMeshDataLoaded();
                 return m_Meshlets;
             }
-            set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, value, VertexBuffer, IndexBuffer);
+            set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, MeshLODGroups, value, VertexBuffer, IndexBuffer);
         }
 
         public VividMeshletVertex[] VertexBuffer
@@ -73,7 +83,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 EnsureMeshDataLoaded();
                 return m_VertexBuffer;
             }
-            set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, Meshlets, value, IndexBuffer);
+            set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, MeshLODGroups, Meshlets, value, IndexBuffer);
         }
 
         public byte[] IndexBuffer
@@ -83,7 +93,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 EnsureMeshDataLoaded();
                 return m_IndexBuffer;
             }
-            set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, Meshlets, VertexBuffer, value);
+            set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, MeshLODGroups, Meshlets, VertexBuffer, value);
         }
 
         // Reimport .vmeshletcollection sources (or rebake terrain) to restore automatic LOD.
@@ -95,18 +105,34 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         public void SetMeshData(
             int[] meshLODLevelNodeCounts,
-            VividMeshLODNode[] meshLODNodes,
+            VividMeshLODNodePacked[] meshLODNodes,
+            VividMeshLODGroup[] meshLODGroups,
             VividMeshlet[] meshlets,
             VividMeshletVertex[] vertexBuffer,
             byte[] indexBuffer)
         {
+            meshLODNodes ??= Array.Empty<VividMeshLODNodePacked>();
+            meshLODGroups ??= Array.Empty<VividMeshLODGroup>();
+            VividMeshLODGroupTable.Validate(meshLODNodes, meshLODGroups.Length);
             m_MeshLODLevelNodeCounts = meshLODLevelNodeCounts ?? Array.Empty<int>();
-            m_MeshLODNodes = meshLODNodes ?? Array.Empty<VividMeshLODNode>();
+            m_MeshLODGroups = meshLODGroups;
+            m_MeshLODNodes = meshLODNodes;
             m_Meshlets = meshlets ?? Array.Empty<VividMeshlet>();
             m_VertexBuffer = vertexBuffer ?? Array.Empty<VividMeshletVertex>();
             m_IndexBuffer = indexBuffer ?? Array.Empty<byte>();
             m_MeshDataLoaded = true;
             m_MeshDataSerializationVersion = VividMeshletCollectionBinarySerializer.CurrentVersion;
+        }
+
+        // Compatibility for callers supplying pre-v7 authoring data. Convert once;
+        // the asset retains only the compact node array and shared groups.
+        public void SetMeshData(int[] meshLODLevelNodeCounts, VividMeshLODNode[] meshLODNodes,
+            VividMeshlet[] meshlets, VividMeshletVertex[] vertexBuffer, byte[] indexBuffer)
+        {
+            var table = new VividMeshLODGroupTable();
+            table.Build(meshLODNodes ?? Array.Empty<VividMeshLODNode>());
+            SetMeshData(meshLODLevelNodeCounts, table.Nodes.ToArray(), table.Groups.ToArray(),
+                meshlets, vertexBuffer, indexBuffer);
         }
 
         public void MarkChanged()
@@ -131,6 +157,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_MeshDataBlob = VividMeshletCollectionBinarySerializer.Serialize(
                 m_MeshLODLevelNodeCounts,
                 m_MeshLODNodes,
+                m_MeshLODGroups,
                 m_Meshlets,
                 m_VertexBuffer,
                 m_IndexBuffer
@@ -156,6 +183,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     m_MeshDataBlob,
                     out m_MeshLODLevelNodeCounts,
                     out m_MeshLODNodes,
+                    out m_MeshLODGroups,
                     out m_Meshlets,
                     out m_VertexBuffer,
                     out m_IndexBuffer
@@ -185,7 +213,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private void ClearRuntimeMeshData()
         {
             m_MeshLODLevelNodeCounts = Array.Empty<int>();
-            m_MeshLODNodes = Array.Empty<VividMeshLODNode>();
+            m_MeshLODNodes = Array.Empty<VividMeshLODNodePacked>();
+            m_MeshLODGroups = Array.Empty<VividMeshLODGroup>();
             m_Meshlets = Array.Empty<VividMeshlet>();
             m_VertexBuffer = Array.Empty<VividMeshletVertex>();
             m_IndexBuffer = Array.Empty<byte>();

@@ -403,8 +403,8 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
-    // Expanded CPU/authoring view. GPU uploads use VividMeshLODNodePacked and a
-    // shared VividMeshLODGroup table; keep this API for builders and CPU VSM bounds.
+    // Legacy v6/input layout only. Assets, scene data and GPU buffers retain
+    // VividMeshLODNodePacked plus shared groups; never expand v7 into this array.
     [StructLayout(LayoutKind.Sequential)]
     [Serializable]
     public struct VividMeshLODNode
@@ -462,10 +462,26 @@ namespace VividRP.Runtime.GPUDriven
         public uint ParentGroupIndex;
         public uint MeshletStartIndex;
         public uint PackedMeshletCountLevel;
+
+        public readonly bool HasParent => ParentGroupIndex != InvalidGroupIndex;
+
+        public uint MeshletCount
+        {
+            readonly get => PackedMeshletCountLevel & VividMeshletMetadataPacking.UInt16Mask;
+            set => PackedMeshletCountLevel = VividMeshletMetadataPacking.SetLowUInt16(
+                PackedMeshletCountLevel, value, nameof(MeshletCount));
+        }
+
+        public uint LevelIndex
+        {
+            readonly get => PackedMeshletCountLevel >> 16;
+            set => PackedMeshletCountLevel = VividMeshletMetadataPacking.SetHighUInt16(
+                PackedMeshletCountLevel, value, nameof(LevelIndex));
+        }
     }
 
-    // Used at serialization and static-scene upload boundaries. Reuse the owned
-    // table when uploading; warmed-up rebuilds do not allocate managed memory.
+    // Intern only while building an asset or converting legacy metadata.
+    // v7 loading, scene assembly and GPU uploads already have shared indices.
     internal sealed class VividMeshLODGroupTable
     {
         internal readonly List<VividMeshLODGroup> Groups = new();
@@ -484,16 +500,28 @@ namespace VividRP.Runtime.GPUDriven
             Clear();
             if (Nodes.Capacity < source.Count) Nodes.Capacity = source.Count;
             for (int i = 0; i < source.Count; i++)
+                Add(source[i]);
+        }
+
+        internal void Add(in VividMeshLODNode node)
+        {
+            Nodes.Add(new VividMeshLODNodePacked
             {
-                var node = source[i];
-                Nodes.Add(new VividMeshLODNodePacked
-                {
-                    GroupIndex = GetGroupIndex(node.Bounds, node.Error),
-                    ParentGroupIndex = node.ParentError < 0f ? VividMeshLODNodePacked.InvalidGroupIndex
-                        : GetGroupIndex(node.ParentBounds, node.ParentError),
-                    MeshletStartIndex = node.MeshletStartIndex,
-                    PackedMeshletCountLevel = node.PackedMeshletCountLevel,
-                });
+                GroupIndex = GetGroupIndex(node.Bounds, node.Error),
+                ParentGroupIndex = node.ParentError < 0f ? VividMeshLODNodePacked.InvalidGroupIndex
+                    : GetGroupIndex(node.ParentBounds, node.ParentError),
+                MeshletStartIndex = node.MeshletStartIndex,
+                PackedMeshletCountLevel = node.PackedMeshletCountLevel,
+            });
+        }
+
+        internal static void Validate(IReadOnlyList<VividMeshLODNodePacked> nodes, int groupCount)
+        {
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                var node = nodes[i];
+                if (node.GroupIndex >= (uint)groupCount || (node.HasParent && node.ParentGroupIndex >= (uint)groupCount))
+                    throw new InvalidDataException("Mesh LOD node references a group outside its shared table.");
             }
         }
 
@@ -507,21 +535,7 @@ namespace VividRP.Runtime.GPUDriven
             return index;
         }
 
-        internal static VividMeshLODNode Expand(VividMeshLODNodePacked node, IReadOnlyList<VividMeshLODGroup> groups)
-        {
-            bool hasParent = node.ParentGroupIndex != VividMeshLODNodePacked.InvalidGroupIndex;
-            if (node.GroupIndex >= (uint)groups.Count || (hasParent && node.ParentGroupIndex >= (uint)groups.Count))
-                throw new InvalidDataException("Mesh LOD node references a group outside its shared table.");
-            VividMeshLODGroup own = groups[(int)node.GroupIndex];
-            VividMeshLODGroup parent = hasParent ? groups[(int)node.ParentGroupIndex] : default;
-            return new VividMeshLODNode
-            {
-                Bounds = own.Bounds, Error = own.Error,
-                ParentBounds = parent.Bounds, ParentError = hasParent ? parent.Error : -1f,
-                MeshletStartIndex = node.MeshletStartIndex,
-                PackedMeshletCountLevel = node.PackedMeshletCountLevel,
-            };
-        }
+
     }
 
     public static class VividMeshletMetadataPacking

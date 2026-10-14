@@ -23,7 +23,6 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_TerrainLayerDataBuffer;
         private GraphicsBuffer m_MeshLODNodesBuffer;
         private GraphicsBuffer m_MeshLODGroupsBuffer;
-        private readonly VividMeshLODGroupTable m_MeshLODTable = new();
         private GraphicsBuffer m_MeshletsBuffer;
         private GraphicsBuffer m_SharedVertexBuffer;
         private GraphicsBuffer m_SharedIndexBuffer;
@@ -58,7 +57,7 @@ namespace VividRP.Runtime.GPUDriven
 
         public GraphicsBuffer MeshLODGroupsBuffer => m_MeshLODGroupsBuffer;
 
-        public int MeshLODGroupCount => m_MeshLODTable.Groups.Count;
+        public int MeshLODGroupCount { get; private set; }
 
         public GraphicsBuffer MeshletsBuffer => m_MeshletsBuffer;
 
@@ -196,18 +195,16 @@ namespace VividRP.Runtime.GPUDriven
 
             if (shouldUploadStaticData)
             {
-                // Intern after asset nodes have been rebased into the scene.
-                // Both sides of each transition resolve to the same global ID.
-                m_MeshLODTable.Build(sceneData.MeshLODNodes);
+                MeshLODGroupCount = sceneData.MeshLODGroupCount;
                 UploadStructuredBuffer(
                     ref m_MeshLODGroupsBuffer,
-                    m_MeshLODTable.Groups,
+                    sceneData.MutableMeshLODGroups,
                     UnsafeUtility.SizeOf<VividMeshLODGroup>(),
                     "VividGPUDriven_MeshLODGroups"
                 );
                 UploadStructuredBuffer(
                     ref m_MeshLODNodesBuffer,
-                    m_MeshLODTable.Nodes,
+                    sceneData.MutableMeshLODNodes,
                     UnsafeUtility.SizeOf<VividMeshLODNodePacked>(),
                     "VividGPUDriven_MeshLODNodes"
                 );
@@ -226,7 +223,7 @@ namespace VividRP.Runtime.GPUDriven
                 UploadRawIndexBuffer(sceneData.MutableIndices);
             }
             bool boundsChanged = VSMGeometryBounds.Update(sceneData, shouldUploadStaticData);
-            VSMLODHierarchy.Update(sceneData.MeshLODNodes, sceneData.Instances, boundsChanged, VSMGeometryBounds.CpuLodNodes);
+            VSMLODHierarchy.Update(sceneData.MeshLODNodes, sceneData.MeshLODGroups, sceneData.Instances, boundsChanged, VSMGeometryBounds.CpuLodNodes);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -309,7 +306,7 @@ namespace VividRP.Runtime.GPUDriven
             m_TerrainLayerDataBuffer?.Dispose();
             m_MeshLODNodesBuffer?.Dispose();
             m_MeshLODGroupsBuffer?.Dispose();
-            m_MeshLODTable.Clear();
+            MeshLODGroupCount = 0;
             m_MeshletsBuffer?.Dispose();
             m_SharedVertexBuffer?.Dispose();
             m_SharedIndexBuffer?.Dispose();
@@ -419,7 +416,7 @@ namespace VividRP.Runtime.GPUDriven
         private bool RequiresStaticBufferUpload(VividGPUDrivenSceneData sceneData)
         {
             return !IsStructuredBufferCompatible(m_MeshLODNodesBuffer, sceneData.MeshLODNodeCount, UnsafeUtility.SizeOf<VividMeshLODNodePacked>()) ||
-                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, MeshLODGroupCount, UnsafeUtility.SizeOf<VividMeshLODGroup>()) ||
+                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, sceneData.MeshLODGroupCount, UnsafeUtility.SizeOf<VividMeshLODGroup>()) ||
                    !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
                    !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||
                    !IsRawBufferCompatible(m_SharedIndexBuffer, sceneData.IndexCount);

@@ -38,7 +38,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static readonly int s_RootCountId = Shader.PropertyToID("_VSMLodRootCount");
         private static readonly int s_ForcedDepthId = Shader.PropertyToID("_ForcedMeshLODNodeDepth");
 
-        internal void Update(IReadOnlyList<VividMeshLODNode> lodNodes,
+        internal void Update(IReadOnlyList<VividMeshLODNodePacked> lodNodes, IReadOnlyList<VividMeshLODGroup> groups,
             IReadOnlyList<VividInstanceData> instances, bool geometryChanged,
             IReadOnlyList<VirtualShadowMapGeometryBounds.Bounds> geometryBounds = null)
         {
@@ -61,14 +61,14 @@ namespace VividRP.Runtime.VirtualShadowMap
             m_Nodes.Clear(); Array.Fill(m_Roots, uint.MaxValue);
             for (int start = 0; start < count; start++)
                 if (m_RangeCounts[start] != 0)
-                    m_Roots[start] = (uint)Build(lodNodes, start, (int)m_RangeCounts[start], geometryBounds);
+                    m_Roots[start] = (uint)Build(lodNodes, groups, start, (int)m_RangeCounts[start], geometryBounds);
             Ensure(ref m_NodeBuffer, Math.Max(m_Nodes.Count, 1), Marshal.SizeOf<Node>(), "VSMLodHierarchy");
             Ensure(ref m_RootBuffer, count, 4, "VSMLodRoots");
             if (m_Nodes.Count != 0) m_NodeBuffer.SetData(m_Nodes);
             m_RootBuffer.SetData(m_Roots);
         }
 
-        private int Build(IReadOnlyList<VividMeshLODNode> source, int start, int count,
+        private int Build(IReadOnlyList<VividMeshLODNodePacked> source, IReadOnlyList<VividMeshLODGroup> groups, int start, int count,
             IReadOnlyList<VirtualShadowMapGeometryBounds.Bounds> geometryBounds)
         {
             int index = m_Nodes.Count; m_Nodes.Add(default);
@@ -79,10 +79,13 @@ namespace VividRP.Runtime.VirtualShadowMap
             {
                 for (int i = start; i < start + count; i++)
                 {
-                    var node = source[i]; float radius = math.max(node.Bounds.w, 0f);
-                    float3 center = node.Bounds.xyz;
+                    var node = source[i];
+                    var group = groups[(int)node.GroupIndex];
+                    var parent = node.HasParent ? groups[(int)node.ParentGroupIndex] : default;
+                    float radius = math.max(group.Bounds.w, 0f);
+                    float3 center = group.Bounds.xyz;
                     // Invalid bounds must conservatively keep this branch.
-                    bool finite = math.all(math.isfinite(node.Bounds));
+                    bool finite = math.all(math.isfinite(group.Bounds));
                     float3 sphereLow = finite ? center - radius : new float3(float.NegativeInfinity);
                     float3 sphereHigh = finite ? center + radius : new float3(float.PositiveInfinity);
                     errorMagnitude = math.max(errorMagnitude, math.max(math.abs(sphereLow), math.abs(sphereHigh)));
@@ -90,10 +93,10 @@ namespace VividRP.Runtime.VirtualShadowMap
                     low = math.min(low, new float4(box.IsValid ? box.Center.xyz - box.Extent.xyz : sphereLow, node.LevelIndex));
                     high = math.max(high, new float4(box.IsValid ? box.Center.xyz + box.Extent.xyz : sphereHigh, node.LevelIndex));
                     // Use exactly the group data consumed by GPU LOD selection.
-                    float parentError = node.ParentError, parentRadius = node.ParentBounds.w;
+                    float parentError = node.HasParent ? parent.Error : -1f, parentRadius = parent.Bounds.w;
                     bool validParent = math.isfinite(parentError) && parentError >= 0f
                         && math.isfinite(parentRadius) && parentRadius >= 0f;
-                    errors.x = math.min(errors.x, math.isfinite(node.Error) && node.Error >= 0f ? node.Error : 0f);
+                    errors.x = math.min(errors.x, math.isfinite(group.Error) && group.Error >= 0f ? group.Error : 0f);
                     errors.y = math.min(errors.y, finite && radius >= 0f ? radius : 0f);
                     errors.z = math.max(errors.z, validParent ? parentError : float.PositiveInfinity);
                     errors.w = math.max(errors.w, validParent ? parentRadius : 0f);
@@ -103,7 +106,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             {
                 int leaves = (count + NodesPerLeaf - 1) / NodesPerLeaf;
                 int leftCount = (leaves / 2) * NodesPerLeaf;
-                int left = Build(source, start, leftCount, geometryBounds), right = Build(source, start + leftCount, count - leftCount, geometryBounds);
+                int left = Build(source, groups, start, leftCount, geometryBounds), right = Build(source, groups, start + leftCount, count - leftCount, geometryBounds);
                 errorMagnitude = math.max(m_Nodes[left].ErrorMagnitude.xyz, m_Nodes[right].ErrorMagnitude.xyz);
                 low = math.min(m_Nodes[left].Min, m_Nodes[right].Min);
                 high = math.max(m_Nodes[left].Max, m_Nodes[right].Max);

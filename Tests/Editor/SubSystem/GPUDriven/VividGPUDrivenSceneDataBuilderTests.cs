@@ -1153,7 +1153,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.IndexCount, Is.EqualTo(3));
 
                 meshletCollection.Meshlets = new[] { CreateMeshlet(0, 0, 6, 2) };
-                meshletCollection.MeshLODNodes = new[] { CreateMeshLODNode(0, 1, 0) };
+                meshletCollection.SetMeshData(meshletCollection.MeshLODLevelNodeCounts, new[] { CreateMeshLODNode(0, 1, 0) },
+                    meshletCollection.Meshlets, meshletCollection.VertexBuffer, meshletCollection.IndexBuffer);
                 meshletCollection.VertexBuffer = new[]
                 {
                     CreateVertex(0.0f, 0.0f, 0.0f),
@@ -1296,6 +1297,20 @@ namespace VividRP.Editor.Tests
                     new byte[] { 0, 1, 2, 3, 4, 5 }
                 );
 
+                // The two assets both use local group index zero, but refer to
+                // different bounds/errors. The child must follow its own parent
+                // after scene rebasing, and the root sentinel must stay intact.
+                var groups1 = new[] {
+                    new VividMeshLODGroup { Bounds = new float4(3, 2, 1, 4), Error = .25f },
+                    new VividMeshLODGroup { Bounds = new float4(3, 2, 1, 1), Error = 0 },
+                };
+                var nodes1 = new[] {
+                    new VividMeshLODNodePacked { GroupIndex = 0, ParentGroupIndex = uint.MaxValue, MeshletCount = 1 },
+                    new VividMeshLODNodePacked { GroupIndex = 1, ParentGroupIndex = 0, MeshletStartIndex = 1, MeshletCount = 1, LevelIndex = 1 },
+                };
+                meshletCollection1.SetMeshData(new[] { 1, 1 }, nodes1, groups1, meshletCollection1.Meshlets,
+                    meshletCollection1.VertexBuffer, meshletCollection1.IndexBuffer);
+
                 gameObject = CreateMeshletRendererObject(
                     "Renderer_MultiSubMesh",
                     mesh,
@@ -1325,6 +1340,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(3));
                 Assert.That(sceneData.MeshLODNodes[1].MeshletStartIndex, Is.EqualTo(1u));
                 Assert.That(sceneData.MeshLODNodes[2].MeshletStartIndex, Is.EqualTo(2u));
+                Assert.That(sceneData.MeshLODGroupCount, Is.EqualTo(3));
+                Assert.That(sceneData.MeshLODNodes[0].GroupIndex, Is.Zero);
+                Assert.That(sceneData.MeshLODNodes[1].GroupIndex, Is.EqualTo(1u));
+                Assert.That(sceneData.MeshLODNodes[1].ParentGroupIndex, Is.EqualTo(uint.MaxValue));
+                Assert.That(sceneData.MeshLODNodes[2].GroupIndex, Is.EqualTo(2u));
+                Assert.That(sceneData.MeshLODNodes[2].ParentGroupIndex, Is.EqualTo(sceneData.MeshLODNodes[1].GroupIndex));
+                Assert.That(sceneData.MeshLODGroups[1], Is.EqualTo(groups1[0]));
+                Assert.That(sceneData.MeshLODGroups[2], Is.EqualTo(groups1[1]));
+                Assert.That(nodes1[0].GroupIndex, Is.Zero, "Scene assembly must not mutate asset-local indices.");
+                Assert.That(nodes1[1].ParentGroupIndex, Is.Zero);
                 Assert.That(sceneData.Meshlets[1].VertexOffset, Is.EqualTo(3u));
                 Assert.That(sceneData.Meshlets[1].TriangleOffset, Is.EqualTo(3u));
                 Assert.That(sceneData.Meshlets[2].VertexOffset, Is.EqualTo(6u));
@@ -3147,7 +3172,7 @@ namespace VividRP.Editor.Tests
             asset.MeshLODLevelCount = meshLODLevelCount;
             asset.LeafMeshletCount = meshlets.Length;
             asset.MeshLODLevelNodeCounts = meshLODLevelNodeCounts;
-            asset.MeshLODNodes = meshLODNodes;
+            asset.SetMeshData(meshLODLevelNodeCounts, meshLODNodes, meshlets, vertices, indices);
             asset.Meshlets = meshlets;
             asset.VertexBuffer = vertices;
             asset.IndexBuffer = indices;

@@ -12,6 +12,33 @@ namespace VividRP.Editor.Tests
 {
     public class VividGPUDrivenBufferSetTests
     {
+        internal static VividMeshLODNode ExpandMeshLODNode(VividMeshLODNodePacked node, IReadOnlyList<VividMeshLODGroup> groups)
+        {
+            bool hasParent = node.ParentGroupIndex != VividMeshLODNodePacked.InvalidGroupIndex;
+            if (node.GroupIndex >= (uint)groups.Count || (hasParent && node.ParentGroupIndex >= (uint)groups.Count))
+                throw new System.IO.InvalidDataException("Mesh LOD node references a group outside its shared table.");
+            VividMeshLODGroup own = groups[(int)node.GroupIndex];
+            VividMeshLODGroup parent = hasParent ? groups[(int)node.ParentGroupIndex] : default;
+            return new VividMeshLODNode
+            {
+                Bounds = own.Bounds, Error = own.Error,
+                ParentBounds = parent.Bounds, ParentError = hasParent ? parent.Error : -1f,
+                MeshletStartIndex = node.MeshletStartIndex,
+                PackedMeshletCountLevel = node.PackedMeshletCountLevel,
+            };
+        }
+
+        internal static void AddMeshLODNode(VividGPUDrivenSceneData scene, VividMeshLODNode node)
+        {
+            var table = new VividMeshLODGroupTable(); table.Add(node);
+            uint offset = (uint)scene.MeshLODGroupCount;
+            var packed = table.Nodes[0];
+            packed.GroupIndex += offset;
+            if (packed.HasParent) packed.ParentGroupIndex += offset;
+            scene.MutableMeshLODGroups.AddRange(table.Groups);
+            scene.MutableMeshLODNodes.Add(packed);
+        }
+
         [Test]
         public void GPUDataLayouts_HaveExpectedStrides()
         {
@@ -27,7 +54,7 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
-            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(48)); // CPU view
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(48)); // legacy v6/input layout
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODNodePacked>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroup>(), Is.EqualTo(20));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
@@ -80,7 +107,7 @@ namespace VividRP.Editor.Tests
             Assert.That(table.Nodes[3].GroupIndex, Is.EqualTo(table.Nodes[0].GroupIndex));
             Assert.That(table.Nodes[3].MeshletStartIndex, Is.EqualTo(300));
             for (int i = 0; i < source.Count; i++)
-                Assert.That(VividMeshLODGroupTable.Expand(table.Nodes[i], table.Groups), Is.EqualTo(source[i]));
+                Assert.That(VividGPUDrivenBufferSetTests.ExpandMeshLODNode(table.Nodes[i], table.Groups), Is.EqualTo(source[i]));
             Assert.That(16 * table.Nodes.Count + 20 * table.Groups.Count, Is.LessThan(48 * source.Count));
             table.Build(source);
             long before = System.GC.GetAllocatedBytesForCurrentThread();
@@ -93,7 +120,7 @@ namespace VividRP.Editor.Tests
             Assert.That(table.Nodes.Count, Is.EqualTo(1));
             Assert.That(table.Groups.Count, Is.EqualTo(1));
             Assert.That(table.Nodes[0].GroupIndex, Is.Zero);
-            Assert.That(VividMeshLODGroupTable.Expand(table.Nodes[0], table.Groups), Is.EqualTo(changed));
+            Assert.That(VividGPUDrivenBufferSetTests.ExpandMeshLODNode(table.Nodes[0], table.Groups), Is.EqualTo(changed));
             source.Clear(); table.Build(source);
             Assert.That(table.Groups, Is.Empty);
             Assert.That(table.Nodes, Is.Empty);
@@ -113,7 +140,7 @@ namespace VividRP.Editor.Tests
             var table = new VividMeshLODGroupTable(); table.Build(source);
             Assert.That(table.Groups.Count, Is.EqualTo(4));
             for (int i = 0; i < source.Length; i++)
-                Assert.That(math.asuint(VividMeshLODGroupTable.Expand(table.Nodes[i], table.Groups).Error), Is.EqualTo(math.asuint(source[i].Error)));
+                Assert.That(math.asuint(VividGPUDrivenBufferSetTests.ExpandMeshLODNode(table.Nodes[i], table.Groups).Error), Is.EqualTo(math.asuint(source[i].Error)));
         }
 
         [Test]
@@ -608,7 +635,7 @@ namespace VividRP.Editor.Tests
                 BaseColorResource = 4u,
                 UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
             });
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
+            VividGPUDrivenBufferSetTests.AddMeshLODNode(sceneData, new VividMeshLODNode
             {
                 MeshletStartIndex = 0,
                 MeshletCount = 1,
@@ -842,7 +869,7 @@ namespace VividRP.Editor.Tests
             var sceneData = new VividGPUDrivenSceneData();
             sceneData.MutableInstances.Add(default);
             sceneData.AddLegacyMaterial(default);
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
+            VividGPUDrivenBufferSetTests.AddMeshLODNode(sceneData, new VividMeshLODNode
             {
                 MeshletStartIndex = 0,
                 MeshletCount = 1,

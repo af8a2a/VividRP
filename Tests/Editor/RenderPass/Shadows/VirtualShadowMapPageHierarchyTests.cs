@@ -166,7 +166,8 @@ namespace VividRP.Editor.Tests
             var instances = new System.Collections.Generic.List<VividInstanceData>
                 { new() { TopMeshLODStartIndex = 3, TotalMeshLODCount = (uint)count, MeshLODLevelCount = 3 } };
             using var hierarchy = new VirtualShadowMapLODHierarchy();
-            hierarchy.Update(source, instances, true);
+            var table = new VividMeshLODGroupTable(); table.Build(source);
+            hierarchy.Update(table.Nodes, table.Groups, instances, true);
             var roots = new uint[source.Count]; hierarchy.Roots.GetData(roots);
             int root = (int)roots[3], end = (int)hierarchy.CpuNodes[root].Range.z;
             Assert.That(hierarchy.Nodes.stride, Is.EqualTo(80));
@@ -198,18 +199,18 @@ namespace VividRP.Editor.Tests
             }
             foreach (int visits in covered) Assert.That(visits, Is.EqualTo(1));
             var nodeBuffer = hierarchy.Nodes; var rootBuffer = hierarchy.Roots;
-            for (int i = 0; i < 32; i++) hierarchy.Update(source, instances, false);
+            for (int i = 0; i < 32; i++) hierarchy.Update(table.Nodes, table.Groups, instances, false);
             long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 1024; i++) hierarchy.Update(source, instances, false);
+            for (int i = 0; i < 1024; i++) hierarchy.Update(table.Nodes, table.Groups, instances, false);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(allocated, Is.Zero); Assert.That(hierarchy.Nodes, Is.SameAs(nodeBuffer));
             Assert.That(hierarchy.Roots, Is.SameAs(rootBuffer));
             // Adding a previously unused range must work without a geometry upload.
             instances.Add(new VividInstanceData { TopMeshLODStartIndex = 0, TotalMeshLODCount = 3, MeshLODLevelCount = 3 });
-            hierarchy.Update(source, instances, false); hierarchy.Roots.GetData(roots);
+            hierarchy.Update(table.Nodes, table.Groups, instances, false); hierarchy.Roots.GetData(roots);
             Assert.That(roots[0], Is.Not.EqualTo(uint.MaxValue));
             var changed = source[3]; changed.Bounds = new float4(-1000, 0, 0, 1); changed.Error = float.NaN; source[3] = changed;
-            hierarchy.Update(source, instances, true); hierarchy.Roots.GetData(roots);
+            table.Build(source); hierarchy.Update(table.Nodes, table.Groups, instances, true); hierarchy.Roots.GetData(roots);
             Assert.That(hierarchy.CpuNodes[(int)roots[3]].Min.x, Is.LessThanOrEqualTo(-1001));
             Assert.That(hierarchy.CpuNodes[(int)roots[3]].ErrorBounds.x, Is.Zero,
                 "Geometry invalidation must rebuild error bounds and retain invalid inputs conservatively.");

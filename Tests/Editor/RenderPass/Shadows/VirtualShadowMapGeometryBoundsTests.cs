@@ -19,9 +19,10 @@ namespace VividRP.Editor.Tests
             scene.MutableIndices.AddRange(new byte[] { 255, 0, 1, 2 });
             scene.MutableMeshlets.Add(new VividMeshlet { VertexOffset = 1, TriangleOffset = 1,
                 VertexCount = 4, TriangleCount = 1, BoundingSphere = new float4(1, 2, 1, 8) });
-            scene.MutableMeshLODNodes.Add(new VividMeshLODNode { MeshletCount = 1,
-                Bounds = new float4(1, 2, 1, 12), Error = .1f, ParentError = .35f,
-                ParentBounds = new float4(1, 2, 1, 14), LevelIndex = 2 });
+            scene.MutableMeshLODGroups.Add(new VividMeshLODGroup { Bounds = new float4(1, 2, 1, 12), Error = .1f });
+            scene.MutableMeshLODGroups.Add(new VividMeshLODGroup { Bounds = new float4(1, 2, 1, 14), Error = .35f });
+            scene.MutableMeshLODNodes.Add(new VividMeshLODNodePacked { MeshletCount = 1,
+                GroupIndex = 0, ParentGroupIndex = 1, LevelIndex = 2 });
             scene.MutableInstances.Add(new VividInstanceData { TotalMeshLODCount = 1, MeshLODLevelCount = 3 });
             return scene;
         }
@@ -30,12 +31,13 @@ namespace VividRP.Editor.Tests
         public void IndexedBounds_TightenSpaceButPreserveErrorDomainAndSerializedSpheres()
         {
             var scene = Geometry(); var original = scene.MeshLODNodes[0];
+            var originalGroup = scene.MeshLODGroups[0]; var originalParent = scene.MeshLODGroups[1];
             using var bounds = new VirtualShadowMapGeometryBounds();
             using var oldTree = new VirtualShadowMapLODHierarchy();
             using var tree = new VirtualShadowMapLODHierarchy();
             bounds.Update(scene, true);
-            oldTree.Update(scene.MeshLODNodes, scene.Instances, true);
-            tree.Update(scene.MeshLODNodes, scene.Instances, true, bounds.CpuLodNodes);
+            oldTree.Update(scene.MeshLODNodes, scene.MeshLODGroups, scene.Instances, true);
+            tree.Update(scene.MeshLODNodes, scene.MeshLODGroups, scene.Instances, true, bounds.CpuLodNodes);
             Assert.That(bounds.Meshlets.stride, Is.EqualTo(32));
             var box = bounds.CpuMeshlets[0]; Assert.That(box.IsValid, Is.True);
             for (int i = 1; i <= 3; i++)
@@ -45,9 +47,9 @@ namespace VividRP.Editor.Tests
             Assert.That(tree.CpuNodes[0].Max.y - tree.CpuNodes[0].Min.y, Is.LessThan(.02f));
             Assert.That(tree.CpuNodes[0].ErrorBounds, Is.EqualTo(oldTree.CpuNodes[0].ErrorBounds));
             Assert.That(tree.CpuNodes[0].ErrorMagnitude, Is.EqualTo(oldTree.CpuNodes[0].ErrorMagnitude));
-            Assert.That(scene.MeshLODNodes[0].Bounds, Is.EqualTo(original.Bounds));
-            Assert.That(scene.MeshLODNodes[0].ParentBounds, Is.EqualTo(original.ParentBounds));
-            Assert.That(scene.MeshLODNodes[0].ParentError, Is.EqualTo(original.ParentError));
+            Assert.That(scene.MeshLODNodes[0], Is.EqualTo(original));
+            Assert.That(scene.MeshLODGroups[0], Is.EqualTo(originalGroup));
+            Assert.That(scene.MeshLODGroups[1], Is.EqualTo(originalParent));
         }
 
         [TestCase(0)] // invalid index
@@ -68,8 +70,33 @@ namespace VividRP.Editor.Tests
             Assert.That(bounds.CpuLodNodes[0].IsValid, Is.False);
             if (kind != 3) Assert.That(bounds.CpuMeshlets[0].IsValid, Is.False);
             using var tree = new VirtualShadowMapLODHierarchy();
-            tree.Update(scene.MeshLODNodes, scene.Instances, true, bounds.CpuLodNodes);
-            Assert.That(tree.CpuNodes[0].Min.xyz, Is.EqualTo(scene.MeshLODNodes[0].Bounds.xyz - scene.MeshLODNodes[0].Bounds.w));
+            tree.Update(scene.MeshLODNodes, scene.MeshLODGroups, scene.Instances, true, bounds.CpuLodNodes);
+            Assert.That(tree.CpuNodes[0].Min.xyz, Is.EqualTo(scene.MeshLODGroups[(int)scene.MeshLODNodes[0].GroupIndex].Bounds.xyz - scene.MeshLODGroups[(int)scene.MeshLODNodes[0].GroupIndex].Bounds.w));
+        }
+
+        [Test]
+        public void SharedGroupUpload_RefreshesSameCountVSMInputsAndReusesBuffers()
+        {
+            var scene = Geometry();
+            using var buffers = new VividGPUDrivenBufferSet();
+            buffers.Upload(scene);
+            var nodeBuffer = buffers.MeshLODNodesBuffer;
+            var groupBuffer = buffers.MeshLODGroupsBuffer;
+            var own = scene.MutableMeshLODGroups[0]; own.Error = .2f;
+            var parent = scene.MutableMeshLODGroups[1]; parent.Error = .5f;
+            scene.MutableMeshLODGroups[0] = own;
+            scene.MutableMeshLODGroups[1] = parent;
+            buffers.Upload(scene, false, false, true);
+            Assert.That(buffers.MeshLODNodesBuffer, Is.SameAs(nodeBuffer));
+            Assert.That(buffers.MeshLODGroupsBuffer, Is.SameAs(groupBuffer));
+            var groups = new VividMeshLODGroup[2]; groupBuffer.GetData(groups);
+            CollectionAssert.AreEqual(scene.MeshLODGroups, groups);
+            Assert.That(buffers.VSMLODHierarchy.CpuNodes[0].ErrorBounds, Is.EqualTo(new float4(.2f, 12f, .5f, 14f)));
+            for (int i = 0; i < 8; i++) buffers.Upload(scene, false, false, true);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 32; i++) buffers.Upload(scene, false, false, true);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
         }
 
         [Test]

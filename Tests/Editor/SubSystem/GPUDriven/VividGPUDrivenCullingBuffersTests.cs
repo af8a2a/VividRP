@@ -59,7 +59,7 @@ namespace VividRP.Editor.Tests
                 int count = expansion[n % expansion.Length];
                 float x = skewed && n >= 1024 && n % 1024 >= 32 ? 10f : .5f;
                 if (x < 1f) visibleExpected += count;
-                scene.MutableMeshLODNodes.Add(new VividMeshLODNode
+                VividGPUDrivenBufferSetTests.AddMeshLODNode(scene, new VividMeshLODNode
                 {
                     Bounds = new float4(x, .5f, 0, .01f), ParentError = -1,
                     ParentBounds = new float4(x, .5f, 0, .01f),
@@ -149,7 +149,7 @@ namespace VividRP.Editor.Tests
             for (int n = 0; n < nodeCount; n++)
             {
                 int level = n / nodesPerLevel;
-                scene.MutableMeshLODNodes.Add(new VividMeshLODNode
+                VividGPUDrivenBufferSetTests.AddMeshLODNode(scene, new VividMeshLODNode
                 {
                     Bounds = new float4(.5f, .5f, 0, .01f),
                     Error = level == 0 ? 1f : level == 1 ? .1f : 0f,
@@ -293,7 +293,7 @@ namespace VividRP.Editor.Tests
                     };
                     var scene = new VividGPUDrivenSceneData();
                     scene.MutableMaterials.Add(new VividMaterialData { RendererListID = (VividRendererListID)c.CullMode });
-                    scene.MutableMeshLODNodes.Add(new VividMeshLODNode
+                    VividGPUDrivenBufferSetTests.AddMeshLODNode(scene, new VividMeshLODNode
                         { Bounds = sphere, ParentBounds = sphere, ParentError = -1, MeshletCount = 1 });
                     scene.MutableMeshlets.Add(new VividMeshlet
                         { BoundingSphere = sphere, PackedCone = VividMeshletMetadataPacking.PackCone(new float3(0, 0, 1), c.Cutoff) });
@@ -328,7 +328,7 @@ namespace VividRP.Editor.Tests
         public void EnsureCapacity_CreatesIndirectDrawArgsBufferForAllRendererLists()
         {
             var sceneData = new VividGPUDrivenSceneData();
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
+            VividGPUDrivenBufferSetTests.AddMeshLODNode(sceneData, new VividMeshLODNode
             {
                 MeshletCount = 4,
             });
@@ -387,7 +387,7 @@ namespace VividRP.Editor.Tests
         public void EnsureCapacity_CreatesDisjointBuffersForBatchedCullingContexts()
         {
             var sceneData = new VividGPUDrivenSceneData();
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
+            VividGPUDrivenBufferSetTests.AddMeshLODNode(sceneData, new VividMeshLODNode
             {
                 MeshletCount = 4,
             });

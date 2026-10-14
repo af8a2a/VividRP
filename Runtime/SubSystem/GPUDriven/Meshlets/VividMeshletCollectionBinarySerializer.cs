@@ -26,25 +26,26 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         public static byte[] Serialize(
             int[] meshLODLevelNodeCounts,
-            VividMeshLODNode[] meshLODNodes,
+            VividMeshLODNodePacked[] meshLODNodes,
+            VividMeshLODGroup[] meshLODGroups,
             VividMeshlet[] meshlets,
             VividMeshletVertex[] vertexBuffer,
             byte[] indexBuffer)
         {
             meshLODLevelNodeCounts ??= Array.Empty<int>();
-            meshLODNodes ??= Array.Empty<VividMeshLODNode>();
+            meshLODNodes ??= Array.Empty<VividMeshLODNodePacked>();
+            meshLODGroups ??= Array.Empty<VividMeshLODGroup>();
             meshlets ??= Array.Empty<VividMeshlet>();
             vertexBuffer ??= Array.Empty<VividMeshletVertex>();
             indexBuffer ??= Array.Empty<byte>();
 
-            var lodTable = new VividMeshLODGroupTable();
-            lodTable.Build(meshLODNodes);
+            VividMeshLODGroupTable.Validate(meshLODNodes, meshLODGroups.Length);
             using var payloadStream = new MemoryStream();
             using (var writer = new BinaryWriter(payloadStream, Encoding.UTF8, leaveOpen: true))
             {
                 WriteIntArray(writer, meshLODLevelNodeCounts);
-                WriteStructArray(writer, lodTable.Groups.ToArray());
-                WriteStructArray(writer, lodTable.Nodes.ToArray());
+                WriteStructArray(writer, meshLODGroups);
+                WriteStructArray(writer, meshLODNodes);
                 WriteStructArray(writer, meshlets);
                 WriteStructArray(writer, vertexBuffer);
                 WriteByteArray(writer, indexBuffer);
@@ -70,7 +71,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         public static void Deserialize(
             byte[] serializedData,
             out int[] meshLODLevelNodeCounts,
-            out VividMeshLODNode[] meshLODNodes,
+            out VividMeshLODNodePacked[] meshLODNodes,
+            out VividMeshLODGroup[] meshLODGroups,
             out VividMeshlet[] meshlets,
             out VividMeshletVertex[] vertexBuffer,
             out byte[] indexBuffer)
@@ -78,7 +80,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (serializedData == null || serializedData.Length == 0)
             {
                 meshLODLevelNodeCounts = Array.Empty<int>();
-                meshLODNodes = Array.Empty<VividMeshLODNode>();
+                meshLODNodes = Array.Empty<VividMeshLODNodePacked>();
+                meshLODGroups = Array.Empty<VividMeshLODGroup>();
                 meshlets = Array.Empty<VividMeshlet>();
                 vertexBuffer = Array.Empty<VividMeshletVertex>();
                 indexBuffer = Array.Empty<byte>();
@@ -122,13 +125,25 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 using var payloadStream = new MemoryStream(payload, 0, payloadLength, writable: false);
                 using var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8, leaveOpen: true);
                 meshLODLevelNodeCounts = ReadIntArray(payloadReader);
-                meshLODNodes = usesLegacyMetadataLayout
-                    ? ConvertLegacyMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy64>(payloadReader))
-                    : version <= RecenteredParentVersion
-                        ? ConvertRecenteredMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy32>(payloadReader), out meshLODLevelNodeCounts)
-                        : version == ExpandedGroupVersion
-                            ? ReadStructArray<VividMeshLODNode>(payloadReader)
-                            : ReadSharedLODNodes(payloadReader);
+                VividMeshLODNode[] legacyNodes = null;
+                if (version == CurrentVersion)
+                {
+                    // Keep the v7 arrays and IDs verbatim, including unused records.
+                    // No expanded node array or hash table is needed on this path.
+                    meshLODGroups = ReadStructArray<VividMeshLODGroup>(payloadReader);
+                    meshLODNodes = ReadStructArray<VividMeshLODNodePacked>(payloadReader);
+                    VividMeshLODGroupTable.Validate(meshLODNodes, meshLODGroups.Length);
+                }
+                else
+                {
+                    legacyNodes = usesLegacyMetadataLayout
+                        ? ConvertLegacyMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy64>(payloadReader))
+                        : version <= RecenteredParentVersion
+                            ? ConvertRecenteredMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy32>(payloadReader), out meshLODLevelNodeCounts)
+                            : ReadStructArray<VividMeshLODNode>(payloadReader);
+                    meshLODNodes = null;
+                    meshLODGroups = null;
+                }
                 meshlets = usesLegacyMetadataLayout
                     ? ConvertLegacyMeshlets(ReadStructArray<VividMeshletLegacy64>(payloadReader))
                     : ReadStructArray<VividMeshlet>(payloadReader);
@@ -138,7 +153,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     : version <= UnquantizedVertexVersion
                         ? ConvertLegacyVertices(ReadStructArray<VividMeshletVertexLegacy32>(payloadReader), out quantizationError)
                         : ReadStructArray<VividMeshletVertex>(payloadReader);
-                ExpandLegacyBounds(meshLODNodes, meshlets, quantizationError);
+                if (legacyNodes != null)
+                {
+                    ExpandLegacyBounds(legacyNodes, meshlets, quantizationError);
+                    var table = new VividMeshLODGroupTable();
+                    table.Build(legacyNodes);
+                    meshLODNodes = table.Nodes.ToArray();
+                    meshLODGroups = table.Groups.ToArray();
+                }
                 indexBuffer = ReadByteArray(payloadReader);
             }
             finally
@@ -146,17 +168,6 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 if (payload != null && version != LegacyGZipVersion)
                     ArrayPool<byte>.Shared.Return(payload);
             }
-        }
-
-        private static VividMeshLODNode[] ReadSharedLODNodes(BinaryReader reader)
-        {
-            var groups = ReadStructArray<VividMeshLODGroup>(reader);
-            var packedNodes = ReadStructArray<VividMeshLODNodePacked>(reader);
-            if (packedNodes.Length == 0) return Array.Empty<VividMeshLODNode>();
-            var nodes = new VividMeshLODNode[packedNodes.Length];
-            for (int i = 0; i < nodes.Length; i++)
-                nodes[i] = VividMeshLODGroupTable.Expand(packedNodes[i], groups);
-            return nodes;
         }
 
         internal static VividMeshletVertex[] ConvertLegacyVertices(VividMeshletVertexLegacy64[] legacyVertices)

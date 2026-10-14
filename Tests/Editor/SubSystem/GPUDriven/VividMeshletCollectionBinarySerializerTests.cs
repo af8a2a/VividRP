@@ -14,6 +14,66 @@ namespace VividRP.Editor.Tests
         private const uint MeshletBlobMagic = 0x564D4342u;
 
         [Test]
+        public void Deserialize_Version7_RetainsIndicesAndAllocatesOnlyCompactArrays()
+        {
+            var groups = new[] {
+                new VividMeshLODGroup { Bounds = new float4(100, 200, 300, 1), Error = 9 }, // unused
+                new VividMeshLODGroup { Bounds = new float4(1, 2, 3, 20), Error = .25f },
+                new VividMeshLODGroup { Bounds = new float4(1, 2, 3, 2), Error = 0 },
+                new VividMeshLODGroup { Bounds = new float4(1, 2, 3, 2), Error = 0 }, // intentionally distinct ID
+            };
+            var nodes = new VividMeshLODNodePacked[8192];
+            nodes[0] = new VividMeshLODNodePacked { GroupIndex = 1, ParentGroupIndex = uint.MaxValue, MeshletCount = 1 };
+            for (int i = 1; i < nodes.Length; i++)
+                nodes[i] = new VividMeshLODNodePacked { GroupIndex = 2u + (uint)(i & 1), ParentGroupIndex = 1,
+                    MeshletStartIndex = (uint)i, MeshletCount = 1, LevelIndex = 1 };
+            int[] levels = { 1, nodes.Length - 1 };
+            byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(levels, nodes, groups,
+                Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out _, out _, out _, out _, out _);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out var loadedLevels, out var loadedNodes,
+                out var loadedGroups, out _, out _, out _);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            // Reject both a 48-byte temporary expansion and a rebuilt dictionary.
+            Assert.That(allocated, Is.LessThan(nodes.Length * 16L + groups.Length * 20L + 4096));
+            CollectionAssert.AreEqual(levels, loadedLevels);
+            CollectionAssert.AreEqual(nodes, loadedNodes);
+            CollectionAssert.AreEqual(groups, loadedGroups);
+            Assert.That(loadedNodes[1].ParentGroupIndex, Is.EqualTo(loadedNodes[0].GroupIndex));
+            byte[] roundTrip = VividMeshletCollectionBinarySerializer.Serialize(loadedLevels, loadedNodes, loadedGroups,
+                Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
+            CollectionAssert.AreEqual(blob, roundTrip);
+            // Arrays are owned by each load, never aliases of pooled decode storage.
+            loadedNodes[0].GroupIndex = 0;
+            loadedGroups[1].Error = 99;
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out var freshNodes, out var freshGroups,
+                out _, out _, out _);
+            CollectionAssert.AreEqual(nodes, freshNodes);
+            CollectionAssert.AreEqual(groups, freshGroups);
+        }
+
+        // Legacy-layout assertions use this test-only projection. Production v7
+        // loading returns the indexed arrays directly, tested separately below.
+        private static void DeserializeExpanded(byte[] blob, out int[] levels, out VividMeshLODNode[] nodes,
+            out VividMeshlet[] meshlets, out VividMeshletVertex[] vertices, out byte[] indices)
+        {
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out levels, out var packed, out var groups,
+                out meshlets, out vertices, out indices);
+            nodes = new VividMeshLODNode[packed.Length];
+            for (int i = 0; i < packed.Length; i++) nodes[i] = VividGPUDrivenBufferSetTests.ExpandMeshLODNode(packed[i], groups);
+        }
+
+        private static byte[] SerializeExpanded(int[] levels, VividMeshLODNode[] nodes,
+            VividMeshlet[] meshlets, VividMeshletVertex[] vertices, byte[] indices)
+        {
+            var table = new VividMeshLODGroupTable(); table.Build(nodes);
+            return VividMeshletCollectionBinarySerializer.Serialize(levels, table.Nodes.ToArray(), table.Groups.ToArray(),
+                meshlets, vertices, indices);
+        }
+
+
+        [Test]
         public void LZ4Codec_DecodesIntoCallerStorageWithoutAllocating()
         {
             var source = new byte[65537];
@@ -39,11 +99,11 @@ namespace VividRP.Editor.Tests
         {
             var vertices = new VividMeshletVertex[4096];
             vertices[0].Position = new float3(1, 2, 3);
-            byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(
+            byte[] blob = SerializeExpanded(
                 Array.Empty<int>(), Array.Empty<VividMeshLODNode>(), Array.Empty<VividMeshlet>(), vertices, new byte[] { 0, 1, 2 });
-            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out _, out _, out var first, out _);
+            DeserializeExpanded(blob, out _, out _, out _, out var first, out _);
             long before = GC.GetAllocatedBytesForCurrentThread();
-            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out _, out _, out var second, out var indices);
+            DeserializeExpanded(blob, out _, out _, out _, out var second, out var indices);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             // Only the owned vertex/index arrays and small reader/stream objects remain.
             Assert.That(allocated, Is.LessThan(vertices.Length * 20L + 4096));
@@ -73,7 +133,7 @@ namespace VividRP.Editor.Tests
             writer.Write(compressed.Length);
             writer.Write(compressed);
             byte[] blob = stream.ToArray();
-            Assert.Throws<EndOfStreamException>(() => VividMeshletCollectionBinarySerializer.Deserialize(
+            Assert.Throws<EndOfStreamException>(() => DeserializeExpanded(
                 blob, out _, out _, out _, out _, out _));
         }
 
@@ -119,7 +179,7 @@ namespace VividRP.Editor.Tests
                 new float4(math.normalize(new float3(-2.0f, 1.0f, 0.5f)), -1.0f),
                 new float2(4.0f, -8.0f)
             );
-            byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(
+            byte[] blob = SerializeExpanded(
                 levelCounts,
                 Array.Empty<VividMeshLODNode>(),
                 Array.Empty<VividMeshlet>(),
@@ -132,7 +192,7 @@ namespace VividRP.Editor.Tests
             Assert.That(BitConverter.ToUInt32(blob, 8), Is.EqualTo(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec));
             Assert.That(BitConverter.ToInt32(blob, 16), Is.EqualTo(blob.Length - 20));
 
-            VividMeshletCollectionBinarySerializer.Deserialize(
+            DeserializeExpanded(
                 blob,
                 out int[] deserializedLevelCounts,
                 out VividMeshLODNode[] deserializedNodes,
@@ -187,7 +247,7 @@ namespace VividRP.Editor.Tests
                 Array.Empty<VividMeshletVertex>(),
                 new byte[] { 0, 1, 2 });
 
-            VividMeshletCollectionBinarySerializer.Deserialize(
+            DeserializeExpanded(
                 legacyBlob,
                 out int[] levelCounts,
                 out VividMeshLODNode[] nodes,
@@ -262,7 +322,7 @@ namespace VividRP.Editor.Tests
                 new[] { packedVertex },
                 new byte[] { 0, 1, 2 });
 
-            VividMeshletCollectionBinarySerializer.Deserialize(
+            DeserializeExpanded(
                 blob,
                 out _,
                 out VividMeshLODNode[] nodes,
@@ -302,12 +362,12 @@ namespace VividRP.Editor.Tests
             writer.Write(MemoryMarshal.AsBytes(source.AsSpan()));
             writer.Write(0); writer.Write(0); writer.Write(0);
             byte[] blob = CreateVersionedLZ4Blob(6u, payload.ToArray());
-            VividMeshletCollectionBinarySerializer.Deserialize(blob, out var levels, out var nodes, out _, out _, out _);
+            DeserializeExpanded(blob, out var levels, out var nodes, out _, out _, out _);
             CollectionAssert.AreEqual(new[] { 1, 1 }, levels);
             CollectionAssert.AreEqual(source, nodes);
-            byte[] converted = VividMeshletCollectionBinarySerializer.Serialize(levels, nodes,
+            byte[] converted = SerializeExpanded(levels, nodes,
                 Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
-            VividMeshletCollectionBinarySerializer.Deserialize(converted, out _, out var reloaded, out _, out _, out _);
+            DeserializeExpanded(converted, out _, out var reloaded, out _, out _, out _);
             CollectionAssert.AreEqual(source, reloaded);
         }
 
@@ -323,7 +383,7 @@ namespace VividRP.Editor.Tests
             writer.Write(1); writer.Write(ownIndex); writer.Write(parentIndex); writer.Write(0u); writer.Write(1u);
             writer.Write(0); writer.Write(0); writer.Write(0);
             byte[] blob = CreateVersionedLZ4Blob(7u, payload.ToArray());
-            Assert.Throws<InvalidDataException>(() => VividMeshletCollectionBinarySerializer.Deserialize(
+            Assert.Throws<InvalidDataException>(() => DeserializeExpanded(
                 blob, out _, out _, out _, out _, out _));
         }
 
@@ -348,7 +408,7 @@ namespace VividRP.Editor.Tests
                 VividMeshletMetadataPacking.PackMeshLODNode(new float4(2, 3, 4, 5), bounds, error, 0, 1, 1, 1),
                 VividMeshletMetadataPacking.PackMeshLODNode(new float4(-5, -3, 4, 2), bounds, error, 0, 2, 1, 1),
             };
-            byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(new[] { 1, 2 }, source,
+            byte[] blob = SerializeExpanded(new[] { 1, 2 }, source,
                 Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
             // Inspect the v7 payload itself: both children reference the parent's
             // one shared record, rather than merely decoding to equal copies.
@@ -371,7 +431,7 @@ namespace VividRP.Editor.Tests
                     reader.ReadUInt32(); reader.ReadUInt32();
                 }
             }
-            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out var nodes, out _, out _, out _);
+            DeserializeExpanded(blob, out _, out var nodes, out _, out _, out _);
             CollectionAssert.AreEqual(source, nodes);
             for (int i = 1; i < nodes.Length; i++)
             {
@@ -401,7 +461,7 @@ namespace VividRP.Editor.Tests
             header.Write(MeshletBlobMagic); header.Write(version);
             header.Write(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec);
             header.Write(bytes.Length); header.Write(compressed.Length); header.Write(compressed);
-            VividMeshletCollectionBinarySerializer.Deserialize(blob.ToArray(), out var counts, out var nodes,
+            DeserializeExpanded(blob.ToArray(), out var counts, out var nodes,
                 out _, out _, out _);
             CollectionAssert.AreEqual(new[] { 4 }, counts);
             Assert.That(nodes.Length, Is.EqualTo(4));
@@ -449,7 +509,7 @@ namespace VividRP.Editor.Tests
                 legacyVertices,
                 Array.Empty<VividMeshletVertex>(),
                 Array.Empty<byte>());
-            byte[] packedBlob = VividMeshletCollectionBinarySerializer.Serialize(
+            byte[] packedBlob = SerializeExpanded(
                 Array.Empty<int>(),
                 Array.Empty<VividMeshLODNode>(),
                 Array.Empty<VividMeshlet>(),
@@ -499,7 +559,7 @@ namespace VividRP.Editor.Tests
                 Array.Empty<VividMeshletVertexLegacy64>(),
                 Array.Empty<VividMeshletVertex>(),
                 Array.Empty<byte>());
-            byte[] version4Blob = VividMeshletCollectionBinarySerializer.Serialize(
+            byte[] version4Blob = SerializeExpanded(
                 Array.Empty<int>(),
                 VividMeshletCollectionBinarySerializer.ConvertLegacyMeshLODNodes(legacyNodes),
                 VividMeshletCollectionBinarySerializer.ConvertLegacyMeshlets(legacyMeshlets),
@@ -541,7 +601,7 @@ namespace VividRP.Editor.Tests
             header.Write(MeshletBlobMagic); header.Write(4u);
             header.Write(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec);
             header.Write(payload.Length); header.Write(compressed.Length); header.Write(compressed);
-            VividMeshletCollectionBinarySerializer.Deserialize(blob.ToArray(), out _, out var nodes,
+            DeserializeExpanded(blob.ToArray(), out _, out var nodes,
                 out var meshlets, out var vertices, out _);
             float error = math.distance(sourcePosition, vertices[0].Position);
             Assert.That(error, Is.GreaterThan(0));
@@ -551,8 +611,8 @@ namespace VividRP.Editor.Tests
             Assert.That(nodes[0].ParentError, Is.LessThan(0));
             Assert.That(meshlets[0].BoundingSphere.w, Is.GreaterThanOrEqualTo(1f + error));
             Assert.That(VividMeshletMetadataPacking.IsConeValid(meshlets[0].PackedCone), Is.False);
-            byte[] migrated = VividMeshletCollectionBinarySerializer.Serialize(new[] { 1 }, nodes, meshlets, vertices, Array.Empty<byte>());
-            VividMeshletCollectionBinarySerializer.Deserialize(migrated, out _, out var reloadedNodes,
+            byte[] migrated = SerializeExpanded(new[] { 1 }, nodes, meshlets, vertices, Array.Empty<byte>());
+            DeserializeExpanded(migrated, out _, out var reloadedNodes,
                 out var reloadedMeshlets, out var reloadedVertices, out _);
             CollectionAssert.AreEqual(nodes, reloadedNodes);
             CollectionAssert.AreEqual(meshlets, reloadedMeshlets);

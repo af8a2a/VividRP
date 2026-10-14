@@ -56,6 +56,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(second.Bounds.size, Is.EqualTo(first.Bounds.size));
                 CollectionAssert.AreEqual(first.MeshLODLevelNodeCounts, second.MeshLODLevelNodeCounts);
                 CollectionAssert.AreEqual(first.MeshLODNodes, second.MeshLODNodes);
+                CollectionAssert.AreEqual(first.MeshLODGroups, second.MeshLODGroups);
                 CollectionAssert.AreEqual(first.Meshlets, second.Meshlets);
                 CollectionAssert.AreEqual(first.VertexBuffer, second.VertexBuffer);
                 CollectionAssert.AreEqual(first.IndexBuffer, second.IndexBuffer);
@@ -191,7 +192,7 @@ namespace VividRP.Editor.Tests
                 asset.LeafMeshletCount = 1;
                 asset.MeshLODLevelCount = 1;
                 asset.MeshLODLevelNodeCounts = new[] { 1 };
-                asset.MeshLODNodes = new[]
+                asset.SetMeshData(asset.MeshLODLevelNodeCounts, new[]
                 {
                     new VividMeshLODNode
                     {
@@ -199,7 +200,7 @@ namespace VividRP.Editor.Tests
                         MeshletCount = 1,
                         LevelIndex = 0,
                     },
-                };
+                }, asset.Meshlets, asset.VertexBuffer, asset.IndexBuffer);
                 asset.Meshlets = new[]
                 {
                     new VividMeshlet
@@ -247,6 +248,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(reloaded.Bounds.size, Is.EqualTo(asset.Bounds.size));
                 CollectionAssert.AreEqual(asset.MeshLODLevelNodeCounts, reloaded.MeshLODLevelNodeCounts);
                 CollectionAssert.AreEqual(asset.MeshLODNodes, reloaded.MeshLODNodes);
+                CollectionAssert.AreEqual(asset.MeshLODGroups, reloaded.MeshLODGroups);
                 CollectionAssert.AreEqual(asset.Meshlets, reloaded.Meshlets);
                 CollectionAssert.AreEqual(asset.VertexBuffer, reloaded.VertexBuffer);
                 CollectionAssert.AreEqual(asset.IndexBuffer, reloaded.IndexBuffer);
@@ -332,8 +334,9 @@ namespace VividRP.Editor.Tests
                 VividMeshletCollectionBuilder.Generate(asset, parameters);
                 Assert.That(asset.MeshLODLevelCount, Is.GreaterThan(1));
                 uint leafTriangles = 0;
-                foreach (VividMeshLODNode node in asset.MeshLODNodes)
+                foreach (var packed in asset.MeshLODNodes)
                 {
+                    var node = VividGPUDrivenBufferSetTests.ExpandMeshLODNode(packed, asset.MeshLODGroups);
                     Assert.That(float.IsNaN(node.Error) || float.IsInfinity(node.Error), Is.False);
                     Assert.That(node.Error, Is.GreaterThanOrEqualTo(0));
                     if (node.LevelIndex == 0)
@@ -347,8 +350,7 @@ namespace VividRP.Editor.Tests
                         foreach (var parent in asset.MeshLODNodes)
                         {
                             if (parent.LevelIndex + 1 != node.LevelIndex) continue;
-                            if (math.all(math.asuint(parent.Bounds) == math.asuint(node.ParentBounds))
-                                && math.asuint(parent.Error) == math.asuint(node.ParentError))
+                            if (parent.GroupIndex == packed.ParentGroupIndex)
                                 sharedTransitionFound = true;
                         }
                         Assert.That(sharedTransitionFound, Is.True, "Parent and child must share exact group Bounds/Error.");

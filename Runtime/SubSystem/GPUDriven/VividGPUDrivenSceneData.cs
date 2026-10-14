@@ -54,7 +54,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
         private readonly List<VividTerrainLayerGPUData> m_TerrainLayers = new();
-        private readonly List<VividMeshLODNode> m_MeshLODNodes = new();
+        private readonly List<VividMeshLODNodePacked> m_MeshLODNodes = new();
+        private readonly List<VividMeshLODGroup> m_MeshLODGroups = new();
         private readonly List<VividMeshlet> m_Meshlets = new();
         private readonly List<VividMeshletVertex> m_Vertices = new();
         private readonly List<byte> m_Indices = new();
@@ -87,7 +88,9 @@ namespace VividRP.Runtime.GPUDriven
 
         public IReadOnlyList<VividTerrainLayerGPUData> TerrainLayers => m_TerrainLayers;
 
-        public IReadOnlyList<VividMeshLODNode> MeshLODNodes => m_MeshLODNodes;
+        public IReadOnlyList<VividMeshLODNodePacked> MeshLODNodes => m_MeshLODNodes;
+
+        public IReadOnlyList<VividMeshLODGroup> MeshLODGroups => m_MeshLODGroups;
 
         public IReadOnlyList<VividMeshlet> Meshlets => m_Meshlets;
 
@@ -116,6 +119,8 @@ namespace VividRP.Runtime.GPUDriven
         public int TerrainLayerCount => m_TerrainLayers.Count;
 
         public int MeshLODNodeCount => m_MeshLODNodes.Count;
+
+        public int MeshLODGroupCount => m_MeshLODGroups.Count;
 
         public int MeshletCount => m_Meshlets.Count;
 
@@ -204,7 +209,9 @@ namespace VividRP.Runtime.GPUDriven
 
         internal List<VividTerrainLayerGPUData> MutableTerrainLayers => m_TerrainLayers;
 
-        internal List<VividMeshLODNode> MutableMeshLODNodes => m_MeshLODNodes;
+        internal List<VividMeshLODNodePacked> MutableMeshLODNodes => m_MeshLODNodes;
+
+        internal List<VividMeshLODGroup> MutableMeshLODGroups => m_MeshLODGroups;
 
         internal List<VividMeshlet> MutableMeshlets => m_Meshlets;
 
@@ -425,6 +432,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             ClearDynamic();
             m_MeshLODNodes.Clear();
+            m_MeshLODGroups.Clear();
             m_Meshlets.Clear();
             m_Vertices.Clear();
             m_Indices.Clear();

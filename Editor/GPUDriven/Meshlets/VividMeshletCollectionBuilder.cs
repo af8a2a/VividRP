@@ -207,14 +207,14 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             meshletCollection.MeshLODLevelCount = meshLODLevels.Length;
 
             var meshLODLevelNodeCounts = new int[meshLODLevels.Length];
-            var meshLODNodes = new VividMeshLODNode[totalMeshLODNodes];
+            var lodTable = new VividMeshLODGroupTable();
+            lodTable.Nodes.Capacity = totalMeshLODNodes;
             var meshlets = new VividMeshlet[totalMeshlets];
             var vertexBuffer = new VividMeshletVertex[totalVertices];
             var indexBuffer = new byte[totalIndices];
 
             var jobHandles = new NativeList<JobHandle>(Allocator.Temp);
 
-            fixed (VividMeshLODNode* pMeshLODNodes = meshLODNodes)
             fixed (VividMeshlet* pDestinationMeshlets = meshlets)
             fixed (VividMeshletVertex* pDestinationVertices = vertexBuffer)
             fixed (byte* pIndexBuffer = indexBuffer)
@@ -224,7 +224,6 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 byte* pTangentData = tangentData.IsCreated ? (byte*) tangentData.GetUnsafeReadOnlyPtr() : null;
                 byte* pUVData = uvData.IsCreated ? (byte*) uvData.GetUnsafeReadOnlyPtr() : null;
 
-                uint meshLODNodeWriteOffset = 0;
                 uint meshletWriteOffset = 0;
                 uint vertexWriteOffset = 0;
                 uint indexWriteOffset = 0;
@@ -255,15 +254,14 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                             int nodeIndex = group[index];
                             MeshLODNode node = level.Nodes[nodeIndex];
 
-                            ref VividMeshLODNode destinationNode = ref pMeshLODNodes[meshLODNodeWriteOffset++];
-                            destinationNode = VividMeshletMetadataPacking.PackMeshLODNode(
+                            lodTable.Add(VividMeshletMetadataPacking.PackMeshLODNode(
                                 node.Bounds,
                                 node.ParentBounds,
                                 node.ParentError,
                                 node.Error,
                                 meshletWriteOffset + (uint) index,
                                 1u,
-                                (uint) levelIndex);
+                                (uint) levelIndex));
                         }
 
                         foreach (int nodeIndex in group)
@@ -338,7 +336,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
 
             meshletCollection.SetMeshData(
                 meshLODLevelNodeCounts,
-                meshLODNodes,
+                lodTable.Nodes.ToArray(),
+                lodTable.Groups.ToArray(),
                 meshlets,
                 vertexBuffer,
                 indexBuffer

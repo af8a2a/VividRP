@@ -39,48 +39,106 @@ The builder also retains owning native allocations separately from bounded
 meshlet views, releases retry partitions and list storage, and completes vertex
 write jobs before unpinning managed output buffers.
 
-## Conservative runtime LOD selection
+## Shared group transitions and pixel budgets
 
-The compact parent bound uses the child's center and an upward-rounded radius
-large enough to contain the original parent sphere. Its projected error must
-therefore never be smaller than the original parent's error. Otherwise the
-parent can request refinement while the child rejects that same refinement,
-leaving missing triangles in the LOD cut.
+Each simplification group produces one canonical sphere and one accumulated
+linear object-space error. All resulting coarse clusters copy these exact values
+into their own Bounds/Error; all source children copy the same values into their
+ParentBounds/ParentError. The resident node preserves both pairs as FP32, without
+recentering or independently rounding the parent. This follows the group-data
+contract in UE 5.7.4 `NaniteBuilder/Private/ClusterDAG.cpp` (`FClusterDAG::ReduceGroup`), while
+keeping meshoptimizer as the builder. It needs no extra buffer or lookup.
 
-`VividMeshLODError.hlsli` evaluates the local sphere using the full local-to-clip
-matrix, including nonuniform scale and shear. The radius metric uses the nearest
-clip W of the sphere with an outward FP32 allowance. An enclosing sphere has a
-larger radius and a no-greater nearest W. Spheres touching or crossing W=0 return
-the largest finite radius metric, requesting refinement for nonzero errors;
-zero-error leaves remain selectable without `0 * infinity` producing NaN.
-Orthographic views use the same calculation with constant W. This can select
-finer LODs near large bounds; the error threshold, forced LOD behavior, buffer
-layout and asset format are unchanged. Existing assets do not need a rebake.
+The sequential `VividMeshLODNode` is now 48 bytes:
 
-The Sponza `Camera_1` roof regression came from projecting radius at the sphere's
-center. Original parent nodes 2722/2723 measured about 1.05 times the threshold,
-but recentered parent bounds for leaves 2727/2728 measured only 0.96/0.84 times
-the threshold. Both sides were rejected. The spheres cross the eye plane; the
-new metric consistently requests refinement. The missing outer roof strip was
-verified restored in the live D3D12 GameView with automatic LOD, frustum, cone
-and HZB culling enabled, at position `(6.181255, 18.638472, -10.503865)`, Euler
-`(43.272297, 304.76556, 1.6177362)`, FOV 60 and clip planes 0.3/1000.
+| Offset | Field |
+| --- | --- |
+| 0 | Bounds (float4) |
+| 16 | ParentBounds (float4) |
+| 32 | Error (float) |
+| 36 | ParentError (float; negative for roots) |
+| 40 | MeshletStartIndex (uint) |
+| 44 | PackedMeshletCountLevel (uint) |
 
-`Tools~/Validate-MeshletCulling.ps1` also compiles all six `MeshletListBuild`
-kernels and runs `MeshLODSelectionProbe.hlsl` through the production selection
-function on D3D12. Its 16,448 deterministic cases include the captured roof
-bounds, perspective/orthographic views, recentered bfloat16 bounds/errors,
-affine scale/shear/reflection, eye-plane crossings, zero-error leaves and forced
-LOD controls. They passed on RTX 5070 Ti with no parent/child cut holes or metric
-containment failures. Coarse and refined controls prevent always selecting the
-finest level from passing. This does not measure frame-time performance.
+The shader selects a node when its parent needs refinement and the node itself
+does not. Both sides evaluate identical group data with complementary `>` / `<=`
+comparisons; equality selects the coarse side. Roots have no parent constraint,
+and the finest retained level always remains drawable, including truncated
+hierarchies and a zero pixel budget. Bounds contain child bounds and accumulated
+errors increase toward coarser levels, preserving a complete cut across levels.
+
+Like Nanite's view pixel scale / MaxPixelsPerEdge budget, the runtime compares
+**linear projected error in pixels** against a budget, default **1 pixel**. The
+new Volume field is `meshLODPixelError` (Inspector: Mesh LOD Pixel Error).
+The previous heuristic threshold, commonly 50, has no view-independent numeric
+conversion: old serialized overrides are deliberately not mapped to this field.
+Set a new pixel override to retune quality. The existing C# system property and
+shader uniform named `MeshLODErrorThreshold` retain their names but now use pixel
+units; the old Volume API is an obsolete forwarding property.
+
+`VividMeshLODError.hlsli` uses the full local-to-clip matrix, viewport dimensions,
+and the shared sphere's nearest W. A bound on the projection derivative includes
+the off-axis W contribution and supports nonuniform scale, shear, perspective,
+and orthographic cameras. Error is no longer multiplied by sphere radius squared
+or compared with instance-center distance squared. Eye-plane crossings request
+refinement for nonzero errors; zero error remains zero. The implementation is a
+conservative projection bound, not an exact port of Nanite's tangent-angle and
+near-plane-clamped formula; large spheres crossing the eye plane can select
+more detail. Critical cut math remains FP32, while existing strict float16_t
+frustum culling is unchanged.
+
+VSM clipmap mode compares linear object-space error times shadow texels per
+object-space unit against the same budget. Its hierarchy interval rejection uses
+the same scale as the leaf shader and preserves ambiguous boundary cases and
+ranges containing the finest retained level. Forced-depth behavior is retained.
 
 ## Existing assets
 
-The `.vmeshletcollection` importer version is now 4. Unity regenerates imported
-collections on the next applicable import. Existing serialized meshlet data
-remains readable. Terrain collections baked as ordinary `.asset` files need an
-explicit terrain rebake to use the new generation algorithm.
+The blob format is now **v6** and `.vmeshletcollection` importer version is **5**.
+Unity rebuilds imported collections from their existing source settings. Vertices
+remain 20 bytes and meshlets remain 32 bytes. Only LOD metadata grows from 32 to
+48 bytes; this is not a whole-scene VRAM or performance claim.
+
+v1-v3 retain full parent metadata and convert losslessly to the new node layout.
+v4/v5 discarded the original parent centers and rounded parent errors, so an
+exact transition cannot be recovered reliably. These assets load the complete
+finest cut until reimported/rebaked; `RequiresLODRebuild` exposes this state. Their
+original serialized blob is retained during serialization so loading does not
+silently replace the old hierarchy with the fallback. Ordinary `.asset` terrain
+collections require an explicit terrain rebake to regain automatic LOD. Source
+FBX/glTF files are unchanged.
+
+## LOD validation (2026-10-14)
+
+- Runtime, Editor and Editor.Tests compile against Unity 7000.0.0a9 references.
+  All 27 pure managed checks pass, covering v1-v6 decoding, exact shared-data round trips,
+  v4/v5 finest-cut migration, all node offsets/stride, and vertex quantization.
+- DXC compiles all 6 MeshletListBuild, 8 GPUInstanceCulling and 12
+  GPUMeshletCulling kernels. The production selection and VSM hierarchy predicate
+  run on D3D12 (RTX 5070 Ti) in `Tools~/MeshLODSelectionProbe.hlsl`.
+- 16,448 cases pass with zero holes/overlap for main-view, shadow and three-level
+  cuts, including exact equality +/- one float ULP, zero error/budget, viewport,
+  FOV, instance bias, affine transforms and the captured Camera_1 roof bounds.
+  An FP64 oracle checks projected error. VSM branches never reject a selected
+  contained node or the truncated finest level. Existing 24,640 meshlet and
+  41,024 instance-frustum cases also pass in native16 and FP32 modes.
+- The running Sponza scene has 217 instances and 2,888 distinct LOD nodes; all
+  3,620 instance-local parent relationships match their group data bit-for-bit
+  and satisfy sphere containment. All 83 loaded meshlet assets were rebuilt.
+  GPU readback matches all 2,888 CPU nodes at a 48-byte stride; visible meshlet
+  counters and indirect draw arguments are nonzero. Auto LOD uses a 1-pixel
+  budget. Production compute shaders have no errors
+  apart from the scoped D3D11 8-UAV diagnostic.
+- The original roof camera was captured at `(6.181255, 18.638472, -10.503865)`,
+  Euler `(43.272297, 304.76556, 1.6177362)`, with GPUDriven/occlusion enabled and
+  automatic LOD. The previously missing outer roof strip is present in the
+  current scene output. The user's camera pose was then restored. Capture:
+  `Temp~/lod-pixel-budget/roof.png`. This is a geometry check, not material or
+  frame-time validation.
+
+Unity Test Framework tests were not run in the active interactive Editor.
+Run `VividMeshletCollectionBuilderTests`, `GPUDrivenSettingsVolumeTests`, and
+GPU buffer/serializer fixtures manually for the full Editor integration suite.
 
 ## Resident vertex quantization
 
@@ -112,7 +170,8 @@ clusters and LODs. Renderer and terrain bounds also include quantized geometry.
 The binary payload retains LZ4 compression; the reference's per-cluster arithmetic
 bitstream is not needed for this fixed-width resident format.
 
-The blob format is now v5. Readers convert v1-v4 vertices on load, conservatively
+Vertex quantization was introduced in v5 and is retained in v6. Readers convert
+v1-v4 vertices on load, conservatively
 expand legacy bounds/errors and disable stale cones when positions moved.
 Reimporting models or rebaking terrain produces bounds and cones directly from
 quantized geometry. Source FBX/glTF files are not modified. Generated assets

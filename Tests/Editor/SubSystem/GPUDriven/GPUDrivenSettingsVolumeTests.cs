@@ -20,7 +20,7 @@ namespace VividRP.Editor.Tests
                     volume.forcedMeshLODNodeDepth.value,
                     Is.EqualTo(VividGPUDrivenCullingContextUtility.DefaultForcedMeshLODNodeDepth));
                 Assert.That(
-                    volume.meshLODErrorThreshold.value,
+                    volume.meshLODPixelError.value,
                     Is.EqualTo(VividGPUDrivenCullingContextUtility.DefaultMeshLODErrorThreshold));
                 Assert.That(volume.IsActive(), Is.False);
             }
@@ -28,6 +28,21 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(volume);
             }
+        }
+
+        [Test]
+        public void LegacySerializedThreshold_IsNotInterpretedAsPixels()
+        {
+            var volume = ScriptableObject.CreateInstance<GPUDrivenSettingsVolume>();
+            try
+            {
+                UnityEditor.EditorJsonUtility.FromJsonOverwrite(
+                    "{\"meshLODErrorThreshold\":{\"m_Value\":50.0,\"m_OverrideState\":true}}", volume);
+                Assert.That(volume.meshLODPixelError.value, Is.EqualTo(1f));
+                Assert.That(volume.meshLODPixelError.overrideState, Is.False);
+                Assert.That(GPUDrivenSettingsVolume.ResolveSettings(volume).meshLODPixelError, Is.EqualTo(1f));
+            }
+            finally { Object.DestroyImmediate(volume); }
         }
 
         [Test]
@@ -40,13 +55,13 @@ namespace VividRP.Editor.Tests
                 volume.active = true;
                 volume.forcedMeshLODNodeDepth.overrideState = true;
                 volume.forcedMeshLODNodeDepth.value = 3;
-                volume.meshLODErrorThreshold.overrideState = true;
-                volume.meshLODErrorThreshold.value = 12.5f;
+                volume.meshLODPixelError.overrideState = true;
+                volume.meshLODPixelError.value = 12.5f;
 
                 GPUDrivenSettingsVolume.GPUDrivenSettingsData settings = GPUDrivenSettingsVolume.ResolveSettings(volume);
 
                 Assert.That(settings.forcedMeshLODNodeDepth, Is.EqualTo(3));
-                Assert.That(settings.meshLODErrorThreshold, Is.EqualTo(12.5f));
+                Assert.That(settings.meshLODPixelError, Is.EqualTo(12.5f));
                 Assert.That(volume.IsActive(), Is.True);
             }
             finally
@@ -66,8 +81,8 @@ namespace VividRP.Editor.Tests
                 var camera = cameraObject.AddComponent<Camera>();
                 GPUDrivenSettingsVolume component = profile.Add<GPUDrivenSettingsVolume>(false);
                 component.active = true;
-                component.meshLODErrorThreshold.overrideState = true;
-                component.meshLODErrorThreshold.value = 9.5f;
+                component.meshLODPixelError.overrideState = true;
+                component.meshLODPixelError.value = 9.5f;
 
                 if (VolumeManager.instance.isInitialized)
                 {
@@ -80,7 +95,7 @@ namespace VividRP.Editor.Tests
                 GPUDrivenSettingsVolume resolvedVolume = VividVolumeManagerUtility.GetGPUDrivenSettingsVolume();
 
                 Assert.That(resolvedVolume, Is.Not.Null);
-                Assert.That(resolvedVolume.meshLODErrorThreshold.value, Is.EqualTo(9.5f));
+                Assert.That(resolvedVolume.meshLODPixelError.value, Is.EqualTo(9.5f));
             }
             finally
             {

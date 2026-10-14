@@ -24,7 +24,7 @@ if (!$UnityCgIncludes) {
         Select-Object -First 1
     if (!$bee) { throw 'Supply UnityCgIncludes, or import the containing project first.' }
     $text = Get-Content (Join-Path $bee.FullName 'VividRP.Runtime.rsp') -Raw
-    $editor = [regex]::Match($text, '-r:"(?<root>[^"]*/Editor/Data)/Managed/UnityEngine/UnityEngine.CoreModule.dll"')
+    $editor = [regex]::Match($text, '-r:"(?<root>[^"]*/Editor/Data)/[^"]*/UnityEngine.CoreModule.dll"')
     if (!$editor.Success) { throw 'Cannot locate this project Editor from Bee references.' }
     $UnityCgIncludes = Join-Path $editor.Groups['root'].Value 'Resources/CGIncludes'
 }

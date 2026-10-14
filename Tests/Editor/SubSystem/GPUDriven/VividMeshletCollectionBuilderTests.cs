@@ -3,6 +3,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using Unity.Collections;
+using Unity.Mathematics;
 using VividRP.Runtime;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -340,7 +341,17 @@ namespace VividRP.Editor.Tests
                     else
                     {
                         Assert.That(node.ParentError, Is.GreaterThanOrEqualTo(node.Error));
-                        Assert.That(node.ParentBounds.w, Is.GreaterThanOrEqualTo(node.Bounds.w));
+                        Assert.That(node.ParentBounds.w + 1e-4f, Is.GreaterThanOrEqualTo(
+                            math.distance(node.Bounds.xyz, node.ParentBounds.xyz) + node.Bounds.w));
+                        bool sharedTransitionFound = false;
+                        foreach (var parent in asset.MeshLODNodes)
+                        {
+                            if (parent.LevelIndex + 1 != node.LevelIndex) continue;
+                            if (math.all(math.asuint(parent.Bounds) == math.asuint(node.ParentBounds))
+                                && math.asuint(parent.Error) == math.asuint(node.ParentError))
+                                sharedTransitionFound = true;
+                        }
+                        Assert.That(sharedTransitionFound, Is.True, "Parent and child must share exact group Bounds/Error.");
                     }
                     Assert.That(node.MeshletCount, Is.EqualTo(1));
                     VividMeshlet meshlet = asset.Meshlets[node.MeshletStartIndex];

@@ -330,8 +330,9 @@ struct VividMeshletVertex
 struct VividMeshLODNode
 {
     float4 Bounds;
+    float4 ParentBounds;
     float Error;
-    uint PackedParentErrorRadius;
+    float ParentError;
     uint MeshletStartIndex;
     uint PackedMeshletCountLevel;
 };

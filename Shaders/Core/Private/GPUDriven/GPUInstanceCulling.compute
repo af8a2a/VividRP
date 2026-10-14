@@ -51,30 +51,16 @@ uint _ForcedMeshLODNodeDepth;
 float _MeshLODErrorThreshold;
 StructuredBuffer<VividGPULODSelectionContext> _LODSelectionContexts;
 
-bool VSMLodRangeMaySelect(VSMLodHierarchyNode node, VividInstanceData instance,
-    float instanceScale, float texelScaleSq, float threshold)
+bool VSMLodRangeMaySelect(VSMLodHierarchyNode node, uint leafLevel,
+    float pixelsPerObjectUnit, float budget)
 {
-    // TransformSphere (the unchanged leaf contract) subtracts transformed points.
-    // Bound its cancellation/rounding error from the largest input magnitude in
-    // this range; a simple error * radius^2 bound is unsafe at large translations.
-    float3 maxLocalPoint = node.ErrorMagnitude.xyz + node.ErrorBounds.w;
-    float3 worldMagnitude = mul(abs((float3x3)instance.ObjectToWorldMatrix), maxLocalPoint)
-        + abs(float3(instance.ObjectToWorldMatrix._m03, instance.ObjectToWorldMatrix._m13,
-            instance.ObjectToWorldMatrix._m23));
-    if (!all(isfinite(worldMagnitude))) return true;
-    float roundoff = max(1e-18f, 1e-5f * length(worldMagnitude));
-    if (!isfinite(roundoff)) return true;
-
-    float minRadius = max(0.0f, node.ErrorBounds.y * instanceScale - roundoff);
-    float maxParentRadius = node.ErrorBounds.w * instanceScale + roundoff;
-    // Keep the leaf multiplication order and leave ambiguous equality/underflow
-    // cases to the leaf. An unbounded parent interval (including the no-parent
-    // sentinel) disables parent rejection.
-    float minError = node.ErrorBounds.x * minRadius * minRadius * texelScaleSq;
-    float maxParentError = node.ErrorBounds.z * maxParentRadius * maxParentRadius * texelScaleSq;
-    float tolerance = max(1e-30f, threshold * 1e-5f);
-    bool ownErrorTooHigh = isfinite(minError) && minError > threshold + tolerance;
-    bool allParentsTooLow = isfinite(maxParentError) && maxParentError < threshold - tolerance;
+    // The same linear texel metric as the leaf shader, with conservative interval
+    // bounds. Leave equality and rounding ambiguity to the exact leaf decision.
+    float minError = node.ErrorBounds.x * pixelsPerObjectUnit;
+    float maxParentError = node.ErrorBounds.z * pixelsPerObjectUnit;
+    float tolerance = max(1e-30f, budget * 1e-5f);
+    bool ownErrorTooHigh = node.Max.w < leafLevel && isfinite(minError) && minError > budget + tolerance;
+    bool allParentsTooLow = isfinite(maxParentError) && maxParentError < budget - tolerance;
     return !(ownErrorTooHigh || allParentsTooLow);
 }
 
@@ -103,7 +89,7 @@ void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint off
 struct VSMLodTraversalState
 {
     uint start, end, leafLevel;
-    float instanceScale, texelScaleSq, threshold;
+    float pixelsPerObjectUnit, threshold;
     bool automaticErrorBounds;
 };
 VSMLodTraversalState VSMLodState(VividInstanceData instance, uint contextIndex, uint start, uint end)
@@ -112,20 +98,17 @@ VSMLodTraversalState VSMLodState(VividInstanceData instance, uint contextIndex, 
     VividGPUCullingContext context = _CullingContexts[contextIndex];
     VividGPULODSelectionContext lodContext = _LODSelectionContexts[0];
     // Match MeshletListBuild's shadow-texel predicate and view scale exactly.
-    float texelsPerWorldUnit = length(context.ViewProjectionMatrix[0].xyz) * lodContext.ScreenSizePixels.x * 0.5;
-    float texelScaleSq = texelsPerWorldUnit * texelsPerWorldUnit;
+    float pixelsPerObjectUnit = VividLODOrthographicPixelScale(
+        mul(context.ViewProjectionMatrix, instance.ObjectToWorldMatrix), lodContext.ScreenSizePixels);
     float threshold = _MeshLODErrorThreshold * instance.LODErrorScale;
-    float3x3 columns = transpose((float3x3)instance.ObjectToWorldMatrix);
-    float instanceScale = max(length(columns[0]), max(length(columns[1]), length(columns[2])));
     bool automaticErrorBounds = _ForcedMeshLODNodeDepth == VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH
         && lodContext.CameraPosition.w == 0.0f && context.CameraIsPerspective == 0
         && ((uint)context.PassMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u
         && isfinite(threshold) && threshold >= 0.0f
-        && isfinite(texelScaleSq) && texelScaleSq > 0.0f
-        && isfinite(instanceScale) && instanceScale > 0.0f;
+        && isfinite(pixelsPerObjectUnit) && pixelsPerObjectUnit > 0.0f;
     VSMLodTraversalState state;
     state.start = start; state.end = end; state.leafLevel = leafLevel;
-    state.instanceScale = instanceScale; state.texelScaleSq = texelScaleSq;
+    state.pixelsPerObjectUnit = pixelsPerObjectUnit;
     state.threshold = threshold; state.automaticErrorBounds = automaticErrorBounds;
     return state;
 }
@@ -137,7 +120,7 @@ bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint c
         overlaps = overlaps && ((_ForcedMeshLODNodeDepth >= node.Min.w && _ForcedMeshLODNodeDepth <= node.Max.w)
             || (state.leafLevel < _ForcedMeshLODNodeDepth && state.leafLevel >= node.Min.w && state.leafLevel <= node.Max.w));
     if (overlaps && state.automaticErrorBounds)
-        overlaps = VSMLodRangeMaySelect(node, instance, state.instanceScale, state.texelScaleSq, state.threshold);
+        overlaps = VSMLodRangeMaySelect(node, state.leafLevel, state.pixelsPerObjectUnit, state.threshold);
     if (overlaps)
         overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
             (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);

@@ -406,30 +406,15 @@ namespace VividRP.Runtime.GPUDriven
     [Serializable]
     public struct VividMeshLODNode
     {
+        // Every coarse cluster and its children copy the SAME group transition data.
+        // Keep all components lossless: independently rounded/recentered parent
+        // data changes the cut threshold and can select both LODs (or neither).
         public float4 Bounds;
+        public float4 ParentBounds;
         public float Error;
-        public uint PackedParentErrorRadius;
+        public float ParentError;
         public uint MeshletStartIndex;
         public uint PackedMeshletCountLevel;
-
-        public float4 ParentBounds
-        {
-            readonly get => ParentError < 0.0f
-                ? default
-                : new float4(Bounds.xyz, VividMeshletMetadataPacking.UnpackParentRadius(PackedParentErrorRadius));
-            set => PackedParentErrorRadius = VividMeshletMetadataPacking.SetParentBounds(
-                PackedParentErrorRadius,
-                Bounds,
-                value);
-        }
-
-        public float ParentError
-        {
-            readonly get => VividMeshletMetadataPacking.UnpackParentError(PackedParentErrorRadius);
-            set => PackedParentErrorRadius = VividMeshletMetadataPacking.SetParentError(
-                PackedParentErrorRadius,
-                value);
-        }
 
         public uint MeshletCount
         {
@@ -461,10 +446,6 @@ namespace VividRP.Runtime.GPUDriven
         private const int ConeCutoffShift = 20;
         private const float DirectionLengthSquaredEpsilon = 1e-20f;
         private const float ConservativeConeAxisSetterErrorRadians = 0.00872664626f;
-        // Parent error and radius use the high 16 bits of a float (bfloat16 style). Positive
-        // values are rounded upward so LOD selection remains conservative across the full float range.
-        private const uint MaximumFiniteFloat16 = 0x7F7Fu;
-
         public static VividMeshlet PackMeshlet(
             uint vertexOffset,
             uint triangleOffset,
@@ -501,7 +482,8 @@ namespace VividRP.Runtime.GPUDriven
             {
                 Bounds = bounds,
                 Error = error,
-                PackedParentErrorRadius = PackParentErrorRadius(bounds, parentBounds, parentError),
+                ParentBounds = parentBounds,
+                ParentError = parentError,
                 MeshletStartIndex = meshletStartIndex,
                 PackedMeshletCountLevel = PackUInt16Pair(
                     meshletCount,
@@ -577,33 +559,6 @@ namespace VividRP.Runtime.GPUDriven
             return quantized / (float) ConeCutoffMask * 2.0f - 1.0f;
         }
 
-        public static float UnpackParentError(uint packedParentErrorRadius)
-        {
-            return Float16ToFloat(packedParentErrorRadius & UInt16Mask);
-        }
-
-        public static float UnpackParentRadius(uint packedParentErrorRadius)
-        {
-            return Float16ToFloat(packedParentErrorRadius >> 16);
-        }
-
-        public static uint SetParentError(uint packedParentErrorRadius, float parentError)
-        {
-            uint packedError = parentError < 0.0f
-                ? FloatToFloat16(-1.0f)
-                : PackPositiveFloat16Up(parentError);
-            return (packedParentErrorRadius & 0xFFFF0000u) | packedError;
-        }
-
-        public static uint SetParentBounds(
-            uint packedParentErrorRadius,
-            float4 bounds,
-            float4 parentBounds)
-        {
-            float parentRadius = ComputeConservativeParentRadius(bounds, parentBounds);
-            return (packedParentErrorRadius & UInt16Mask) | (PackPositiveFloat16Up(parentRadius) << 16);
-        }
-
         public static uint SetLowUInt16(uint packedValue, uint value, string parameterName)
         {
             ValidateUInt16(value, parameterName);
@@ -614,27 +569,6 @@ namespace VividRP.Runtime.GPUDriven
         {
             ValidateUInt16(value, parameterName);
             return (packedValue & UInt16Mask) | (value << 16);
-        }
-
-        private static uint PackParentErrorRadius(float4 bounds, float4 parentBounds, float parentError)
-        {
-            uint packedError = parentError < 0.0f
-                ? FloatToFloat16(-1.0f)
-                : PackPositiveFloat16Up(parentError);
-            uint packedRadius = parentError < 0.0f
-                ? 0u
-                : PackPositiveFloat16Up(ComputeConservativeParentRadius(bounds, parentBounds));
-            return packedError | (packedRadius << 16);
-        }
-
-        private static float ComputeConservativeParentRadius(float4 bounds, float4 parentBounds)
-        {
-            if (!math.all(math.isfinite(bounds)) || !math.all(math.isfinite(parentBounds)))
-            {
-                return Float16ToFloat(MaximumFiniteFloat16);
-            }
-
-            return math.max(0.0f, parentBounds.w) + math.distance(bounds.xyz, parentBounds.xyz);
         }
 
         private static uint PackUInt16Pair(
@@ -741,38 +675,6 @@ namespace VividRP.Runtime.GPUDriven
         {
             float encoded = math.saturate(value * 0.5f + 0.5f) * ConeCutoffMask;
             return math.min((uint) math.ceil(encoded), ConeCutoffMask);
-        }
-
-        private static uint PackPositiveFloat16Up(float value)
-        {
-            if (float.IsNaN(value) || value <= 0.0f)
-            {
-                return 0u;
-            }
-
-            if (float.IsPositiveInfinity(value))
-            {
-                return MaximumFiniteFloat16;
-            }
-
-            uint bits = math.asuint(value);
-            uint packed = bits >> 16;
-            if ((bits & UInt16Mask) != 0u && packed < MaximumFiniteFloat16)
-            {
-                packed++;
-            }
-
-            return math.min(packed, MaximumFiniteFloat16);
-        }
-
-        private static uint FloatToFloat16(float value)
-        {
-            return math.asuint(value) >> 16;
-        }
-
-        private static float Float16ToFloat(uint value)
-        {
-            return math.asfloat((value & UInt16Mask) << 16);
         }
 
         private static float2 SignNotZero(float2 value)

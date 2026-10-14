@@ -26,8 +26,20 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
-            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(48));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
+        }
+
+        [Test]
+        public void MeshLODNodeLayout_HasHlslFieldOffsets()
+        {
+            Assert.That(typeof(VividMeshLODNode).IsLayoutSequential, Is.True);
+            AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.Bounds), 0);
+            AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.ParentBounds), 16);
+            AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.Error), 32);
+            AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.ParentError), 36);
+            AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.MeshletStartIndex), 40);
+            AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.PackedMeshletCountLevel), 44);
         }
 
         [Test]
@@ -396,7 +408,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MeshletMetadataPacking_RejectsInvalidConeAndBuildsConservativeParentSphere()
+        public void MeshletMetadataPacking_RejectsInvalidConeAndPreservesSharedLODTransition()
         {
             VividMeshlet meshlet = VividMeshletMetadataPacking.PackMeshlet(
                 1u,
@@ -429,11 +441,9 @@ namespace VividRP.Editor.Tests
                 17u,
                 9u);
 
-            float requiredParentRadius = parentBounds.w + math.distance(bounds.xyz, parentBounds.xyz);
             Assert.That(node.Bounds, Is.EqualTo(bounds));
-            Assert.That(node.ParentBounds.xyz, Is.EqualTo(bounds.xyz));
-            Assert.That(node.ParentBounds.w, Is.GreaterThanOrEqualTo(requiredParentRadius));
-            Assert.That(node.ParentError, Is.GreaterThanOrEqualTo(0.03125f));
+            Assert.That(node.ParentBounds, Is.EqualTo(parentBounds));
+            Assert.That(node.ParentError, Is.EqualTo(0.03125f));
             Assert.That(node.Error, Is.EqualTo(0.0078125f));
             Assert.That(node.MeshletStartIndex, Is.EqualTo(uint.MaxValue - 7u));
             Assert.That(node.MeshletCount, Is.EqualTo(17u));
@@ -450,11 +460,8 @@ namespace VividRP.Editor.Tests
                 1u,
                 0u);
             Assert.That(math.isfinite(largeNode.ParentBounds.w), Is.True);
-            Assert.That(
-                largeNode.ParentBounds.w,
-                Is.GreaterThanOrEqualTo(
-                    largeParentBounds.w + math.distance(largeBounds.xyz, largeParentBounds.xyz)));
-            Assert.That(largeNode.ParentError, Is.GreaterThanOrEqualTo(0.0012345f));
+            Assert.That(largeNode.ParentBounds, Is.EqualTo(largeParentBounds));
+            Assert.That(largeNode.ParentError, Is.EqualTo(0.0012345f));
         }
 
         [Test]

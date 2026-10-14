@@ -89,8 +89,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                     var box = geometryBounds != null && i < geometryBounds.Count ? geometryBounds[i] : default;
                     low = math.min(low, new float4(box.IsValid ? box.Center.xyz - box.Extent.xyz : sphereLow, node.LevelIndex));
                     high = math.max(high, new float4(box.IsValid ? box.Center.xyz + box.Extent.xyz : sphereHigh, node.LevelIndex));
-                    // Read through the packed accessors used by GPU decoding, not
-                    // the pre-quantization parent error/radius from the mesh baker.
+                    // Use exactly the group data consumed by GPU LOD selection.
                     float parentError = node.ParentError, parentRadius = node.ParentBounds.w;
                     bool validParent = math.isfinite(parentError) && parentError >= 0f
                         && math.isfinite(parentRadius) && parentRadius >= 0f;

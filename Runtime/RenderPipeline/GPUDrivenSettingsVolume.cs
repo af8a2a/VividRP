@@ -12,24 +12,32 @@ namespace VividRP.Runtime
         public ClampedIntParameter forcedMeshLODNodeDepth =
             new(0,VividGPUDrivenDefaults.ForcedMeshLODNodeDepth,32);
 
-        public MinFloatParameter meshLODErrorThreshold =
+        [Tooltip("Maximum projected mesh LOD error in pixels (shadow texels in clipmap mode). Higher values allow coarser geometry.")]
+        public MinFloatParameter meshLODPixelError =
             new(VividGPUDrivenDefaults.MeshLODErrorThreshold, 0f);
+
+        [Obsolete("Use meshLODPixelError. The legacy heuristic threshold has been replaced by a pixel budget.")]
+        public MinFloatParameter meshLODErrorThreshold
+        {
+            get => meshLODPixelError;
+            set => meshLODPixelError = value;
+        }
 
         public bool IsActive()
         {
             return active
                 && ((forcedMeshLODNodeDepth != null && forcedMeshLODNodeDepth.overrideState)
-                    || (meshLODErrorThreshold != null && meshLODErrorThreshold.overrideState));
+                    || (meshLODPixelError != null && meshLODPixelError.overrideState));
         }
 
         internal static GPUDrivenSettingsData ResolveSettings(GPUDrivenSettingsVolume volume)
         {
             int forcedMeshLODNodeDepth = VividGPUDrivenDefaults.ForcedMeshLODNodeDepth;
-            float meshLODErrorThreshold = VividGPUDrivenDefaults.MeshLODErrorThreshold;
+            float meshLODPixelError = VividGPUDrivenDefaults.MeshLODErrorThreshold;
 
             if (volume == null || !volume.active)
             {
-                return new GPUDrivenSettingsData(forcedMeshLODNodeDepth, meshLODErrorThreshold);
+                return new GPUDrivenSettingsData(forcedMeshLODNodeDepth, meshLODPixelError);
             }
 
             if (volume.forcedMeshLODNodeDepth != null && volume.forcedMeshLODNodeDepth.overrideState)
@@ -37,26 +45,26 @@ namespace VividRP.Runtime
                 forcedMeshLODNodeDepth = volume.forcedMeshLODNodeDepth.value;
             }
 
-            if (volume.meshLODErrorThreshold != null && volume.meshLODErrorThreshold.overrideState)
+            if (volume.meshLODPixelError != null && volume.meshLODPixelError.overrideState)
             {
-                meshLODErrorThreshold = volume.meshLODErrorThreshold.value;
+                meshLODPixelError = volume.meshLODPixelError.value;
             }
 
             return new GPUDrivenSettingsData(
                 forcedMeshLODNodeDepth,
-                Mathf.Max(0f, meshLODErrorThreshold));
+                Mathf.Max(0f, meshLODPixelError));
         }
 
         internal readonly struct GPUDrivenSettingsData
         {
-            public GPUDrivenSettingsData(int forcedMeshLODNodeDepth, float meshLODErrorThreshold)
+            public GPUDrivenSettingsData(int forcedMeshLODNodeDepth, float meshLODPixelError)
             {
                 this.forcedMeshLODNodeDepth = forcedMeshLODNodeDepth;
-                this.meshLODErrorThreshold = meshLODErrorThreshold;
+                this.meshLODPixelError = meshLODPixelError;
             }
 
             public readonly int forcedMeshLODNodeDepth;
-            public readonly float meshLODErrorThreshold;
+            public readonly float meshLODPixelError;
         }
     }
 }

@@ -46,7 +46,8 @@ namespace VividRP.Editor.Tests
             Assert.That(tree.CpuNodes[0].ErrorBounds, Is.EqualTo(oldTree.CpuNodes[0].ErrorBounds));
             Assert.That(tree.CpuNodes[0].ErrorMagnitude, Is.EqualTo(oldTree.CpuNodes[0].ErrorMagnitude));
             Assert.That(scene.MeshLODNodes[0].Bounds, Is.EqualTo(original.Bounds));
-            Assert.That(scene.MeshLODNodes[0].PackedParentErrorRadius, Is.EqualTo(original.PackedParentErrorRadius));
+            Assert.That(scene.MeshLODNodes[0].ParentBounds, Is.EqualTo(original.ParentBounds));
+            Assert.That(scene.MeshLODNodes[0].ParentError, Is.EqualTo(original.ParentError));
         }
 
         [TestCase(0)] // invalid index

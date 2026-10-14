@@ -101,11 +101,8 @@ VividDecodedMeshLODNode DecodeVividMeshLODNode(const VividMeshLODNode packedNode
 {
     VividDecodedMeshLODNode node;
     node.Bounds = packedNode.Bounds;
-    node.ParentError = asfloat((packedNode.PackedParentErrorRadius & 0xFFFFu) << 16);
-    const float parentRadius = asfloat(packedNode.PackedParentErrorRadius & 0xFFFF0000u);
-    node.ParentBounds = node.ParentError < 0.0f
-        ? 0.0f
-        : float4(packedNode.Bounds.xyz, parentRadius);
+    node.ParentError = packedNode.ParentError;
+    node.ParentBounds = packedNode.ParentBounds;
     node.Error = packedNode.Error;
     node.MeshletStartIndex = packedNode.MeshletStartIndex;
     node.MeshletCount = packedNode.PackedMeshletCountLevel & 0xFFFFu;

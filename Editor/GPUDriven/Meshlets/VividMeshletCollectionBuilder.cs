@@ -571,6 +571,12 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 }
             }
 
+            // A truncated graph still needs an unconditional finest cut. Its
+            // retained geometry is the source of truth for this asset's LODs.
+            ref MeshLODNodeLevel finestLevel = ref levels.ElementAtRef(levels.Length - 1);
+            for (int index = 0; index < finestLevel.Nodes.Length; index++)
+                finestLevel.Nodes.ElementAtRef(index).Error = 0.0f;
+
             MeshLODNodeLevel firstLevel = levels[0];
             for (int index = 0; index < firstLevel.Nodes.Length; index++)
             {

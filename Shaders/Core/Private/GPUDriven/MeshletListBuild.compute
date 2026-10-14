@@ -53,9 +53,6 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
     const VividInstanceData instanceData = PullInstanceData(job.InstanceID);
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
 
-    const float3 aabbCenterOS = (instanceData.AABBMin.xyz + instanceData.AABBMax.xyz) * 0.5f;
-    const float3 aabbCenterWS = TransformPosition(instanceData.ObjectToWorldMatrix, aabbCenterOS);
-    const float distanceToViewSq = LengthSq(lodSelectionContext.CameraPosition.xyz - aabbCenterWS);
     const uint baseNodeIndex = instanceData.TopMeshLODStartIndex + job.MeshLODNodeOffset;
 
 #if defined(VIVID_VSM_EARLY_CULL)
@@ -75,16 +72,15 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
         const bool shadowTexelLOD = lodSelectionContext.CameraPosition.w == 0.0
             && cullingContext.CameraIsPerspective == 0
             && (cullingContext.PassMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u;
-        const float texelsPerWorldUnit = length(cullingContext.ViewProjectionMatrix[0].xyz)
-            * lodSelectionContext.ScreenSizePixels.x * 0.5;
+        const float pixelsPerObjectUnit = VividLODOrthographicPixelScale(
+            mul(cullingContext.ViewProjectionMatrix, instanceData.ObjectToWorldMatrix), lodSelectionContext.ScreenSizePixels);
         bool selected = shadowTexelLOD
-            ? ShouldSelectShadowMeshLODNode(meshLODNode, instanceData, texelsPerWorldUnit,
+            ? ShouldSelectShadowMeshLODNode(meshLODNode, instanceData, pixelsPerObjectUnit,
                 _ForcedMeshLODNodeDepth, _MeshLODErrorThreshold)
             : ShouldSelectMeshLODNode(
                 lodSelectionContext,
                 meshLODNode,
                 instanceData,
-                distanceToViewSq,
                 _ForcedMeshLODNodeDepth,
                 _MeshLODErrorThreshold
             );

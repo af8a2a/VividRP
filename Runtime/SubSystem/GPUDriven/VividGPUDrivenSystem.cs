@@ -362,6 +362,7 @@ namespace VividRP.Runtime.GPUDriven
 
         public int ForcedMeshLODNodeDepth { get; set; }
 
+        /// <summary>Maximum projected error in pixels; shadow clipmap mode uses texels.</summary>
         public float MeshLODErrorThreshold { get; set; }
 
         public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletRenderRequestsBuffer;
@@ -1180,7 +1181,7 @@ namespace VividRP.Runtime.GPUDriven
             GPUDrivenSettingsVolume.GPUDrivenSettingsData settings =
                 GPUDrivenSettingsVolume.ResolveSettings(VividVolumeManagerUtility.GetGPUDrivenSettingsVolume());
             gpuDrivenSystem.ForcedMeshLODNodeDepth = settings.forcedMeshLODNodeDepth;
-            gpuDrivenSystem.MeshLODErrorThreshold = settings.meshLODErrorThreshold;
+            gpuDrivenSystem.MeshLODErrorThreshold = settings.meshLODPixelError;
         }
 
         internal static Camera ResolveCullingCameraForDebug(Camera renderingCamera)

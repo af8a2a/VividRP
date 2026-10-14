@@ -26,9 +26,9 @@ if (!$BeeDagDirectory) {
 $beeRoot = (Resolve-Path -LiteralPath $BeeDagDirectory).Path
 $runtimeText = Get-Content -Raw -LiteralPath (Join-Path $beeRoot 'VividRP.Runtime.rsp')
 $editorReference = [regex]::Match($runtimeText,
-    '-r:"(?<path>[^"]*/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule\.dll)"')
+    '-r:"(?<path>[^"]*/Editor/Data)/[^"]*/UnityEngine.CoreModule\.dll"')
 if (!$editorReference.Success) { throw 'Cannot determine this project Editor SDK from its Bee references.' }
-$editorData = $editorReference.Groups['path'].Value -replace '/Managed/UnityEngine/UnityEngine.CoreModule\.dll$', ''
+$editorData = $editorReference.Groups['path'].Value
 $dotnet = Join-Path $editorData 'DotNetSdk/dotnet.exe'
 $sdk = @(Get-ChildItem -LiteralPath (Join-Path $editorData 'DotNetSdk/sdk') -Directory |
     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Roslyn/bincore/csc.dll') } |
@@ -135,7 +135,9 @@ internal static class Program
             foreach (MethodInfo method in type.GetMethods().OrderBy(m => m.Name))
             {
                 if (fixtureName == "VividGPUDrivenBufferSetTests" && !method.Name.StartsWith("MeshletVertex")
+                    && !method.Name.StartsWith("MeshletMetadataPacking")
                     && method.Name != "InstanceDataLayout_HasHlslFieldOffsets"
+                    && method.Name != "MeshLODNodeLayout_HasHlslFieldOffsets"
                     && method.Name != "GPUDataLayouts_HaveExpectedStrides") continue;
                 var cases = method.GetCustomAttributes<TestCaseAttribute>().ToArray();
                 if (method.GetCustomAttribute<TestAttribute>() == null && cases.Length == 0) continue;

@@ -382,7 +382,6 @@ bool ShouldSelectMeshLODNode(
     const VividGPULODSelectionContext lodSelectionContext,
     const VividDecodedMeshLODNode meshLODNode,
     const VividInstanceData instanceData,
-    const float distanceToViewSq,
     const uint forcedMeshLODNodeDepth,
     const float meshLODErrorThreshold
 )
@@ -395,33 +394,31 @@ bool ShouldSelectMeshLODNode(
     }
 
     const float4x4 localToClip = mul(lodSelectionContext.ViewProjectionMatrix, instanceData.ObjectToWorldMatrix);
-    const float error = meshLODNode.Error * VividLODProjectedSphereRadiusSq(
-        meshLODNode.Bounds, localToClip, lodSelectionContext.ScreenSizePixels);
-    const float parentError = meshLODNode.ParentError >= 0.0f
-        ? meshLODNode.ParentError * VividLODProjectedSphereRadiusSq(
-            meshLODNode.ParentBounds, localToClip, lodSelectionContext.ScreenSizePixels)
-        : 3.402823466e+38f;
-    const float threshold = meshLODErrorThreshold * distanceToViewSq * instanceData.LODErrorScale;
-    return parentError > threshold && error <= threshold;
+    const float budget = meshLODErrorThreshold * instanceData.LODErrorScale;
+    // Parent and own tests use bit-identical shared group data and complementary
+    // comparisons. Equality selects the coarse side of the cut exactly once.
+    const bool parentRefines = meshLODNode.ParentError < 0.0f || VividLODProjectedError(
+        meshLODNode.ParentBounds, meshLODNode.ParentError, localToClip, lodSelectionContext.ScreenSizePixels) > budget;
+    const bool isLeaf = meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
+    const bool ownRefines = !isLeaf && VividLODProjectedError(
+        meshLODNode.Bounds, meshLODNode.Error, localToClip, lodSelectionContext.ScreenSizePixels) > budget;
+    return parentRefines && !ownRefines;
 }
 
 bool ShouldSelectShadowMeshLODNode(
     const VividDecodedMeshLODNode node, const VividInstanceData instance,
-    float texelsPerWorldUnit, uint forcedDepth, float errorThreshold)
+    float pixelsPerObjectUnit, uint forcedDepth, float pixelErrorBudget)
 {
     if (forcedDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
     {
         bool leaf = node.LevelIndex == instance.MeshLODLevelCount - 1;
         return node.LevelIndex == forcedDepth || (node.LevelIndex < forcedDepth && leaf);
     }
-    float radius = TransformSphere(node.Bounds, instance.ObjectToWorldMatrix).w;
-    float parentRadius = TransformSphere(node.ParentBounds, instance.ObjectToWorldMatrix).w;
-    float scaleSq = texelsPerWorldUnit * texelsPerWorldUnit;
-    float error = node.Error * radius * radius * scaleSq;
-    float parentError = node.ParentError >= 0
-        ? node.ParentError * parentRadius * parentRadius * scaleSq : 3.402823466e+38f;
-    float threshold = errorThreshold * instance.LODErrorScale;
-    return parentError > threshold && error <= threshold;
+    float budget = pixelErrorBudget * instance.LODErrorScale;
+    bool parentRefines = node.ParentError < 0.0f || node.ParentError * pixelsPerObjectUnit > budget;
+    bool ownRefines = node.LevelIndex != instance.MeshLODLevelCount - 1
+        && node.Error * pixelsPerObjectUnit > budget;
+    return parentRefines && !ownRefines;
 }
 
 #endif // VIVIDRP_GPU_DRIVEN_COMMON_INCLUDED

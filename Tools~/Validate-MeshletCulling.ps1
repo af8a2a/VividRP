@@ -24,7 +24,7 @@ if (!$UnityCgIncludes) {
         Select-Object -First 1
     if (!$bee) { throw 'Supply UnityCgIncludes, or import the containing project first.' }
     $text = Get-Content (Join-Path $bee.FullName 'VividRP.Runtime.rsp') -Raw
-    $editor = [regex]::Match($text, '-r:"(?<root>[^"]*/Editor/Data)/Managed/UnityEngine/UnityEngine.CoreModule.dll"')
+    $editor = [regex]::Match($text, '-r:"(?<root>[^"]*/Editor/Data)/[^"]*/UnityEngine.CoreModule.dll"')
     if (!$editor.Success) { throw 'Cannot locate this project Editor from Bee references.' }
     $UnityCgIncludes = Join-Path $editor.Groups['root'].Value 'Resources/CGIncludes'
 }
@@ -90,7 +90,7 @@ try {
         foreach ($define in $defines) { if ($define) { $arguments += @('-D', $define) } }
         Compile-Shader "LOD-$kernel" ($arguments + $lodSource)
     }
-    Compile-Shader 'lod-probe' ($lodArguments + @('-E', 'Main',
+    Compile-Shader 'lod-probe' ($lodArguments + @('-T', 'cs_6_2', '-enable-16bit-types', '-E', 'Main',
         '-Fo', (Join-Path $outputRoot 'lod-probe.dxil'), (Join-Path $PSScriptRoot 'MeshLODSelectionProbe.hlsl')))
 } finally {
     # Delete only the links created here. Never traverse their source targets.
@@ -125,7 +125,7 @@ foreach ($mode in @('native16', 'fp32')) {
 & $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') generate $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'LOD case generation failed.' }
 & $exe (Join-Path $outputRoot 'lod-probe.dxil') (Join-Path $outputRoot 'lod-cases.bin') `
-    (Join-Path $outputRoot 'lod-results.bin') 208 32
+    (Join-Path $outputRoot 'lod-results.bin') 208 64
 if ($LASTEXITCODE -ne 0) { throw 'D3D12 LOD execution failed.' }
 & $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') check $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'LOD cut regression failed.' }

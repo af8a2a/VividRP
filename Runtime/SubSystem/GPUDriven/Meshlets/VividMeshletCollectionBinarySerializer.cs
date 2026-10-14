@@ -10,13 +10,15 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     internal static class VividMeshletCollectionBinarySerializer
     {
-        public const uint CurrentVersion = 5u;
+        public const uint CurrentVersion = 6u;
 
         private const uint Magic = 0x564D4342u;
         private const uint LegacyGZipVersion = 1u;
         private const uint LegacyLZ4Version = 2u;
         private const uint PackedVertexLegacyMetadataVersion = 3u;
         private const uint UnquantizedVertexVersion = 4u;
+
+        private const uint RecenteredParentVersion = 5u;
 
         internal const uint LZ4CompressionCodec = 1u;
 
@@ -98,11 +100,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     LegacyLZ4Version => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
                     PackedVertexLegacyMetadataVersion => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
                     UnquantizedVertexVersion => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
+                    RecenteredParentVersion => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
                     CurrentVersion => ReadLZ4Payload(serializedData, inputStream, headerReader, out payloadLength),
                     _ => throw new InvalidDataException(
                         $"Unsupported meshlet blob version {version}. Expected versions " +
                         $"{LegacyGZipVersion}, {LegacyLZ4Version}, " +
-                        $"{PackedVertexLegacyMetadataVersion}, {UnquantizedVertexVersion}, or {CurrentVersion}."
+                        $"{PackedVertexLegacyMetadataVersion}, {UnquantizedVertexVersion}, {RecenteredParentVersion}, or {CurrentVersion}."
                     ),
                 };
                 bool usesLegacyVertexLayout = version <= LegacyLZ4Version;
@@ -115,7 +118,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 meshLODLevelNodeCounts = ReadIntArray(payloadReader);
                 meshLODNodes = usesLegacyMetadataLayout
                     ? ConvertLegacyMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy64>(payloadReader))
-                    : ReadStructArray<VividMeshLODNode>(payloadReader);
+                    : version <= RecenteredParentVersion
+                        ? ConvertRecenteredMeshLODNodes(ReadStructArray<VividMeshLODNodeLegacy32>(payloadReader), out meshLODLevelNodeCounts)
+                        : ReadStructArray<VividMeshLODNode>(payloadReader);
                 meshlets = usesLegacyMetadataLayout
                     ? ConvertLegacyMeshlets(ReadStructArray<VividMeshletLegacy64>(payloadReader))
                     : ReadStructArray<VividMeshlet>(payloadReader);
@@ -190,7 +195,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 float4 parent = nodes[i].ParentBounds;
                 float parentError = nodes[i].ParentError;
                 nodes[i].Bounds.w += error;
-                nodes[i].Error += error;
+                if (nodes[i].Error > 0f) nodes[i].Error += error;
                 if (parentError >= 0)
                 {
                     parent.w += error;
@@ -198,6 +203,29 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     nodes[i].ParentError = parentError + error;
                 }
             }
+        }
+
+        private static VividMeshLODNode[] ConvertRecenteredMeshLODNodes(
+            VividMeshLODNodeLegacy32[] source, out int[] levelCounts)
+        {
+            // v4/v5 discarded the original parent center and rounded its error.
+            // Neither the shared transition nor group membership can be recovered.
+            // Render the complete finest cut until the source is rebuilt; never
+            // guess parent links or retain the lossy overlapping automatic cut.
+            uint finestLevel = 0;
+            foreach (var node in source) finestLevel = math.max(finestLevel, node.PackedMeshletCountLevel >> 16);
+            int count = 0;
+            foreach (var node in source) if (node.PackedMeshletCountLevel >> 16 == finestLevel) count++;
+            var result = new VividMeshLODNode[count];
+            int index = 0;
+            foreach (var node in source)
+            {
+                if (node.PackedMeshletCountLevel >> 16 != finestLevel) continue;
+                result[index++] = VividMeshletMetadataPacking.PackMeshLODNode(node.Bounds, default,
+                    -1f, 0f, node.MeshletStartIndex, node.PackedMeshletCountLevel & 0xffffu, 0u);
+            }
+            levelCounts = count == 0 ? Array.Empty<int>() : new[] { count };
+            return result;
         }
 
         internal static VividMeshLODNode[] ConvertLegacyMeshLODNodes(
@@ -428,6 +456,16 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         public float4 BoundingSphere;
         public float4 ConeApexCutoff;
         public float4 ConeAxis;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VividMeshLODNodeLegacy32
+    {
+        public float4 Bounds;
+        public float Error;
+        public uint PackedParentErrorRadius;
+        public uint MeshletStartIndex;
+        public uint PackedMeshletCountLevel;
     }
 
     [Serializable]

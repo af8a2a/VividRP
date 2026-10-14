@@ -198,13 +198,8 @@ namespace VividRP.Editor.Tests
             Assert.That(levelCounts, Is.Empty);
             Assert.That(nodes, Has.Length.EqualTo(1));
             Assert.That(nodes[0].Bounds, Is.EqualTo(legacyNode.Bounds));
-            Assert.That(nodes[0].ParentBounds.xyz, Is.EqualTo(legacyNode.Bounds.xyz));
-            Assert.That(
-                nodes[0].ParentBounds.w,
-                Is.GreaterThanOrEqualTo(legacyNode.ParentBounds.w + math.distance(
-                    legacyNode.Bounds.xyz,
-                    legacyNode.ParentBounds.xyz)));
-            Assert.That(nodes[0].ParentError, Is.GreaterThanOrEqualTo(legacyNode.ParentError));
+            Assert.That(nodes[0].ParentBounds, Is.EqualTo(legacyNode.ParentBounds));
+            Assert.That(nodes[0].ParentError, Is.EqualTo(legacyNode.ParentError));
             Assert.That(nodes[0].Error, Is.EqualTo(legacyNode.Error));
             Assert.That(nodes[0].MeshletStartIndex, Is.EqualTo(legacyNode.MeshletStartIndex));
             Assert.That(nodes[0].MeshletCount, Is.EqualTo(legacyNode.MeshletCount));
@@ -288,6 +283,61 @@ namespace VividRP.Editor.Tests
             Assert.That(VividMeshletVertexPacking.UnpackTangent(vertices[0]).w,
                 Is.EqualTo(VividMeshletVertexPacking.UnpackTangent(packedVertex).w));
             CollectionAssert.AreEqual(new byte[] { 0, 1, 2 }, indices);
+        }
+
+        [Test]
+        public void Serialize_SharedGroupTransition_RoundTripsBitExactly()
+        {
+            var bounds = new float4(12345.123f, -2345.678f, 0.0001234f, 31.464842f);
+            const float error = 0.0036991127f;
+            var source = new[] {
+                VividMeshletMetadataPacking.PackMeshLODNode(bounds, default, -1f, error, 0, 1, 0),
+                VividMeshletMetadataPacking.PackMeshLODNode(new float4(2, 3, 4, 5), bounds, error, 0, 1, 1, 1),
+                VividMeshletMetadataPacking.PackMeshLODNode(new float4(-5, -3, 4, 2), bounds, error, 0, 2, 1, 1),
+            };
+            byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(new[] { 1, 2 }, source,
+                Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out var nodes, out _, out _, out _);
+            CollectionAssert.AreEqual(source, nodes);
+            for (int i = 1; i < nodes.Length; i++)
+            {
+                Assert.That(math.asuint(nodes[i].ParentBounds), Is.EqualTo(math.asuint(nodes[0].Bounds)));
+                Assert.That(math.asuint(nodes[i].ParentError), Is.EqualTo(math.asuint(nodes[0].Error)));
+            }
+        }
+
+        [TestCase(4u)]
+        [TestCase(5u)]
+        public void Deserialize_RecenteredParentFormat_UsesCompleteFinestCut(uint version)
+        {
+            using var payload = new MemoryStream();
+            using var w = new BinaryWriter(payload, System.Text.Encoding.UTF8, true);
+            w.Write(3); w.Write(1); w.Write(2); w.Write(4);
+            w.Write(7);
+            for (int i = 0; i < 7; i++)
+            {
+                WriteFloat4(w, new float4(i, 2, 3, 4));
+                w.Write(0.01f); w.Write(0x42003d00u);
+                w.Write((uint)i); w.Write(1u | ((uint)(i == 0 ? 0 : i < 3 ? 1 : 2) << 16));
+            }
+            w.Write(0); w.Write(0); w.Write(0); // meshlets, vertices, indices
+            byte[] bytes = payload.ToArray(), compressed = VividLZ4Codec.Compress(bytes);
+            using var blob = new MemoryStream();
+            using var header = new BinaryWriter(blob, System.Text.Encoding.UTF8, true);
+            header.Write(MeshletBlobMagic); header.Write(version);
+            header.Write(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec);
+            header.Write(bytes.Length); header.Write(compressed.Length); header.Write(compressed);
+            VividMeshletCollectionBinarySerializer.Deserialize(blob.ToArray(), out var counts, out var nodes,
+                out _, out _, out _);
+            CollectionAssert.AreEqual(new[] { 4 }, counts);
+            Assert.That(nodes.Length, Is.EqualTo(4));
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                Assert.That(nodes[i].MeshletStartIndex, Is.EqualTo((uint)i + 3));
+                Assert.That(nodes[i].LevelIndex, Is.Zero);
+                Assert.That(nodes[i].Error, Is.Zero);
+                Assert.That(nodes[i].ParentError, Is.LessThan(0));
+            }
         }
 
         [Test]
@@ -423,7 +473,7 @@ namespace VividRP.Editor.Tests
             Assert.That(error, Is.GreaterThan(0));
             Assert.That(vertices[0].Position, Is.EqualTo(VividMeshletVertexPacking.QuantizePosition(sourcePosition)));
             Assert.That(nodes[0].Bounds.w, Is.GreaterThanOrEqualTo(1f + error));
-            Assert.That(nodes[0].Error, Is.GreaterThanOrEqualTo(error));
+            Assert.That(nodes[0].Error, Is.Zero, "The finest cut must remain selectable at a zero budget.");
             Assert.That(nodes[0].ParentError, Is.LessThan(0));
             Assert.That(meshlets[0].BoundingSphere.w, Is.GreaterThanOrEqualTo(1f + error));
             Assert.That(VividMeshletMetadataPacking.IsConeValid(meshlets[0].PackedCone), Is.False);

@@ -17,7 +17,7 @@ namespace VividRP.Editor
         {
             var fetcher = new PropertyFetcher<GPUDrivenSettingsVolume>(serializedObject);
             m_ForcedMeshLODNodeDepth = Unpack(fetcher.Find(x => x.forcedMeshLODNodeDepth));
-            m_MeshLODErrorThreshold = Unpack(fetcher.Find(x => x.meshLODErrorThreshold));
+            m_MeshLODErrorThreshold = Unpack(fetcher.Find(x => x.meshLODPixelError));
         }
 
         public override bool RequiresConstantRepaint()
@@ -33,7 +33,7 @@ namespace VividRP.Editor
                 EditorGUILayout.HelpBox("Negative forced LOD depth values keep automatic mesh LOD selection.", MessageType.Info);
             }
 
-            PropertyField(m_MeshLODErrorThreshold);
+            PropertyField(m_MeshLODErrorThreshold, new GUIContent("Mesh LOD Pixel Error"));
 
             EditorGUILayout.Space();
             DrawStatsPanel();
@@ -80,7 +80,7 @@ namespace VividRP.Editor
                 DrawStatLine(
                     "Forced Mesh LOD Depth",
                     stats.ForcedMeshLODNodeDepth < 0 ? "Automatic" : stats.ForcedMeshLODNodeDepth.ToString());
-                DrawStatLine("Mesh LOD Error Threshold", stats.MeshLODErrorThreshold.ToString("0.###"));
+                DrawStatLine("Mesh LOD Pixel Error", stats.MeshLODErrorThreshold.ToString("0.###"));
             }
         }
 

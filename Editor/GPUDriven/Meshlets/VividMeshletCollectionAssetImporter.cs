@@ -12,7 +12,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
 {
-    [ScriptedImporter(4, Extension)]
+    [ScriptedImporter(5, Extension)]
     internal sealed class VividMeshletCollectionAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vmeshletcollection";

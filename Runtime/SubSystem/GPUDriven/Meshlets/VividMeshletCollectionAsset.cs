@@ -86,6 +86,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             set => SetMeshData(MeshLODLevelNodeCounts, MeshLODNodes, Meshlets, VertexBuffer, value);
         }
 
+        // Reimport .vmeshletcollection sources (or rebake terrain) to restore automatic LOD.
+        public bool RequiresLODRebuild => m_MeshDataSerializationVersion is 4u or 5u;
+
         public uint ContentVersion => m_ContentVersion;
 
         internal static uint GlobalContentRevision => s_GlobalContentRevision;
@@ -103,6 +106,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_VertexBuffer = vertexBuffer ?? Array.Empty<VividMeshletVertex>();
             m_IndexBuffer = indexBuffer ?? Array.Empty<byte>();
             m_MeshDataLoaded = true;
+            m_MeshDataSerializationVersion = VividMeshletCollectionBinarySerializer.CurrentVersion;
         }
 
         public void MarkChanged()
@@ -118,7 +122,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         void ISerializationCallbackReceiver.OnBeforeSerialize()
         {
-            if (!m_MeshDataLoaded)
+            if (!m_MeshDataLoaded || RequiresLODRebuild)
             {
                 return;
             }
@@ -156,7 +160,11 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     out m_VertexBuffer,
                     out m_IndexBuffer
                 );
-                if (m_MeshDataSerializationVersion < VividMeshletCollectionBinarySerializer.CurrentVersion)
+                if (RequiresLODRebuild)
+                {
+                    MeshLODLevelCount = m_MeshLODLevelNodeCounts.Length;
+                }
+                if (m_MeshDataSerializationVersion < 5u)
                 {
                     Bounds = VividMeshletVertexPacking.ExpandBoundsForQuantization(Bounds);
                 }

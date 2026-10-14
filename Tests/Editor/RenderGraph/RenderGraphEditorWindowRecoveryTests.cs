@@ -11,6 +11,75 @@ namespace VividRP.Editor.Tests
     internal sealed class RenderGraphEditorWindowRecoveryTests
     {
         [Test]
+        public void ParentNavigation_UsesMostRecentAncestor_AndPreservesItsHistoryIndex()
+        {
+            var root = new NavigationGraph("Root");
+            var parent = new NavigationGraph("Parent", root);
+            var state = new NavigationState(new NavigationGraph("Child", parent), root, parent);
+
+            Assert.That(RenderGraphParentNavigation.TryGetParent(state, out var target, out var index, out var title), Is.True);
+            Assert.That(target, Is.SameAs(parent));
+            Assert.That(index, Is.EqualTo(1));
+            Assert.That(title, Is.EqualTo("Parent"));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ParentNavigation_UsesLocalParent_WhenHistoryIsMissingOrInvalid(bool invalidHistory)
+        {
+            var parent = new NavigationGraph("Parent");
+            var state = new NavigationState(new NavigationGraph("Child", parent),
+                invalidHistory ? new NavigationGraph[] { null } : new NavigationGraph[0]);
+
+            Assert.That(RenderGraphParentNavigation.TryGetParent(state, out var target, out var index, out _), Is.True);
+            Assert.That(target, Is.SameAs(parent));
+            Assert.That(index, Is.EqualTo(-1));
+        }
+
+        [Test]
+        public void ParentNavigation_UsesIncomingHistory_ForExternalSubgraphWithoutLocalParent()
+        {
+            var parent = new NavigationGraph("Caller");
+            var state = new NavigationState(new NavigationGraph("External"), parent);
+
+            Assert.That(RenderGraphParentNavigation.TryGetParent(state, out var target, out var index, out _), Is.True);
+            Assert.That(target, Is.SameAs(parent));
+            Assert.That(index, Is.Zero);
+        }
+
+        [Test]
+        public void ParentNavigation_IsUnavailableAtRoot()
+        {
+            Assert.That(RenderGraphParentNavigation.TryGetParent(new NavigationState(new NavigationGraph("Root")),
+                out _, out _, out _), Is.False);
+            Assert.That(RenderGraphParentNavigation.TryGetParent(null, out _, out _, out _), Is.False);
+        }
+
+        private sealed class NavigationGraph
+        {
+            public string Name { get; }
+            public NavigationGraph ParentGraph { get; }
+            internal NavigationGraph(string name, NavigationGraph parent = null)
+            {
+                Name = name;
+                ParentGraph = parent;
+            }
+        }
+
+        private sealed class NavigationState
+        {
+            private readonly List<NavigationGraph> m_SubgraphStack;
+            public NavigationGraph GraphModel { get; }
+            internal NavigationState(NavigationGraph current, params NavigationGraph[] history)
+            {
+                GraphModel = current;
+                m_SubgraphStack = new List<NavigationGraph>(history);
+            }
+            public NavigationGraph ResolveSubGraph(int index) => m_SubgraphStack[index];
+            public string GetSubgraphLabel(int index) => m_SubgraphStack[index]?.Name;
+        }
+
+        [Test]
         public void CanRecoverInvalidSubgraphStack_ReturnsTrue_WhenCurrentGraphPathIsRenderGraphAsset()
         {
             var toolState = new TestToolState("Assets/TestGraph.vrdg", string.Empty, string.Empty);

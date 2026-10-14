@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
 using UnityEditor.Overlays;
+using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -51,6 +52,8 @@ namespace VividRP.Editor.RenderGraph
                 var graphView = RenderGraphEditorWindowReflectionUtility.GetGraphView(window);
                 if (graphView == null)
                     continue;
+
+                RenderGraphParentNavigation.EnsureToolbar(window);
 
                 if (!s_registeredGraphViews.Add(graphView))
                     continue;
@@ -275,6 +278,103 @@ namespace VividRP.Editor.RenderGraph
             return float.IsNaN(resolvedWidth) || resolvedWidth <= 0f
                 ? defaultWidth
                 : Mathf.Max(defaultWidth, resolvedWidth);
+        }
+    }
+
+    internal static class RenderGraphParentNavigation
+    {
+        private const string ToolbarName = "vividrp-parent-graph-navigation";
+        private static readonly BindingFlags Bindings = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static readonly Type LoadCommandType = typeof(Graph).Assembly.GetType("Unity.GraphToolkit.Editor.LoadGraphCommand");
+
+        internal static void EnsureToolbar(EditorWindow window)
+        {
+            if (window.rootVisualElement.Q(ToolbarName) != null)
+                return;
+
+            var toolbar = new Toolbar { name = ToolbarName };
+            var button = new ToolbarButton(() => NavigateToParent(window)) { text = "\u2190 Parent Graph" };
+            toolbar.Add(button);
+            window.rootVisualElement.Insert(0, toolbar);
+            void Refresh()
+            {
+                var isRenderGraph = RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _);
+                toolbar.style.display = isRenderGraph ? DisplayStyle.Flex : DisplayStyle.None;
+                if (!isRenderGraph)
+                    return;
+                var available = TryGetTarget(window, out _, out _, out _, out var title);
+                button.SetEnabled(available);
+                button.tooltip = available ? $"Return to {title}" : "No parent graph";
+            }
+            Refresh();
+            toolbar.schedule.Execute(Refresh).Every(250);
+        }
+
+        private static bool TryGetTarget(EditorWindow window, out object tool, out object parent, out int historyIndex, out string title)
+        {
+            tool = window.GetType().GetProperty("GraphTool", Bindings)?.GetValue(window);
+            var state = tool?.GetType().GetProperty("ToolState", Bindings)?.GetValue(tool);
+            return TryGetParent(state, out parent, out historyIndex, out title);
+        }
+
+        internal static bool TryGetParent(object state, out object parent, out int historyIndex, out string title)
+        {
+            parent = null;
+            historyIndex = -1;
+            title = null;
+            if (state == null)
+                return false;
+
+            var type = state.GetType();
+            var model = type.GetProperty("GraphModel", Bindings)?.GetValue(state);
+            // Read the backing list: the toolkit's SubgraphStack getter resolves every entry,
+            // and can throw for a stale reference left by an Editor layout restore.
+            var stack = type.GetField("m_SubgraphStack", Bindings)?.GetValue(state) as System.Collections.ICollection;
+            if (stack != null && stack.Count > 0)
+            {
+                historyIndex = stack.Count - 1;
+                parent = type.GetMethod("ResolveSubGraph", Bindings)?.Invoke(state, new object[] { historyIndex });
+                if (parent != null)
+                    title = type.GetMethod("GetSubgraphLabel", Bindings)?.Invoke(state, new object[] { historyIndex }) as string;
+            }
+
+            if (parent == null)
+            {
+                historyIndex = -1;
+                parent = model?.GetType().GetProperty("ParentGraph", Bindings)?.GetValue(model);
+            }
+
+            if (parent == null || ReferenceEquals(parent, model))
+                return false;
+
+            if (string.IsNullOrEmpty(title))
+                title = parent.GetType().GetProperty("Name", Bindings)?.GetValue(parent) as string ?? "Parent Graph";
+            return true;
+        }
+
+        private static void NavigateToParent(EditorWindow window)
+        {
+            if (!TryGetTarget(window, out var tool, out var parent, out var historyIndex, out var title))
+                return;
+
+            // Match GraphBreadcrumbs.OnBreadcrumbClick: KeepHistory + truncate at the
+            // selected ancestor. Without history, load the local parent with a fresh stack.
+            var strategyType = LoadCommandType?.GetNestedType("LoadStrategies", BindingFlags.Public | BindingFlags.NonPublic);
+            if (strategyType == null)
+                throw new NotSupportedException("Graph Toolkit parent navigation API is unavailable.");
+            var strategy = Enum.Parse(strategyType, historyIndex >= 0 ? "KeepHistory" : "Replace");
+            var command = Activator.CreateInstance(LoadCommandType, Bindings, null,
+                new[] { parent, strategy, (object)historyIndex, title }, null);
+            foreach (var method in tool.GetType().GetMethods(Bindings))
+            {
+                var parameters = method.GetParameters();
+                if (method.Name != "Dispatch" || parameters.Length != 2 || !parameters[0].ParameterType.IsInstanceOfType(command))
+                    continue;
+
+                method.Invoke(tool, new[] { command, Activator.CreateInstance(parameters[1].ParameterType) });
+                return;
+            }
+            throw new NotSupportedException("Graph Toolkit command dispatch API is unavailable.");
         }
     }
 

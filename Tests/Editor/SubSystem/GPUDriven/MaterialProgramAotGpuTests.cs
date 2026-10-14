@@ -391,7 +391,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer terrainLayerBuffer = TrackBuffer(
                     CreateStructuredBuffer(new VividTerrainLayerGPUData[1]));
                 GraphicsBuffer meshLodNodeBuffer = TrackBuffer(
-                    CreateStructuredBuffer(new VividMeshLODNode[1]));
+                    CreateStructuredBuffer(new VividMeshLODNodePacked[1]));
                 GraphicsBuffer meshletBuffer = TrackBuffer(
                     CreateStructuredBuffer(new[] { meshlet }));
                 GraphicsBuffer vertexBuffer = TrackBuffer(
@@ -1088,7 +1088,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer terrainLayerBuffer = TrackBuffer(
                     CreateStructuredBuffer(new VividTerrainLayerGPUData[1]));
                 GraphicsBuffer meshLodNodeBuffer = TrackBuffer(
-                    CreateStructuredBuffer(new VividMeshLODNode[1]));
+                    CreateStructuredBuffer(new VividMeshLODNodePacked[1]));
                 GraphicsBuffer meshletBuffer = TrackBuffer(
                     CreateStructuredBuffer(new[] { meshlet }));
                 GraphicsBuffer vertexBuffer = TrackBuffer(

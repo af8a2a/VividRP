@@ -22,6 +22,8 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_TerrainMaterialDataBuffer;
         private GraphicsBuffer m_TerrainLayerDataBuffer;
         private GraphicsBuffer m_MeshLODNodesBuffer;
+        private GraphicsBuffer m_MeshLODGroupsBuffer;
+        private readonly VividMeshLODGroupTable m_MeshLODTable = new();
         private GraphicsBuffer m_MeshletsBuffer;
         private GraphicsBuffer m_SharedVertexBuffer;
         private GraphicsBuffer m_SharedIndexBuffer;
@@ -53,6 +55,10 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer TerrainLayerDataBuffer => m_TerrainLayerDataBuffer;
 
         public GraphicsBuffer MeshLODNodesBuffer => m_MeshLODNodesBuffer;
+
+        public GraphicsBuffer MeshLODGroupsBuffer => m_MeshLODGroupsBuffer;
+
+        public int MeshLODGroupCount => m_MeshLODTable.Groups.Count;
 
         public GraphicsBuffer MeshletsBuffer => m_MeshletsBuffer;
 
@@ -190,10 +196,19 @@ namespace VividRP.Runtime.GPUDriven
 
             if (shouldUploadStaticData)
             {
+                // Intern after asset nodes have been rebased into the scene.
+                // Both sides of each transition resolve to the same global ID.
+                m_MeshLODTable.Build(sceneData.MeshLODNodes);
+                UploadStructuredBuffer(
+                    ref m_MeshLODGroupsBuffer,
+                    m_MeshLODTable.Groups,
+                    UnsafeUtility.SizeOf<VividMeshLODGroup>(),
+                    "VividGPUDriven_MeshLODGroups"
+                );
                 UploadStructuredBuffer(
                     ref m_MeshLODNodesBuffer,
-                    sceneData.MutableMeshLODNodes,
-                    UnsafeUtility.SizeOf<VividMeshLODNode>(),
+                    m_MeshLODTable.Nodes,
+                    UnsafeUtility.SizeOf<VividMeshLODNodePacked>(),
                     "VividGPUDriven_MeshLODNodes"
                 );
                 UploadStructuredBuffer(
@@ -242,6 +257,7 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._TerrainMaterialData, TerrainMaterialDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._TerrainLayerData, TerrainLayerDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshLODNodes, MeshLODNodesBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshLODGroups, MeshLODGroupsBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._Meshlets, MeshletsBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SharedVertexBuffer, SharedVertexBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SharedIndexBuffer, SharedIndexBuffer);
@@ -292,6 +308,8 @@ namespace VividRP.Runtime.GPUDriven
             m_TerrainMaterialDataBuffer?.Dispose();
             m_TerrainLayerDataBuffer?.Dispose();
             m_MeshLODNodesBuffer?.Dispose();
+            m_MeshLODGroupsBuffer?.Dispose();
+            m_MeshLODTable.Clear();
             m_MeshletsBuffer?.Dispose();
             m_SharedVertexBuffer?.Dispose();
             m_SharedIndexBuffer?.Dispose();
@@ -307,6 +325,7 @@ namespace VividRP.Runtime.GPUDriven
             m_TerrainMaterialDataBuffer = null;
             m_TerrainLayerDataBuffer = null;
             m_MeshLODNodesBuffer = null;
+            m_MeshLODGroupsBuffer = null;
             m_MeshletsBuffer = null;
             m_SharedVertexBuffer = null;
             m_SharedIndexBuffer = null;
@@ -399,7 +418,8 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool RequiresStaticBufferUpload(VividGPUDrivenSceneData sceneData)
         {
-            return !IsStructuredBufferCompatible(m_MeshLODNodesBuffer, sceneData.MeshLODNodeCount, UnsafeUtility.SizeOf<VividMeshLODNode>()) ||
+            return !IsStructuredBufferCompatible(m_MeshLODNodesBuffer, sceneData.MeshLODNodeCount, UnsafeUtility.SizeOf<VividMeshLODNodePacked>()) ||
+                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, MeshLODGroupCount, UnsafeUtility.SizeOf<VividMeshLODGroup>()) ||
                    !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
                    !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||
                    !IsRawBufferCompatible(m_SharedIndexBuffer, sceneData.IndexCount);

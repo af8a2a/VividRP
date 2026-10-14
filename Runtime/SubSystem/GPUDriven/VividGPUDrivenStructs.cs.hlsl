@@ -130,6 +130,11 @@
 #define MESHLET_CONE_WEIGHT (0.25)
 
 //
+// VividRP.Runtime.GPUDriven.VividMeshLODNodePacked:  static fields
+//
+#define INVALID_GROUP_INDEX (4294967295)
+
+//
 // VividRP.Runtime.GPUDriven.VividSurfaceBindingData:  static fields
 //
 #define INVALID_RESOURCE (4294967295)
@@ -325,14 +330,20 @@ struct VividMeshletVertex
     uint TangentFrame;
 };
 
-// Generated from VividRP.Runtime.GPUDriven.VividMeshLODNode
+// Generated from VividRP.Runtime.GPUDriven.VividMeshLODGroup
 // PackingRules = Exact
-struct VividMeshLODNode
+struct VividMeshLODGroup
 {
     float4 Bounds;
-    float4 ParentBounds;
     float Error;
-    float ParentError;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividMeshLODNodePacked
+// PackingRules = Exact
+struct VividMeshLODNodePacked
+{
+    uint GroupIndex;
+    uint ParentGroupIndex;
     uint MeshletStartIndex;
     uint PackedMeshletCountLevel;
 };

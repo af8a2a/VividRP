@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Mathematics;
 using VividRP.Runtime.GPUDriven;
@@ -286,6 +287,58 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Deserialize_Version6_PreservesExactTransitionsWithoutRebuild()
+        {
+            var group = new float4(10.1234f, -20.2345f, 30.3456f, 40.4567f);
+            const float error = 0.0036991127f;
+            var source = new[] {
+                VividMeshletMetadataPacking.PackMeshLODNode(group, default, -1f, error, 0, 1, 0),
+                VividMeshletMetadataPacking.PackMeshLODNode(new float4(1, 2, 3, 4), group, error, 0, 1, 1, 1),
+            };
+            using var payload = new MemoryStream();
+            using var writer = new BinaryWriter(payload, System.Text.Encoding.UTF8, true);
+            writer.Write(2); writer.Write(1); writer.Write(1);
+            writer.Write(source.Length);
+            writer.Write(MemoryMarshal.AsBytes(source.AsSpan()));
+            writer.Write(0); writer.Write(0); writer.Write(0);
+            byte[] blob = CreateVersionedLZ4Blob(6u, payload.ToArray());
+            VividMeshletCollectionBinarySerializer.Deserialize(blob, out var levels, out var nodes, out _, out _, out _);
+            CollectionAssert.AreEqual(new[] { 1, 1 }, levels);
+            CollectionAssert.AreEqual(source, nodes);
+            byte[] converted = VividMeshletCollectionBinarySerializer.Serialize(levels, nodes,
+                Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
+            VividMeshletCollectionBinarySerializer.Deserialize(converted, out _, out var reloaded, out _, out _, out _);
+            CollectionAssert.AreEqual(source, reloaded);
+        }
+
+        [TestCase(1u, 0xffffffffu)] // missing own group
+        [TestCase(0u, 1u)] // missing parent group
+        [TestCase(0xffffffffu, 0xffffffffu)] // own ID cannot be the root sentinel
+        public void Deserialize_SharedGroups_RejectsInvalidIndices(uint ownIndex, uint parentIndex)
+        {
+            using var payload = new MemoryStream();
+            using var writer = new BinaryWriter(payload, System.Text.Encoding.UTF8, true);
+            writer.Write(1); writer.Write(1); // levels
+            writer.Write(1); WriteFloat4(writer, new float4(1, 2, 3, 4)); writer.Write(0f);
+            writer.Write(1); writer.Write(ownIndex); writer.Write(parentIndex); writer.Write(0u); writer.Write(1u);
+            writer.Write(0); writer.Write(0); writer.Write(0);
+            byte[] blob = CreateVersionedLZ4Blob(7u, payload.ToArray());
+            Assert.Throws<InvalidDataException>(() => VividMeshletCollectionBinarySerializer.Deserialize(
+                blob, out _, out _, out _, out _, out _));
+        }
+
+        private static byte[] CreateVersionedLZ4Blob(uint version, byte[] payload)
+        {
+            byte[] compressed = VividLZ4Codec.Compress(payload);
+            using var blob = new MemoryStream();
+            using var writer = new BinaryWriter(blob, System.Text.Encoding.UTF8, true);
+            writer.Write(MeshletBlobMagic); writer.Write(version);
+            writer.Write(VividMeshletCollectionBinarySerializer.LZ4CompressionCodec);
+            writer.Write(payload.Length); writer.Write(compressed.Length); writer.Write(compressed);
+            return blob.ToArray();
+        }
+
+        [Test]
         public void Serialize_SharedGroupTransition_RoundTripsBitExactly()
         {
             var bounds = new float4(12345.123f, -2345.678f, 0.0001234f, 31.464842f);
@@ -297,6 +350,27 @@ namespace VividRP.Editor.Tests
             };
             byte[] blob = VividMeshletCollectionBinarySerializer.Serialize(new[] { 1, 2 }, source,
                 Array.Empty<VividMeshlet>(), Array.Empty<VividMeshletVertex>(), Array.Empty<byte>());
+            // Inspect the v7 payload itself: both children reference the parent's
+            // one shared record, rather than merely decoding to equal copies.
+            byte[] payload = VividLZ4Codec.Decompress(blob.AsSpan(20).ToArray(), BitConverter.ToInt32(blob, 12));
+            using (var reader = new BinaryReader(new MemoryStream(payload)))
+            {
+                int levelCount = reader.ReadInt32();
+                reader.BaseStream.Position += levelCount * 4;
+                int groupCount = reader.ReadInt32();
+                Assert.That(groupCount, Is.EqualTo(3));
+                reader.BaseStream.Position += groupCount * 20;
+                Assert.That(reader.ReadInt32(), Is.EqualTo(3));
+                uint parentGroupIndex = reader.ReadUInt32();
+                Assert.That(reader.ReadUInt32(), Is.EqualTo(uint.MaxValue));
+                reader.ReadUInt32(); reader.ReadUInt32();
+                for (int i = 0; i < 2; i++)
+                {
+                    reader.ReadUInt32();
+                    Assert.That(reader.ReadUInt32(), Is.EqualTo(parentGroupIndex));
+                    reader.ReadUInt32(); reader.ReadUInt32();
+                }
+            }
             VividMeshletCollectionBinarySerializer.Deserialize(blob, out _, out var nodes, out _, out _, out _);
             CollectionAssert.AreEqual(source, nodes);
             for (int i = 1; i < nodes.Length; i++)

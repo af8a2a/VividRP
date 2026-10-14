@@ -44,21 +44,41 @@ write jobs before unpinning managed output buffers.
 Each simplification group produces one canonical sphere and one accumulated
 linear object-space error. All resulting coarse clusters copy these exact values
 into their own Bounds/Error; all source children copy the same values into their
-ParentBounds/ParentError. The resident node preserves both pairs as FP32, without
-recentering or independently rounding the parent. This follows the group-data
+ParentBounds/ParentError in the CPU authoring view. The GPU stores each distinct
+pair once as FP32, without recentering or independently rounding the parent.
+This follows the group-data
 contract in UE 5.7.4 `NaniteBuilder/Private/ClusterDAG.cpp` (`FClusterDAG::ReduceGroup`), while
-keeping meshoptimizer as the builder. It needs no extra buffer or lookup.
+keeping meshoptimizer as the builder.
 
-The sequential `VividMeshLODNode` is now 48 bytes:
+The sequential GPU `VividMeshLODNodePacked` is **16 bytes**:
 
 | Offset | Field |
 | --- | --- |
-| 0 | Bounds (float4) |
-| 16 | ParentBounds (float4) |
-| 32 | Error (float) |
-| 36 | ParentError (float; negative for roots) |
-| 40 | MeshletStartIndex (uint) |
-| 44 | PackedMeshletCountLevel (uint) |
+| 0 | GroupIndex (uint) |
+| 4 | ParentGroupIndex (uint; 0xffffffff for roots) |
+| 8 | MeshletStartIndex (uint) |
+| 12 | PackedMeshletCountLevel (uint) |
+
+`_MeshLODGroups` contains sequential **20-byte** `VividMeshLODGroup` records:
+Bounds (float4) at offset 0 and Error (float) at offset 16. A child's parent index
+and the corresponding coarse nodes' own indices refer to the same record.
+`VividMeshLODGroupTable` deduplicates by the exact bits of all five floats, so
+one-ULP differences and signed zeros are not silently merged. Scene uploads build
+the table after rebasing all assets' meshlet offsets; asset-local group indices
+never leak into the scene. Identical object-space data can also be shared across
+assets without sharing their geometry offsets or instance transforms.
+
+The existing 48-byte `VividMeshLODNode` remains the CPU authoring/API view for
+meshoptimizer generation, scene assembly and CPU VSM hierarchy construction.
+It is expanded when loading a blob and is no longer uploaded to the GPU.
+Serialization and GPU uploads use the same table builder. The buffer set owns
+and reuses its lists/dictionary, binds both buffers to the production paths,
+and releases both GPU buffers on disposal.
+
+LOD metadata uses `16 * nodeCount + 20 * groupCount` bytes instead of
+`48 * nodeCount`; savings depend on the actual sharing ratio. The extra group
+lookups preserve the existing FP32 cut calculation. This is a GPU metadata
+storage change, not a CPU memory or frame-time improvement claim.
 
 The shader selects a node when its parent needs refinement and the node itself
 does not. Both sides evaluate identical group data with complementary `>` / `<=`
@@ -94,10 +114,16 @@ ranges containing the finest retained level. Forced-depth behavior is retained.
 
 ## Existing assets
 
-The blob format is now **v6** and `.vmeshletcollection` importer version is **5**.
+The blob format is now **v7** and `.vmeshletcollection` importer version is **6**.
 Unity rebuilds imported collections from their existing source settings. Vertices
-remain 20 bytes and meshlets remain 32 bytes. Only LOD metadata grows from 32 to
-48 bytes; this is not a whole-scene VRAM or performance claim.
+remain 20 bytes and meshlets remain 32 bytes. The LZ4 payload stores level counts,
+the shared group array, indexed nodes, meshlets, vertices and indices in that
+order. Both own and parent group indices are checked before expanding nodes.
+
+v6 already preserves exact group data and loads without rebaking or falling back
+to the finest cut. Its nodes are interned on GPU upload just like v7; saving a
+loaded collection serializes the shared format. Existing ordinary v6 `.asset`
+collections therefore also receive the GPU storage reduction without a rebake.
 
 v1-v3 retain full parent metadata and convert losslessly to the new node layout.
 v4/v5 discarded the original parent centers and rounded parent errors, so an
@@ -111,8 +137,10 @@ FBX/glTF files are unchanged.
 ## LOD validation (2026-10-14)
 
 - Runtime, Editor and Editor.Tests compile against Unity 7000.0.0a9 references.
-  All 27 pure managed checks pass, covering v1-v6 decoding, exact shared-data round trips,
-  v4/v5 finest-cut migration, all node offsets/stride, and vertex quantization.
+  All 34 pure managed checks pass, covering v1-v7 decoding, exact shared-data round
+  trips, invalid group indices, table rebuild/empty state, distinct float bits,
+  allocation-free warmed table builds, v4/v5 finest-cut migration, all node/group
+  offsets and strides, and vertex quantization.
 - DXC compiles all 6 MeshletListBuild, 8 GPUInstanceCulling and 12
   GPUMeshletCulling kernels. The production selection and VSM hierarchy predicate
   run on D3D12 (RTX 5070 Ti) in `Tools~/MeshLODSelectionProbe.hlsl`.
@@ -120,19 +148,26 @@ FBX/glTF files are unchanged.
   cuts, including exact equality +/- one float ULP, zero error/budget, viewport,
   FOV, instance bias, affine transforms and the captured Camera_1 roof bounds.
   An FP64 oracle checks projected error. VSM branches never reject a selected
-  contained node or the truncated finest level. Existing 24,640 meshlet and
+  contained node or the truncated finest level. The probe loads the production
+  16-byte nodes and 20-byte groups from actual D3D12 structured buffers, with
+  different offsets per case. All 1,052,672 result bytes match the previous
+  expanded-node implementation exactly. Existing 24,640 meshlet and
   41,024 instance-frustum cases also pass in native16 and FP32 modes.
-- The running Sponza scene has 217 instances and 2,888 distinct LOD nodes; all
-  3,620 instance-local parent relationships match their group data bit-for-bit
-  and satisfy sphere containment. All 83 loaded meshlet assets were rebuilt.
-  GPU readback matches all 2,888 CPU nodes at a 48-byte stride; visible meshlet
-  counters and indirect draw arguments are nonzero. Auto LOD uses a 1-pixel
-  budget. Production compute shaders have no errors
-  apart from the scoped D3D11 8-UAV diagnostic.
-- The original roof camera was captured at `(6.181255, 18.638472, -10.503865)`,
+- The running Sponza scene has 217 instances, 2,888 distinct LOD nodes and 2,014
+  shared groups. GPU readback matches all CPU geometry offsets and all own/parent
+  float bits (2,468 non-root nodes), with no invalid indices or duplicate groups.
+  Both metadata buffers total **86,488 bytes**, down from **138,624 bytes**:
+  **52,136 bytes / 37.61% saved**. This excludes vertices, meshlets and other scene
+  resources. Sixteen full static uploads after warm-up allocate zero managed
+  bytes on the calling thread and reuse both GPU buffers. Readback reports 994
+  visible meshlets and 16 nonzero indirect argument records at the current view.
+  Auto LOD uses a 1-pixel budget. Live Editor compilation and console errors are
+  zero; production compute shaders have no errors (existing warnings remain).
+- Before extracting the shared table, the original roof camera was captured at
+  `(6.181255, 18.638472, -10.503865)`,
   Euler `(43.272297, 304.76556, 1.6177362)`, with GPUDriven/occlusion enabled and
   automatic LOD. The previously missing outer roof strip is present in the
-  current scene output. The user's camera pose was then restored. Capture:
+  captured scene output. The user's camera pose was then restored. Capture:
   `Temp~/lod-pixel-budget/roof.png`. This is a geometry check, not material or
   frame-time validation.
 
@@ -170,7 +205,7 @@ clusters and LODs. Renderer and terrain bounds also include quantized geometry.
 The binary payload retains LZ4 compression; the reference's per-cluster arithmetic
 bitstream is not needed for this fixed-width resident format.
 
-Vertex quantization was introduced in v5 and is retained in v6. Readers convert
+Vertex quantization was introduced in v5 and is retained in v7. Readers convert
 v1-v4 vertices on load, conservatively
 expand legacy bounds/errors and disable stale cones when positions moved.
 Reimporting models or rebaking terrain produces bounds and cones directly from

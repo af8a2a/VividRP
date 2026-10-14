@@ -19,6 +19,7 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _SurfaceBindingData = Shader.PropertyToID(nameof(_SurfaceBindingData));
         public static readonly int _TerrainMaterialData = Shader.PropertyToID(nameof(_TerrainMaterialData));
         public static readonly int _TerrainLayerData = Shader.PropertyToID(nameof(_TerrainLayerData));
+        public static readonly int _MeshLODGroups = Shader.PropertyToID(nameof(_MeshLODGroups));
         public static readonly int _MeshLODNodes = Shader.PropertyToID(nameof(_MeshLODNodes));
         public static readonly int _Meshlets = Shader.PropertyToID(nameof(_Meshlets));
         public static readonly int _SharedVertexBuffer = Shader.PropertyToID(nameof(_SharedVertexBuffer));

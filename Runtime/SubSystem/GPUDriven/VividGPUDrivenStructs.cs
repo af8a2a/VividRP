@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using Unity.Mathematics;
 using UnityEngine;
@@ -401,7 +403,8 @@ namespace VividRP.Runtime.GPUDriven
         }
     }
 
-    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    // Expanded CPU/authoring view. GPU uploads use VividMeshLODNodePacked and a
+    // shared VividMeshLODGroup table; keep this API for builders and CPU VSM bounds.
     [StructLayout(LayoutKind.Sequential)]
     [Serializable]
     public struct VividMeshLODNode
@@ -432,6 +435,92 @@ namespace VividRP.Runtime.GPUDriven
                 PackedMeshletCountLevel,
                 value,
                 nameof(LevelIndex));
+        }
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMeshLODGroup : IEquatable<VividMeshLODGroup>
+    {
+        public float4 Bounds;
+        public float Error;
+
+        // Equality must preserve the exact cut inputs, including signed zero/NaN
+        // payloads. Never merge nearby spheres/errors using an epsilon.
+        public readonly bool Equals(VividMeshLODGroup other) =>
+            math.all(math.asuint(Bounds) == math.asuint(other.Bounds)) && math.asuint(Error) == math.asuint(other.Error);
+        public override readonly bool Equals(object obj) => obj is VividMeshLODGroup other && Equals(other);
+        public override readonly int GetHashCode() => unchecked((int)(math.hash(math.asuint(Bounds)) * 397u ^ math.asuint(Error)));
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividMeshLODNodePacked
+    {
+        public const uint InvalidGroupIndex = uint.MaxValue;
+        public uint GroupIndex;
+        public uint ParentGroupIndex;
+        public uint MeshletStartIndex;
+        public uint PackedMeshletCountLevel;
+    }
+
+    // Used at serialization and static-scene upload boundaries. Reuse the owned
+    // table when uploading; warmed-up rebuilds do not allocate managed memory.
+    internal sealed class VividMeshLODGroupTable
+    {
+        internal readonly List<VividMeshLODGroup> Groups = new();
+        internal readonly List<VividMeshLODNodePacked> Nodes = new();
+        private readonly Dictionary<VividMeshLODGroup, uint> m_GroupIndices = new();
+
+        internal void Clear()
+        {
+            Groups.Clear();
+            Nodes.Clear();
+            m_GroupIndices.Clear();
+        }
+
+        internal void Build(IReadOnlyList<VividMeshLODNode> source)
+        {
+            Clear();
+            if (Nodes.Capacity < source.Count) Nodes.Capacity = source.Count;
+            for (int i = 0; i < source.Count; i++)
+            {
+                var node = source[i];
+                Nodes.Add(new VividMeshLODNodePacked
+                {
+                    GroupIndex = GetGroupIndex(node.Bounds, node.Error),
+                    ParentGroupIndex = node.ParentError < 0f ? VividMeshLODNodePacked.InvalidGroupIndex
+                        : GetGroupIndex(node.ParentBounds, node.ParentError),
+                    MeshletStartIndex = node.MeshletStartIndex,
+                    PackedMeshletCountLevel = node.PackedMeshletCountLevel,
+                });
+            }
+        }
+
+        private uint GetGroupIndex(float4 bounds, float error)
+        {
+            var group = new VividMeshLODGroup { Bounds = bounds, Error = error };
+            if (m_GroupIndices.TryGetValue(group, out uint index)) return index;
+            index = (uint)Groups.Count;
+            m_GroupIndices.Add(group, index);
+            Groups.Add(group);
+            return index;
+        }
+
+        internal static VividMeshLODNode Expand(VividMeshLODNodePacked node, IReadOnlyList<VividMeshLODGroup> groups)
+        {
+            bool hasParent = node.ParentGroupIndex != VividMeshLODNodePacked.InvalidGroupIndex;
+            if (node.GroupIndex >= (uint)groups.Count || (hasParent && node.ParentGroupIndex >= (uint)groups.Count))
+                throw new InvalidDataException("Mesh LOD node references a group outside its shared table.");
+            VividMeshLODGroup own = groups[(int)node.GroupIndex];
+            VividMeshLODGroup parent = hasParent ? groups[(int)node.ParentGroupIndex] : default;
+            return new VividMeshLODNode
+            {
+                Bounds = own.Bounds, Error = own.Error,
+                ParentBounds = parent.Bounds, ParentError = hasParent ? parent.Error : -1f,
+                MeshletStartIndex = node.MeshletStartIndex,
+                PackedMeshletCountLevel = node.PackedMeshletCountLevel,
+            };
         }
     }
 

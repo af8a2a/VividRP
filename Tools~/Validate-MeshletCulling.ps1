@@ -125,7 +125,8 @@ foreach ($mode in @('native16', 'fp32')) {
 & $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') generate $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'LOD case generation failed.' }
 & $exe (Join-Path $outputRoot 'lod-probe.dxil') (Join-Path $outputRoot 'lod-cases.bin') `
-    (Join-Path $outputRoot 'lod-results.bin') 208 64
+    (Join-Path $outputRoot 'lod-results.bin') 208 64 `
+    (Join-Path $outputRoot 'lod-nodes.bin') (Join-Path $outputRoot 'lod-groups.bin')
 if ($LASTEXITCODE -ne 0) { throw 'D3D12 LOD execution failed.' }
 & $python (Join-Path $PSScriptRoot 'Validate-MeshLODSelection.py') check $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'LOD cut regression failed.' }

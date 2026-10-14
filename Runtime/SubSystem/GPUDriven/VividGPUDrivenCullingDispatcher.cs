@@ -229,6 +229,7 @@ namespace VividRP.Runtime.GPUDriven
                 sceneBuffers.InstanceDataBuffer == null ||
                 sceneBuffers.MaterialDataBuffer == null ||
                 sceneBuffers.MeshLODNodesBuffer == null ||
+                sceneBuffers.MeshLODGroupsBuffer == null ||
                 sceneBuffers.MeshletsBuffer == null ||
                 gpuInstanceCullingCompute == null ||
                 meshletListBuildCompute == null ||
@@ -581,6 +582,12 @@ namespace VividRP.Runtime.GPUDriven
                 kernel,
                 VividGPUDrivenShaderIDs._MeshLODNodes,
                 sceneBuffers.MeshLODNodesBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_MeshletListBuildCompute,
+                kernel,
+                VividGPUDrivenShaderIDs._MeshLODGroups,
+                sceneBuffers.MeshLODGroupsBuffer
             );
             cmd.SetComputeIntParam(
                 m_MeshletListBuildCompute,

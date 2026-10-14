@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
@@ -26,12 +27,14 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
             Assert.That(UnsafeUtility.SizeOf<VividMeshlet>(), Is.EqualTo(32));
-            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(48));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNode>(), Is.EqualTo(48)); // CPU view
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODNodePacked>(), Is.EqualTo(16));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroup>(), Is.EqualTo(20));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
         }
 
         [Test]
-        public void MeshLODNodeLayout_HasHlslFieldOffsets()
+        public void MeshLODNodeLayout_PreservesVersion6CPUFieldOffsets()
         {
             Assert.That(typeof(VividMeshLODNode).IsLayoutSequential, Is.True);
             AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.Bounds), 0);
@@ -40,6 +43,77 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.ParentError), 36);
             AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.MeshletStartIndex), 40);
             AssertFieldOffset<VividMeshLODNode>(nameof(VividMeshLODNode.PackedMeshletCountLevel), 44);
+        }
+
+        [Test]
+        public void MeshLODSharedLayout_HasHlslFieldOffsets()
+        {
+            Assert.That(typeof(VividMeshLODNodePacked).IsLayoutSequential, Is.True);
+            Assert.That(typeof(VividMeshLODGroup).IsLayoutSequential, Is.True);
+            AssertFieldOffset<VividMeshLODNodePacked>(nameof(VividMeshLODNodePacked.GroupIndex), 0);
+            AssertFieldOffset<VividMeshLODNodePacked>(nameof(VividMeshLODNodePacked.ParentGroupIndex), 4);
+            AssertFieldOffset<VividMeshLODNodePacked>(nameof(VividMeshLODNodePacked.MeshletStartIndex), 8);
+            AssertFieldOffset<VividMeshLODNodePacked>(nameof(VividMeshLODNodePacked.PackedMeshletCountLevel), 12);
+            AssertFieldOffset<VividMeshLODGroup>(nameof(VividMeshLODGroup.Bounds), 0);
+            AssertFieldOffset<VividMeshLODGroup>(nameof(VividMeshLODGroup.Error), 16);
+        }
+
+        [Test]
+        public void MeshLODSharedTable_InternsExactTransitionsAndRebuildsWithoutStaleIndices()
+        {
+            var group = new float4(123.456f, -234.567f, 345.678f, 31.464842f);
+            const float error = 0.0036991127f;
+            var source = new List<VividMeshLODNode> {
+                VividMeshletMetadataPacking.PackMeshLODNode(group, default, -1f, error, 7, 1, 0),
+                VividMeshletMetadataPacking.PackMeshLODNode(new float4(1, 2, 3, 4), group, error, 0, 8, 1, 1),
+                VividMeshletMetadataPacking.PackMeshLODNode(new float4(2, 3, 4, 5), group, error, 0, 9, 1, 1),
+                // Another scene asset/instance may have identical local data but
+                // different meshlet offsets. Sharing must not alias its geometry.
+                VividMeshletMetadataPacking.PackMeshLODNode(group, default, -1f, error, 300, 2, 0),
+            };
+            var table = new VividMeshLODGroupTable();
+            table.Build(source);
+            Assert.That(table.Groups.Count, Is.EqualTo(3));
+            Assert.That(table.Nodes[0].ParentGroupIndex, Is.EqualTo(uint.MaxValue));
+            Assert.That(table.Nodes[1].ParentGroupIndex, Is.EqualTo(table.Nodes[0].GroupIndex));
+            Assert.That(table.Nodes[2].ParentGroupIndex, Is.EqualTo(table.Nodes[0].GroupIndex));
+            Assert.That(table.Nodes[3].GroupIndex, Is.EqualTo(table.Nodes[0].GroupIndex));
+            Assert.That(table.Nodes[3].MeshletStartIndex, Is.EqualTo(300));
+            for (int i = 0; i < source.Count; i++)
+                Assert.That(VividMeshLODGroupTable.Expand(table.Nodes[i], table.Groups), Is.EqualTo(source[i]));
+            Assert.That(16 * table.Nodes.Count + 20 * table.Groups.Count, Is.LessThan(48 * source.Count));
+            table.Build(source);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 64; i++) table.Build(source);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            source.RemoveRange(0, 3);
+            var changed = source[0]; changed.Bounds.x += 1f; source[0] = changed;
+            table.Build(source);
+            Assert.That(table.Nodes.Count, Is.EqualTo(1));
+            Assert.That(table.Groups.Count, Is.EqualTo(1));
+            Assert.That(table.Nodes[0].GroupIndex, Is.Zero);
+            Assert.That(VividMeshLODGroupTable.Expand(table.Nodes[0], table.Groups), Is.EqualTo(changed));
+            source.Clear(); table.Build(source);
+            Assert.That(table.Groups, Is.Empty);
+            Assert.That(table.Nodes, Is.Empty);
+        }
+
+        [Test]
+        public void MeshLODSharedTable_DoesNotMergeDistinctFloatBits()
+        {
+            var bounds = new float4(1, 2, 3, 4);
+            float error = 0.0012345f;
+            var source = new[] {
+                VividMeshletMetadataPacking.PackMeshLODNode(bounds, default, -1, error, 0, 1, 0),
+                VividMeshletMetadataPacking.PackMeshLODNode(bounds, default, -1, math.asfloat(math.asuint(error) + 1), 1, 1, 0),
+                VividMeshletMetadataPacking.PackMeshLODNode(bounds, default, -1, 0f, 2, 1, 0),
+                VividMeshletMetadataPacking.PackMeshLODNode(bounds, default, -1, math.asfloat(0x80000000u), 3, 1, 0),
+            };
+            var table = new VividMeshLODGroupTable(); table.Build(source);
+            Assert.That(table.Groups.Count, Is.EqualTo(4));
+            for (int i = 0; i < source.Length; i++)
+                Assert.That(math.asuint(VividMeshLODGroupTable.Expand(table.Nodes[i], table.Groups).Error), Is.EqualTo(math.asuint(source[i].Error)));
         }
 
         [Test]
@@ -577,6 +651,9 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.MaterialProgramBuffer, Is.Not.Null);
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshLODNodesBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MeshLODGroupsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.MeshLODNodesBuffer.stride, Is.EqualTo(16));
+            Assert.That(bufferSet.MeshLODGroupsBuffer.stride, Is.EqualTo(20));
             Assert.That(bufferSet.MeshletsBuffer, Is.Not.Null);
             Assert.That(bufferSet.SharedVertexBuffer, Is.Not.Null);
             Assert.That(bufferSet.SharedIndexBuffer, Is.Not.Null);

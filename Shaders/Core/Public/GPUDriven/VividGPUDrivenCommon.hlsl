@@ -52,7 +52,8 @@ StructuredBuffer<VividTerrainMaterialData> _TerrainMaterialData;
 uint _TerrainMaterialDataCount;
 StructuredBuffer<VividTerrainLayerGPUData> _TerrainLayerData;
 uint _TerrainLayerDataCount;
-StructuredBuffer<VividMeshLODNode> _MeshLODNodes;
+StructuredBuffer<VividMeshLODNodePacked> _MeshLODNodes;
+StructuredBuffer<VividMeshLODGroup> _MeshLODGroups;
 StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
 uint _MeshletCount;
@@ -236,7 +237,12 @@ VividTerrainLayerGPUData PullTerrainLayerData(const uint terrainLayerIndex)
 
 VividDecodedMeshLODNode PullMeshLODNode(const uint nodeIndex)
 {
-    return DecodeVividMeshLODNode(_MeshLODNodes[nodeIndex]);
+    const VividMeshLODNodePacked node = _MeshLODNodes[nodeIndex];
+    const VividMeshLODGroup own = _MeshLODGroups[node.GroupIndex];
+    VividMeshLODGroup parent = (VividMeshLODGroup)0;
+    if (node.ParentGroupIndex != 0xffffffffu)
+        parent = _MeshLODGroups[node.ParentGroupIndex];
+    return DecodeVividMeshLODNode(node, own, parent);
 }
 
 VividDecodedMeshlet PullMeshletData(const uint meshletIndex)

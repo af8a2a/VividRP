@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_MESHLET_DECODE_INCLUDED
 #define VIVIDRP_MESHLET_DECODE_INCLUDED
 
-// The packed VividMeshLODNode, VividMeshlet, and VividMeshletVertex structures
+// The packed VividMeshLODNodePacked, VividMeshLODGroup, VividMeshlet, and VividMeshletVertex structures
 // must be declared before this file is included. Keeping this header free from
 // Unity shader-library dependencies allows it to be consumed by standalone DXC.
 
@@ -97,13 +97,14 @@ VividDecodedMeshlet DecodeVividMeshlet(const VividMeshlet packedMeshlet)
     return meshlet;
 }
 
-VividDecodedMeshLODNode DecodeVividMeshLODNode(const VividMeshLODNode packedNode)
+VividDecodedMeshLODNode DecodeVividMeshLODNode(const VividMeshLODNodePacked packedNode,
+    const VividMeshLODGroup own, const VividMeshLODGroup parent)
 {
     VividDecodedMeshLODNode node;
-    node.Bounds = packedNode.Bounds;
-    node.ParentError = packedNode.ParentError;
-    node.ParentBounds = packedNode.ParentBounds;
-    node.Error = packedNode.Error;
+    node.Bounds = own.Bounds;
+    node.ParentError = packedNode.ParentGroupIndex != 0xffffffffu ? parent.Error : -1.0f;
+    node.ParentBounds = parent.Bounds;
+    node.Error = own.Error;
     node.MeshletStartIndex = packedNode.MeshletStartIndex;
     node.MeshletCount = packedNode.PackedMeshletCountLevel & 0xFFFFu;
     node.LevelIndex = packedNode.PackedMeshletCountLevel >> 16;

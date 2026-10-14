@@ -33,21 +33,14 @@ void Main(uint3 id : SV_DispatchThreadID)
     instance.ObjectToWorldMatrix = c.ObjectToWorld;
     instance.MeshLODLevelCount = 2;
     instance.LODErrorScale = c.Screen.z;
-    VividMeshLODNode packedParent = (VividMeshLODNode)0;
-    packedParent.Bounds = c.ParentBounds;
-    packedParent.Error = c.Metrics.x;
-    packedParent.ParentError = -1;
-    VividMeshLODNode packedChild = (VividMeshLODNode)0;
-    packedChild.Bounds = c.ChildBounds;
-    packedChild.ParentBounds = c.ParentBounds;
-    packedChild.ParentError = c.Metrics.x;
-    packedChild.PackedMeshletCountLevel = 1u << 16;
-    VividDecodedMeshLODNode parent = DecodeVividMeshLODNode(packedParent);
-    VividDecodedMeshLODNode child = DecodeVividMeshLODNode(packedChild);
+    // Exercise the production structured-buffer loads (16-byte nodes / 20-byte
+    // shared groups), including a root with an invalid parent sentinel.
+    VividDecodedMeshLODNode parent = PullMeshLODNode(id.x * 3);
+    VividDecodedMeshLODNode child = PullMeshLODNode(id.x * 3 + 1);
 
     float4x4 localToClip = mul(c.ViewProjection, c.ObjectToWorld);
     Result r;
-    r.Metrics.x = VividLODProjectedError(c.ParentBounds, c.Metrics.x, localToClip, c.Screen.xy);
+    r.Metrics.x = VividLODProjectedError(parent.Bounds, parent.Error, localToClip, c.Screen.xy);
     r.Metrics.y = VividLODProjectedError(c.ChildBounds, c.Metrics.w, localToClip, c.Screen.xy);
     r.Metrics.z = VividLODProjectedError(c.GrandparentBounds, c.Metrics.y, localToClip, c.Screen.xy);
     r.Metrics.w = VividLODOrthographicPixelScale(localToClip, c.Screen.xy);
@@ -70,12 +63,11 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     // Three nested transitions catch non-monotone projection/error metrics,
     // which a complementary two-node test alone cannot detect.
-    VividDecodedMeshLODNode grandparent = parent;
-    grandparent.Bounds = c.GrandparentBounds;
-    grandparent.Error = c.Metrics.y;
-    parent.ParentBounds = c.GrandparentBounds;
-    parent.ParentError = c.Metrics.y;
-    parent.LevelIndex = 1;
+    VividDecodedMeshLODNode grandparent = PullMeshLODNode(id.x * 3 + 2);
+    VividMeshLODNodePacked middle = _MeshLODNodes[id.x * 3];
+    middle.ParentGroupIndex = _MeshLODNodes[id.x * 3 + 2].GroupIndex;
+    middle.PackedMeshletCountLevel = 1u | (1u << 16);
+    parent = DecodeVividMeshLODNode(middle, _MeshLODGroups[middle.GroupIndex], _MeshLODGroups[middle.ParentGroupIndex]);
     child.LevelIndex = 2;
     instance.MeshLODLevelCount = 3;
     r.Chain.x = ShouldSelectMeshLODNode(context, grandparent, instance,

@@ -33,10 +33,10 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 4 && argc != 6)
-            throw std::runtime_error("Usage: probe shader.dxil cases.bin results.bin [inputStride outputStride]");
-        const size_t inputStride = argc == 6 ? std::stoul(argv[4]) : 192;
-        const size_t outputStride = argc == 6 ? std::stoul(argv[5]) : 32;
+        if (argc != 4 && argc != 6 && argc != 8)
+            throw std::runtime_error("Usage: probe shader.dxil cases.bin results.bin [inputStride outputStride [srv1.bin srv2.bin]]");
+        const size_t inputStride = argc >= 6 ? std::stoul(argv[4]) : 192;
+        const size_t outputStride = argc >= 6 ? std::stoul(argv[5]) : 32;
         if (!inputStride || !outputStride) throw std::runtime_error("Zero probe stride");
         auto shader = read(argv[1]), vertices = read(argv[2]);
         size_t count = vertices.size() / inputStride;
@@ -71,10 +71,27 @@ int main(int argc, char** argv)
         void* mapped = nullptr;
         D3D12_RANGE empty{};
         check(input->Map(0, &empty, &mapped)); std::memcpy(mapped, vertices.data(), vertices.size()); input->Unmap(0, nullptr);
-        D3D12_ROOT_PARAMETER params[2]{};
+        std::vector<ComPtr<ID3D12Resource>> extraInputs;
+        if (argc == 8)
+        {
+            for (int i = 6; i < 8; ++i)
+            {
+                auto data = read(argv[i]);
+                auto resource = buffer(data.size(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE);
+                check(resource->Map(0, &empty, &mapped));
+                std::memcpy(mapped, data.data(), data.size()); resource->Unmap(0, nullptr);
+                extraInputs.push_back(resource);
+            }
+        }
+        std::vector<D3D12_ROOT_PARAMETER> params(2 + extraInputs.size());
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
-        D3D12_ROOT_SIGNATURE_DESC rootDesc{}; rootDesc.NumParameters = 2; rootDesc.pParameters = params;
+        for (size_t i = 0; i < extraInputs.size(); ++i)
+        {
+            params[2 + i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            params[2 + i].Descriptor.ShaderRegister = UINT(1 + i);
+        }
+        D3D12_ROOT_SIGNATURE_DESC rootDesc{}; rootDesc.NumParameters = UINT(params.size()); rootDesc.pParameters = params.data();
         ComPtr<ID3DBlob> rootBytes, errors;
         check(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootBytes, &errors));
         ComPtr<ID3D12RootSignature> root;
@@ -93,6 +110,8 @@ int main(int argc, char** argv)
         commands->SetComputeRootSignature(root.Get());
         commands->SetComputeRootShaderResourceView(0, input->GetGPUVirtualAddress());
         commands->SetComputeRootUnorderedAccessView(1, output->GetGPUVirtualAddress());
+        for (size_t i = 0; i < extraInputs.size(); ++i)
+            commands->SetComputeRootShaderResourceView(UINT(2 + i), extraInputs[i]->GetGPUVirtualAddress());
         commands->Dispatch(UINT(count / 64), 1, 1);
         D3D12_RESOURCE_BARRIER barrier{};
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;

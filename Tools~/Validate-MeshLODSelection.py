@@ -103,6 +103,18 @@ def generate(root):
         cases.append(cases[0])
     root.mkdir(parents=True, exist_ok=True)
     (root / 'lod-cases.bin').write_bytes(b''.join(CASE.pack(*c) for c in cases))
+    # Each child references the exact same table element as its parent. Distinct
+    # case/asset offsets exercise global remapping instead of only index zero.
+    groups, nodes = bytearray(), bytearray()
+    for i, c in enumerate(cases):
+        groups += struct.pack('<5f', *c[:4], c[44])
+        groups += struct.pack('<5f', *c[4:8], 0)
+        groups += struct.pack('<5f', *c[8:12], c[45])
+        nodes += struct.pack('<4I', i * 3, 0xffffffff, i * 3, 1)
+        nodes += struct.pack('<4I', i * 3 + 1, i * 3, i * 3 + 1, 1 | (1 << 16))
+        nodes += struct.pack('<4I', i * 3 + 2, 0xffffffff, i * 3 + 2, 1)
+    (root / 'lod-groups.bin').write_bytes(groups)
+    (root / 'lod-nodes.bin').write_bytes(nodes)
     (root / 'lod-controls.json').write_text(json.dumps(controls), encoding='utf-8')
     print(f'Generated {len(cases)} shared-group LOD cases, including Camera_1 roof')
 

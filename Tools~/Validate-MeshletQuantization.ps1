@@ -136,8 +136,9 @@ internal static class Program
             {
                 if (fixtureName == "VividGPUDrivenBufferSetTests" && !method.Name.StartsWith("MeshletVertex")
                     && !method.Name.StartsWith("MeshletMetadataPacking")
+                    && !method.Name.StartsWith("MeshLODShared")
                     && method.Name != "InstanceDataLayout_HasHlslFieldOffsets"
-                    && method.Name != "MeshLODNodeLayout_HasHlslFieldOffsets"
+                    && method.Name != "MeshLODNodeLayout_PreservesVersion6CPUFieldOffsets"
                     && method.Name != "GPUDataLayouts_HaveExpectedStrides") continue;
                 var cases = method.GetCustomAttributes<TestCaseAttribute>().ToArray();
                 if (method.GetCustomAttribute<TestAttribute>() == null && cases.Length == 0) continue;

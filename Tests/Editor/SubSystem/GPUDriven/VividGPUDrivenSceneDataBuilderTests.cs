@@ -1362,6 +1362,107 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_InternsSharedGroupsAcrossAssets_AndInvalidatesOnlyForReferencedGeometryChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset first = null, second = null, untracked = null;
+            try
+            {
+                mesh = CreateTwoSubMeshMesh("SharedGroups");
+                material = CreateTestMaterial();
+                first = CreateMeshletCollectionAsset("First", 0, 1,
+                    new[] { CreateMeshLODNode(0, 1, 0) }, new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0, 0, 0), CreateVertex(1, 0, 0), CreateVertex(0, 1, 0) }, new byte[] { 0, 1, 2 });
+                second = CreateMeshletCollectionAsset("Second", 1, 2,
+                    new[] { CreateMeshLODNode(0, 1, 0), CreateMeshLODNode(1, 1, 1) },
+                    new[] { CreateMeshlet(0, 0, 3, 1), CreateMeshlet(0, 0, 3, 1) },
+                    first.VertexBuffer, new byte[] { 0, 1, 2 });
+                var shared = new VividMeshLODGroup { Bounds = new float4(1, 2, 3, 4), Error = .25f };
+                var near = shared; near.Error = math.asfloat(math.asuint(shared.Error) + 1);
+                var groups = new[] {
+                    new VividMeshLODGroup { Bounds = new float4(1, 2, 3, 1), Error = 0 },
+                    shared, shared, near,
+                };
+                var secondNodes = new[] {
+                    new VividMeshLODNodePacked { GroupIndex = 2, ParentGroupIndex = uint.MaxValue, MeshletCount = 1 },
+                    new VividMeshLODNodePacked { GroupIndex = 0, ParentGroupIndex = 1, MeshletStartIndex = 1, MeshletCount = 1, LevelIndex = 1 },
+                };
+                first.SetMeshData(new[] { 1 }, first.MeshLODNodes, new[] { shared }, first.Meshlets, first.VertexBuffer, first.IndexBuffer);
+                second.SetMeshData(new[] { 1, 1 }, secondNodes, groups, second.Meshlets, second.VertexBuffer, second.IndexBuffer);
+                gameObject = CreateMeshletRendererObject("Renderer_SharedGroups", mesh, new[] { material, material }, out var renderer);
+                renderer.SetMeshletCollections(new[] { first, second });
+                var database = VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(renderer);
+                var scene = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textures = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
+                Assert.That(builder.Build(scene, database, textures), Is.True);
+                Assert.That(scene.MeshLODGroupCount, Is.EqualTo(3)); // 5 input records, 3 exact values
+                Assert.That(scene.MeshLODNodes[0].GroupIndex, Is.EqualTo(scene.MeshLODNodes[1].GroupIndex));
+                Assert.That(scene.MeshLODNodes[2].ParentGroupIndex, Is.EqualTo(scene.MeshLODNodes[1].GroupIndex));
+                Assert.That(scene.MeshLODNodes[1].ParentGroupIndex, Is.EqualTo(uint.MaxValue));
+                Assert.That(scene.MeshLODNodes[1].MeshletStartIndex, Is.EqualTo(1u));
+                Assert.That(scene.MeshLODNodes[2].MeshletStartIndex, Is.EqualTo(2u));
+                Assert.That(scene.MeshLODGroups[2], Is.EqualTo(near), "One-ULP errors must remain distinct.");
+                Assert.That(secondNodes[0].GroupIndex, Is.EqualTo(2u));
+                Assert.That(secondNodes[1].ParentGroupIndex, Is.EqualTo(1u));
+                var savedNodes = scene.MutableMeshLODNodes.ToArray();
+                var savedGroups = scene.MutableMeshLODGroups.ToArray();
+
+                for (int i = 0; i < 8; i++) builder.Build(scene, database, textures);
+                int rebuilds = 0;
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 64; i++) if (builder.Build(scene, database, textures)) rebuilds++;
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(rebuilds, Is.Zero);
+                Assert.That(allocated, Is.Zero);
+                gameObject.transform.position = Vector3.one;
+                database.UpdateRendererData(renderer);
+                Assert.That(builder.Build(scene, database, textures, out _, out bool instancesChanged), Is.False);
+                Assert.That(instancesChanged, Is.True);
+                material.renderQueue += 1;
+                Assert.That(builder.Build(scene, database, textures, out bool materialsChanged), Is.False);
+                Assert.That(materialsChanged, Is.True);
+                untracked = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                untracked.MarkChanged();
+                Assert.That(builder.Build(scene, database, textures), Is.False);
+                CollectionAssert.AreEqual(savedNodes, scene.MeshLODNodes);
+                CollectionAssert.AreEqual(savedGroups, scene.MeshLODGroups);
+
+                // Same-size edits must invalidate the exact-value map. Change both
+                // sides of this asset's transition without touching the other asset.
+                var changed = shared; changed.Bounds.x += 1;
+                groups[1] = groups[2] = changed;
+                second.MarkChanged();
+                Assert.That(builder.Build(scene, database, textures), Is.True);
+                Assert.That(scene.MeshLODGroupCount, Is.EqualTo(4));
+                Assert.That(scene.MeshLODNodes[1].GroupIndex, Is.Not.EqualTo(scene.MeshLODNodes[0].GroupIndex));
+                Assert.That(scene.MeshLODNodes[2].ParentGroupIndex, Is.EqualTo(scene.MeshLODNodes[1].GroupIndex));
+                Assert.That(scene.MeshLODGroups[(int)scene.MeshLODNodes[1].GroupIndex], Is.EqualTo(changed));
+                groups[1] = groups[2] = shared;
+                second.MarkChanged();
+                Assert.That(builder.Build(scene, database, textures), Is.True);
+                CollectionAssert.AreEqual(savedNodes, scene.MeshLODNodes);
+                CollectionAssert.AreEqual(savedGroups, scene.MeshLODGroups);
+                renderer.SetMeshletCollections(new[] { first, (VividMeshletCollectionAsset)null });
+                database.UpdateRendererData(renderer);
+                Assert.That(builder.Build(scene, database, textures), Is.True);
+                Assert.That(scene.MeshLODGroupCount, Is.EqualTo(1));
+                renderer.SetMeshletCollections(new[] { first, second });
+                database.UpdateRendererData(renderer);
+                Assert.That(builder.Build(scene, database, textures), Is.True);
+                CollectionAssert.AreEqual(savedNodes, scene.MeshLODNodes);
+                CollectionAssert.AreEqual(savedGroups, scene.MeshLODGroups);
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, first, second, untracked);
+            }
+        }
+
+        [Test]
         public void Build_UsesMaterialProxyAndCatalogedGraphProgram_WhenAssigned()
         {
             GameObject gameObject = null;

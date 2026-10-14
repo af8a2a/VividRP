@@ -68,13 +68,16 @@ and signed zeros are not silently merged. v7 loads preserve both arrays and
 their indices directly, including unused or duplicate records, without a
 48-byte intermediate array or a deduplication dictionary.
 
-Scene assembly appends each unique asset's group array once, adds its group base
-offset to own/parent indices, and rebases meshlet offsets. The root sentinel is
-preserved and source arrays are not modified. Multiple instances of one asset
-reuse its scene range. Different assets retain their own group ranges, even when
-some values happen to match. Capacity reservation and clearing include both
-scene arrays. GPU upload copies those arrays directly; the former upload-time
-table and hash dictionary are removed.
+Scene assembly interns groups across assets by the exact bits of all five floats.
+A reusable asset-local-to-scene index array remaps both own and parent references;
+meshlet offsets are rebased as before. The root sentinel is preserved and source
+arrays are not modified. Multiple instances of one asset reuse its scene range.
+The scene-owned dictionary and remap storage retain capacity between rebuilds.
+They are populated only on the initial static build or when the referenced asset
+set or a referenced asset's content version changes. Instance/material-only
+updates and changes to unrelated assets reuse the existing groups and node IDs.
+GPU upload continues to copy the scene arrays directly, without interning or
+index remapping during upload.
 
 `VividMeshletCollectionAsset.MeshLODNodes` and `VividGPUDrivenSceneData.MeshLODNodes`
 now expose indexed nodes; `MeshLODGroups` exposes the shared records. Use
@@ -170,20 +173,31 @@ FBX/glTF files are unchanged.
   different offsets per case. All 1,052,672 result bytes match the previous
   expanded-node implementation exactly. Existing 24,640 meshlet and
   41,024 instance-frustum cases also pass in native16 and FP32 modes.
-- The running Sponza scene has 217 instances, 2,888 distinct LOD nodes and 2,022
-  shared groups. GPU readback matches all CPU geometry offsets and all own/parent
+- The running Sponza scene has 217 instances, 2,888 distinct LOD nodes and 2,014
+  shared groups (down from 2,022 before scene-level cross-asset interning).
+  GPU readback matches all CPU geometry offsets and all own/parent
   float bits, with no invalid indices or differences from the pre-change LOD
   inputs. VSM hierarchy, root and geometry-bound buffers are byte-identical to
   the pre-change capture. The CPU scene payload and GPU buffers each total
-  **86,648 bytes**, compared with the former **138,624-byte** CPU node payload
-  (37.49% smaller). Removing cross-asset interning retains eight matching records,
-  costing 160 bytes versus the previous 86,488-byte GPU metadata total. This
-  excludes vertices, meshlets, collection overhead and other scene resources.
+  **86,488 bytes**, compared with the former **138,624-byte** CPU node payload
+  (37.61% smaller). Scene-level interning removes eight duplicate records,
+  saving 160 bytes relative to separate per-asset group ranges. This excludes
+  vertices, meshlets, collection overhead, reserved capacity, the scene builder's
+  dictionary/remap storage and other scene resources.
   Sixteen full static uploads after warm-up allocate zero managed
   bytes on the calling thread and reuse both GPU buffers. Readback reports 994
   visible meshlets and 16 nonzero indirect argument records at the current view.
   Auto LOD uses a 1-pixel budget. Live Editor compilation and console errors are
   zero; production compute shaders have no errors (existing warnings remain).
+- Live scene-builder diagnostics measure zero managed bytes and zero static
+  rebuilds across 64 warmed stable builds; the interning dictionary is untouched.
+  An unrelated asset's content revision leaves the table unchanged. Updating a
+  referenced asset's in-memory content revision triggers a rebuild, preserves
+  all node/group values, and the next stable build reuses the table. No asset
+  content was edited or saved. The Editor regression test additionally covers
+  different local group ordering, duplicate groups, one-ULP differences,
+  transform/material-only updates, same-length group edits, and reference
+  removal/readdition; it compiled but awaits the manual Editor test run below.
 - A live in-memory meshoptimizer build of a 32x32-quad grid produces five levels,
   34 indexed nodes and 24 groups. All parent links resolve to a coarse group's
   exact ID, errors are monotone, all 2,048 finest triangles remain, and asset
@@ -200,7 +214,7 @@ Unity Test Framework tests were not run in the active interactive Editor.
 Run `VividMeshletCollectionBuilderTests`, `VividGPUDrivenSceneDataBuilderTests`,
 `VirtualShadowMapGeometryBoundsTests`, `VirtualShadowMapPageHierarchyTests`, and
 GPU buffer/serializer fixtures manually for the full Editor integration suite.
-These include distinct-asset group rebasing, root-sentinel preservation and
+These include cross-asset group remapping, root-sentinel preservation and
 same-count group edits refreshing VSM error intervals.
 
 ## Resident vertex quantization

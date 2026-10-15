@@ -149,7 +149,7 @@ namespace VividRP.Editor.Tests
             var content = RenderGraphEditorGraph.LoadStandardGraphTemplateContent();
 
             Assert.That(
-                Regex.Matches(content, @"m_SchemaVersion: 4").Count,
+                Regex.Matches(content, $@"m_SchemaVersion: {RenderGraphEditorGraph.CurrentSchemaVersion}\b").Count,
                 Is.EqualTo(3));
             StringAssert.Contains("m_Name: LayerAux0 (R)", content);
             StringAssert.Contains("m_Name: LayerAux1 (R)", content);

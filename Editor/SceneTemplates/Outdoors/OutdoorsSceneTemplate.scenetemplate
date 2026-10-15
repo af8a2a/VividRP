@@ -20,6 +20,8 @@ MonoBehaviour:
     Contains a volume profile setup with physically based sky and an automatic exposure setting, a camera, a sun (directional light) and a reflection probe.'
   preview: {fileID: 3162778939648686945}
   dependencies:
+  - dependency: {fileID: 2800000, guid: 177b2538515c71b4a86aa1cad939807a, type: 2}
+    instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 38953195e6292514a9b9b51b1328c34b, type: 2}
     instantiationMode: 0
   - dependency: {fileID: 11400000, guid: bd7eaf3bd49c39f4cb77bd809459aa72, type: 2}

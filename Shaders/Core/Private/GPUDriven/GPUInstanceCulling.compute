@@ -1,4 +1,7 @@
 #pragma kernel CS
+#pragma kernel CSMainHierarchyEnqueue VIVID_MAIN_LOD_HIERARCHY VIVID_VSM_BATCH
+#pragma kernel CSMainHierarchyTraverse VIVID_MAIN_LOD_HIERARCHY VIVID_VSM_BATCH VIVID_VSM_BALANCED_TRAVERSAL
+#pragma kernel CSVSMHierarchyDirect VIVID_VSM_EARLY_CULL VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_LOD_HIERARCHY
 
 #pragma kernel CSVSM VIVID_VSM_EARLY_CULL
 #pragma kernel CSVSMCompacted VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS
@@ -34,14 +37,14 @@ RWStructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
 RWStructuredBuffer<uint> _MeshletListBuildJobCounter;
 RWStructuredBuffer<uint> _MeshletListBuildIndirectArgs;
 
-#if defined(VIVID_VSM_LOD_HIERARCHY)
+#if defined(VIVID_VSM_LOD_HIERARCHY) || defined(VIVID_MAIN_LOD_HIERARCHY)
 struct VSMLodHierarchyNode
 {
     float4 Min;
     float4 Max;
     uint4 Range;
-    float4 ErrorBounds; // min error/radius, max decoded parent error/radius
-    float4 ErrorMagnitude; // original sphere-domain magnitude; spatial bounds may be tighter
+    float4 ErrorBounds; // min error (zero for resident leaves)/radius, max parent error/radius
+    float4 ErrorMagnitude; // xyz own/parent sphere magnitude; w residency mask (uint bits)
 };
 StructuredBuffer<VSMLodHierarchyNode> _VSMLodHierarchy;
 StructuredBuffer<uint> _VSMLodRoots;
@@ -64,7 +67,7 @@ bool VSMLodRangeMaySelect(VSMLodHierarchyNode node, uint leafLevel,
     return !(ownErrorTooHigh || allParentsTooLow);
 }
 
-void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint offset, uint count)
+void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint offset, uint count, uint streamingLeafMask)
 {
     uint index;
 #if defined(VIVID_VSM_BATCH)
@@ -82,7 +85,7 @@ void EmitVSMLodJob(uint instanceID, uint contextIndex, uint jobsOffset, uint off
 #endif
     VividMeshletListBuildJob job;
     job.InstanceID = instanceID; job.MeshLODNodeOffset = offset;
-    job.MeshLODNodeCount = count; job.Padding0 = 0u;
+    job.MeshLODNodeCount = count; job.StreamingLeafMask = streamingLeafMask;
     _MeshletListBuildJobs[jobsOffset + index] = job;
 }
 
@@ -118,12 +121,30 @@ bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint c
     bool overlaps = node.Range.x < state.end && node.Range.x + node.Range.y > state.start;
     if (_ForcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
         overlaps = overlaps && ((_ForcedMeshLODNodeDepth >= node.Min.w && _ForcedMeshLODNodeDepth <= node.Max.w)
-            || (state.leafLevel < _ForcedMeshLODNodeDepth && state.leafLevel >= node.Min.w && state.leafLevel <= node.Max.w));
+            || (state.leafLevel < _ForcedMeshLODNodeDepth && state.leafLevel >= node.Min.w && state.leafLevel <= node.Max.w)
+            || (asuint(node.ErrorMagnitude.w) != 0u && _ForcedMeshLODNodeDepth > node.Min.w));
     if (overlaps && state.automaticErrorBounds)
         overlaps = VSMLodRangeMaySelect(node, state.leafLevel, state.pixelsPerObjectUnit, state.threshold);
+#if defined(VIVID_MAIN_LOD_HIERARCHY)
+    if (overlaps && _ForcedMeshLODNodeDepth == VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH && !state.automaticErrorBounds)
+    {
+        VividGPULODSelectionContext lod = _LODSelectionContexts[0];
+        float maxParent = VividLODRangeProjectedError(node.ErrorMagnitude.xyz, node.ErrorBounds.z,
+            mul(lod.ViewProjectionMatrix, instance.ObjectToWorldMatrix), lod.ScreenSizePixels);
+        float tolerance = max(1e-30f, abs(state.threshold) * 1e-5f);
+        // Never reject the unbounded sentinel, even with an extreme budget.
+        overlaps = !(maxParent < VIVID_LOD_UNBOUNDED_ERROR && maxParent < state.threshold - tolerance);
+    }
+    if (overlaps)
+    {
+        VividInstanceCullBounds bounds = VividBuildInstanceCullBounds(node.Min.xyz, node.Max.xyz, instance.ObjectToWorldMatrix);
+        overlaps = VividInstanceFrustumVisible(bounds, _CullingContexts[contextIndex].FrustumPlanes);
+    }
+#else
     if (overlaps)
         overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
             (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);
+#endif
     return overlaps;
 }
 
@@ -141,7 +162,7 @@ void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint c
     {
         // Preserve the original guarded flat path for incomplete source data.
         for (uint offset = 0u; offset < count; offset += 32u)
-            EmitVSMLodJob(instanceID, contextIndex, jobsOffset, offset, min(count - offset, 32u));
+            EmitVSMLodJob(instanceID, contextIndex, jobsOffset, offset, min(count - offset, 32u), 0u);
         return;
     }
     uint stop = _VSMLodHierarchy[index].Range.z;
@@ -153,7 +174,7 @@ void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint c
         if (!overlaps) { index = node.Range.z; continue; }
         if (node.Range.w == 0u) { index++; continue; }
         uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
-        EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+        EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first, asuint(node.ErrorMagnitude.w) >> (first - node.Range.x));
         index = node.Range.z;
     }
 }
@@ -190,11 +211,15 @@ void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
     {
         // Disjoint 32-record chunks, including an incomplete final chunk.
         for (uint offset = lane * 32u; offset < count; offset += 1024u)
-            EmitVSMLodJob(instanceID, contextIndex, jobsOffset, offset, min(32u, count - offset));
+            EmitVSMLodJob(instanceID, contextIndex, jobsOffset, offset, min(32u, count - offset), 0u);
         return;
     }
     VSMLodTraversalState state = VSMLodState(instance, contextIndex, start, end);
+#if defined(VIVID_MAIN_LOD_HIERARCHY)
+    float4x4 localToShadow = (float4x4)0; // unused by main-view bounds tests
+#else
     float4x4 localToShadow = mul(_VSMProjections[contextIndex].worldToShadow, instance.ObjectToWorldMatrix);
+#endif
     if (lane == 0u) { gVSMLodFrontier[0] = root; gVSMLodFrontierCount = 1u; }
     GroupMemoryBarrierWithGroupSync();
     // Split only while at most 16 nodes are pending: two children per node always
@@ -212,7 +237,7 @@ void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
                 if (node.Range.w != 0u)
                 {
                     uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
-                    EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+                    EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first, asuint(node.ErrorMagnitude.w) >> (first - node.Range.x));
                 }
                 else { branch = true; left = index + 1u; right = _VSMLodHierarchy[left].Range.z; }
             }
@@ -249,7 +274,7 @@ void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
                 if (!VSMLodMayVisit(node, instance, contextIndex, localToShadow, state)) { index = node.Range.z; continue; }
                 if (node.Range.w == 0u) { index++; continue; }
                 uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
-                EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+                EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first, asuint(node.ErrorMagnitude.w) >> (first - node.Range.x));
                 index = node.Range.z;
             }
             bool active = index < stop;
@@ -301,7 +326,7 @@ void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
         if (!VSMLodMayVisit(node, instance, contextIndex, localToShadow, state)) { index = node.Range.z; continue; }
         if (node.Range.w == 0u) { index++; continue; }
         uint first = max(node.Range.x, start), last = min(node.Range.x + node.Range.y, end);
-        EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first);
+        EmitVSMLodJob(instanceID, contextIndex, jobsOffset, first - start, last - first, asuint(node.ErrorMagnitude.w) >> (first - node.Range.x));
         index = node.Range.z;
     }
 }
@@ -391,8 +416,10 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
 #if defined(VIVID_VSM_BATCH)
-    // Small ranges stay distributed across instance lanes; long ranges get a group.
+    // Main view only enqueues here. VSM keeps small ranges on instance lanes.
+#if !defined(VIVID_MAIN_LOD_HIERARCHY)
     if (totalMeshLODCount > 128u)
+#endif
     {
         EnqueueVSMLodTraversal(instanceID, cullingContextIndex);
         return;
@@ -419,7 +446,7 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
         job.InstanceID = instanceID;
         job.MeshLODNodeOffset = offset;
         job.MeshLODNodeCount = min(remainingNodeCount, MAX_LODNODES_PER_THREAD_GROUP);
-        job.Padding0 = 0u;
+        job.StreamingLeafMask = 0u;
         _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + jobWriteOffset + jobIndex] = job;
     }
 }
@@ -481,4 +508,15 @@ void CSVSMHierarchyTraverse(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CSVSMHierarchyTraverseBalanced(uint3 group : SV_GroupID, uint lane : SV_GroupIndex) { RunVSMHierarchyTraverse(group, lane); }
 #endif
+#endif
+
+#if defined(VIVID_MAIN_LOD_HIERARCHY)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMainHierarchyEnqueue(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSMainHierarchyTraverse(uint3 group : SV_GroupID, uint lane : SV_GroupIndex) { RunVSMHierarchyTraverse(group, lane); }
+#endif
+#if defined(VIVID_VSM_LOD_HIERARCHY)
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSVSMHierarchyDirect(uint3 id : SV_DispatchThreadID) { RunCulling(id); }
 #endif

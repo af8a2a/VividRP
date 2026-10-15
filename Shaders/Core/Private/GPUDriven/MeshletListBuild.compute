@@ -5,7 +5,6 @@
 #pragma kernel CSVSMBounds VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS
 #pragma kernel CSVSMBoundsBatched VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_BATCH
 #pragma kernel CSVSMGeometryBoundsBatched VIVID_VSM_EARLY_CULL VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_BATCH VIVID_VSM_GEOMETRY_BOUNDS
-#pragma multi_compile_local _ VIVID_LOD_AB_FP32
 #pragma use_dxc
 #pragma require wavebasic waveballot wavemath : VIVID_VSM_BATCH
 
@@ -68,6 +67,9 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
         }
 
         const VividDecodedMeshLODNode meshLODNode = PullMeshLODNode(nodeIndex);
+        // Hierarchy leaves contain mixed groups: finalize the exact shared-group
+        // cut here. Residency bypasses own refinement, never the parent test.
+        const bool streamingLeaf = (job.StreamingLeafMask & (1u << nodeOffset)) != 0u;
         // CameraPosition.w == 0 is the VSM clipmap LOD mode. Evaluate error in
         // shadow texels per level, independent of observer position/FOV/viewport.
         const bool shadowTexelLOD = lodSelectionContext.CameraPosition.w == 0.0
@@ -77,13 +79,13 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
             mul(cullingContext.ViewProjectionMatrix, instanceData.ObjectToWorldMatrix), lodSelectionContext.ScreenSizePixels);
         bool selected = shadowTexelLOD
             ? ShouldSelectShadowMeshLODNode(meshLODNode, instanceData, pixelsPerObjectUnit,
-                _ForcedMeshLODNodeDepth, _MeshLODErrorThreshold)
+                _ForcedMeshLODNodeDepth, _MeshLODErrorThreshold, streamingLeaf)
             : ShouldSelectMeshLODNode(
                 lodSelectionContext,
                 meshLODNode,
                 instanceData,
                 _ForcedMeshLODNodeDepth,
-                _MeshLODErrorThreshold
+                _MeshLODErrorThreshold, streamingLeaf
             );
         if (!selected)
         {

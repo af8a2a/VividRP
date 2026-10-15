@@ -197,12 +197,10 @@ namespace VividRP.Runtime.GPUDriven
 
             if (shouldUploadStaticData)
             {
-                if (!VividMeshLODGroupQuantizer.FullPrecisionAB && sceneData.PackedMeshLODGroups.Count != sceneData.MeshLODGroupCount)
+                if (sceneData.PackedMeshLODGroups.Count != sceneData.MeshLODGroupCount)
                     throw new InvalidOperationException("Scene LOD groups must be quantized before upload.");
                 MeshLODGroupCount = sceneData.MeshLODGroupCount;
-                if (VividMeshLODGroupQuantizer.FullPrecisionAB)
-                    UploadStructuredBuffer(ref m_MeshLODGroupsBuffer, sceneData.MutableMeshLODGroups, UnsafeUtility.SizeOf<VividMeshLODGroup>(), "VividGPUDriven_MeshLODGroups");
-                else UploadStructuredBuffer(
+                UploadStructuredBuffer(
                     ref m_MeshLODGroupsBuffer,
                     sceneData.MutablePackedMeshLODGroups,
                     UnsafeUtility.SizeOf<VividMeshLODGroupPacked>(),
@@ -431,7 +429,7 @@ namespace VividRP.Runtime.GPUDriven
         private bool RequiresStaticBufferUpload(VividGPUDrivenSceneData sceneData)
         {
             return !IsStructuredBufferCompatible(m_MeshLODNodesBuffer, sceneData.MeshLODNodeCount, UnsafeUtility.SizeOf<VividMeshLODNodePacked>()) ||
-                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, sceneData.MeshLODGroupCount, VividMeshLODGroupQuantizer.FullPrecisionAB ? UnsafeUtility.SizeOf<VividMeshLODGroup>() : UnsafeUtility.SizeOf<VividMeshLODGroupPacked>()) ||
+                   !IsStructuredBufferCompatible(m_MeshLODGroupsBuffer, sceneData.MeshLODGroupCount, UnsafeUtility.SizeOf<VividMeshLODGroupPacked>()) ||
                    !IsStructuredBufferCompatible(m_MeshLODGroupOverflowBuffer, sceneData.MeshLODGroupOverflow.Count, UnsafeUtility.SizeOf<VividMeshLODGroupOverflow>()) ||
                    !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
                    !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||

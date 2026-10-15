@@ -113,6 +113,80 @@ and the finest retained level always remains drawable, including truncated
 hierarchies and a zero pixel budget. Bounds contain child bounds and accumulated
 errors increase toward coarser levels, preserving a complete cut across levels.
 
+## Main-view hierarchy traversal and resident leaves
+
+Main-view culling now uses three GPU stages:
+
+1. `CSMainHierarchyEnqueue` rejects instances and appends instance/view tasks.
+2. `CSMainHierarchyTraverse` traverses the cached binary hierarchy and emits
+   disjoint candidate ranges of at most 32 LOD records through indirect dispatch.
+   It rejects conservatively by transformed local AABB and the maximum projected
+   parent error. Near-plane, nonfinite and equality ambiguity retain the range.
+3. `MeshletListBuild.CS` applies the exact shared-group parent/own predicates and
+   expands only selected records into meshlet requests. Meshlet frustum, cone and
+   occlusion culling continue afterward.
+
+This follows the separation between `ShouldVisitChildInternal` and
+`SmallEnoughToDraw` / `NANITE_CLUSTER_FLAG_STREAMING_LEAF` in the local UE source
+`Engine/Shaders/Private/Nanite/NaniteClusterCulling.usf`. Unlike Nanite's packed
+hierarchy, each range here can contain several groups, so final selection still
+checks its exact parent predicate; an interval result cannot replace that test.
+Native `float16_t` box support tests are reused. Projected error and all shared
+cut decisions remain FP32. The platform continues to assume reversed Z.
+
+Main and VSM views share the existing 80-byte auxiliary hierarchy. Its final
+word (`ErrorMagnitude.w`, byte 76, interpreted as uint bits) stores a resident
+leaf mask in range leaves and an any-leaf flag in internal nodes. The existing
+16-byte task's fourth uint carries the mask into final selection. No serialized
+v7 changes, expanded LOD nodes, extra per-node GPU flags, or second hierarchy
+buffer are needed. Queue storage is eight bytes per possible instance/view task
+plus 16 bytes of indirect arguments and is reused at stable capacity.
+
+Residency is derived per asset range and transition level from nonempty child
+records referencing a coarse group's index. Every member of that group therefore
+gets the same terminal state. A resident terminal group may exceed the pixel
+budget, but still draws only when its parent refines into it. Forced deeper levels
+also retain terminal groups. VSM uses the same mask and excludes these groups
+from minimum-own-error range rejection. Geometry/content invalidation rebuilds
+the masks; camera, instance-transform and material updates reuse the table.
+
+The current asset system exposes complete resident refinements, not Nanite page
+requests, priorities or asynchronous page installation. This handles fully absent
+finer refinements and truncated hierarchies. A future geometry streamer must
+install/evict a complete refinement atomically and invalidate the hierarchy;
+partially publishing some children is not a supported residency contract.
+
+Validation on 2026-10-15, Unity 7000.0.0a9 / D3D12 / RTX 5070 Ti:
+
+- All instance, meshlet and selection kernels compiled with DXC, including native
+  FP16 instructions in main hierarchy traversal. Runtime, Editor and Editor.Tests
+  compiled against current Bee references; 40 standalone managed checks passed,
+  including hierarchy stride/field offsets. Unity Test Framework was not run
+  because the interactive Editor was open.
+- The production staged GPU path matched a flat GPU selection reference in 603
+  comparisons: all 399 poses of the roof route plus forced-depth, shadow-texel
+  and synthetic absent-finest-refinement cases. No duplicate meshlets, overlapping
+  jobs, residency-mask mismatches or capacity overruns occurred. Synthetic data
+  exercised 1,323 terminal instance/node pairs above the globally finest level.
+- These selection comparisons deliberately use nonrestrictive frustum planes to
+  isolate LOD correctness. Along the route, jobs decreased from 296 to 224–260
+  with identical final selection. This is not a new image comparison or a GPU
+  frame-time result. Evidence is under `Temp~/main-lod-traversal/`.
+- A further 399 comparisons enabled the actual roof-route frustum. All 6,222
+  additional meshlet rejections were independently checked in FP64 against their
+  indexed, quantized triangle vertices: each rejected meshlet lay entirely outside
+  at least one clip plane. No additional LOD selections were introduced.
+- Native D3D12 predicates passed 111,680 LOD cases (including projected range
+  upper bounds and resident-leaf main/shadow/forced-depth selection), plus 41,024
+  instance and 24,640 meshlet cases per precision mode. A live Editor frame used
+  106 traversal tasks, 142 jobs, 1,017 candidates and 908 drawn meshlets.
+- Repeated stable scene upload/hierarchy update allocated 0 managed bytes over
+  128 calls and retained the hierarchy buffer. Camera transform and Play Mode were
+  unchanged. No scene was saved; the Editor acquired a dirty-scene flag during
+  validation, which was left intact. One CLI evaluation exceeded Pipeline's five-second response timeout;
+  its completed result was recovered from disk. No shader or rendering error was
+  reported by the final console inspection.
+
 Like Nanite's view pixel scale / MaxPixelsPerEdge budget, the runtime compares
 **linear projected error in pixels** against a budget, default **1 pixel**. The
 new Volume field is `meshLODPixelError` (Inspector: Mesh LOD Pixel Error).
@@ -270,6 +344,55 @@ snapshots and source hashes remain beside the report.
   zeros without setting the readback error flag. Zero-filled normal equality is
   not validation. Depth uses an explicit compute copy, contains 1,216,311 nonzero
   finite pixels, and remains identical after restoring the production source.
+
+### Moving roof camera A/B follow-up (2026-10-15)
+
+Report and synchronized video: `Temp~/lod-group16-dynamic/report/report.html`
+and `roof-route-ab.mp4` in that directory. `route.json` defines 399 rendered poses:
+distance 6 to 100 and back along the original roof view axis, two oscillation
+segments around actual roof LOD thresholds (42.295 and 98.353), four stationary
+holds, and continuous connecting segments. FOV, 1920x1080 resolution, 1-pixel LOD
+budget, reversed-Z, GPUDriven/HZB and VSM/SMRT settings are preserved.
+
+- Four complete A/B/B/A captures contain 1,596 frames. Each frame checks the
+  main view and 17 shadow views, totaling **153,723,528 leaf-to-root path checks**.
+  Holes, overlaps, duplicate main-view draws and draws from unselected nodes are
+  all zero. Every run records 858 roof-node selection changes (including both
+  sides of transitions, not 858 distinct thresholds).
+- Both A/B comparisons differ in node selection at 38 poses and in depth at
+  12 poses. The largest depth difference covers **2,498 pixels (0.1205%)**;
+  lost and gained coverage are both zero. Differences occur only when the LOD
+  cut changes; equal cuts have equal draw sets. The quantized version retains
+  finer detail slightly longer, as confirmed by GPU error/budget measurements.
+  These expected threshold shifts are not classified as false culling.
+- A/A and B/B depth are identical at every pose. All four hold segments keep
+  depth and LOD selection unchanged; the outbound and return paths make identical
+  LOD decisions at identical positions. No new abnormal geometry flicker is
+  observed on this route. Final RGB is not identical: mean A/B differences are
+  0.03667 and 0.03669 /255, versus 0.07052 and 0.03598 /255 for same-version
+  controls. Frame-dependent lighting noise remains; the result is not a claim
+  of flicker-free rendering on every camera route.
+- Timing excludes screenshots, readbacks and diagnostic dispatches. Each window
+  has 192 stationary warm-up frames, one 399-frame moving warm-up cycle, and two
+  measured cycles. Six paired windows provide **4,788 valid samples per mode**.
+  The full camera GPU range, including pre-graph GPUDriven work, averages
+  **2.151886 ms A / 2.170838 ms B**. Paired B-A is **+18.952 us (+0.881%)**;
+  its 95% t interval is **[-15.884, +53.787] us**. Stable speedup or regression
+  is not established. Clocks are unlocked. Recorder observations can lag the
+  current pose, so timing is compared over complete route cycles, not attributed
+  to exact threshold frames.
+- The original sixth pair was interrupted by an Editor restart: TA6 is unpaired
+  and TB6 incomplete, so both are excluded. TA7/TB7 replace that pair after
+  verifying the backend, dimensions and VSM settings. The report retains separate
+  session means and all excluded data. The comparison video plays at 30 fps;
+  this playback rate is not a measured rendering rate.
+- All six instrumented production files are restored to their pre-experiment
+  hashes. The temporary Editor probe is removed through AssetDatabase and its
+  source is archived beside the data. This cleanup also removes the experimental
+  files included in the intervening commit. The final live check confirms the
+  production 16-byte group layout, no temporary switch, the original camera and
+  time settings, and an unmodified scene. The Editor remains stopped, preserving
+  its state after the restart. No Unity Test Framework run was started.
 
 ## Shared-group quantization design (implemented, 2026-10-14)
 

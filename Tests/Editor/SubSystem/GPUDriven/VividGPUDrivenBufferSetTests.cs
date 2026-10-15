@@ -82,6 +82,13 @@ namespace VividRP.Editor.Tests
         [Test]
         public void MeshLODSharedLayout_HasHlslFieldOffsets()
         {
+            Assert.That(typeof(Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node>(), Is.EqualTo(80));
+            AssertFieldOffset<Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node>("Min", 0);
+            AssertFieldOffset<Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node>("Max", 16);
+            AssertFieldOffset<Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node>("Range", 32);
+            AssertFieldOffset<Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node>("ErrorBounds", 48);
+            AssertFieldOffset<Runtime.VirtualShadowMap.VirtualShadowMapLODHierarchy.Node>("ErrorMagnitude", 64);
             Assert.That(typeof(VividMeshLODNodePacked).IsLayoutSequential, Is.True);
             Assert.That(typeof(VividMeshLODGroup).IsLayoutSequential, Is.True);
             AssertFieldOffset<VividMeshLODNodePacked>(nameof(VividMeshLODNodePacked.GroupIndex), 0);

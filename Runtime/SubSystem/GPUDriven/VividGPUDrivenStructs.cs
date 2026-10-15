@@ -493,7 +493,6 @@ namespace VividRP.Runtime.GPUDriven
     // run during upload. All storage survives static rebuilds without shrinking.
     internal sealed class VividMeshLODGroupQuantizer
     {
-        public static bool FullPrecisionAB; // Temporary A/B harness; restored after capture.
         private readonly List<VividMeshLODGroup> m_Working = new();
         private readonly Dictionary<VividMeshLODGroup, uint> m_Indices = new();
         private uint[] m_Remap = Array.Empty<uint>();

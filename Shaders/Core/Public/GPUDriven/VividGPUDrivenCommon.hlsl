@@ -28,7 +28,7 @@ struct VividMeshletListBuildJob
     uint InstanceID;
     uint MeshLODNodeOffset;
     uint MeshLODNodeCount;
-    uint Padding0;
+    uint StreamingLeafMask; // one bit per record in this <=32-record job
 };
 
 StructuredBuffer<VividInstanceData> _InstanceData;
@@ -53,11 +53,7 @@ uint _TerrainMaterialDataCount;
 StructuredBuffer<VividTerrainLayerGPUData> _TerrainLayerData;
 uint _TerrainLayerDataCount;
 StructuredBuffer<VividMeshLODNodePacked> _MeshLODNodes;
-#if defined(VIVID_LOD_AB_FP32)
-StructuredBuffer<VividMeshLODGroup> _MeshLODGroups;
-#else
 StructuredBuffer<VividMeshLODGroupPacked> _MeshLODGroups;
-#endif
 StructuredBuffer<VividMeshLODGroupOverflow> _MeshLODGroupOverflow;
 StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
@@ -242,9 +238,6 @@ VividTerrainLayerGPUData PullTerrainLayerData(const uint terrainLayerIndex)
 
 VividMeshLODGroup PullMeshLODGroup(const uint groupIndex)
 {
-#if defined(VIVID_LOD_AB_FP32)
-    return _MeshLODGroups[groupIndex];
-#else
     const VividMeshLODGroupPacked packed = _MeshLODGroups[groupIndex];
     float2 values;
     if ((packed.RadiusError & 0x80000000u) != 0u)
@@ -255,7 +248,6 @@ VividMeshLODGroup PullMeshLODGroup(const uint groupIndex)
     group.Bounds = float4(packed.CenterX, packed.CenterY, packed.CenterZ, values.x);
     group.Error = values.y;
     return group;
-#endif
 }
 
 VividDecodedMeshLODNode PullMeshLODNode(const uint nodeIndex)
@@ -412,12 +404,13 @@ bool ShouldSelectMeshLODNode(
     const VividDecodedMeshLODNode meshLODNode,
     const VividInstanceData instanceData,
     const uint forcedMeshLODNodeDepth,
-    const float meshLODErrorThreshold
+    const float meshLODErrorThreshold,
+    const bool streamingLeaf
 )
 {
     if (forcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
     {
-        const bool isLeaf = meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
+        const bool isLeaf = streamingLeaf || meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
         return meshLODNode.LevelIndex == forcedMeshLODNodeDepth ||
                (meshLODNode.LevelIndex < forcedMeshLODNodeDepth && isLeaf);
     }
@@ -428,26 +421,38 @@ bool ShouldSelectMeshLODNode(
     // comparisons. Equality selects the coarse side of the cut exactly once.
     const bool parentRefines = meshLODNode.ParentError < 0.0f || VividLODProjectedError(
         meshLODNode.ParentBounds, meshLODNode.ParentError, localToClip, lodSelectionContext.ScreenSizePixels) > budget;
-    const bool isLeaf = meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
+    const bool isLeaf = streamingLeaf || meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
     const bool ownRefines = !isLeaf && VividLODProjectedError(
         meshLODNode.Bounds, meshLODNode.Error, localToClip, lodSelectionContext.ScreenSizePixels) > budget;
     return parentRefines && !ownRefines;
 }
 
+bool ShouldSelectMeshLODNode(const VividGPULODSelectionContext context,
+    const VividDecodedMeshLODNode node, const VividInstanceData instance, uint forcedDepth, float budget)
+{
+    return ShouldSelectMeshLODNode(context, node, instance, forcedDepth, budget, false);
+}
+
 bool ShouldSelectShadowMeshLODNode(
     const VividDecodedMeshLODNode node, const VividInstanceData instance,
-    float pixelsPerObjectUnit, uint forcedDepth, float pixelErrorBudget)
+    float pixelsPerObjectUnit, uint forcedDepth, float pixelErrorBudget, bool streamingLeaf)
 {
     if (forcedDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
     {
-        bool leaf = node.LevelIndex == instance.MeshLODLevelCount - 1;
+        bool leaf = streamingLeaf || node.LevelIndex == instance.MeshLODLevelCount - 1;
         return node.LevelIndex == forcedDepth || (node.LevelIndex < forcedDepth && leaf);
     }
     float budget = pixelErrorBudget * instance.LODErrorScale;
     bool parentRefines = node.ParentError < 0.0f || node.ParentError * pixelsPerObjectUnit > budget;
-    bool ownRefines = node.LevelIndex != instance.MeshLODLevelCount - 1
+    bool ownRefines = !streamingLeaf && node.LevelIndex != instance.MeshLODLevelCount - 1
         && node.Error * pixelsPerObjectUnit > budget;
     return parentRefines && !ownRefines;
+}
+
+bool ShouldSelectShadowMeshLODNode(const VividDecodedMeshLODNode node, const VividInstanceData instance,
+    float pixelsPerObjectUnit, uint forcedDepth, float budget)
+{
+    return ShouldSelectShadowMeshLODNode(node, instance, pixelsPerObjectUnit, forcedDepth, budget, false);
 }
 
 #endif // VIVIDRP_GPU_DRIVEN_COMMON_INCLUDED

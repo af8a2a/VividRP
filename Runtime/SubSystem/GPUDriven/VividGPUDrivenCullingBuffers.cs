@@ -353,8 +353,8 @@ namespace VividRP.Runtime.GPUDriven
                            * IndirectDrawArgsByteStride);
         }
 
-        // At most one long-range task per dispatched instance/view. Keep this
-        // storage lazy so non-VSM culling does not allocate a traversal queue.
+        // One task per surviving main-view instance/view (or long VSM range).
+        // The two dispatchers own separate queues; stable capacities are reused.
         public void EnsureVSMTraversalCapacity(int instanceDispatchCount, int cullingContextCount)
         {
             ThrowIfDisposed();

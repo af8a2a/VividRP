@@ -15,6 +15,25 @@ float VividLODOrthographicPixelScale(float4x4 localToClip, float2 screenSize)
         VividLODScaledLength(localToClip[1].xyz) * screenSize.y);
 }
 
+// Upper bound over every parent sphere inside the symmetric object-space box.
+// Retain near-plane/nonfinite ranges; final cluster tests resolve equality.
+float VividLODRangeProjectedError(float3 magnitude, float maxError, float4x4 localToClip, float2 screenSize)
+{
+    if (!all(isfinite(magnitude)) || !isfinite(maxError) || maxError < 0.0f)
+        return VIVID_LOD_UNBOUNDED_ERROR;
+    float wExtent = dot(abs(localToClip[3].xyz), magnitude);
+    float margin = 16e-6f * (abs(localToClip[3].w) + wExtent) + 1e-30f;
+    float nearestW = localToClip[3].w - wExtent - margin;
+    if (!isfinite(nearestW) || nearestW <= 0.0f) return VIVID_LOD_UNBOUNDED_ERROR;
+    float2 xyScale = float2(VividLODScaledLength(localToClip[0].xyz), VividLODScaledLength(localToClip[1].xyz));
+    float2 maxXY = float2(abs(localToClip[0].w) + dot(abs(localToClip[0].xyz), magnitude),
+        abs(localToClip[1].w) + dot(abs(localToClip[1].xyz), magnitude));
+    float2 scale = (xyScale + maxXY / nearestW * VividLODScaledLength(localToClip[3].xyz))
+        * (0.5f * screenSize) / nearestW;
+    float pixels = maxError * max(scale.x, scale.y);
+    return isfinite(pixels) ? pixels : VIVID_LOD_UNBOUNDED_ERROR;
+}
+
 float VividLODProjectedError(float4 sphereOS, float objectError, float4x4 localToClip, float2 screenSize)
 {
     // meshoptimizer supplies a LINEAR object-space deviation. Like Nanite, compare

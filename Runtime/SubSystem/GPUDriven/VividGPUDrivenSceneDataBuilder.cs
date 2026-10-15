@@ -261,7 +261,7 @@ namespace VividRP.Runtime.GPUDriven
                     }
                 }
 
-                if (staticDataChanged && !VividMeshLODGroupQuantizer.FullPrecisionAB)
+                if (staticDataChanged)
                     m_MeshLODGroupQuantizer.Build(sceneData.MutableMeshLODNodes, sceneData.MutableMeshLODGroups,
                         sceneData.MutablePackedMeshLODGroups, sceneData.MutableMeshLODGroupOverflow);
                 bindingLifecycle?.EndSurfaceBindingUpdate();

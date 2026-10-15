@@ -8,7 +8,7 @@ using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.VirtualShadowMap
 {
-    // Auxiliary acceleration over existing LOD records. It does not change the
+    // Shared main-view/VSM acceleration over existing LOD records. It does not change the
     // serialized LOD graph, node order, or the leaf error-selection contract.
     internal sealed class VirtualShadowMapLODHierarchy : IDisposable
     {
@@ -22,10 +22,11 @@ namespace VividRP.Runtime.VirtualShadowMap
             // Independent bounds over decoded leaf inputs, before instance/view scaling.
             // A missing or invalid parent uses +infinity so it cannot reject a branch.
             internal float4 ErrorBounds; // min error, min radius, max parent error, max parent radius
-            internal float4 ErrorMagnitude; // original sphere-domain coordinate magnitude, independent of spatial AABB
+            internal float4 ErrorMagnitude; // xyz own/parent sphere magnitude; w leaf residency mask (uint bits)
         }
 
         private readonly List<Node> m_Nodes = new();
+        private readonly HashSet<ulong> m_ResidentRefinements = new();
         private uint[] m_Roots = Array.Empty<uint>(), m_RangeCounts = Array.Empty<uint>();
         private GraphicsBuffer m_NodeBuffer, m_RootBuffer;
         internal GraphicsBuffer Nodes => m_NodeBuffer;
@@ -61,7 +62,18 @@ namespace VividRP.Runtime.VirtualShadowMap
             m_Nodes.Clear(); Array.Fill(m_Roots, uint.MaxValue);
             for (int start = 0; start < count; start++)
                 if (m_RangeCounts[start] != 0)
+                {
+                    // Residency is scoped to this asset range and LOD transition:
+                    // equal group values across assets or levels are not graph edges.
+                    m_ResidentRefinements.Clear();
+                    for (int i = start; i < start + m_RangeCounts[start]; i++)
+                    {
+                        var node = lodNodes[i];
+                        if (node.HasParent && node.LevelIndex > 0 && node.MeshletCount > 0)
+                            m_ResidentRefinements.Add(((ulong)(node.LevelIndex - 1) << 32) | node.ParentGroupIndex);
+                    }
                     m_Roots[start] = (uint)Build(lodNodes, groups, start, (int)m_RangeCounts[start], geometryBounds);
+                }
             Ensure(ref m_NodeBuffer, Math.Max(m_Nodes.Count, 1), Marshal.SizeOf<Node>(), "VSMLodHierarchy");
             Ensure(ref m_RootBuffer, count, 4, "VSMLodRoots");
             if (m_Nodes.Count != 0) m_NodeBuffer.SetData(m_Nodes);
@@ -75,6 +87,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             float4 low = new(float.PositiveInfinity), high = new(float.NegativeInfinity);
             float4 errors = new(float.PositiveInfinity, float.PositiveInfinity, 0f, 0f);
             float3 errorMagnitude = 0f;
+            uint streamingLeaves = 0u;
             if (count <= NodesPerLeaf)
             {
                 for (int i = start; i < start + count; i++)
@@ -82,6 +95,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                     var node = source[i];
                     var group = groups[(int)node.GroupIndex];
                     var parent = node.HasParent ? groups[(int)node.ParentGroupIndex] : default;
+                    bool streamingLeaf = !m_ResidentRefinements.Contains(((ulong)node.LevelIndex << 32) | node.GroupIndex);
+                    if (streamingLeaf) streamingLeaves |= 1u << (i - start);
                     float radius = math.max(group.Bounds.w, 0f);
                     float3 center = group.Bounds.xyz;
                     // Invalid bounds must conservatively keep this branch.
@@ -95,8 +110,10 @@ namespace VividRP.Runtime.VirtualShadowMap
                     // Use exactly the group data consumed by GPU LOD selection.
                     float parentError = node.HasParent ? parent.Error : -1f, parentRadius = parent.Bounds.w;
                     bool validParent = math.isfinite(parentError) && parentError >= 0f
-                        && math.isfinite(parentRadius) && parentRadius >= 0f;
-                    errors.x = math.min(errors.x, math.isfinite(group.Error) && group.Error >= 0f ? group.Error : 0f);
+                        && math.all(math.isfinite(parent.Bounds)) && parentRadius >= 0f;
+                    if (validParent)
+                        errorMagnitude = math.max(errorMagnitude, math.abs(parent.Bounds.xyz) + parentRadius);
+                    errors.x = math.min(errors.x, !streamingLeaf && math.isfinite(group.Error) && group.Error >= 0f ? group.Error : 0f);
                     errors.y = math.min(errors.y, finite && radius >= 0f ? radius : 0f);
                     errors.z = math.max(errors.z, validParent ? parentError : float.PositiveInfinity);
                     errors.w = math.max(errors.w, validParent ? parentRadius : 0f);
@@ -108,12 +125,13 @@ namespace VividRP.Runtime.VirtualShadowMap
                 int leftCount = (leaves / 2) * NodesPerLeaf;
                 int left = Build(source, groups, start, leftCount, geometryBounds), right = Build(source, groups, start + leftCount, count - leftCount, geometryBounds);
                 errorMagnitude = math.max(m_Nodes[left].ErrorMagnitude.xyz, m_Nodes[right].ErrorMagnitude.xyz);
+                streamingLeaves = (math.asuint(m_Nodes[left].ErrorMagnitude.w) | math.asuint(m_Nodes[right].ErrorMagnitude.w)) != 0u ? 1u : 0u;
                 low = math.min(m_Nodes[left].Min, m_Nodes[right].Min);
                 high = math.max(m_Nodes[left].Max, m_Nodes[right].Max);
                 errors = new float4(math.min(m_Nodes[left].ErrorBounds.xy, m_Nodes[right].ErrorBounds.xy),
                     math.max(m_Nodes[left].ErrorBounds.zw, m_Nodes[right].ErrorBounds.zw));
             }
-            m_Nodes[index] = new Node { Min = low, Max = high, ErrorBounds = errors, ErrorMagnitude = new float4(errorMagnitude, 0f),
+            m_Nodes[index] = new Node { Min = low, Max = high, ErrorBounds = errors, ErrorMagnitude = new float4(errorMagnitude, math.asfloat(streamingLeaves)),
                 Range = new uint4((uint)start, (uint)count, (uint)m_Nodes.Count, count <= NodesPerLeaf ? 1u : 0u) };
             return index;
         }
@@ -138,6 +156,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             m_NodeBuffer?.Dispose(); m_NodeBuffer = null;
             m_RootBuffer?.Dispose(); m_RootBuffer = null;
             m_Nodes.Clear(); m_Roots = m_RangeCounts = Array.Empty<uint>();
+            m_ResidentRefinements.Clear();
         }
     }
 }

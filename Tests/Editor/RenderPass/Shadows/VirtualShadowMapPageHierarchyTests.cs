@@ -216,6 +216,41 @@ namespace VividRP.Editor.Tests
                 "Geometry invalidation must rebuild error bounds and retain invalid inputs conservatively.");
         }
 
+        [Test]
+        public void LodHierarchy_ResidentLeavesAreScopedToRangeAndTransition_AndRebuilt()
+        {
+            var groups = new System.Collections.Generic.List<VividMeshLODGroup>
+            {
+                new() { Bounds = new float4(0, 0, 0, 10), Error = 4 },
+                new() { Bounds = new float4(0, 0, 0, 5), Error = 2 },
+                new() { Bounds = new float4(0, 0, 0, 1), Error = 1 },
+            };
+            var nodes = new System.Collections.Generic.List<VividMeshLODNodePacked>
+            {
+                new() { GroupIndex = 0, ParentGroupIndex = uint.MaxValue, LevelIndex = 0, MeshletCount = 1 },
+                new() { GroupIndex = 1, ParentGroupIndex = 0, LevelIndex = 1, MeshletCount = 1 },
+                new() { GroupIndex = 2, ParentGroupIndex = 1, LevelIndex = 2, MeshletCount = 1 },
+                // Same shared values in another asset must not acquire its descendants.
+                new() { GroupIndex = 1, ParentGroupIndex = uint.MaxValue, LevelIndex = 0, MeshletCount = 1 },
+            };
+            var instances = new System.Collections.Generic.List<VividInstanceData>
+            {
+                new() { TopMeshLODStartIndex = 0, TotalMeshLODCount = 3, MeshLODLevelCount = 3 },
+                new() { TopMeshLODStartIndex = 3, TotalMeshLODCount = 1, MeshLODLevelCount = 1 },
+            };
+            using var hierarchy = new VirtualShadowMapLODHierarchy();
+            hierarchy.Update(nodes, groups, instances, true);
+            Assert.That(math.asuint(hierarchy.CpuNodes[0].ErrorMagnitude.w), Is.EqualTo(4u));
+            Assert.That(math.asuint(hierarchy.CpuNodes[1].ErrorMagnitude.w), Is.EqualTo(1u));
+            var child = nodes[2]; child.MeshletCount = 0; nodes[2] = child;
+            hierarchy.Update(nodes, groups, instances, true);
+            Assert.That(math.asuint(hierarchy.CpuNodes[0].ErrorMagnitude.w) & 2u, Is.EqualTo(2u));
+            Assert.That(hierarchy.CpuNodes[0].ErrorBounds.x, Is.Zero, "Resident leaves cannot be pruned by minimum own error.");
+            child.MeshletCount = 1; nodes[2] = child;
+            hierarchy.Update(nodes, groups, instances, true);
+            Assert.That(math.asuint(hierarchy.CpuNodes[0].ErrorMagnitude.w), Is.EqualTo(4u));
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void AffineProjection_ContainsTransformedBoundSamples(bool sphere)

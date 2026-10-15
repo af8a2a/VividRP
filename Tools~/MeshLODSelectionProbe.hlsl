@@ -128,5 +128,20 @@ void Main(uint3 id : SV_DispatchThreadID)
     r.Chain.w |= uint(ConservativeBounds(c.ParentBounds, parent.Bounds, c.ObjectToWorld, c.ViewProjection)) << 5;
     r.Chain.w |= uint(all(asuint(child.ParentBounds) == asuint(parent.Bounds))
         && asuint(child.ParentError) == asuint(parent.Error)) << 6;
+    float upper = VividLODRangeProjectedError(abs(grandparent.Bounds.xyz) + grandparent.Bounds.w,
+        grandparent.Error, localToClip, c.Screen.xy);
+    r.Chain.w |= uint(upper >= r.Metrics.z * (1.0f - 1e-5f)) << 7;
+    // A resident terminal group can be above the globally finest level. Only
+    // its own refinement is bypassed; its parent must still refine into it.
+    bool parentRefines = r.Metrics.z > budget * instance.LODErrorScale;
+    bool residentSelected = ShouldSelectMeshLODNode(context, parent, instance,
+        VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH, budget, true);
+    r.Chain.w |= uint(residentSelected == parentRefines) << 8;
+    bool shadowParentRefines = grandparent.Error * r.Metrics.w > c.Metrics.z * instance.LODErrorScale;
+    r.Chain.w |= uint(ShouldSelectShadowMeshLODNode(parent, instance, r.Metrics.w,
+        VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH, c.Metrics.z, true) == shadowParentRefines) << 9;
+    r.Chain.w |= uint(ShouldSelectMeshLODNode(context, parent, instance, 2, budget, true)
+        && ShouldSelectShadowMeshLODNode(parent, instance, r.Metrics.w, 2, budget, true)
+        && !ShouldSelectMeshLODNode(context, parent, instance, 0, budget, true)) << 10;
     Results[id.x] = r;
 }

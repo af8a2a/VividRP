@@ -168,6 +168,10 @@ def check(root):
         require(r[15] & 16, 'quantized bound/error is smaller than the source')
         require(r[15] & 32, 'quantized sphere newly rejected VSM/frustum coverage')
         require(r[15] & 64, 'parent/child decoded transition mismatch')
+        require(r[15] & 128, 'main hierarchy projected-error upper bound underestimated a parent')
+        require(r[15] & 256, 'main streaming leaf bypassed its parent or disappeared')
+        require(r[15] & 512, 'shadow streaming leaf bypassed its parent or disappeared')
+        require(r[15] & 1024, 'forced depth failed to retain a streaming leaf')
         range_rejected += not (r[15] & 1)
         require(r[6:8] == (1, 0) and r[10:12] == (1, 0), 'forced leaf changed')
         if str(index) in controls:

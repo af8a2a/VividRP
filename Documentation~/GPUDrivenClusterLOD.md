@@ -97,6 +97,12 @@ quality/ABI probes pass. Unity Test Framework was not run with the Editor open.
 This generation validation does not include a new rendered camera A/B or GPU
 frame-time measurement. Evidence is under `Temp~/cluster-lod-quality/`.
 
+The follow-up [moving roof generation-quality A/B](GPUDrivenGenerationQualityAB.md)
+measures actual rendered assets: normal/base-color error improves, raw UV RMSE
+increases, drawn triangles rise 3.15%, and whole-camera GPU cost is inconclusive.
+It includes finest-LOD and flat-traversal controls, complete cut/coverage checks,
+and independent timing windows.
+
 ## Shared group transitions and pixel budgets
 
 Each simplification group produces one canonical sphere and one accumulated

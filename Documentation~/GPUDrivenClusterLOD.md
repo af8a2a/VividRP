@@ -187,6 +187,12 @@ Validation on 2026-10-15, Unity 7000.0.0a9 / D3D12 / RTX 5070 Ti:
   its completed result was recovered from disk. No shader or rendering error was
   reported by the final console inspection.
 
+The follow-up [moving roof traversal A/B](GPUDrivenMainTraversalAB.md) compares
+rendered depth, LOD cuts and actual draw sets at all 399 poses with matching TSR
+jitter, then measures six paired GPU timing windows. Geometry matches, but this
+Sponza workload has no demonstrated speedup: main culling increases by 11.9 us,
+and the whole-camera difference remains within measurement uncertainty.
+
 Like Nanite's view pixel scale / MaxPixelsPerEdge budget, the runtime compares
 **linear projected error in pixels** against a budget, default **1 pixel**. The
 new Volume field is `meshLODPixelError` (Inspector: Mesh LOD Pixel Error).

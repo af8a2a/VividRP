@@ -20,14 +20,20 @@ in the local `E:/vk_lod_clusters` reference, based on meshoptimizer's
    original vertex IDs at that position.
 4. Gather each group's triangles and compact vertices by original ID. This
    merges meshlet-local duplicates while retaining attribute seams. Simplify
-   with `meshopt_simplifyWithAttributes` (no attribute weights, border locking)
-   and the shared-position locks, then rebuild meshlets.
-5. Retain the existing optional sloppy fallback and level reduction threshold.
-   Both simplifiers receive boundary locks. Sloppy mode can merge coincident
-   seam IDs and degrade attributes; terrain continues to disable it.
-6. Convert relative simplification errors into object-space distances with
-   `meshopt_simplifyScale`, then conservatively accumulate child errors and
-   bounds. An empty simplification result retains its source geometry.
+   with `meshopt_simplifyWithAttributes`, normalized normals and UV0, border
+   locking and the shared-position locks, then rebuild meshlets. Import defaults
+   are normal weight **0.1** and UV weight multiplier **0.05**; either can be zero.
+5. Retain the level reduction threshold. Sloppy fallback is allowed only when
+   no weighted attributes are active: it ignores attributes and must not bypass
+   an appearance constraint. Both simplifiers receive boundary locks. Terrain
+   uses the same weights and continues to disable sloppy mode explicitly.
+6. Convert relative simplification errors to object units with
+   `meshopt_simplifyScale`, then accumulate `max(child errors) + local error`,
+   rounded upward to FP32. Zero-error steps add zero, without a fixed minimum.
+   Merge full child spheres with `meshopt_computeSphereBounds`, then repair the
+   FP32 radius using FP64 child containment and outward rounding. This avoids
+   repeatedly circumscribing their AABB (even identical spheres grew by sqrt(3)
+   per level). An empty simplification result retains its source geometry.
 
 This adapts the reference to VividRP's existing level-based representation;
 it does not adopt the reference's asynchronous iteration or independent terminal
@@ -38,6 +44,58 @@ selection is described in the next section.
 The builder also retains owning native allocations separately from bounded
 meshlet views, releases retry partitions and list storage, and completes vertex
 write jobs before unpinning managed output buffers.
+
+### Attribute weights and accumulated error
+
+UV weight is multiplied by `1 / sqrt(mean source triangle UV area)`, computed
+once per source submesh and reused at every level. Away from its safety cap,
+uniform UV scaling therefore preserves the weighted objective. The density
+factor is capped at 1024 for nearly degenerate maps; zero-area maps use factor
+1. Missing attributes are omitted. Source vertex IDs and seam locks are retained;
+the simplifier selects existing vertices rather than welding attribute seams.
+
+With attributes, meshoptimizer's reported error combines position and attribute
+error. It is an approximate metric converted to object units, **not a certified
+geometric Hausdorff distance or a measured image-space appearance error**. The
+existing main/VSM pixel-budget projections still consume the same shared scalar.
+
+The reference `vk_lod_clusters/src/meshopt_clusterlod.h` defaults to the
+`max(previous, local)` recurrence. That is monotone but does not bound successive
+same-direction deviations. VividRP retains addition and removes only the old
+0.0001-per-step artificial bias. On the rebuilt weighted Roof graph, additive
+root error is 1.47606; reconstructing a max recurrence from stored increments
+gives approximately 0.24422. This substantial decrease is not evidence of lower
+geometric error, so max is not adopted. Outward rounding preserves positive
+increments even when FP32 (or the intermediate FP64 sum) would swallow them.
+
+Generation checks on 2026-10-15, Unity 7000.0.0a9:
+
+| Source | Old root mean radius | Tight, weights off | Tight, default weights | Old / new root triangles |
+| --- | ---: | ---: | ---: | ---: |
+| Sponza Roof | 198.965 | 18.418 | 19.777 | 388 / 634 |
+| Sponza Support_Roof | 31.722 | 21.220 | 21.220 | 260 / 260 |
+
+The bounds-only variant preserves every level's triangle counts; its Roof root
+radius decreases by 90.7%. Default weights produce 10 Roof levels instead of 7,
+preserving the 13,988-triangle finest level. Normal weight 1 stopped this source
+at its finest level, motivating the smaller default. More retained geometry and
+larger combined errors are an intentional quality cost, not a performance claim.
+
+At an equal 200-triangle target on an 800-triangle planar nonlinear attribute
+field, default weights reduce sampled normal-vector RMSE from 0.163586 to
+0.135494 (17.2%) and UV RMSE from 0.020851 to 0.013575 (34.9%). This synthetic
+experiment does not establish the same improvement for every asset.
+
+The live production builder passed vertex coverage and parent containment for
+both sources and all three variants. The actual importer uses 0.1/0.05 and
+produces the expected 10/2 levels. Source and production FP16-decoded group
+tables pass strict FP64 sphere containment and monotone-error checks; packed
+decode matches the CPU cache exactly for 505 distinct parent links across the
+tight and weighted variants. v7 serialization and GPU layouts are unchanged.
+Runtime, Editor and Editor.Tests compile with the current Bee references; native
+quality/ABI probes pass. Unity Test Framework was not run with the Editor open.
+This generation validation does not include a new rendered camera A/B or GPU
+frame-time measurement. Evidence is under `Temp~/cluster-lod-quality/`.
 
 ## Shared group transitions and pixel budgets
 
@@ -111,7 +169,7 @@ does not. Both sides evaluate identical group data with complementary `>` / `<=`
 comparisons; equality selects the coarse side. Roots have no parent constraint,
 and the finest retained level always remains drawable, including truncated
 hierarchies and a zero pixel budget. Bounds contain child bounds and accumulated
-errors increase toward coarser levels, preserving a complete cut across levels.
+errors are nondecreasing toward coarser levels, preserving a complete cut across levels.
 
 ## Main-view hierarchy traversal and resident leaves
 
@@ -220,8 +278,11 @@ ranges containing the finest retained level. Forced-depth behavior is retained.
 
 ## Existing assets
 
-The blob format remains **v7** and `.vmeshletcollection` importer version **6**;
-this resident-only change requires no asset reimport or rebake. Vertices remain 20 bytes
+The blob format remains **v7**; `.vmeshletcollection` importer version **7**
+reimports generated model assets for tighter bounds and attribute weights.
+Existing serialized terrain needs rebaking to receive these generation changes.
+The resident compression and traversal changes themselves require no rebake.
+Vertices remain 20 bytes
 and meshlets remain 32 bytes. The LZ4 payload stores level counts,
 the shared group array, indexed nodes, meshlets, vertices and indices in that
 order. Both own and parent group indices are validated before accepting data.
@@ -584,6 +645,7 @@ Run the native integration probe from the package directory:
 
 ```powershell
 python Tools~/Validate-ClusterLOD.py
+python Tools~/Validate-ClusterLODQuality.py
 ```
 
 It loads the shipped DLL and checks partition determinism, disconnected seam
@@ -618,3 +680,9 @@ For visual acceptance, regenerate a detailed mesh and rebake terrain, then
 move the camera across LOD transitions and inspect silhouette, seams, cluster
 debug views, and visible meshlet counts. Static C# compilation and the native
 probe do not establish this runtime result.
+
+The quality probe compares interpolated normal/UV error at an equal triangle
+target and checks UV scale invariance. Optional `--hierarchy-exports <directory>`
+checks production diagnostic JSON exports for source/decoded containment, error
+monotonicity, unchanged centers and exact packed decoding, and estimates the
+alternative max-error recurrence. These are CPU checks, not GPU cut validation.

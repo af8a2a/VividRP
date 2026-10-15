@@ -488,6 +488,93 @@ namespace VividRP.Editor.Tests
             return count;
         }
 
+        [Test]
+        public void ClusterError_AccumulatesWithoutFixedBiasAndRoundsOutward()
+        {
+            Assert.That(VividMeshletCollectionBuilder.AccumulateError(0f, 0f), Is.Zero);
+            Assert.That(VividMeshletCollectionBuilder.AccumulateError(0.125f, 0f), Is.EqualTo(0.125f));
+            Assert.That(VividMeshletCollectionBuilder.AccumulateError(0f, 0.125f), Is.EqualTo(0.125f));
+            Assert.That(VividMeshletCollectionBuilder.AccumulateError(0.25f, 0.5f), Is.EqualTo(0.75f));
+            foreach (float small in new[] { 1e-8f, 1e-20f })
+            {
+                Assert.That(VividMeshletCollectionBuilder.AccumulateError(1f, small), Is.GreaterThan(1f));
+                Assert.That(VividMeshletCollectionBuilder.AccumulateError(small, 1f), Is.GreaterThan(1f));
+            }
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => VividMeshletCollectionBuilder.AccumulateError(0f, float.NaN));
+            Assert.Throws<System.OverflowException>(() => VividMeshletCollectionBuilder.AccumulateError(float.MaxValue, float.MaxValue));
+        }
+
+        [Test]
+        public void ClusterBounds_DuplicateSpheresDoNotInflateAndChildrenRemainContained()
+        {
+            using var sphereStorage = new NativeArray<float4>(4, Allocator.Temp);
+            var spheres = sphereStorage;
+            for (int i = 0; i < spheres.Length; i++) spheres[i] = new float4(10, -20, 30, 4);
+            Assert.That(VividMeshletCollectionBuilder.ComputeGroupBounds(spheres), Is.EqualTo(spheres[0]));
+            var random = new Unity.Mathematics.Random(1327);
+            foreach (float scale in new[] { 1e-5f, 1f, 1e5f })
+                for (int sample = 0; sample < 64; sample++)
+                {
+                    for (int i = 0; i < spheres.Length; i++) spheres[i] = new float4(random.NextFloat3(-10, 10), random.NextFloat(0, 3)) * scale;
+                    float4 parent = VividMeshletCollectionBuilder.ComputeGroupBounds(spheres);
+                    foreach (float4 child in spheres)
+                        Assert.That((double) parent.w, Is.GreaterThanOrEqualTo(math.distance((double3) parent.xyz, (double3) child.xyz) + child.w));
+                }
+        }
+
+        [Test]
+        public void ClusterUVWeight_UsesSourceDensityAndHandlesMissingOrDegenerateUVs()
+        {
+            using var indices = new NativeArray<uint>(new uint[] { 0, 1, 2 }, Allocator.Temp);
+            using var uvStorage = new NativeArray<float>(new float[] { 0, 0, 1, 0, 0, 1 }, Allocator.Temp);
+            var uv = uvStorage;
+            float baseline = VividMeshletCollectionBuilder.ComputeUVWeight(indices, uv, 0, 8, 1);
+            for (int i = 0; i < uv.Length; i++) uv[i] *= 4;
+            Assert.That(VividMeshletCollectionBuilder.ComputeUVWeight(indices, uv, 0, 8, 1), Is.EqualTo(baseline / 4));
+            Assert.That(VividMeshletCollectionBuilder.ComputeUVWeight(indices, default, 0, 0, 1), Is.Zero);
+            for (int i = 0; i < uv.Length; i++) uv[i] = 0;
+            Assert.That(VividMeshletCollectionBuilder.ComputeUVWeight(indices, uv, 0, 8, 1), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SimplifyMeshlets_AttributesAffectReductionAndCannotFallBackToSloppy()
+        {
+            Mesh mesh = CreateGridMesh(20, 20);
+            try
+            {
+                using var positions = CopyPositions(mesh, 1);
+                using var indices = new NativeArray<uint>(System.Array.ConvertAll(mesh.triangles, i => (uint) i), Allocator.TempJob);
+                using var normalStorage = new NativeArray<float>(mesh.vertexCount * 3, Allocator.TempJob);
+                using var uvStorage = new NativeArray<float>(mesh.vertexCount * 2, Allocator.TempJob);
+                var normals = normalStorage;
+                var uv = uvStorage;
+                for (int i = 0; i < mesh.vertexCount; i++)
+                {
+                    float x = positions[i * 3], y = positions[i * 3 + 1];
+                    float3 n = math.normalize(new float3(math.sin(x), math.cos(y), 1));
+                    normals[i * 3] = n.x; normals[i * 3 + 1] = n.y; normals[i * 3 + 2] = n.z;
+                    uv[i * 2] = x / 20 + .1f * math.sin(y); uv[i * 2 + 1] = y / 20 + .1f * math.cos(x);
+                }
+                var settings = VividMeshletCollectionAsset.MeshletGenerationParams;
+                using var source = VividMeshOptimizer.BuildMeshlets(Allocator.TempJob, positions, 0, 12, indices, settings);
+                using var groupStorage = new NativeArray<VividMeshOptimizer.MeshletBuildResults>(1, Allocator.Temp);
+                var groups = groupStorage;
+                groups[0] = source;
+                var layout = new VividMeshOptimizer.VertexLayout { Vertices = positions, PositionStride = 12,
+                    Normals = normals, NormalStride = 12, UV = uv, UVStride = 8 };
+                using var unweighted = VividMeshOptimizer.SimplifyMeshlets(Allocator.TempJob, groups, layout, settings,
+                    VividMeshOptimizer.SimplifyMode.Normal, .01f, out _);
+                layout.NormalWeight = 1; layout.UVWeight = 10;
+                using var weighted = VividMeshOptimizer.SimplifyMeshlets(Allocator.TempJob, groups, layout, settings,
+                    VividMeshOptimizer.SimplifyMode.Normal, .01f, out float error);
+                Assert.That(CountTriangles(weighted), Is.GreaterThan(CountTriangles(unweighted)));
+                Assert.That(error, Is.GreaterThanOrEqualTo(0));
+                Assert.Throws<System.ArgumentException>(() => VividMeshOptimizer.SimplifyMeshlets(Allocator.TempJob, groups, layout, settings,
+                    VividMeshOptimizer.SimplifyMode.Sloppy, .01f, out _));
+            }
+            finally { Object.DestroyImmediate(mesh); }
+        }
+
         private static VividMeshletCollectionBuilder.Parameters CreateParameters(Mesh mesh)
         {
             return new VividMeshletCollectionBuilder.Parameters
@@ -500,6 +587,8 @@ namespace VividRP.Editor.Tests
                 MaxMeshLODLevelCount = 4,
                 TargetError = 0.01f,
                 TargetErrorSloppy = 0.001f,
+                NormalWeight = VividMeshOptimizer.DefaultNormalWeight,
+                UVWeight = VividMeshOptimizer.DefaultUVWeight,
                 MinTriangleReductionPerStep = 0.8f,
                 LogErrorHandler = message => Assert.Fail(message),
             };

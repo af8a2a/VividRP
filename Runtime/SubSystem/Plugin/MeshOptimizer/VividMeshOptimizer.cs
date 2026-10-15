@@ -11,6 +11,9 @@ namespace VividRP.Runtime
 {
     public static class VividMeshOptimizer
     {
+        public const float DefaultNormalWeight = 0.1f;
+        public const float DefaultUVWeight = 0.05f;
+
         public enum SimplifyMode
         {
             Normal,
@@ -140,6 +143,14 @@ namespace VividRP.Runtime
             in VertexLayout vertexLayout, in MeshletGenerationParams meshletGenerationParams, SimplifyMode simplifyMode, float targetError,
             out float resultError, NativeArray<byte> vertexLocks)
         {
+            bool useNormals = vertexLayout.Normals.IsCreated && vertexLayout.NormalWeight > 0f;
+            bool useUV = vertexLayout.UV.IsCreated && vertexLayout.UVWeight > 0f;
+            if (!math.isfinite(vertexLayout.NormalWeight) || vertexLayout.NormalWeight < 0f
+                || !math.isfinite(vertexLayout.UVWeight) || vertexLayout.UVWeight < 0f)
+                throw new ArgumentOutOfRangeException(nameof(vertexLayout), "Attribute weights must be finite and nonnegative.");
+            // Sloppy ignores attributes. Never silently bypass an appearance constraint.
+            if ((useNormals || useUV) && simplifyMode == SimplifyMode.Sloppy)
+                throw new ArgumentException("Sloppy simplification does not support attribute weights.", nameof(simplifyMode));
             using var localVertices = new NativeList<ClusterVertex>(Allocator.Temp);
             using var vertexRemap = new NativeHashMap<uint, uint>(128, Allocator.Temp);
             using var localLocks = new NativeList<byte>(Allocator.Temp);
@@ -147,6 +158,8 @@ namespace VividRP.Runtime
             using var localIndices = new NativeList<uint>(Allocator.Temp);
 
             byte* pVertexPositionsBytes = (byte*) vertexLayout.Vertices.GetUnsafeReadOnlyPtr() + vertexLayout.PositionOffset;
+            byte* normals = useNormals ? (byte*) vertexLayout.Normals.GetUnsafeReadOnlyPtr() + vertexLayout.NormalOffset : null;
+            byte* uv = useUV ? (byte*) vertexLayout.UV.GetUnsafeReadOnlyPtr() + vertexLayout.UVOffset : null;
 
             foreach (MeshletBuildResults group in meshletGroups)
             {
@@ -160,9 +173,15 @@ namespace VividRP.Runtime
                         {
                             localIndex = (uint) localVertices.Length;
                             vertexRemap.Add(globalIndex, localIndex);
+                            float3 normal = useNormals ? *(float3*) (normals + globalIndex * vertexLayout.NormalStride) : default;
+                            float2 texcoord = useUV ? *(float2*) (uv + globalIndex * vertexLayout.UVStride) : default;
+                            if (!math.all(math.isfinite(normal)) || !math.all(math.isfinite(texcoord)))
+                                throw new ArgumentException("Simplification attributes must be finite.", nameof(vertexLayout));
                             localVertices.Add(new ClusterVertex
                             {
                                 Position = *(float3*) (pVertexPositionsBytes + globalIndex * vertexLayout.PositionStride),
+                                Normal = math.normalizesafe(normal),
+                                UV = texcoord,
                             });
                             localVerticesGlobalIndices.Add(globalIndex);
                             localLocks.Add(vertexLocks.IsCreated ? vertexLocks[(int) globalIndex] : (byte) 0);
@@ -181,6 +200,10 @@ namespace VividRP.Runtime
             float* pVertexPositions = (float*) localVertices.GetUnsafePtr();
             nuint vertexCount = (nuint) localVertices.Length;
             nuint vertexPositionsStride = (nuint) UnsafeUtility.SizeOf<ClusterVertex>();
+            float normalWeight = useNormals ? vertexLayout.NormalWeight : 0f;
+            float uvWeight = useUV ? vertexLayout.UVWeight : 0f;
+            float* weights = stackalloc float[5] { normalWeight, normalWeight, normalWeight, uvWeight, uvWeight };
+            bool useAttributes = useNormals || useUV;
             int simplifiedIndexCount = simplifyMode switch
             {
                 SimplifyMode.Normal => (int) meshopt_simplifyWithAttributes(
@@ -190,7 +213,8 @@ namespace VividRP.Runtime
                     pVertexPositions,
                     vertexCount,
                     vertexPositionsStride,
-                    null, 0, null, 0, localLocks.GetUnsafePtr(),
+                    useAttributes ? pVertexPositions + 3 : null, useAttributes ? vertexPositionsStride : 0,
+                    useAttributes ? weights : null, useAttributes ? 5u : 0u, localLocks.GetUnsafePtr(),
                     (nuint) targetIndexCount,
                     targetError,
                     (uint) meshopt_SimplifyOptions.LockBorder,
@@ -211,7 +235,8 @@ namespace VividRP.Runtime
                 _ => throw new ArgumentOutOfRangeException(nameof(simplifyMode), simplifyMode, null),
             };
 
-            // Both APIs return relative error here. The runtime compares object-space distances.
+            // With attributes this is the combined position/appearance metric, not a pure
+            // Hausdorff distance. Both APIs return relative error; LOD consumes object units.
             resultErrorValue *= meshopt_simplifyScale(pVertexPositions, vertexCount, vertexPositionsStride);
             // An empty representation cannot replace a child group: retain its geometry.
             if (simplifiedIndexCount == 0)
@@ -285,12 +310,22 @@ namespace VividRP.Runtime
             public NativeArray<float> UV;
             public uint UVOffset;
             public uint UVStride;
+            public NativeArray<float> Normals;
+            public uint NormalOffset;
+            public uint NormalStride;
+            public float NormalWeight;
+            public float UVWeight;
+
+            public bool HasWeightedAttributes => (Normals.IsCreated && NormalWeight > 0f)
+                || (UV.IsCreated && UVWeight > 0f);
         }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct ClusterVertex
         {
             public float3 Position;
+            public float3 Normal;
+            public float2 UV;
         }
 
         public struct MeshletBuildResults : IDisposable

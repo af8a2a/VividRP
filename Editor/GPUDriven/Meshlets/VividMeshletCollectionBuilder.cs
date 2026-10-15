@@ -26,6 +26,9 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             {
                 throw new ArgumentNullException(nameof(parameters.Mesh));
             }
+            if (!math.isfinite(parameters.NormalWeight) || parameters.NormalWeight < 0f
+                || !math.isfinite(parameters.UVWeight) || parameters.UVWeight < 0f)
+                throw new ArgumentOutOfRangeException(nameof(parameters), "Attribute weights must be finite and nonnegative.");
 
             if (parameters.Mesh.subMeshCount <= 0)
             {
@@ -162,6 +165,12 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 UV = uvData,
                 UVOffset = uvOffset,
                 UVStride = uvStride,
+                Normals = normalData,
+                NormalOffset = normalOffset,
+                NormalStride = normalStride,
+                NormalWeight = parameters.NormalWeight,
+                // One density normalization per source submesh, reused at every LOD.
+                UVWeight = ComputeUVWeight(subMeshIndices, uvData, uvOffset, uvStride, parameters.UVWeight),
             };
             if (parameters.MaxMeshLODLevelCount == 1)
             {
@@ -426,8 +435,9 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                     NativeList<int> sourceMeshletGroup = childMeshletGroups[childGroupIndex];
                     var sourceMeshlets = new NativeList<VividMeshOptimizer.MeshletBuildResults>(sourceMeshletGroup.Length, Allocator.Temp);
                     float sourceError = 0.0f;
-                    float3 sourceBoundsMin = float.PositiveInfinity;
-                    float3 sourceBoundsMax = float.NegativeInfinity;
+                    using var sourceBoundsStorage = new NativeArray<float4>(sourceMeshletGroup.Length, Allocator.Temp);
+                    NativeArray<float4> sourceBounds = sourceBoundsStorage;
+                    int sphereIndex = 0;
 
                     foreach (int nodeIndex in sourceMeshletGroup)
                     {
@@ -438,13 +448,10 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                         meshletBuildResults.Meshlets = meshletBuildResults.Meshlets.GetSubArray(node.MeshletIndex, 1);
                         sourceMeshlets.Add(meshletBuildResults);
 
-                        sourceBoundsMin = math.min(sourceBoundsMin, node.Bounds.xyz - node.Bounds.w);
-                        sourceBoundsMax = math.max(sourceBoundsMax, node.Bounds.xyz + node.Bounds.w);
+                        sourceBounds[sphereIndex++] = node.Bounds;
                     }
 
-                    float3 sourceBoundsCenter = (sourceBoundsMin + sourceBoundsMax) * 0.5f;
-                    float sourceBoundsRadius = math.length(sourceBoundsCenter - sourceBoundsMin);
-                    float4 sourceBounds = math.float4(sourceBoundsCenter, sourceBoundsRadius);
+                    float4 bounds = ComputeGroupBounds(sourceBounds);
                     float targetError = simplifyMode == VividMeshOptimizer.SimplifyMode.Sloppy ? parameters.TargetErrorSloppy : parameters.TargetError;
 
                     VividMeshOptimizer.MeshletBuildResults simplifiedMeshlets = VividMeshOptimizer.SimplifyMeshlets(
@@ -460,12 +467,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                     Assert.IsTrue(localError >= 0.0f);
                     sourceMeshlets.Dispose();
 
-                    const float minSimplificationError = 0.0001f;
-                    float error = sourceError + math.max(localError, minSimplificationError);
-                    Assert.IsTrue(error > sourceError);
-
-                    float4 bounds = sourceBounds;
-                    bounds.w += 0.0001f;
+                    float error = AccumulateError(sourceError, localError);
+                    Assert.IsTrue(error >= sourceError);
 
                     for (int meshletIndex = 0; meshletIndex < simplifiedMeshlets.Meshlets.Length; meshletIndex++)
                     {
@@ -523,7 +526,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                     newMeshLODNodeLevel.Dispose();
 
                     if (simplifyMode == VividMeshOptimizer.SimplifyMode.Normal
-                        && !parameters.DisableSloppySimplification)
+                        && !parameters.DisableSloppySimplification && !vertexLayout.HasWeightedAttributes)
                     {
                         simplifyMode = VividMeshOptimizer.SimplifyMode.Sloppy;
                     }
@@ -596,6 +599,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             public int MaxMeshLODLevelCount;
             public float TargetError;
             public float TargetErrorSloppy;
+            public float NormalWeight;
+            public float UVWeight;
             public float MinTriangleReductionPerStep;
             public bool DisableSloppySimplification;
             public bool PreserveFinestLODLevels;

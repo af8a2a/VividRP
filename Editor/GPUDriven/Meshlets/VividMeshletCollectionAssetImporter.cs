@@ -9,10 +9,11 @@ using VividRP.Editor.GPUDriven;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
 {
-    [ScriptedImporter(6, Extension)]
+    [ScriptedImporter(7, Extension)]
     internal sealed class VividMeshletCollectionAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vmeshletcollection";
@@ -26,6 +27,12 @@ namespace VividRP.Editor.GPUDriven.Meshlets
 
         [Range(0.0f, 0.25f)]
         public float TargetErrorSloppy = 0.001f;
+
+        [Min(0.0f), Tooltip("Normal importance during simplification. Zero disables normal weighting.")]
+        public float NormalWeight = VividMeshOptimizer.DefaultNormalWeight;
+
+        [Min(0.0f), Tooltip("UV importance, scaled by source triangle UV density. Zero disables UV weighting. Weighted simplification never falls back to sloppy.")]
+        public float UVWeight = VividMeshOptimizer.DefaultUVWeight;
 
         [Range(0.0f, 1.0f)]
         public float MinTriangleReductionPerStep = 0.8f;
@@ -70,6 +77,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 MaxMeshLODLevelCount = MaxMeshLODLevelCount,
                 TargetError = TargetError,
                 TargetErrorSloppy = TargetErrorSloppy,
+                NormalWeight = NormalWeight,
+                UVWeight = UVWeight,
                 MinTriangleReductionPerStep = MinTriangleReductionPerStep,
                 LogErrorHandler = message => ctx.LogImportError(message),
             });

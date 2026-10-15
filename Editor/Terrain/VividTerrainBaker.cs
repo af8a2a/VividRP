@@ -194,6 +194,8 @@ namespace VividRP.Editor.TerrainTools
                                         MaxMeshLODLevelCount = settings.MaxMeshLODLevelCount,
                                         TargetError = 0.01f,
                                         TargetErrorSloppy = 0.001f,
+                                        NormalWeight = VividMeshOptimizer.DefaultNormalWeight,
+                                        UVWeight = VividMeshOptimizer.DefaultUVWeight,
                                         MinTriangleReductionPerStep = 0.8f,
                                         DisableSloppySimplification = true,
                                         PreserveFinestLODLevels = true,

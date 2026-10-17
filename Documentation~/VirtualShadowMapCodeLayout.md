@@ -1,6 +1,6 @@
 # VirtualShadowMap 代码布局
 
-当前 Shader 与本地 Unreal `ReferenceVSM` 的函数对应见 [Shader 参考关系](VirtualShadowMapShaderReference.md)；下一步性能工作见 [定向光 VSM 优化路线](../Roadmap~/DirectionalVSMOptimization_20260917.md)。
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[Shader 参考关系](VirtualShadowMapShaderReference.md) | [SMRT 自适应退出](SMRTAdaptiveRays.md) | [SMRT 准备复用](SMRTReceiverPreparation.md) | [SMRT 成本诊断](SMRTCostDiagnostics.md) | [定向光 VSM 优化路线](../Roadmap~/DirectionalVSMOptimization_20260917.md)
 
 本次整理于 2026-09-16，保持现有渲染行为、资源 GUID、Pass 类型身份、shader kernel 名称及顺序。
 

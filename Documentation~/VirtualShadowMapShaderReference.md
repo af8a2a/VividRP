@@ -1,6 +1,8 @@
 # VSM Shader 与 Unreal 参考关系
 
-审计日期：2026-09-17。VividRP 基线：`038853de`。本文描述当前代码；实施优先级见 [定向光优化路线](../Roadmap~/DirectionalVSMOptimization_20260917.md)。
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[VSM 代码布局](VirtualShadowMapCodeLayout.md) | [SMRT 自适应退出](SMRTAdaptiveRays.md) | [SMRT 准备复用](SMRTReceiverPreparation.md) | [SMRT 成本诊断](SMRTCostDiagnostics.md) | [定向光优化路线](../Roadmap~/DirectionalVSMOptimization_20260917.md)
+
+审计日期：2026-09-17。VividRP 基线：`038853de`。本文描述当前代码。
 
 当日实施更新：分配提交已改为同角色/同层的组内分批并行，保留顺序槽配对；见 [实现与计时](../Temp~/VSM/Roadmap~/Experiments/VSMAllocationCommit_20260917/README.md)。下列当前代码函数位置随本次实现更新。
 

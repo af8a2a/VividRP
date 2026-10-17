@@ -1,5 +1,7 @@
 # Unity 7000.0.0a9 compatibility
 
+Back to index: [Documentation~ Index](README.md)
+
 Updated on 2026-10-14 against Unity `7000.0.0a9` revision `69e891f60f9a`.
 
 ## Package baseline

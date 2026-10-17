@@ -1,56 +1,43 @@
-# Bindless Native Plugin Setup
+# Bindless 原生插件设置 (`UnityBindless.dll`)
 
-## Why this exists
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[VividRP Wizard](VividRPWizard.md)
 
-VividRP's bindless path relies on `UnityBindless.dll` hooking D3D12 descriptor heap creation early enough to reserve a plugin-owned descriptor range.
+## 背景：为什么需要独立安装脚本
 
-On current Unity 6000.5 editor builds, native plugins loaded from `Packages/...` can arrive too late for this hook point. When that happens, the plugin can still see the active shader-visible CBV/SRV/UAV heap through `SetDescriptorHeaps`, but it misses the original `CreateDescriptorHeap` call and never learns the plugin-owned range. The visible symptom is:
+VividRP 的 Bindless 路径依赖 `UnityBindless.dll` 在 D3D12 描述符堆创建阶段尽早挂载 Hook，以预留由插件管理的 Bindless 描述符区间。
 
-- `GetSRVDescriptorHeapCount()` returns a non-zero heap size
-- `GetBindlessDescriptorCount()` stays `0`
-- bindless descriptors can never be created reliably
+在当前 Unity Editor 版本中，从 `Packages/...` 加载的原生插件时机可能晚于 D3D12 设备的 `CreateDescriptorHeap` 调用（对应 Unity 已知问题 `UUM-134389`）。一旦错过该时机，插件虽然仍能通过 `SetDescriptorHeaps` 观察到当前激活的 Shader-visible CBV/SRV/UAV 堆，但无法获知插件专属的描述符区间，表现为以下典型症状：
 
-This behavior matches Unity issue `UUM-134389`, where Unity's current workaround is to bypass Package Manager for this kind of early native plugin hook.
+- `GetSRVDescriptorHeapCount()` 返回非零堆大小；
+- `GetBindlessDescriptorCount()` 始终为 `0`；
+- 无法可靠地创建 Bindless 描述符。
 
-## Why the DLL lives in `BindlessNative~`
+## 设计机制：`BindlessNative~` 与 `Assets/Plugins`
 
-The package stores the native payload under `BindlessNative~`. Unity ignores folders suffixed with `~` during import, so the DLL stays versioned in the package without being loaded from the package itself.
+| 位置 | 角色与行为 |
+| --- | --- |
+| `Packages/VividRP/BindlessNative~` | **包内源码载荷（Source of Truth）**：利用 `~` 后缀使 Unity 在包导入阶段忽略该目录，避免从 `Packages/` 晚加载 |
+| `Assets/Plugins/VividRP/x86_64/` | **项目级早加载副本**：参与主工程插件发现路径并标记为 Preloaded，确保在 D3D12 设备与描述符堆初始化完成前加载 |
 
-That lets the package keep a single source of truth while forcing the actual early-loaded copy to come from the project.
+## 安装步骤
 
-## Why the Setup script copies into `Assets/Plugins`
-
-`Assets/Plugins/...` participates in Unity's normal project plugin discovery path. A project-local copy placed there and marked as preloaded can be loaded before the D3D12 device and descriptor heap setup is finished.
-
-That earlier load timing is the difference between:
-
-- successfully capturing the plugin-owned bindless descriptor range
-- only observing Unity's already-created default shader-visible heap
-
-## How to use it
-
-From the project root, run:
+在 Unity **项目根目录**下执行以下 PowerShell 脚本，完成后**重启 Unity Editor**：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 ```
 
-The script:
+该脚本会自动完成以下操作：
 
-- creates `Assets/Plugins/VividRP/x86_64` if it does not exist
-- copies `UnityBindless.dll`
-- copies `UnityBindless.pdb` when present
-- creates a preloaded plugin `.meta` file on first install
-- removes known stale copies from older locations
+1. 创建目录 `Assets/Plugins/VividRP/x86_64`（若不存在）；
+2. 复制 `UnityBindless.dll`（以及存在时的 `UnityBindless.pdb`）；
+3. 首次安装时生成开启了 Preload 的 `UnityBindless.dll.meta`；
+4. 清理旧位置的残留副本。
 
-After the script finishes, restart Unity.
+## 生成文件清单
 
-## Generated files
-
-The setup script installs the project-local runtime copy here:
+脚本安装后的项目本地运行时文件如下（这些文件是有意生成的，而 `BindlessNative~` 仅作为源载荷保留在包内）：
 
 - `Assets/Plugins/VividRP/x86_64/UnityBindless.dll`
 - `Assets/Plugins/VividRP/x86_64/UnityBindless.pdb`
 - `Assets/Plugins/VividRP/x86_64/UnityBindless.dll.meta`
-
-These generated files are intentional. The package-local copy in `BindlessNative~` is only the source payload.

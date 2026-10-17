@@ -1,10 +1,14 @@
-# VividRP Wizard
+# VividRP Wizard 配置向导
 
-Open **Window > Rendering > VividRP Wizard** to configure the basic Windows rendering requirements for VividRP.
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[Bindless 原生插件设置](Bindless.md)
 
-The Wizard can:
+打开 **Window > Rendering > VividRP Wizard** 即可检查并一键配置 VividRP 在 Windows 平台下的基础图形环境要求。
 
-- disable automatic graphics API selection for Standalone Windows 64 and place Direct3D12 first;
-- configure the active Build Profile to use DXC for shaders targeting Direct3D12.
+## 向导功能
 
-DXC selection is stored per Build Profile. Create or activate a Windows Build Profile before fixing that item. If the Editor is running with another graphics API after Direct3D12 is configured, restart the Editor to apply the graphics device change.
+1. **配置 Direct3D 12 图形 API**：为 Windows 64-bit Standalone 关闭自动图形 API 选择（Auto Graphics API），并将 **Direct3D12** 置于首位。
+2. **配置 DXC Shader 编译器**：为当前激活的 Build Profile 启用 Direct3D12 下的 **DXC** 编译器后端。
+
+> [!IMPORTANT]
+> - DXC 编译器配置按 **Build Profile** 独立存储；修复该项前请先创建或激活一个 Windows Build Profile。
+> - 若配置完 Direct3D12 后当前 Editor 仍运行在其他图形 API（如 D3D11 或 Vulkan）下，请**重启 Unity Editor** 使图形设备切换生效。

@@ -1,40 +1,38 @@
-# FFT Convolution Bloom
+# FFT 卷积泛光 (FFT Convolution Bloom)
 
-`BloomPass` supports two Volume modes:
+返回索引：[Documentation~ 索引](README.md)
 
-- `Scattering` keeps the existing mip-pyramid bloom and is the default fast path.
-- `Convolution FFT` convolves the thresholded HDR image with a user-supplied kernel.
+`BloomPass` 在 Volume 中支持两种模式：
 
-## Setup
+- **`Scattering`（默认快速路径）**：沿用多级 Mip 金字塔散射 Bloom。
+- **`Convolution FFT`**：使用用户提供的卷积核纹理在频域对阈值化后的 HDR 图像执行二维卷积。
 
-1. Add **Post-processing > Bloom** to a Volume Profile.
-2. Set **Mode** to `Convolution FFT`.
-3. Assign a linear HDR or grayscale texture to **Convolution Kernel**.
-4. Set **Convolution Center** to the kernel's brightest point. A centered kernel uses `(0.5, 0.5)`.
-5. Adjust **Convolution Size** and **Intensity**.
+## 配置步骤
 
-The kernel should use a black background and non-negative RGB values. Colored kernels are supported. The implementation clamps the bright center before convolution so the source highlight remains in the scene while the surrounding scattering lobe becomes bloom.
+1. 在 Volume Profile 中添加 **Post-processing > Bloom**。
+2. 将 **Mode** 设为 `Convolution FFT`。
+3. 为 **Convolution Kernel** 指定一张线性 HDR 或灰度卷积核纹理（建议使用黑色背景与非负 RGB 值，支持彩色卷积核）。
+4. 将 **Convolution Center** 设为卷积核最亮中心点（居中卷积核使用 `(0.5, 0.5)`）。
+5. 调节 **Convolution Size** 与 **Intensity**。
 
-## Implementation
+> [!NOTE]
+> 实现会在卷积前对中心高亮区域进行钳制（Clamp），使源高光保留在场景中，而周围的散射瓣转化为泛光。若未指定卷积核纹理或 FFT Kernel 不可用，`BloomPass` 会自动回退到 `Scattering` 模式。
 
-The implementation follows the same domain construction used by Unreal's FFT bloom:
+## 算法流程（对标 Unreal FFT Bloom）
 
-1. Downsample and threshold the scene input.
-2. Reserve zero padding from the kernel radius to limit circular wraparound.
-3. Round both axes up to powers of two, capped at `4096`.
-4. Wrap the centered spatial kernel around the FFT origin.
-5. Reduce its RGB energy and cache its frequency-domain representation.
-6. Execute unitary radix-2 forward transforms, complex multiplication, and inverse transforms. On Wave32/Wave64 hardware, each scanline uses wave shuffles for its first stages and group-shared memory for the remaining stages.
-7. Normalize by kernel energy and pass the result through the existing bloom tint, intensity, lens-dirt, lens-flare, and final-composite bindings.
+1. **降采样与阈值化**：对场景颜色输入进行降采样并提取高亮部分。
+2. **边缘零填充（Zero Padding）**：根据卷积核半径预留零填充区，抑制周期性圆周卷积带来的跨屏幕边缘回绕。
+3. **2 的幂次频域对齐**：将宽高向上取整至 2 的幂次（上限 `4096`）。
+4. **卷积核预处理与频谱缓存**：将居中的空间卷积核环绕对齐至 FFT 原点，归约 RGB 能量并缓存其频域表示（仅在纹理内容、尺寸、中心、钳制参数或 FFT 域尺寸变化时失效重建）。
+5. **正/逆 FFT 与频域复数乘法**：执行酉基 2（Unitary Radix-2）正向变换、频域复数乘法与逆向变换。每个水平或垂直轴仅需**单次 Dispatch**（不再按基 2 级数多次 Dispatch）。
+6. **能量归一化与合成**：按卷积核总能量归一化后，接入现有的 Bloom Tint、Intensity、Lens Dirt、Lens Flare 及最终合成绑定。
 
-The spectral kernel cache is invalidated when the texture contents, kernel size, center, clamp, or FFT domain changes.
+## 性能特征与硬件路径
 
-## Performance and limits
-
-- **Convolution Resolution Scale** defaults to `0.25`. FFT memory and work grow with the next power-of-two domain, so small resolution changes can double an axis.
-- **Convolution Buffer Scale** limits padding. Lower values save memory but can introduce bloom wrapping between opposite screen edges.
-- Frequency buffers use `R16G16B16A16_SFloat`. Extremely bright, broadly distributed pre-exposed values can exceed half-precision range.
-- Wave32/Wave64 is the primary FFT path for domains whose axes are at least one subgroup wide and no larger than `2048`.
-- Domains with a `4096` axis, smaller-than-subgroup axes, missing wave kernels, or unsupported subgroup sizes use the LDS compatibility path. It processes RGB channels sequentially through a reusable 16 KiB complex buffer.
-- Both paths use one dispatch per horizontal or vertical axis; the runtime no longer dispatches once per radix-2 stage.
-- If the convolution kernel is missing or FFT kernels are unavailable, `BloomPass` falls back to the scattering path.
+| 项目 | 行为与约束 |
+| --- | --- |
+| **Convolution Resolution Scale** | 默认 `0.25`。由于 FFT 内存和计算量按下一个 2 的幂次跳变，微小的分辨率调整可能使某条轴的计算域翻倍 |
+| **Convolution Buffer Scale** | 限制零填充比例。调低可节省显存，但过低会导致强高光在屏幕对侧边缘出现泛光回绕 |
+| **频域缓冲区精度** | 使用 `R16G16B16A16_SFloat`；极端明亮且大面积分布的预曝光值可能超出半精度浮点上限 |
+| **Wave32 / Wave64 主路径** | 当变换轴长度 ≥ 1 个 Subgroup 且 ≤ `2048` 时启用：扫描线前几级使用 Wave Shuffle，后续级使用 Group-Shared Memory (LDS) |
+| **LDS 兼容路径** | 当变换轴达到 `4096`、小于 Subgroup、缺少 Wave 变体或 Subgroup 尺寸不受支持时启用：通过复用的 16 KiB 复数共享内存按 R/G/B 通道顺序处理 |

@@ -1,5 +1,7 @@
 # Cluster generation quality: moving roof A/B
 
+Back to index: [Documentation~ Index](README.md) · Related: [Cluster LOD Generation](GPUDrivenClusterLOD.md) | [Main Traversal A/B](GPUDrivenMainTraversalAB.md)
+
 Date: 2026-10-15. Candidate source: `7103e223`; baseline builder: before that
 commit, archived in `Temp~/cluster-lod-quality/harness/`.
 

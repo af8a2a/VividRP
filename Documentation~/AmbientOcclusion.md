@@ -1,38 +1,28 @@
-# Ambient Occlusion
+# 环境光遮蔽 (Ambient Occlusion: XeGTAO / FidelityFX CACAO)
 
-VividRP's `Ambient Occlusion` volume component can run either the existing
-XeGTAO path or FidelityFX CACAO. Both implementations use the existing
-`GTAOPass` RenderGraph node and continue to publish the `GTAOTexture` output,
-so changing the implementation does not require rewiring a render graph.
-The runtime Volume component type is `AmbientOcclusion`; profiles created with
-the former `GTAO` type are migrated automatically.
+返回索引：[Documentation~ 索引](README.md)
 
-## Selecting an implementation
+VividRP 的 `Ambient Occlusion` Volume 组件支持在 **XeGTAO** 与 **FidelityFX CACAO** 两种算法实现之间无缝切换。两者共用同一个 `GTAOPass` RenderGraph 节点并统一输出 `GTAOTexture`，因此切换实现时**无需修改 `.vrdg` 渲染图连线**。
 
-1. Add or select the `Post-processing > Ambient Occlusion` volume component.
-2. Enable the component.
-3. Set `Implementation` to `GTAO` or `FidelityFX CACAO`.
+> [!NOTE]
+> 运行时 Volume 组件类型为 `AmbientOcclusion`；旧版使用 `GTAO` 类型创建的 Volume Profile 会自动迁移并默认保持 `GTAO` 模式。
 
-Existing profiles remain on `GTAO` by default. `Quality Level` uses values
-0-3 for GTAO. CACAO accepts 0-4; level 4 enables its adaptive importance-map
-path. The custom inspector displays only the controls used by the selected
-implementation.
+## 启用与切换实现
 
-## CACAO controls
+1. 在 Volume Profile 中添加或选中 `Post-processing > Ambient Occlusion`。
+2. 勾选启用该组件。
+3. 将 `Implementation` 设为 `GTAO` 或 `FidelityFX CACAO`（自定义 Inspector 会自动过滤并仅显示当前实现所需的参数）。
 
-- `CACAO Downsampled` reduces the internal AO resolution and enables CACAO's
-  depth-aware bilateral upsampler.
-- `CACAO Blur Passes` selects 0-8 edge-sensitive blur iterations.
-- `CACAO Adaptive Quality Limit` controls the extra sample budget used only by
-  quality level 4.
-- Shadow multiplier, power, clamp, horizon threshold, detail strength, fade
-  distances, sharpness, and bilateral sigma values map to the corresponding
-  FidelityFX CACAO settings.
+| 实现模式 | `Quality Level` 范围 | 特性说明 |
+| --- | --- | --- |
+| `GTAO`（默认） | `0` – `3` | 基于 XeGTAO 的屏幕空间环境光遮蔽路径 |
+| `FidelityFX CACAO` | `0` – `4` | 等级 `4` 启用自适应重要性图（Adaptive Importance-Map）路径 |
 
-CACAO consumes HZB mip 0 as device depth and decodes world-space normals from
-VividRP's `GBuffer1`. Its deinterleaved depth, normal, SSAO, importance-map,
-and load-counter textures are transient RenderGraph resources.
+## FidelityFX CACAO 参数与管线细节
 
-The port is based on AMD FidelityFX CACAO and its Intel ASSAO-derived shader
-code. License text and attribution are included in
-`Shaders/Core/Private/CACAO/LICENSE.txt` and the package third-party notices.
+- **`CACAO Downsampled`**：降低内部 AO 分辨率，并启用 CACAO 的深度感知双边上采样器（Depth-Aware Bilateral Upsampler）。
+- **`CACAO Blur Passes`**：选择 `0` – `8` 次边缘敏感模糊迭代。
+- **`CACAO Adaptive Quality Limit`**：控制仅在 `Quality Level = 4` 下生效的额外采样预算。
+- **核心外观参数**：Shadow Multiplier、Power、Clamp、Horizon Threshold、Detail Strength、Fade Distances、Sharpness 与 Bilateral Sigma 直接映射到对应的 FidelityFX CACAO 参数。
+- **输入与瞬态资源**：CACAO 读取 HZB Mip 0 作为设备深度，并从 `GBuffer1` 解码世界空间法线；其内部的去交织（Deinterleaved）深度、法线、SSAO、重要性图与负载计数器纹理均为 RenderGraph 瞬态资源（Transient Resources）。
+- **开源许可**：移植基于 AMD FidelityFX CACAO 及其源自 Intel ASSAO 的着色器代码，许可声明见 `Shaders/Core/Private/CACAO/LICENSE.txt` 与包根目录的 `Third Party Notices.md`。

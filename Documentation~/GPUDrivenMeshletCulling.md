@@ -1,82 +1,46 @@
-# Conservative meshlet culling
+# 保守 Meshlet 视锥、法线锥与 HZB 裁剪 (`GPUMeshletCulling.compute`)
 
-`GPUMeshletCulling.compute` uses the same affine-box support predicate as instance
-culling. Meshlet metadata supplies a local sphere, so the default box is its
-enclosing local cube. VSM geometry-bound variants use their tighter auxiliary
-local AABB. Neither path approximates a sheared instance by the largest transformed
-radius axis. Existing buffer layouts, draw counters, material-facing conventions,
-VSM page queries and the first-pass/recovery queue contracts are unchanged.
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[保守实例视锥裁剪](GPUDrivenInstanceCulling.md) | [Cluster LOD 生成与选择](GPUDrivenClusterLOD.md)
 
-The reference is the local UE checkout:
+## 算法概述
 
-- `E:/UnrealEngine/Engine/Shaders/Private/Nanite/NaniteClusterCulling.usf`:
-  `FBoxCull` and cluster `FrustumHZB`.
-- `NaniteCullingCommon.ush`: previous/current view HZB and near-plane protection.
-- `NaniteHZBCull.ush`: projected box bounds and inclusive reversed-Z depth tests.
+`GPUMeshletCulling.compute` 与实例裁剪共享同一套**仿射包围盒（Affine-Box）平面支撑谓词**：
 
-This adapts those geometric rules to VividRP's existing two-stage occlusion pass;
-it does not port Nanite's resource layout or streaming system. The local-space
-normal cone remains a meshoptimizer-specific stage.
+- **默认包围盒**：由于 Meshlet 元数据提供局部包围球，默认构建其外接局部立方体进行仿射变换。
+- **VSM 紧致包围盒变体**：VSM 几何边界变体直接使用更紧致的辅助局部 AABB。
+- **精确错切/非均匀缩放**：两条路径均不采用“最大变换轴半径”近似错切实例；现有的 GPU 缓冲区布局、绘制计数器、材质朝向约定、VSM 页查询以及双阶段遮挡剔除（First-Pass / Recovery Queue）契约保持不变。
 
-## Precision and rejection rules
+### 参考实现（Unreal Engine Nanite）
 
-The target guarantees reversed Z and the D3D/Vulkan clip-depth interval [0, W].
-There is no forward-Z branch or runtime depth-convention parameter. The pyramid
-reduces with `min`, padding uses clear depth zero, and equality remains visible.
-Projection and depth use FP32 throughout.
+本实现将 Nanite 的几何裁剪准则适配到 VividRP 的双阶段 HZB 遮挡管线中，同时保留 meshoptimizer 特有的局部空间法线锥（Normal Cone）裁剪阶段：
 
-The projected rectangle bounds all eight corners of the affine box. Projection
-error bounds include magnitudes before model/view translation cancellation; the
-rectangle and closest depth expand toward visibility, with two additional pixels
-of guard. Queries touching a clip-depth boundary, crossing W=0 or extending outside
-the historical viewport remain visible. The latter cannot safely clamp to the
-border of the previous frame's depth evidence. Mip selection covers the rectangle
-with at most four loads; missing mips and truncated odd-dimension tails also retain
-geometry. A large rectangle can be tested when a covering mip exists.
+- `NaniteClusterCulling.usf`：`FBoxCull` 与 Cluster `FrustumHZB`；
+- `NaniteCullingCommon.ush`：上一帧/当前帧视图 HZB 与近裁面保护；
+- `NaniteHZBCull.ush`：投影包围盒矩形计算与 Reversed-Z 深度包含性测试。
 
-Frustum support uses strict `float16_t`/`float16_t3` arithmetic on normalized axes
-and bounded plane normals, with the shared 1/32 outward error allowance. World
-coordinates, matrix transforms, plane distances and offsets remain FP32.
+---
 
-The normal cone and viewing rays stay in object space under nonuniform scale,
-shear and reflection. The material's original culling side is used because raster
-renderer-list selection already compensates mirrored winding. The perspective
-test uses meshoptimizer's sufficient sphere-cone condition, enlarged for camera
-transform error. Only the normalized direction/axis dot uses FP16, with a 1/128
-absolute margin covering half conversion/arithmetic and denormal flushing.
-Invalid/degenerate cones and ambiguous boundaries remain visible. Double-sided
-materials skip cone rejection. These allowances can retain extra geometry.
+## 三大裁剪阶段与精度规则
 
-## Validation
+| 裁剪阶段 | 精度与保守性规则 |
+| --- | --- |
+| **1. 视锥平面支撑裁剪 (Frustum Support)** | • 对归一化半轴与有界平面法线使用严格的 `float16_t` / `float16_t3` 算术，并附加共享的 `1/32` 向外误差余量<br>• 世界坐标、矩阵变换、平面距离与偏移保持 `FP32` |
+| **2. 局部空间法线锥背面裁剪 (Normal Cone)** | • 在非均匀缩放、错切与镜像反射下，法线锥与视线向量始终保持在**模型空间（Object Space）**计算（镜像绕序已由光栅化 RendererList 桶选择补偿，因此直接使用材质原始剔除面设置，双面材质跳过法线锥剔除）<br>• 透视测试采用 meshoptimizer 的球-锥充分条件，并针对相机变换误差做外扩保护<br>• 仅归一化视线方向与锥轴的点积使用 `FP16`，并附加 `1/128` 绝对余量覆盖半精度转换/运算与非规格化数刷零；退化/非法法线锥及边界情况一律保留可见 |
+| **3. 双阶段 HZB 遮挡剔除 (HZB Occlusion)** | • 全程采用 `FP32` 投影与深度计算；固定遵循 **Reversed-Z** 与 D3D/Vulkan 裁剪深度区间 `[0, W]`（深度金字塔以 `min` 归约，Padding 清除深度为 `0`，深度相等判为可见）<br>• 投影矩形包围仿射盒全部 8 个角点，考虑模型/视图平移相消前的幅值误差，向可见方向扩展矩形与最近深度，并额外增加 **2 像素保护边距（Guard Band）**<br>• 触碰裁剪深度边界、跨越 $W = 0$ 或超出历史视口边界的查询一律保留可见（超出上一帧视口边缘不可安全 Clamp 到边界深度）<br>• Mip 选择保证最多 4 次采样覆盖矩形；缺失 Mip 或奇数尺寸截断尾部均保守保留几何 |
 
-From the package directory:
+---
+
+## 独立验证 (`Validate-MeshletCulling.ps1`)
+
+在包根目录下执行：
 
 ```powershell
 ./Tools~/Validate-MeshletCulling.ps1
 ./Tools~/Validate-InstanceFrustumCulling.ps1
 ```
 
-The meshlet command compiles all 12 production kernels (including VSM variants
-and depth reduction), checks production DXIL for native `f16` dot instructions,
-and executes the shared predicates on D3D12. It requires DXC, clang-cl, Windows
-SDK/linker, Python 3, and a GPU with native 16-bit operations. It resolves Editor
-includes through Bee, or accepts `-UnityCgIncludes`. Outputs default to
-`Temp~/meshlet-culling`; include junctions created by the script are removed
-without traversing their targets.
-
-24,640 deterministic cases compare GPU readback to independent double-precision
-corner projection and angular cone oracles starting from the same FP32 inputs.
-They cover all frustum planes, shear/reflection, extreme scales, large translation
-cancellation, perspective/orthographic views, near-plane intersections, historical
-viewport edges, equality/clear/invalid depth, odd mip tails and invalid metadata.
-Controls require both rejection and retention, so an always-visible predicate
-cannot pass. The FP32 diagnostic variant keeps the same outward margins.
-
-Both native FP16 and diagnostic FP32 passed on RTX 5070 Ti with no false frustum,
-cone or occlusion rejections and no rectangle/depth containment failures. The
-shared instance predicate is separately regressed by its existing 41,024 cases.
-The command also compiles six LOD-build kernels and checks 16,448 parent/child
-LOD selection cases; see `GPUDrivenClusterLOD.md` for the Camera_1 roof gap fix
-and its live D3D12 GameView verification. These checks do not establish general
-temporal occlusion/VSM integration or frame-time improvement; no performance
-improvement is inferred from the presence of FP16 instructions.
+- **验证范围**：
+  1. 编译全部 12 个生产 Meshlet 裁剪 Kernel（含 VSM 变体与深度归约），静态检查 DXIL 原生 `f16` 点积指令并在 D3D12 上直接运行共享谓词（输出默认位于 `Temp~/meshlet-culling`）；
+  2. 对比 **24,640 个确定性用例**的 GPU 回读结果与独立 Python 双精度（FP64）8 角点投影及角度锥参考基准（覆盖全部视锥面、错切/镜像、极端缩放、大平移相消、透视/正交、近平面相交、历史视口边界、相等/Clear/非法深度、奇数 Mip 尾部与非法元数据）；
+  3. 同时编译 6 个 LOD 构建 Kernel 并校验 **16,448 个父子 LOD 选择用例**（详见 [Cluster LOD 文档](GPUDrivenClusterLOD.md)）。
+- **验证结果**：在 RTX 5070 Ti 上，原生 FP16 与诊断 FP32 变体均实现**零错误剔除（Zero False Frustum / Cone / Occlusion Rejections）**与**零投影矩形/深度包含失败**。

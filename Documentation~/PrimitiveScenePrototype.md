@@ -1,5 +1,7 @@
 # VividPrimitiveScene v0 原型
 
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[PrimitiveScene V1](PrimitiveSceneV1.md)
+
 ## 状态与目的
 
 `VividPrimitiveScene` 是现有 GPUDriven 场景旁边的一份内部镜像。v0 的目的不是改变最终绘制结果，而是先验证以下基础能力：

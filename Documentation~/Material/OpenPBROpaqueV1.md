@@ -1,5 +1,7 @@
 # OpenPBROpaqueV1 默认材质合约
 
+返回索引：[Documentation~ 索引](../README.md) · 相关文档：[SimpleSlab V1 实时 BSDF 合约](SimpleSlabV1.md)
+
 本合约冻结 VividRP 下一代默认 PBR 的原生输入和 BSDF 调用语义。默认家族选择包内的 OpenPBR 1.1 实现，首个 profile 为 `OpenPBROpaqueV1`：不透明、各向同性、单个 OpenPBR 叶 Closure。OpenPBR 内部的漫反射、介电反射和金属反射仍由 Vendor 实现组合；“单 Closure”不表示只保留一个反射 lobe。
 
 原生编译入口与 Native Catalog → Resolve → Deferred 已接通，详见“原生 Deferred 接入”。旧单层／双层材质继续使用 SimpleSlab；默认创建、导入、预览和现有 StandardLit/PT adapter 不变。生产代码接入与 GPU 画面／性能验收分别记录。

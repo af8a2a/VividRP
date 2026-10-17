@@ -1,192 +1,86 @@
-# RenderGraph SubSystem
+# RenderGraph SubSystem（局部子图）
+
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[RenderGraph 编辑器](RenderGraphEditor.md) | [可序列化资源描述符](RenderGraphResourceDescriptors.md)
 
 ## 目标
 
-`SubSystem` 是基于 Graph Toolkit `Local Subgraph` 的一层编辑器期抽象，用来把一组 `RenderPass` 与其私有资源折叠成一个高层节点，降低主 `RenderGraph` 的复杂度。
+`SubSystem` 是基于 Graph Toolkit `Local Subgraph` 的一层**编辑器期抽象**，用来将一组 `RenderPass` 与其私有资源折叠为一个高层节点，显著降低主 `RenderGraph` 的视觉复杂度。
 
-`SubSystem` 只存在于 Authoring / Import 阶段。`.vrdg` 导入后仍然只生成当前的扁平运行时数据 `RenderGraphData`，不会引入新的 runtime 层级执行模型。
+> [!IMPORTANT]
+> `SubSystem` 仅存在于 Authoring / Import 阶段。`.vrdg` 导入后仍然编译为扁平的运行时数据 `RenderGraphData`，不会引入额外的运行时层级执行开销。
 
-## 适用场景
+![RenderGraph SubSystem 示例](Image/SubGraph.png)
 
-- 把一段固定的后处理链路折叠成单个节点
-- 把一组只在局部使用的中间 `Texture / Buffer / RenderList / RTAS` 收进局部系统
-- 在主图里只保留少量明确的输入/输出资源，隐藏内部实现细节
+## 适用场景与取舍
 
-## v1 约束
+| 推荐使用 `SubSystem` | 建议直接保留在主图 |
+| --- | --- |
+| 内部资源与中间 Pass 很多，但对外输入/输出接口很少 | 只有一两个 Pass，结构本身已足够简单 |
+| 把一段固定的后处理、天空或光照链路折叠为单个高层节点 | 需要跨边界暴露大量资源，导致子图端口与主图一样复杂 |
+| 将局部使用的中间 `Texture / Buffer / RenderList / RTAS` 隐藏为私有实现细节 | 需要跨边界传递大量标量参数，或需要多层次嵌套复用 |
 
-- 仅支持 `Local Subgraph`
-- 仅支持一层 `SubSystem`，不允许嵌套
-- 仅支持显式 I/O，不做自动接口推导
-- 运行时仍然展开为扁平 `RenderGraphData`
-- 支持在 `SubSystem` 内放置 `Pass`、私有资源节点与 `History` 节点
+---
 
-## 边界类型
+## 边界契约与 V1 约束
 
-`SubSystem` 输入/输出变量只允许以下资源类型：
+### 1. 允许跨边界传递的 I/O 变量类型
 
-- `RenderGraphTexture`
-- `RenderGraphBuffer`
-- `RenderGraphRenderList`
-- `RenderGraphAccelerationStructure`
+| 允许作为 `SubSystem` 输入/输出 | **不允许**作为 `SubSystem` 边界传递 |
+| --- | --- |
+| `RenderGraphTexture`<br>`RenderGraphBuffer`<br>`RenderGraphRenderList`<br>`RenderGraphAccelerationStructure` | • `float` / `int` / `bool` / `enum` 等标量参数（继续保留在内部 `RenderPass` 节点选项上）<br>• 任意普通 C# 对象引用<br>• 控制流语义或专用 `History Prev/Curr` 边界语义 |
 
-以下内容 **不** 作为 `SubSystem` 边界传递：
+### 2. 核心约束
 
-- `float / int / bool / enum`
-- 任何普通对象引用
-- 控制流语义
-- 专门的 `History Prev/Curr` 边界语义
+- **仅支持 `Local Subgraph`**：不支持外部独立资产形式的 Asset Subgraph。
+- **单层结构**：仅允许从主图创建一层 `SubSystem`，不支持嵌套子系统。
+- **显式接口**：对外端口完全由子图内的 `Input / Output Variable` 显式声明，不做基于连线的自动推导。
+- **单一输出源**：每个 `SubSystem` 输出变量应保持单一内部生产者来源，避免编译歧义。
 
-> 标量参数继续保留在内部 `RenderPass` 的参数或选项上，不通过 `SubSystem` 端口传递。
+---
 
 ## Authoring 工作流
 
-### 1. 在主图中创建 SubSystem
+### 1. 在主图中创建并进入 SubSystem
 
-1. 创建或打开一个 `.vrdg`
-2. 在主图中使用 Graph Toolkit 提供的 `Local Subgraph` 创建入口
-3. 选择 `RenderGraphSubSystemGraph`
-4. 主图中会出现一个内建 `Subgraph Node`，节点标题等于子系统图名称
+1. 打开一个 `.vrdg` 主图资产。
+2. 使用 Graph Toolkit 的 `Local Subgraph` 创建入口，选择 `RenderGraphSubSystemGraph`。
+3. 主图中会生成一个内建 `Subgraph Node`（节点标题即子系统图名称）。
+4. 双击该 `SubSystem` 节点即可进入子图编辑（内部同样支持 `RenderPassNodeData`、专用 Pass 节点及四类资源节点与 History 节点）。
 
-> `SubSystem` 只允许从主图创建。进入 `SubSystem` 后不会继续提供创建下一层子系统的能力。
+### 2. 定义显式输入与输出
 
-### 2. 进入 SubSystem 编辑
+| 方向 | 配置步骤 |
+| --- | --- |
+| **输入 (`Input variable`)** | 1. 在子图 Blackboard 中新建 `Input variable`，类型设为允许的四种资源类型之一<br>2. 将其拖入子图创建 `Variable Node`<br>3. 将该变量节点的输出连接到子图内部 `Pass` 的输入端口 |
+| **输出 (`Output variable`)** | 1. 在子图 Blackboard 中新建 `Output variable`，类型设为允许的四种资源类型之一<br>2. 将其拖入子图创建 `Variable Node`<br>3. 将内部 `Pass` 产出的资源连接到该输出变量节点 |
 
-双击主图中的 `SubSystem` 节点，进入子图编辑。
+定义完成后，回到主图即可看到 `SubSystem Node` 自动暴露出对应的输入/输出端口。
 
-在 `SubSystem` 内部可以继续使用现有节点生态：
+---
 
-- `RenderPassNodeData`
-- `TextureResourceNodeData`
-- `BufferResourceNodeData`
-- `RenderListResourceNodeData`
-- `AccelerationStructureResourceNodeData`
+## 编译期展开与连接语义
 
-### 3. 定义显式输入/输出
-
-`SubSystem` 对外接口完全由子图中的 `Input / Output Variable` 决定。
-
-推荐做法：
-
-1. 在 `SubSystem` 内新建一个 `Input variable`
-2. 类型设置为允许的资源类型之一
-3. 为它创建 `Variable Node`
-4. 把该变量节点输出连接到内部 `Pass` 的输入端口
-
-输出同理：
-
-1. 在 `SubSystem` 内新建一个 `Output variable`
-2. 类型设置为允许的资源类型之一
-3. 为它创建 `Variable Node`
-4. 把内部产出的资源连接到这个输出变量节点
-
-创建完成后，主图中的 `SubSystem Node` 会自动暴露对应输入/输出端口。
-
-## 连接规则
-
-### 输入
-
-- 主图中接到 `SubSystem` 输入端口的资源，会在编译时重写为子图内部 `Input variable` 的真实来源
-- 内部 `Pass` 读取的是外层真实来源，而不是额外复制的一份资源
-
-### 输出
-
-- 子图中连接到 `Output variable` 的资源，会在编译时作为 `SubSystem` 输出端口的真实来源
-- 主图下游 `Pass` 读取的是该内部真实生产者
-
-### 私有资源
-
-- `SubSystem` 内部资源节点默认是私有实现细节
-- 它们会参与最终编译并进入全局描述符列表
-- 主图不能直接访问这些私有资源
-
-## 推荐的构建方式
-
-一个典型结构如下：
-
-1. 主图上游 `Pass` 产生资源
-2. 资源进入 `SubSystem`
-3. `SubSystem` 内部完成若干步处理
-4. 最终结果通过 `Output variable` 暴露回主图
-5. 主图下游 `Pass` 继续消费
-
-例如：
-
-```text
-Main Pass A
-    -> SubSystem(InputColor)
-        -> Internal Pass 1
-        -> Internal Pass 2
-        -> Internal Private Texture
-        -> OutputColor
-    -> Main Pass B
+```mermaid
+flowchart LR
+    U["主图上游 Pass"] -->|InputColor| S_In["SubSystem Input Variable"]
+    subgraph SubSystem ["SubSystem (编译期展开)"]
+        S_In --> P1["Internal Pass 1"]
+        P1 --> T["Internal Private Texture"]
+        T --> P2["Internal Pass 2"]
+        P2 --> S_Out["SubSystem Output Variable"]
+    end
+    S_Out -->|OutputColor| D["主图下游 Pass"]
 ```
 
-## 导入与运行时行为
+- **零拷贝边界重写**：
+  - **输入**：主图连接到 `SubSystem` 输入端口的资源，在编译时直接重写为子图内部 `Input variable` 的真实上游来源，不会产生额外资源复制。
+  - **输出**：子图连接到 `Output variable` 的内部资源，在编译时直接作为主图下游 `Pass` 的真实生产者。
+- **私有资源隔离**：子图内部的资源节点默认作为私有实现细节参与全局描述符编译，主图无法直接访问或预览它们。
+- **运行时透明**：`RenderGraphImporter` 先将主图与所有 `SubSystem` 展开为一份语义扁平图，再生成 `RenderGraphPassDefinition` 并写入 `RenderGraphData`，`PassRecorder` 的运行时执行逻辑完全无需感知 `SubSystem`。
 
-`.vrdg` 导入时：
-
-1. Importer 先把主图与所有 `SubSystem` 展开成一份语义扁平图
-2. 再沿用现有编译逻辑生成 `RenderGraphPassDefinition`
-3. 最终写入同一份扁平 `RenderGraphData`
-
-这意味着：
-
-- runtime 不知道 `SubSystem` 的存在
-- `PassRecorder` 仍按现有扁平 Pass 列表执行
-- 不需要修改运行时资源绑定模型
+---
 
 ## 校验规则
 
-### 子系统内部
-
-进入子图后，仍然沿用现有的 pass / resource / history 校验逻辑。
-
-### 主图层面
-
-主图会额外校验：
-
-- `SubSystem` I/O variable 是否为允许的资源类型
-- 是否出现嵌套 `SubSystem`
-- 子图整体是否合法
-
-如果子图整体不合法，主图中的 `SubSystem Node` 会收到一个汇总错误；具体错误需要进入子图查看。
-
-## 限制与注意事项
-
-- 仅支持本地子图，不支持 Asset Subgraph
-- 不支持嵌套 `SubSystem`
-- 不支持通过当前连线自动推导 `SubSystem` 接口
-- 不支持标量参数穿越 `SubSystem` 边界
-- 不支持主图直接访问或预览内部私有资源
-- `SubSystem` 输出变量应保持单一内部来源，避免歧义
-
-## 最小示例
-
-### 目标
-
-把一段“输入颜色 -> 局部处理 -> 输出颜色”的处理链折叠为一个 `SubSystem`。
-
-### 步骤
-
-1. 在主图创建一个 `SubSystem`
-2. 进入子图
-3. 新建 `Input variable`：`InputColor : RenderGraphTexture`
-4. 新建 `Output variable`：`OutputColor : RenderGraphTexture`
-5. 放置一个内部 `RenderPass`
-6. 将 `InputColor` 连接到该 `Pass` 输入
-7. 将该 `Pass` 输出连接到 `OutputColor`
-8. 回到主图，把上游资源连到 `InputColor`
-9. 把 `OutputColor` 连到下游 `Pass`
-
-最终主图中只保留一个高层节点，但运行时仍会展开成真实的 Pass 依赖链。
-
-## 何时不建议使用
-
-以下情况更适合继续留在主图直接表达：
-
-- 只有一两个 Pass，结构本身已经足够简单
-- 需要大量跨边界暴露资源，导致 `SubSystem` 端口和主图一样复杂
-- 需要跨边界传递大量标量参数
-- 需要多层次递归复用
-
-当一个局部流程“内部资源很多，但外部接口很少”时，`SubSystem` 的收益最高。
+- **子系统内部**：沿用主图相同的 Pass、资源描述符与 History 校验规则。
+- **主图边界**：额外校验 `SubSystem` I/O 变量类型是否合法、是否存在嵌套 `SubSystem` 以及子图整体是否通过验证。若子图内部存在错误，主图中的 `SubSystem` 节点会显示汇总报错提示，双击进入子图即可定位具体节点错误。

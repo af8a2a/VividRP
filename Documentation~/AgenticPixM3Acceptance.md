@@ -1,5 +1,7 @@
 # Agentic PIX M3 acceptance — 2026-09-28
 
+Back to index: [Documentation~ Index](README.md) · Related: [AgenticDebugger PIX Guide](../Editor/AgenticDebugger/PIX.md) | [Tools~/PIX README](../Tools~/PIX/README.md)
+
 Environment: `E:/VividRPSample`, Unity 6000.7.0b1, PIX 2606.18-preview,
 Direct3D12, `Assets/Scenes/SampleScene.unity`, Main Camera, original
 `Assets/New Vivid Render Pipeline Asset.asset` and

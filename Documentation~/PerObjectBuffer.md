@@ -1,9 +1,12 @@
-# Per-Object Buffer
+# Per-Object Buffer 逐物体数据系统
+
+返回索引：[Documentation~ 索引](README.md)
 
 VividRP 的 Per-Object Buffer 为 `MeshRenderer` 和 `SkinnedMeshRenderer` 提供不依赖
 `MaterialPropertyBlock` 的逐 Renderer Shader 数据。所有布局的记录共享同一个 Raw
 `GraphicsBuffer`；每条记录在 `ShaderUserValue` 中保存自己的 16 字节粒度地址，因此 Character、
 Terrain、Decal、Effect 等不同 stride 的布局可以同时存在。
+
 
 ## 用代码声明布局
 

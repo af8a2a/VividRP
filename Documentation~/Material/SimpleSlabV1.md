@@ -1,5 +1,7 @@
 # Vivid Simple Slab V1 — frozen contract
 
+Back to index: [Documentation~ Index](../README.md) · Related: [OpenPBROpaque V1 Contract](OpenPBROpaqueV1.md)
+
 Phase 8.8 freezes the first default real-time BSDF and its Deferred integration.
 This document describes the final implementation, superseding the intermediate
 8.0–8.7 migration notes. Contract freeze and runtime acceptance are separate:

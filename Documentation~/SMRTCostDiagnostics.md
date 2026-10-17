@@ -1,32 +1,46 @@
-# SMRT 成本诊断
+# SMRT 成本诊断 (`smrt-cost`)
 
-## 使用
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[SMRT 自适应射线退出](SMRTAdaptiveRays.md) | [SMRT 接收点准备复用](SMRTReceiverPreparation.md) | [VSM 代码布局](VirtualShadowMapCodeLayout.md)
 
-Unity 菜单：**Tools → VividRP → Diagnostics → Capture SMRT Cost**。
+## 调用方式
 
-也可调用现有诊断 API（`vivid_diagnostics` CLI 命令的 `request` 参数接受相同 JSON）：
+### 1. Unity Editor 菜单
+选择 **Tools → VividRP → Diagnostics → Capture SMRT Cost**。
+
+### 2. C# / CLI 诊断接口
+通过 `VividDiagnostics.Execute`（或 `vivid_diagnostics` CLI 命令的 `request` 参数）提交 JSON 请求：
 
 ```csharp
 VividDiagnostics.Execute("{\"action\":\"smrt-cost\",\"warmupFrames\":64,\"repaintViews\":true}");
 ```
 
-返回 `jobId` / `outputDirectory`；用 `status` 查看结果，或带该 `jobId` 调用 `cancel`。与 profile/capture 任务互斥。`smrt-cost` 在预热后只采一帧，`frames` 不表示重复采样数。需要正在渲染且 VSM Active 的目标相机；默认主相机，可用 `cameras` 的 id 指定 `cameraId`。未使用 VSM 的相机会超时，工具不会修改画质配置。
+- **任务管理**：返回 `jobId` 与 `outputDirectory`；可通过 `status` 查询进度或携带 `jobId` 调用 `cancel`（与 profile/capture 任务互斥）。
+- **采样规则**：在 `warmupFrames` 预热后**仅采集一帧**（`frames` 参数不代表重复采样帧数）。
+- **相机要求**：目标相机必须正在渲染且处于 VSM Active 状态（默认使用主相机，可通过 `cameraId` 指定）；未启用 VSM 的相机会超时退出，工具不会自动篡改画质配置。
 
-输出 `smrt-cost.json`、请求、前/后与采样帧状态快照。schemaVersion 3 统计 UE 固定步点、逐点粗层寻址、最终深度 slice 0 读取、过渡与回退；保留旧 DDA/隐藏层计数槽位（生产路径应为零）；每项有 total、每接收像素均值、p50/p95/p99/max、非零像素数和 activeP95。普通百分位包含零工作接收像素，排除天空；activeP95 再排除零工作像素，避免低频回退被 p95=0 隐藏。
+---
 
-## 范围与成本
+## 输出格式与统计口径 (`schemaVersion: 3`)
 
-- 按当前生产模式（固定预算或自适应退出）统计实际 ray 数；`_VSMHistoryParameters.y` 仅在诊断重放中选择策略，生产使用独立 kernel。
-- 在原始 `ResolveTrace` 之后、降噪之前重放同一 receiver 函数。复用原相机全部参数、蓝噪声、页表、投影和统一物理深度池；当前生产 Trace 只读取已合并的 slice 0；不改射线数、步数、质量、历史或页请求。
-- 重放结果转换到当前原始阴影目标的 **R16_SFloat** 精度，与同帧原始输出比较。输出精确差异计数和超过 1e-6 / 非有限值计数；后者非零时任务标记失败。
-- 32 个计数器按像素写入结构化缓冲，无全屏全局原子热点。buffer 为 `width * height * 128` 字节，1920×1080 约 **253.125 MiB**；只在显式采样时创建，读回完成后释放。不会逐帧常驻。
-- 新入口 `VSMReceiverCost` 定义 `VIVID_VSM_SMRT_COST`；普通入口没有计数器存储、读回或额外 dispatch。无 Editor 订阅者时，捕获钩子不解析纹理或分配资源；Player 不编译钩子。
-- 计数是源码级工作量，**不是内部函数 GPU 毫秒、带宽或缓存 miss**。finalDepthLoads 计最终 slice 0 的标量 Load 调用，含 PCF 回退；旧 static-front/hidden 槽位保留但生产路径为零。traceSamples 是实际步点数，每条 ray 最多 N+1；samplePageProbes 包含接收点初始层选择与每个步点的回退寻址，不等于深度读取数。
-- `VSM.SMRTCostReplay` 标记只包含重放 dispatch。诊断会扰动缓存并产生大缓冲写回；应单独采集正常 `ResolveTrace`、`FilterHorizontal`、`FilterTemporalVertical`/`FilterVertical` 时间，不把诊断帧的 Resolve 父标记当作生产性能。
-- 多项计数互相包含（例如 rays/traceCalls/traceSamples、projection/transition）；不可相加当作总工作或按读取次数比例分摊 GPU 时间。
+采集完成后在输出目录生成 `smrt-cost.json` 以及请求参数、采样前后与当帧状态快照：
 
-计数 ABI：`SMRTCostCapture.Names` 与 `VSM_COST_ADD` 索引一一对应；counter 0 是非天空接收像素标志，30/31 为输出差异。CPU 归约用 64 位总量，百分位采用 nearest rank。修改 raw shadow 输出格式时必须同步重放比较的量化规则。
+| 统计维度 | 说明 |
+| --- | --- |
+| **核心计数项** | UE 固定步点（`traceSamples`）、逐点粗层寻址（`samplePageProbes`）、最终深度 Slice 0 读取（`finalDepthLoads`，含 PCF 回退）、层间过渡与回退（旧 DDA / 隐藏层计数槽位保留，但在当前生产路径中恒为 `0`） |
+| **聚合指标** | 每项指标输出：`total`、每接收像素均值、`p50` / `p95` / `p99` / `max`、非零像素数以及 `activeP95` |
+| **百分位口径** | 普通百分位（`p50`/`p95`/`p99`）包含零工作量的非天空接收像素（排除天空）；**`activeP95`** 进一步排除零工作量像素，避免低频回退被 `p95 = 0` 掩盖 |
+| **计数器 ABI** | `SMRTCostCapture.Names` 与 `VSM_COST_ADD` 索引一一对应：Counter `0` 为非天空接收像素标志，Counter `30` / `31` 为重放输出差异计数；CPU 端使用 64 位整数归约总量，百分位采用 Nearest Rank |
 
-[首次实测与优化判断](../Temp~/VSM/Roadmap~/Experiments/SMRTCost_20260917/README.md)。
+---
 
-接收点/投影准备复用不会减少这些 ray、步点或深度读取计数；准备计算的收益由普通 kernel 配对计时测量，见[复用报告](../Temp~/VSM/Roadmap~/Experiments/SMRTReceiverPreparation_20260918/README.md)。
+## 重放机制与性能测量边界
+
+- **同帧原位重放**：在原始 `ResolveTrace` 之后、降噪之前，使用新增的 `VSMReceiverCost`（定义 `VIVID_VSM_SMRT_COST`）重放同一个 Receiver 函数，完全复用当帧相机的蓝噪声、页表、投影与统一物理深度池（Slice 0），不改变射线数、步数、历史或缺页请求。
+- **精度一致性自检**：重放结果会量化到原始阴影目标的 **`R16_SFloat`** 精度并与同帧生产输出逐像素比对，统计精确差异数以及超出 `1e-6` / 非有限值的像素数（后者非零时任务直接标记为失败）。
+- **按需显存分配**：32 个计数器按像素写入无全局原子竞争的结构化缓冲区（大小 `width × height × 128` 字节，1920×1080 下约 **253.125 MiB**），仅在显式采样帧创建并在读回后立即释放；正常生产 Kernel 不包含任何计数器存储、读回或额外 Dispatch。
+
+> [!IMPORTANT]
+> **如何正确解读诊断数据**：
+> 1. **源码级工作量 ≠ GPU 耗时**：计数器反映的是着色器源码级事件次数（例如 `traceSamples` 为实际步点数、每条射线最多 $N+1$；`samplePageProbes` 含初始选层与步点回退寻址，不等于深度纹理读取次数），**不能**直接等同于 GPU 毫秒数、显存带宽或缓存未命中率。
+> 2. **计数存在包含关系**：多项计数互相包含（如 `rays` / `traceCalls` / `traceSamples`、`projection` / `transition`），切勿直接相加当作总工作量。
+> 3. **计时必须与诊断帧分离**：`VSM.SMRTCostReplay` 重放会扰动 GPU 缓存并产生 253 MiB 缓冲写回；评估 GPU 耗时时，必须单独采集未开启诊断的正常 `ResolveTrace`、`FilterHorizontal`、`FilterTemporalVertical` / `FilterVertical` 时间。

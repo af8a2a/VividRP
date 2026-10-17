@@ -1,89 +1,46 @@
-# AccelerationStructure Support for VividRP RenderGraph
+# RenderGraph 光线追踪加速结构 (RTAS) 支持
 
-## Overview
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[RenderGraph 编辑器](RenderGraphEditor.md) | [可序列化资源描述符](RenderGraphResourceDescriptors.md)
 
-VividRP's RenderGraph now includes full support for ray tracing acceleration structures through the serializable descriptor system. This enables declarative configuration of ray tracing resources in the graph editor.
+## 概述
 
-## New Components
+VividRP 的 RenderGraph 将光线追踪加速结构（Ray Tracing Acceleration Structure, RTAS）作为一等公民纳入可序列化描述符系统。RTAS 的构建与消费通过显式的图连线表达，替代隐藏的全局状态（`SetGlobalRayTracingAccelerationStructure`），从而保障依赖顺序与 Async Compute 调度的正确性。
 
-### RenderGraphAccelerationStructureDesc
-**Location:** `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs`
+---
 
-A serializable descriptor class that mirrors Unity's `RayTracingAccelerationStructureDesc` but can be fully serialized in assets.
+## 核心组件
 
-**Properties:**
-- `Name` - String identifier for debugging and profiling
+| 组件 | 路径 | 职责 |
+| --- | --- | --- |
+| `RenderGraphAccelerationStructureDesc` | `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs` | 可序列化的 RTAS 描述符，对应 Unity `RayTracingAccelerationStructureDesc`，提供 `ToAccelerationStructureDesc()`、`FromAccelerationStructureDesc(desc)` 与 `Create(name)` |
+| `RenderGraphAccelerationStructure` | `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs` | RenderGraph 资源包装器，可根据序列化描述符按需创建原生 `RayTracingAccelerationStructure` 或包装外部管理实例 |
+| `AccelerationStructureResourceNodeData` | `Editor/RenderGraph/Nodes/AccelerationStructureResourceNodeData.cs` | 图编辑器中的 RTAS 资源节点，用于显式声明自定义 RTAS 描述符 |
+| `RTASBuildPass` | `Runtime/RenderPass/Core/RTASBuildPass.cs` | 负责将场景几何构建为 `RenderGraphAccelerationStructure` 资源并向下游光追 Pass 输出 |
 
-**Methods:**
-- `ToAccelerationStructureDesc()` - Converts to Unity's `RayTracingAccelerationStructureDesc`
-- `FromAccelerationStructureDesc(desc)` - Creates from Unity's descriptor
-- `Create(name)` - Static factory method for creating new descriptors
+---
 
-### RenderGraphAccelerationStructure
-**Location:** `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs`
+## 使用模式
 
-A serializable RenderGraph resource wrapper around Unity's `RayTracingAccelerationStructure`.
-It can lazily create a native acceleration structure from the serialized descriptor or wrap an externally managed one.
+### 1. 在图中构建与传递 RTAS
 
-### AccelerationStructureResourceNodeData
-**Location:** `Editor/RenderGraph/Nodes/AccelerationStructureResourceNodeData.cs`
+- **默认自持模式**：直接将 `RTASBuildPass` 节点的 `SceneRTAS` 输出端口连接到下游光线追踪 Pass（如方向光 DXR 阴影、延迟光照、Reference Path Tracing 或 Raytracing GBuffer）。
+- **外部覆盖模式**：若需自定义 RTAS 描述符，可在图中创建 `AccelerationStructureResourceNodeData` 节点并接入 `RTASBuildPass`。
 
-A dedicated resource node for authoring RTAS descriptors directly in the RenderGraph editor.
+### 2. C# Pass 声明示例
 
-### RTASBuildPass
-**Location:** `Runtime/RenderPass/Core/RTASBuildPass.cs`
+```csharp
+// 生产者 Pass (如 RTASBuildPass)
+[RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Write)]
+private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
 
-A compute pass that builds a scene RTAS into a RenderGraph resource without relying on
-`SetGlobalRayTracingAccelerationStructure`, so the resource can flow explicitly to downstream passes.
+// 消费者 Pass (下游光追 Pass)
+[RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
+private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
+```
 
-## Integration with Existing System
+在录制阶段，消费者 Pass 直接从 `m_SceneAccelerationStructure` 获取底层原生对象，并通过 `SetRayTracingAccelerationStructure(...)` 等 CommandBuffer API 绑定到 Compute 或 Ray Tracing Shader。
 
-The acceleration structure descriptor integrates seamlessly with the existing descriptor system:
-
-- Uses the same namespace (`VividRP.Runtime`) as other descriptors
-- Follows the same naming convention (`RenderGraph[Type]Desc`)
-- Provides conversion methods to/from Unity's native types
-- Includes factory methods for common use cases
-
-## Usage Patterns
-
-### Building an Acceleration Structure
-
-Connect an `AccelerationStructureResourceNodeData` node to `RTASBuildPass` when you want an authored RTAS descriptor,
-or use the pass-owned default RTAS output directly and forward it to downstream ray tracing passes.
-
-### Using an Acceleration Structure for Ray Tracing
-
-In a downstream pass, declare a `[RenderGraphResource] RenderGraphAccelerationStructure` field with `AccessFlags.Read`
-and bind it from `RTASBuildPass` through the graph. At record time, use the wrapped native object with
-`SetRayTracingAccelerationStructure(...)` or other ray tracing command buffer APIs.
-
-## Benefits
-
-1. **Explicit Dependencies** - RTAS lifetime and ordering stay inside RenderGraph instead of hidden global state
-2. **Async Compute Friendly** - RTAS build and consumer passes can use explicit resource edges
-3. **Serialization** - Descriptor and node data are stored in graph assets
-4. **Integration** - Works alongside existing texture, buffer, history, and render-list resources
-5. **Ray Tracing Ready** - Downstream passes can consume the same RTAS resource directly
-
-## Future Enhancements
-
-1. **Scene Culling Controls** - More authoring-time control over RTAS build scope and filtering
-2. **Ray Tracing Pass Templates** - Prebuilt nodes for common ray tracing workflows
-3. **Inline Ray Tracing** - Support for inline ray tracing in raster passes
-4. **RTAS Validation** - Additional editor/runtime validation for unsupported hardware or pass layouts
-
-## Hardware Requirements
-
-Ray tracing acceleration structures require:
-- DirectX 12 with DXR support (Windows)
-- Vulkan with ray tracing extensions (Windows, Linux)
-- Metal with ray tracing support (macOS, iOS)
-- Hardware with ray tracing capabilities (NVIDIA RTX, AMD RDNA 2+, Intel Arc, Apple Silicon)
-
-## Shader Integration
-
-Example compute shader using acceleration structure:
+### 3. HLSL Inline Ray Tracing (`RayQuery`) 示例
 
 ```hlsl
 #pragma kernel RayTraceMain
@@ -94,29 +51,26 @@ RaytracingAccelerationStructure _AccelStruct;
 [numthreads(8, 8, 1)]
 void RayTraceMain(uint3 id : SV_DispatchThreadID)
 {
-    // Setup ray
     RayDesc ray;
-    ray.Origin = float3(0, 0, 0);
-    ray.Direction = normalize(float3(id.xy, 1));
+    ray.Origin = float3(0.0, 0.0, 0.0);
+    ray.Direction = normalize(float3(id.xy, 1.0));
     ray.TMin = 0.001;
     ray.TMax = 1000.0;
 
-    // Trace ray
     RayQuery<RAY_FLAG_NONE> query;
     query.TraceRayInline(_AccelStruct, RAY_FLAG_NONE, 0xFF, ray);
     query.Proceed();
 
-    // Write result
     float4 color = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT
-        ? float4(1, 1, 1, 1)
-        : float4(0, 0, 0, 1);
+        ? float4(1.0, 1.0, 1.0, 1.0)
+        : float4(0.0, 0.0, 0.0, 1.0);
     _OutputTexture[id.xy] = color;
 }
 ```
 
-## See Also
+---
 
-- `RenderGraphTextureDesc.cs` - Texture descriptor implementation
-- `RenderGraphBufferDesc.cs` - Buffer descriptor implementation
-- `RenderGraphResourceDescriptors.md` - Complete descriptor system documentation
-- Unity RenderGraph documentation - Official Unity RenderGraph API reference
+## 硬件与平台要求
+
+- **图形 API**：Windows DirectX 12（具备 DXR 支持）；或支持 Ray Tracing 扩展的 Vulkan / Metal。
+- **GPU 硬件**：具备硬件光追能力的显卡（NVIDIA RTX、AMD RDNA 2+、Intel Arc、Apple Silicon）。

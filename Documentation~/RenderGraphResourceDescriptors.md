@@ -1,156 +1,61 @@
-# RenderGraph Serializable Resource Descriptors
+# RenderGraph 可序列化资源描述符与 PassBypass
 
-## Overview
+返回索引：[Documentation~ 索引](README.md) · 相关文档：[RenderGraph 编辑器](RenderGraphEditor.md) | [SubSystem 局部子图](RenderGraphSubSystem.md) | [RTAS 加速结构支持](AccelerationStructureSupport.md)
 
-VividRP's RenderGraph now includes serializable resource descriptor classes that mirror Unity's `TextureDesc`, `BufferDesc`, and `RayTracingAccelerationStructureDesc` but can be fully serialized in assets. This allows pass nodes to define resource properties declaratively.
+## 概述
 
-## Core Classes
+VividRP 的 RenderGraph 提供了与 Unity CoreRP `TextureDesc`、`BufferDesc` 和 `RayTracingAccelerationStructureDesc` 一一对应的**可序列化资源描述符**。资源属性可以直接保存在 `.vrdg` 与 `RenderGraphData` 资产中，支持在 Graph Toolkit 编辑器和自定义 Property Drawer 中声明式配置。
 
-### RenderGraphTextureDesc
-Location: `Runtime/RenderGraph/Resource/RenderGraphTextureDesc.cs`
+---
 
-Serializable texture descriptor with full support for:
-- Dimensions (width, height, slices, dimension)
-- Format (color format, depth bits)
-- Sampling (MSAA, filter mode, wrap mode, aniso level, mip bias)
-- Mip maps (enable, auto-generate, count)
-- Clear settings (clear buffer, clear color)
-- Flags (random write, bind MS, dynamic scale)
-- Metadata (name, fallback texture)
+## 核心描述符类型
 
-**Key Methods:**
-- `ToTextureDesc()` - Converts to Unity's `TextureDesc`
-- `FromTextureDesc(TextureDesc)` - Creates from Unity's descriptor
-- `CreateColorTarget(width, height, format)` - Factory for color targets
-- `CreateDepthTarget(width, height, depthBits)` - Factory for depth targets
+| 描述符类型 | 源码路径 | 对应运行时包装类型 | 主要配置项与工厂方法 |
+| --- | --- | --- | --- |
+| `RenderGraphTextureDesc` | `Runtime/RenderGraph/Resource/RenderGraphTextureDesc.cs` | `RenderGraphTexture` | • **配置项**：尺寸/切片/维度、颜色格式与深度位数、MSAA/过滤/寻址/各向异性/MipBias、MipMap 生成、Clear 设置、`EnableRandomWrite`、动态缩放、名称与 Fallback 纹理<br>• **转换与工厂**：`ToTextureDesc()`、`FromTextureDesc(...)`、`CreateColorTarget(w, h, format)`、`CreateDepthTarget(w, h, depthBits)` |
+| `RenderGraphBufferDesc` | `Runtime/RenderGraph/Resource/RenderGraphBufferDesc.cs` | `RenderGraphBuffer` | • **配置项**：`Count`、`Stride`、`GraphicsBuffer.Target`（`Structured`、`Append`、`IndirectArguments`、`Raw` 等）、调试名称<br>• **转换与工厂**：`ToBufferDesc()`、`FromBufferDesc(...)`、`CreateStructured(count, stride)`、`CreateAppend(count, stride)`、`CreateIndirectArguments(count)` |
+| `RenderGraphAccelerationStructureDesc` | `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs` | `RenderGraphAccelerationStructure` | • **配置项**：用于调试和 Profiling 的 `Name` 元数据<br>• **转换与工厂**：`ToAccelerationStructureDesc()`、`FromAccelerationStructureDesc(...)`、`Create(name)` |
 
-### RenderGraphBufferDesc
-Location: `Runtime/RenderGraph/Resource/RenderGraphBufferDesc.cs`
+---
 
-Serializable buffer descriptor with support for:
-- Count and stride
-- Buffer target type (Default, Structured, Append, IndirectArguments, etc.)
-- Name metadata
+## 节点与端口集成
 
-**Key Methods:**
-- `ToBufferDesc()` - Converts to Unity's `BufferDesc`
-- `FromBufferDesc(BufferDesc)` - Creates from Unity's descriptor
-- `CreateStructured(count, stride)` - Factory for structured buffers
-- `CreateAppend(count, stride)` - Factory for append/consume buffers
-- `CreateIndirectArguments(count)` - Factory for indirect args buffers
+### 1. 资源节点与相机历史
 
-### RenderGraphAccelerationStructureDesc
-Location: `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs`
+- `TextureResourceNodeData`：持有 `RenderGraphTextureDesc`（默认通过 `CreateColorTarget(1920, 1080)` 初始化），输出 `RenderGraphTexture`。
+- `BufferResourceNodeData`：持有 `RenderGraphBufferDesc`（默认通过 `CreateStructured(1, 4)` 初始化），输出 `RenderGraphBuffer`。
+- `AccelerationStructureResourceNodeData`：持有 `RenderGraphAccelerationStructureDesc`，输出 `RenderGraphAccelerationStructure`。
+- `CameraHistoryTexture` / `CameraHistoryBuffer`：跨帧持久化资源按相机在运行时管理，由 `CameraHistoryRenderGraphBridge` 转换描述符并将请求的历史帧导入 RenderGraph。
 
-Serializable acceleration structure descriptor for ray tracing:
-- Name metadata for debugging and profiling
+### 2. 端口描述符存储 (`RenderGraphPortData`)
 
-**Key Methods:**
-- `ToAccelerationStructureDesc()` - Converts to Unity's `RayTracingAccelerationStructureDesc`
-- `FromAccelerationStructureDesc(RayTracingAccelerationStructureDesc)` - Creates from Unity's descriptor
-- `Create(name)` - Factory for acceleration structures
+路径：`Runtime/RenderGraph/Data/RenderGraphPortData.cs`
 
-## Port Integration
+编译后的端口数据可按资源类型保存描述符：
+- 字段：`TextureDesc`、`BufferDesc`、`AccelerationStructureDesc`
+- 访问方法：`GetDescriptor()`（根据端口类型返回对应描述符）、`SetDescriptor(object)`（设置对应类型并清空其余字段）
 
-### RenderGraphPortData
-Location: `Runtime/RenderGraph/Data/RenderGraphPortData.cs`
-
-Ports now optionally store resource descriptors:
-- `TextureDesc` - For texture ports
-- `BufferDesc` - For buffer ports
-- `AccelerationStructureDesc` - For acceleration structure ports (ray tracing)
-
-**Key Methods:**
-- `GetDescriptor()` - Returns the appropriate descriptor based on port type
-- `SetDescriptor(object)` - Sets the descriptor and clears the other type
-
-## Node Updates
-
-All resource and pass nodes have been updated to use the new descriptor system:
-
-### Resource Nodes
-
-**TextureNodeData**
-- Now uses `RenderGraphTextureDesc` instead of individual fields
-- Descriptor is initialized with `CreateColorTarget(1920, 1080)`
-- Port stores reference to the descriptor
-
-**BufferNodeData**
-- Now uses `RenderGraphBufferDesc` instead of Count/Stride fields
-- Descriptor is initialized with `CreateStructured(1, 4)`
-- Port stores reference to the descriptor
-
-**CameraHistoryTexture**
-- Persistent texture history is managed per camera at runtime instead of through a graph resource node
-- `CameraHistoryRenderGraphBridge` converts `RenderGraphTextureDesc` values and imports the requested history frame
-
-### Pass Nodes
-
-**FullScreenPassNodeData**
-- Now uses `RenderGraphTextureDesc` for output texture
-- Descriptor is initialized with `CreateColorTarget(1920, 1080)`
-- Output port stores reference to the descriptor
-
-**RasterPassNodeData**
-- Uses data-driven approach with reflection-based compilation
-- Creates transient attachments using existing serialized fields
-- Can be extended to use descriptors per-attachment in the future
-
-## Ray Tracing Support
-
-VividRP now includes full support for ray tracing acceleration structures through the descriptor system.
-
-1. **Authoring RTAS Resources** - `Editor/RenderGraph/Nodes/AccelerationStructureResourceNodeData.cs` exposes RTAS descriptors in the graph editor
-2. **Building Scene RTAS** - `Runtime/RenderPass/Core/RTASBuildPass.cs` builds a scene RTAS into a RenderGraph resource
-3. **Passing RTAS Between Passes** - downstream passes can consume `RenderGraphAccelerationStructure` fields through explicit graph edges
-
-### Ray Tracing Usage Example
+### 3. 代码创建示例
 
 ```csharp
-// Producer pass
-[RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Write)]
-private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
+// 1. 创建自定义纹理描述符
+var textureDesc = RenderGraphTextureDesc.CreateColorTarget(2048, 2048, GraphicsFormat.R16G16B16A16_SFloat);
+textureDesc.UseMipMap = true;
+textureDesc.AutoGenerateMips = true;
 
-// Consumer pass
-[RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
-private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
+// 2. 创建 Append Structured Buffer 描述符
+var bufferDesc = RenderGraphBufferDesc.CreateStructured(1024, 16);
+bufferDesc.Target = GraphicsBuffer.Target.Append;
+
+// 3. 创建光线追踪加速结构描述符
+var rtasDesc = RenderGraphAccelerationStructureDesc.Create("SceneRTAS");
 ```
 
-## Benefits
+---
 
-1. **Declarative Configuration** - Resource properties are defined in the asset, not hardcoded
-2. **Editor Integration** - Descriptors can be exposed in custom inspectors for visual editing
-3. **Reusability** - Descriptors can be shared between ports and nodes
-4. **Type Safety** - Compile-time checking of descriptor properties
-5. **Extensibility** - Easy to add new descriptor types for future resource types
-6. **Serialization** - Full Unity serialization support with `[SerializeReference]`
-7. **Ray Tracing Ready** - First-class support for acceleration structures
+## Pass 旁路 (`[PassBypass]`)
 
-## Usage Example
-
-```csharp
-// Create a texture node with custom descriptor
-var textureNode = new TextureNodeData();
-textureNode.TextureDesc = RenderGraphTextureDesc.CreateColorTarget(2048, 2048, GraphicsFormat.R16G16B16A16_SFloat);
-textureNode.TextureDesc.UseMipMap = true;
-textureNode.TextureDesc.AutoGenerateMips = true;
-
-// Create a buffer node with custom descriptor
-var bufferNode = new BufferNodeData();
-bufferNode.BufferDesc = RenderGraphBufferDesc.CreateStructured(1024, 16);
-bufferNode.BufferDesc.Target = GraphicsBuffer.Target.Append;
-
-// Create an acceleration structure descriptor
-var accelStructDesc = RenderGraphAccelerationStructureDesc.Create("MyAccelerationStructure");
-
-// Access descriptor from port
-var port = textureNode.Ports[0];
-var desc = port.TextureDesc; // Returns RenderGraphTextureDesc
-```
-
-## Pass Bypass
-
-Passes that produce a replacement texture or buffer can declare a zero-GPU bypass path for disabled frames:
+对于“读取输入资源并产出替换纹理或 Buffer”的 Pass，可以使用 `[PassBypass]` 声明禁用状态下的**零 GPU 开销旁路**，无需在 Pass 未激活时执行冗余拷贝：
 
 ```csharp
 [RenderGraphResource(Access = AccessFlags.Read)]
@@ -166,17 +71,10 @@ public override bool IsActive(ContextContainer frameData)
 }
 ```
 
-When `IsActive` returns `false`, `PassRecorder` skips the RenderGraph builder for that pass and forwards the output handle to the source handle. The `PassBypass` argument must be the C# field name, not the `RenderGraphResource.Name` display name. V1 supports `RenderGraphTexture` and `RenderGraphBuffer` fields only; source and output fields must use the same type, source must be readable, and output must be writable.
+### 旁路规则与约束
 
-`StopNaNPass` follows this model: it is no longer injected by `PassRecorder`; add it explicitly to a `.vrdg` graph and wire its output downstream. When the camera Stop NaNs option is off, its output is forwarded to its input without recording GPU work.
-
-`ReadWrite` resources do not need `PassBypass`: because the input and output are the same field, skipping an inactive pass naturally leaves the existing handle available for downstream readers.
-
-## Future Enhancements
-
-1. **Editor UI** - Custom property drawers for descriptors in the graph editor
-2. **Descriptor Presets** - Library of common descriptor configurations
-3. **Validation** - Runtime validation of descriptor properties
-4. **Per-Attachment Descriptors** - RasterPassNodeData could use descriptors per color/depth attachment
-5. **Descriptor Inheritance** - Ports could inherit descriptors from connected ports
-6. **Ray Tracing Node** - Dedicated node type for ray tracing passes with RTAS inputs
+1. **零开销句柄转发**：当 `IsActive` 返回 `false` 时，`PassRecorder` 会直接跳过该 Pass 的 RenderGraph builder 录制，并将输出字段句柄直接转发到源字段句柄。
+2. **参数契约**：`[PassBypass(...)]` 的参数必须是 **C# 字段名**（推荐使用 `nameof(m_Source)`），而不是 `RenderGraphResource.Name` 的显示名称。
+3. **类型与访问权限**：当前支持 `RenderGraphTexture` 和 `RenderGraphBuffer` 字段；源字段与输出字段必须类型相同，且源字段必须可读（`Read`）、输出字段必须可写（`Write`）。
+4. **典型案例（`StopNaNPass`）**：`StopNaNPass` 不再由 `PassRecorder` 硬编码注入，而是显式放置在 `.vrdg` 图中并串联下游；当相机关闭 Stop NaNs 选项时，其输出直接旁路转发至输入，不产生任何 GPU 调度。
+5. **`ReadWrite` 原地修改无需声明**：对于 `AccessFlags.ReadWrite` 的同一个资源字段，跳过未激活 Pass 时原有句柄天然保持有效并继续供下游读取，无需标记 `[PassBypass]`。

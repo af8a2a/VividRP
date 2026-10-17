@@ -1,5 +1,7 @@
 # Main-view traversal: moving roof camera A/B
 
+Back to index: [Documentation~ Index](README.md) · Related: [Cluster LOD Generation](GPUDrivenClusterLOD.md) | [Generation Quality A/B](GPUDrivenGenerationQualityAB.md)
+
 Date: 2026-10-15. Source: `63c85764ceff5fc366c776c3d7aea0ba029838ba`.
 
 ## Comparison and controls

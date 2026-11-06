@@ -360,7 +360,8 @@ namespace VividRP.Runtime
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline()
         {
 #if UNITY_EDITOR
-            VividRenderPipelineGlobalSettings.Ensure();
+            if (System.Environment.GetEnvironmentVariable("VIVIDRP_STARTUP_SRP") != "minimal")
+                VividRenderPipelineGlobalSettings.Ensure();
 #endif
             return new VividRenderPipeline(this);
         }

@@ -80,11 +80,24 @@ namespace VividRP.Runtime
         private bool m_RuntimeResourcesInitialized;
         private bool m_RequiredResourcesWarningLogged;
         private int m_EditModePipelineFrameIndex;
+#if UNITY_EDITOR
+        private readonly CommandBuffer m_StartupIsolationCommands;
+#endif
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
             m_Asset = asset;
             m_PreviousUseScriptableRenderPipelineBatching = GraphicsSettings.useScriptableRenderPipelineBatching;
+#if UNITY_EDITOR
+            // Keep the declared pipeline type while bypassing all runtime subsystem
+            // initialization. Plugin preloading and Editor callbacks remain independent.
+            if (System.Environment.GetEnvironmentVariable("VIVIDRP_STARTUP_SRP") == "minimal")
+            {
+                m_StartupIsolationCommands = new CommandBuffer { name = "VividRP Startup Isolation" };
+                Debug.Log("[VividRP] Startup isolation: minimal SRP; VividRP runtime subsystems are bypassed.");
+                return;
+            }
+#endif
             ApplySRPBatcherSetting(asset);
             ApplyVirtualTextureStreamingSettings(asset);
 
@@ -97,6 +110,13 @@ namespace VividRP.Runtime
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
+#if UNITY_EDITOR
+            if (m_StartupIsolationCommands != null)
+            {
+                RenderStartupIsolation(context, cameras);
+                return;
+            }
+#endif
             using var renderScope = s_RenderMarker.Auto();
             RenderPassGpuProfiler.Collect();
             using (s_ApplySRPBatcherMarker.Auto())
@@ -127,6 +147,25 @@ namespace VividRP.Runtime
                 m_RenderGraph.EndFrame();
             }
         }
+
+#if UNITY_EDITOR
+        private void RenderStartupIsolation(ScriptableRenderContext context, List<Camera> cameras)
+        {
+            for (var i = 0; i < cameras.Count; i++)
+            {
+                var camera = cameras[i];
+                if (camera == null)
+                    continue;
+
+                context.SetupCameraProperties(camera);
+                m_StartupIsolationCommands.Clear();
+                m_StartupIsolationCommands.ClearRenderTarget(true, true, camera.backgroundColor);
+                context.ExecuteCommandBuffer(m_StartupIsolationCommands);
+            }
+
+            context.Submit();
+        }
+#endif
 
         internal static int ResolvePipelineFrameIndex(
             bool isPlaying,
@@ -892,6 +931,14 @@ namespace VividRP.Runtime
 
         protected override void Dispose(bool disposing)
         {
+#if UNITY_EDITOR
+            if (m_StartupIsolationCommands != null)
+            {
+                m_StartupIsolationCommands.Release();
+                base.Dispose(disposing);
+                return;
+            }
+#endif
             PassRecorder.Dispose();
             CameraHistorySystem.Dispose();
             VirtualTextureSystem.Deinitialize();

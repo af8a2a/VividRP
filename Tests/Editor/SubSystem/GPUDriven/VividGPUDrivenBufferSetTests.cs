@@ -86,7 +86,7 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding1), 44);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Instance).IsLayoutSequential, Is.True);
-            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(64));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(80));
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal0), 0);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal1), 16);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal2), 32);
@@ -94,6 +94,10 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.LayerMask), 52);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdLow), 56);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdHigh), 60);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.DistanceScale), 64);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.Padding0), 68);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.Padding1), 72);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.Padding2), 76);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Node).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Node>(), Is.EqualTo(48));
@@ -105,6 +109,41 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.LayerMask), 36);
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding0), 40);
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding1), 44);
+        }
+
+        [TestCase(0, 0, 0, false)]
+        [TestCase(1, -2, 3, false)]
+        [TestCase(-127, 2, -1, false)]
+        [TestCase(128, 0, 0, false)]
+        [TestCase(0, 0, 0, true)]
+        public void GlobalSdfUpdateRegions_CoverExactlyTheNewCells(int dx, int dy, int dz, bool reset)
+        {
+            const int resolution = VividGlobalSdfClipmap.Resolution;
+            var previous = new int3(-130, -12, 115);
+            var next = previous + new int3(dx, dy, dz);
+            var regions = new VividGlobalSdfClipmap.Region[VividGlobalSdfClipmap.RegionsPerLevel];
+            int count = VividGlobalSdfClipmap.GetUpdateRegions(previous, next, reset, regions, 0);
+            var overlapMin = math.max(previous, next);
+            var overlapMax = math.min(previous + resolution, next + resolution);
+            var overlapSize = math.max(overlapMax - overlapMin, 0);
+            int volume = 0;
+            for (int i = 0; i < count; i++)
+            {
+                var region = regions[i];
+                var end = region.Min + region.Size;
+                Assert.That(math.all(region.Size > 0), Is.True);
+                Assert.That(math.all(region.Min >= next) && math.all(end <= next + resolution), Is.True);
+                if (!reset)
+                    Assert.That(math.all(math.min(end, overlapMax) > math.max(region.Min, overlapMin)), Is.False);
+                for (int j = 0; j < i; j++)
+                {
+                    var other = regions[j];
+                    Assert.That(math.all(math.min(end, other.Min + other.Size) > math.max(region.Min, other.Min)), Is.False);
+                }
+                volume += region.Size.x * region.Size.y * region.Size.z;
+            }
+            Assert.That(volume, Is.EqualTo(resolution * resolution * resolution
+                - (reset ? 0 : overlapSize.x * overlapSize.y * overlapSize.z)));
         }
 
         [Test]

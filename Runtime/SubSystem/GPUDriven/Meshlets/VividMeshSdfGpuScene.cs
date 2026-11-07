@@ -6,11 +6,19 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     internal sealed class VividMeshSdfGpuScene : IDisposable
     {
+        private static readonly int VoxelsId = Shader.PropertyToID("_MeshSdfVoxels");
+        private static readonly int FieldsId = Shader.PropertyToID("_MeshSdfFields");
+        private static readonly int InstancesId = Shader.PropertyToID("_MeshSdfInstances");
+        private static readonly int NodesId = Shader.PropertyToID("_MeshSdfNodes");
+        private static readonly int LeafInstancesId = Shader.PropertyToID("_MeshSdfLeafInstances");
+        private static readonly int NodeCountId = Shader.PropertyToID("_MeshSdfNodeCount");
+
         // Keep these layouts in sync with MeshSdfTrace.hlsl.
         [StructLayout(LayoutKind.Sequential)]
         internal struct Field
@@ -25,6 +33,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             public Vector4 WorldToLocal0, WorldToLocal1, WorldToLocal2;
             public uint FieldIndex, LayerMask, EntityIdLow, EntityIdHigh;
+            public float DistanceScale;
+            public uint Padding0, Padding1, Padding2;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -113,6 +123,17 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal GraphicsBuffer Nodes => m_NodeBuffer;
         internal GraphicsBuffer LeafInstances => m_LeafInstanceBuffer;
         internal int NodeCount { get; private set; }
+        internal uint Revision { get; private set; }
+
+        internal void Bind(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
+        {
+            cmd.SetComputeBufferParam(shader, kernel, VoxelsId, m_Voxels);
+            cmd.SetComputeBufferParam(shader, kernel, FieldsId, m_FieldBuffer);
+            cmd.SetComputeBufferParam(shader, kernel, InstancesId, m_InstanceBuffer);
+            cmd.SetComputeBufferParam(shader, kernel, NodesId, m_NodeBuffer);
+            cmd.SetComputeBufferParam(shader, kernel, LeafInstancesId, m_LeafInstanceBuffer);
+            cmd.SetComputeIntParam(shader, NodeCountId, NodeCount);
+        }
 
         internal void Update(VividMeshletRendererDatabase database)
         {
@@ -142,6 +163,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextFields.Clear();
             m_NextInstances.Clear();
             NodeCount = m_Nodes.Count;
+            Revision++;
         }
 
         private void CollectSources(VividMeshletRendererDatabase database)
@@ -301,6 +323,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     LayerMask = source.LayerMask,
                     EntityIdLow = (uint)source.EntityId,
                     EntityIdHigh = (uint)(source.EntityId >> 32),
+                    DistanceScale = CalculateDistanceScale(source.WorldToLocal),
                 });
             }
 
@@ -317,6 +340,20 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
             else
                 RefitBvh();
+        }
+
+        private static float CalculateDistanceScale(Matrix4x4 worldToLocal)
+        {
+            var x = new Vector3(worldToLocal.m00, worldToLocal.m01, worldToLocal.m02);
+            var y = new Vector3(worldToLocal.m10, worldToLocal.m11, worldToLocal.m12);
+            var z = new Vector3(worldToLocal.m20, worldToLocal.m21, worldToLocal.m22);
+            float xy = Mathf.Abs(Vector3.Dot(x, y));
+            float xz = Mathf.Abs(Vector3.Dot(x, z));
+            float yz = Mathf.Abs(Vector3.Dot(y, z));
+            // The largest absolute row sum of A * transpose(A) bounds the squared stretch of A.
+            float maxStretchSquared = Mathf.Max(x.sqrMagnitude + xy + xz,
+                Mathf.Max(y.sqrMagnitude + xy + yz, z.sqrMagnitude + xz + yz));
+            return 1f / Mathf.Sqrt(maxStretchSquared);
         }
 
         private void BuildNode(int start, int count)

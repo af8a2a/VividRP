@@ -1,0 +1,124 @@
+#pragma kernel ComposeGlobalSdf
+#pragma kernel TraceGlobalSdfDebug
+
+#include "../../Public/GPUDriven/GlobalSdf.hlsl"
+
+RWTexture3D<float> _GlobalSdfWrite;
+int3 _GlobalSdfRegionMin;
+int3 _GlobalSdfRegionSize;
+float _GlobalSdfVoxelSize;
+uint _GlobalSdfLayerMask;
+
+float GlobalSdfInstanceDistance(VividMeshSdfInstance instance, VividMeshSdfField field, float3 positionWS)
+{
+    float4 p = float4(positionWS, 1.0);
+    float3 local = float3(dot(instance.worldToLocal0, p), dot(instance.worldToLocal1, p),
+        dot(instance.worldToLocal2, p)) - field.originAndVoxelSize.xyz;
+    float3 extent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
+    float3 clamped = clamp(local, 0.0, extent);
+    float distance = VividMeshSdfSample(field, clamped);
+    float outsideSquared = dot(local - clamped, local - clamped);
+    if (outsideSquared > 0.0)
+    {
+        // The baked grid encloses the surface. Outside it, extend from the positive boundary.
+        float boundary = max(0.0, distance);
+        distance = sqrt(outsideSquared + boundary * boundary);
+    }
+    return distance * instance.distanceScale;
+}
+
+[numthreads(4, 4, 4)]
+void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= uint3(_GlobalSdfRegionSize)))
+        return;
+
+    int3 cell = _GlobalSdfRegionMin + int3(id);
+    float3 position = float3(cell) * _GlobalSdfVoxelSize;
+    float band = VividGlobalSdfBand * _GlobalSdfVoxelSize;
+    float best = band;
+    uint nodeIndex = 0u;
+    [loop]
+    while (nodeIndex < _MeshSdfNodeCount)
+    {
+        VividMeshSdfNode node = _MeshSdfNodes[nodeIndex];
+        float3 outside = max(0.0, max(node.boundsMin - position, position - node.boundsMax));
+        float boxDistanceSquared = dot(outside, outside);
+        float limit = max(best, 0.0);
+        if ((node.layerMask & _GlobalSdfLayerMask) == 0u || boxDistanceSquared > limit * limit)
+        {
+            nodeIndex = node.escapeIndex;
+            continue;
+        }
+        nodeIndex++;
+
+        [loop]
+        for (uint i = 0u; i < node.leafCount; i++)
+        {
+            VividMeshSdfInstance instance = _MeshSdfInstances[_MeshSdfLeafInstances[node.firstLeaf + i]];
+            if ((instance.layerMask & _GlobalSdfLayerMask) == 0u)
+                continue;
+            float distance = GlobalSdfInstanceDistance(instance, _MeshSdfFields[instance.fieldIndex], position);
+            if (distance > 0.0)
+                distance = max(distance, sqrt(boxDistanceSquared));
+            best = min(best, distance);
+        }
+    }
+
+    uint3 physical = uint3(cell & (VividGlobalSdfResolution - 1));
+    _GlobalSdfWrite[physical] = clamp(best / _GlobalSdfVoxelSize, -VividGlobalSdfBand, VividGlobalSdfBand);
+}
+
+RWTexture2D<float4> _GlobalSdfDebugOutput;
+float4x4 _GlobalSdfInverseViewProjection;
+float4 _GlobalSdfScreenSize;
+float _GlobalSdfFarClip;
+float _GlobalSdfSliceHeight;
+uint _GlobalSdfDebugMode;
+
+[numthreads(8, 8, 1)]
+void TraceGlobalSdfDebug(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_GlobalSdfScreenSize.xy)))
+        return;
+
+    float2 ndc = (id.xy + 0.5) * (2.0 * _GlobalSdfScreenSize.zw) - 1.0;
+    #if UNITY_UV_STARTS_AT_TOP
+        ndc.y = -ndc.y;
+    #endif
+    float4 nearPoint = mul(_GlobalSdfInverseViewProjection, float4(ndc, UNITY_NEAR_CLIP_VALUE, 1.0));
+    float4 farPoint = mul(_GlobalSdfInverseViewProjection, float4(ndc, UNITY_RAW_FAR_CLIP_VALUE, 1.0));
+    float3 origin = nearPoint.xyz / nearPoint.w;
+    float3 ray = farPoint.xyz - farPoint.w * origin;
+    float rayLength = length(ray);
+    float3 direction = ray / rayLength;
+    float maxDistance = farPoint.w > 0.0 ? rayLength / farPoint.w : _GlobalSdfFarClip;
+
+    float3 color = 0.0;
+    if (_GlobalSdfDebugMode == 1u)
+    {
+        if (abs(direction.y) > 1e-6)
+        {
+            float t = (_GlobalSdfSliceHeight - origin.y) / direction.y;
+            float distance;
+            uint level;
+            if (t >= 0.0 && t <= maxDistance && VividGlobalSdfTrySample(origin + t * direction, distance, level))
+            {
+                float units = distance / _GlobalSdfLevels[level].w;
+                float3 tint = units < 0.0 ? float3(1.0, 0.36, 0.09) : float3(0.06, 0.5, 1.0);
+                color = lerp(tint * (0.12 + 0.65 * exp(-0.4 * abs(units))), 1.0, saturate(1.0 - 3.0 * abs(units)));
+            }
+        }
+    }
+    else
+    {
+        VividGlobalSdfHit hit;
+        if (VividTraceGlobalSdf(origin, direction, 0.0, maxDistance, hit))
+        {
+            float3 tint = hit.level == 0u ? float3(0.1, 0.85, 0.72)
+                : hit.level == 1u ? float3(1.0, 0.55, 0.16) : float3(0.64, 0.36, 1.0);
+            color = tint * (0.24 + 0.76 * abs(dot(hit.normalWS, direction)));
+        }
+    }
+    _GlobalSdfDebugOutput[id.xy] = float4(color, 1.0);
+}

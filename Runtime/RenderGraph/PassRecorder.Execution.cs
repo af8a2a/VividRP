@@ -7,6 +7,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.RenderGraphModule.Util;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven.Meshlets;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
@@ -88,6 +89,8 @@ namespace VividRP.Runtime
                 ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
                 VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
                 VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
+                if (s_FrameData.Contains<VividGlobalSdfFrameData>())
+                    s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
             }
 
             VividRenderingData renderingData;
@@ -595,6 +598,8 @@ namespace VividRP.Runtime
         {
             using var commitFrameScope = RenderPassProfilingUtility.CommitFrameMarker.Auto();
             VirtualTextureSystem.CommitPageTableUpdates();
+            if (s_FrameData.Contains<VividGlobalSdfFrameData>())
+                s_FrameData.Get<VividGlobalSdfFrameData>().Commit();
             using (RenderPassProfilingUtility.CommitFrameClearImportedHandlesMarker.Auto())
             {
                 ClearFrameImportedHandles();

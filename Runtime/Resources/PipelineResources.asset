@@ -121,6 +121,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 09dbe8037a2fc9a4f9129f9f21253064, type: 3}
   - ResourceName: Shaders/Core/Private/GenerateViewZ
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/GlobalSdf.compute
+    ResourceObject: {fileID: 7200000, guid: d3871ab5d7dd97943af74cafa95fcccd, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/RaytracingGBuffer.raytrace
     ResourceObject: {fileID: 4807578003741378534, guid: e7308e3e8d216f743b2ae2cb7762fc72, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathTracingDLSSRayReconstructionResolve.compute

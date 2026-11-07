@@ -20,6 +20,8 @@ struct VividMeshSdfInstance
     uint fieldIndex;
     uint layerMask;
     uint2 entityId;
+    float distanceScale;
+    uint3 padding;
 };
 
 struct VividMeshSdfNode
@@ -114,19 +116,29 @@ float VividMeshSdfSampleBlock(uint3 dimensions, uint wordOffset, float3 voxel)
 float VividMeshSdfSample(VividMeshSdfField field, float3 positionInGrid)
 {
     float3 voxel = positionInGrid / field.originAndVoxelSize.w;
+    float value;
     if (field.pageOffset == VividMeshSdfDense)
-        return VividMeshSdfSampleBlock(field.dimensions, field.wordOffset, voxel);
-
-    voxel = clamp(voxel, 0.0, float3(field.dimensions - 1u));
-    uint3 counts = VividMeshSdfBrickCount(field.dimensions);
-    uint3 brick = min(uint3(voxel) / VividMeshSdfBrickCells, counts - 1u);
-    uint page = VividMeshSdfPage(field.pageOffset, brick, counts);
-    if (page == VividMeshSdfEmptyInside || page == VividMeshSdfEmptyOutside)
-        return (page == VividMeshSdfEmptyInside ? -1.0 : 1.0) * VividMeshSdfBandVoxels * field.originAndVoxelSize.w;
-
-    uint3 start = brick * VividMeshSdfBrickCells;
-    uint3 size = min(field.dimensions - start, VividMeshSdfBrickCells + 1u);
-    return VividMeshSdfSampleBlock(size, field.wordOffset + page, voxel - start);
+    {
+        value = VividMeshSdfSampleBlock(field.dimensions, field.wordOffset, voxel);
+    }
+    else
+    {
+        voxel = clamp(voxel, 0.0, float3(field.dimensions - 1u));
+        uint3 counts = VividMeshSdfBrickCount(field.dimensions);
+        uint3 brick = min(uint3(voxel) / VividMeshSdfBrickCells, counts - 1u);
+        uint page = VividMeshSdfPage(field.pageOffset, brick, counts);
+        if (page == VividMeshSdfEmptyInside || page == VividMeshSdfEmptyOutside)
+        {
+            value = (page == VividMeshSdfEmptyInside ? -1.0 : 1.0) * VividMeshSdfBandVoxels * field.originAndVoxelSize.w;
+        }
+        else
+        {
+            uint3 start = brick * VividMeshSdfBrickCells;
+            uint3 size = min(field.dimensions - start, VividMeshSdfBrickCells + 1u);
+            value = VividMeshSdfSampleBlock(size, field.wordOffset + page, voxel - start);
+        }
+    }
+    return value;
 }
 
 float3 VividMeshSdfGradient(VividMeshSdfField field, float3 positionInGrid)

@@ -826,7 +826,7 @@ namespace VividRP.Runtime.GPUDriven
             return flags;
         }
 
-        private static Bounds TransformBounds(Bounds localBounds, Matrix4x4 objectToWorldMatrix)
+        internal static Bounds TransformBounds(Bounds localBounds, Matrix4x4 objectToWorldMatrix)
         {
             Vector3 center = objectToWorldMatrix.MultiplyPoint3x4(localBounds.center);
             Vector3 extents = localBounds.extents;

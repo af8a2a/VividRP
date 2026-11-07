@@ -1,0 +1,39 @@
+#pragma kernel MeshSdfTraceDebug
+
+#include "../../Public/GPUDriven/MeshSdfTrace.hlsl"
+
+RWTexture2D<float4> _MeshSdfOutput;
+float4x4 _MeshSdfInverseViewProjection;
+int _MeshSdfWidth, _MeshSdfHeight;
+uint _MeshSdfLayerMask;
+float _MeshSdfFarClip;
+
+[numthreads(8, 8, 1)]
+void MeshSdfTraceDebug(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_MeshSdfWidth || id.y >= (uint)_MeshSdfHeight)
+        return;
+
+    float2 ndc = (id.xy + 0.5) * (2.0 / float2(_MeshSdfWidth, _MeshSdfHeight)) - 1.0;
+    #if UNITY_UV_STARTS_AT_TOP
+        ndc.y = -ndc.y;
+    #endif
+
+    float4 nearPoint = mul(_MeshSdfInverseViewProjection, float4(ndc, UNITY_NEAR_CLIP_VALUE, 1.0));
+    float4 farPoint = mul(_MeshSdfInverseViewProjection, float4(ndc, UNITY_RAW_FAR_CLIP_VALUE, 1.0));
+    float3 origin = nearPoint.xyz / nearPoint.w;
+    // Homogeneous subtraction also reconstructs the direction when the far plane is infinite.
+    float3 ray = farPoint.xyz - farPoint.w * origin;
+    float rayLength = length(ray);
+    float3 direction = ray / rayLength;
+    float maxDistance = farPoint.w > 0.0 ? rayLength / farPoint.w : _MeshSdfFarClip;
+
+    VividMeshSdfHit hit;
+    float3 color = 0.0;
+    if (VividTraceMeshSdfScene(origin, direction, 0.0, maxDistance, _MeshSdfLayerMask, hit))
+    {
+        float3 tint = hit.signMode == 2u ? float3(1.0, 0.48, 0.13) : float3(0.12, 0.75, 1.0);
+        color = tint * (0.28 + 0.72 * abs(dot(hit.normalWS, direction)));
+    }
+    _MeshSdfOutput[id.xy] = float4(color, 1.0);
+}

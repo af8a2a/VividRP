@@ -5,8 +5,10 @@ using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.Tests
 {
@@ -65,6 +67,107 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroupPacked>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroupOverflow>(), Is.EqualTo(8));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
+        }
+
+        [Test]
+        public void MeshSdfLayouts_MatchTraceShader()
+        {
+            Assert.That(typeof(VividMeshSdfGpuScene.Field).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Field>(), Is.EqualTo(48));
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.OriginAndVoxelSize), 0);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Width), 16);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Height), 20);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Depth), 24);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.WordOffset), 28);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.SignMode), 32);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding0), 36);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding1), 40);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding2), 44);
+
+            Assert.That(typeof(VividMeshSdfGpuScene.Instance).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(64));
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal0), 0);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal1), 16);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal2), 32);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.FieldIndex), 48);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.LayerMask), 52);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdLow), 56);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdHigh), 60);
+
+            Assert.That(typeof(VividMeshSdfGpuScene.Node).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Node>(), Is.EqualTo(32));
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Min), 0);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.InstanceIndex), 12);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Max), 16);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.EscapeIndex), 28);
+        }
+
+        [Test]
+        public void MeshSdfScene_RefitsMovingInstancesWithoutManagedAllocations()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                Assert.Ignore("Mesh SDF scene uploads require a graphics device.");
+
+            using var scene = new VividMeshSdfGpuScene();
+            var database = new VividMeshletRendererDatabase();
+            var mesh = new Mesh();
+            var texture = new Texture3D(2, 2, 2, GraphicsFormat.R16_SFloat, TextureCreationFlags.None);
+            var field = ScriptableObject.CreateInstance<VividMeshSdfAsset>();
+            var first = new GameObject("MeshSdfInstanceA");
+            var second = new GameObject("MeshSdfInstanceB");
+            try
+            {
+                texture.SetPixelData(new ushort[8], 0);
+                texture.Apply(false, false);
+                field.Initialize(mesh, texture, new Bounds(Vector3.zero, Vector3.one), Vector3.zero, 1f,
+                    VividMeshSdfSignMode.Solid, 0f);
+                var moving = Register(first);
+                Register(second);
+                var movingTransform = first.transform;
+
+                for (int i = 0; i < 8; i++)
+                    Move(i);
+                var voxelBuffer = scene.Voxels;
+                Assert.That(scene.Fields.count, Is.EqualTo(1));
+                Assert.That(scene.NodeCount, Is.EqualTo(3));
+
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 64; i++)
+                    Move(i);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+
+                Assert.That(allocated, Is.Zero);
+                Assert.That(scene.Voxels, Is.SameAs(voxelBuffer));
+                Assert.That(scene.NodeCount, Is.EqualTo(3));
+
+                MeshletRenderer Register(GameObject obj)
+                {
+                    obj.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    obj.AddComponent<MeshRenderer>();
+                    var renderer = obj.AddComponent<MeshletRenderer>();
+                    renderer.CaptureSourceFromGameObject();
+                    using var serialized = new UnityEditor.SerializedObject(renderer);
+                    serialized.FindProperty("m_MeshSdf").objectReferenceValue = field;
+                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                    database.RegisterRenderer(renderer);
+                    return renderer;
+                }
+
+                void Move(int step)
+                {
+                    movingTransform.position = new Vector3(step + 1f, 0f, 0f);
+                    database.UpdateRendererTransformData(moving);
+                    scene.Update(database);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(first);
+                Object.DestroyImmediate(second);
+                Object.DestroyImmediate(field);
+                Object.DestroyImmediate(texture);
+                Object.DestroyImmediate(mesh);
+            }
         }
 
         [Test]

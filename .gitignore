@@ -13,5 +13,9 @@ UnityDLSS.dll.meta
 Shaders/Core/Private/VirtualShadowMap/ReferenceVSM
 ReferenceVSM.meta
 
+# Unity MSBuild-generated project and analyzer files.
+*.gen.csproj
+*.Analyzers.gen.props
+
 # Local implementation reports, profiling captures and temporary artifacts.
 /Temp~/

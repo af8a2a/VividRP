@@ -12,7 +12,7 @@
 2. **编写自定义 RenderPass**：阅读 [RenderGraph 编辑器](RenderGraphEditor.md)、[RenderGraph 可序列化资源描述符](RenderGraphResourceDescriptors.md) 与 [RenderGraph SubSystem](RenderGraphSubSystem.md)。
 3. **深入 GPU Driven 与场景管线**：依次阅读 [PrimitiveScene V1](PrimitiveSceneV1.md) → [保守实例视锥裁剪](GPUDrivenInstanceCulling.md) → [Cluster LOD 生成与选择](GPUDrivenClusterLOD.md) → [保守 Meshlet 裁剪](GPUDrivenMeshletCulling.md)。
 4. **材质与着色开发**：参阅 [SimpleSlab V1 冻结合约](Material/SimpleSlabV1.md) 与 [OpenPBROpaque V1 默认材质合约](Material/OpenPBROpaqueV1.md)。
-5. **虚拟阴影图（VSM）开发與调优**：阅读 [VirtualShadowMap 代码布局](VirtualShadowMapCodeLayout.md) 与 [VSM Shader 与 Unreal 参考关系](VirtualShadowMapShaderReference.md)，并结合 `SMRT*` 系列文档分析成本与质量。
+5. **虚拟阴影图（VSM）与光照烘焙**：阅读 [VirtualShadowMap 代码布局](VirtualShadowMapCodeLayout.md)、[VSM Shader 与 Unreal 参考关系](VirtualShadowMapShaderReference.md) 与 [Meshlet APV 烘焙验证](MeshletAPVBaking.md)。
 
 ---
 
@@ -35,6 +35,7 @@
 | [Material/SimpleSlabV1.md](Material/SimpleSlabV1.md) | 第一代默认实时 BSDF（`SimpleSlabV1`）冻结合约：版本指纹、单层/双层 Slab 输入、Kulla-Conty 能量补偿、LUT 规范与延迟光照集成 |
 | [Material/OpenPBROpaqueV1.md](Material/OpenPBROpaqueV1.md) | 下一代默认 PBR（`OpenPBROpaqueV1`）冻结合约：OpenPBR 1.1 原生 11 项输入、能力边界、校验规则、Prepare/Eval/Sample 语义与原生延迟光照闭环 |
 | [LWGUI.md](LWGUI.md) | 内嵌 LWGUI 版本说明、相对路径图标适配，以及面向 D3D12 Shader Model 6 DXIL 的 DXC 静态性能分析后端 |
+| [Hlsl2021.md](Hlsl2021.md) | UberPost 中的 HLSL 2021 语言标准试点（`#pragma hlsl_version 2021`）与独立 DXC 编译矩阵验证 |
 
 ### 3. GPU Driven、地形与场景表示
 
@@ -49,10 +50,12 @@
 | [GPUDrivenMainTraversalAB.md](GPUDrivenMainTraversalAB.md) | 实测 A/B 报告：Sponza 移动屋顶路线下扁平遍历 vs. 两阶段层级遍历的几何等价性、时域稳定性与 GPU 计时分析 |
 | [GPUDrivenGenerationQualityAB.md](GPUDrivenGenerationQualityAB.md) | 实测 A/B 报告：旧版构建器 vs. 紧凑球界 + 法线/UV 权重构建器在渲染法线、Base Color、UV RMSE 与 GPU 耗时上的对比 |
 
-### 4. 虚拟阴影图（VSM）与 SMRT
+### 4. 阴影、光照与 APV
 
 | 文档 | 内容概要 |
 | --- | --- |
+| [MeshletAPVBaking.md](MeshletAPVBaking.md) | 静态 MeshletRenderer 代理几何 APV 烘焙工作流、Meta-pass 投影矩阵修复与独立 URP 对照验证 |
+| [SponzaNoonLook.md](SponzaNoonLook.md) | Sponza 正午基准场景构图对齐、自动曝光与 APV / 反射探针调优记录 |
 | [VirtualShadowMapCodeLayout.md](VirtualShadowMapCodeLayout.md) | VSM Runtime 子系统与 `Shaders/Core` Public/Private 目录职责、独立 `VSMShadowPass`、布局重映射、当帧请求与常驻状态分离、动态缓存与工作列表补绘顺序 |
 | [VirtualShadowMapShaderReference.md](VirtualShadowMapShaderReference.md) | VividRP VSM Shader 与 Unreal Engine 5.7.4 `ReferenceVSM`（37 个文件）的主链路对照、函数级映射表与差异说明 |
 | [SMRTAdaptiveRays.md](SMRTAdaptiveRays.md) | `VSMShadowResolveAdaptive` 生产自适应射线退出策略：首条射线全亮退出、双射线全暗退出、缺页投票保护与历史失效规则 |
@@ -84,7 +87,9 @@
 | --- | --- |
 | [VividRPWizard.md](VividRPWizard.md) | **Window > Rendering > VividRP Wizard** 向导：Windows Standalone Direct3D 12 首选 API 与 Build Profile DXC 配置 |
 | [Bindless.md](Bindless.md) | `UnityBindless.dll` 早加载机制说明（`UUM-134389`）、`BindlessNative~` 载荷与 `Setup-Bindless.ps1` 安装流程 |
-| [Unity7000a9Upgrade.md](Unity7000a9Upgrade.md) | Unity `7000.0.0a9`（`69e891f60f9a`）包基线升级、内嵌 CoreRP 同步、DXC 独立编译与 18 个 GPU 结构体偏移反射验证记录 |
+| [Unity7000a16Upgrade.md](Unity7000a16Upgrade.md) | Unity `7000.0.0a16`（`0745a91df592`）兼容性升级、CoreRP 17.7.0 同步与 GPU 结构体验证记录 |
+| [Unity7000a9Upgrade.md](Unity7000a9Upgrade.md) | Unity `7000.0.0a9`（`69e891f60f9a`）包基线升级记录 |
+| [StartupMemoryIsolation.md](StartupMemoryIsolation.md) | 启动内存隔离诊断模式（`VIVIDRP_STARTUP_SRP=minimal`）与外部目录链接安全防护 |
 | [AgenticPixM3Acceptance.md](AgenticPixM3Acceptance.md) | Agentic PIX M3 端到端捕获、多队列校验、DOS 8.3 路径修复、异步 CommandBuffer 标志恢复与验收边界记录 |
 | [../Editor/AgenticDebugger/README.md](../Editor/AgenticDebugger/README.md) | AgenticDebugger（Frame Debugger / [PIX](../Editor/AgenticDebugger/PIX.md) / [GC Profiler](../Editor/AgenticDebugger/GCProfiler.md)）CLI 与 C# 自动化诊断接口说明 |
 | [../SourceGenerators~/README.md](../SourceGenerators~/README.md) | `VividRP.RenderPassNodeGenerator` Roslyn 增量生成器测试与构建部署说明 |

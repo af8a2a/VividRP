@@ -16,6 +16,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FieldsId = Shader.PropertyToID("_MeshSdfFields");
         private static readonly int InstancesId = Shader.PropertyToID("_MeshSdfInstances");
         private static readonly int NodesId = Shader.PropertyToID("_MeshSdfNodes");
+        private static readonly int LeafInstancesId = Shader.PropertyToID("_MeshSdfLeafInstances");
         private static readonly int NodeCountId = Shader.PropertyToID("_MeshSdfNodeCount");
         private static readonly int OutputId = Shader.PropertyToID("_MeshSdfOutput");
         private static readonly int InverseViewProjectionId = Shader.PropertyToID("_MeshSdfInverseViewProjection");
@@ -81,6 +82,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, FieldsId, m_Scene.Fields);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, InstancesId, m_Scene.Instances);
             cmd.SetComputeBufferParam(m_Compute, m_Kernel, NodesId, m_Scene.Nodes);
+            cmd.SetComputeBufferParam(m_Compute, m_Kernel, LeafInstancesId, m_Scene.LeafInstances);
             cmd.SetComputeIntParam(m_Compute, NodeCountId, m_Scene.NodeCount);
             cmd.SetComputeTextureParam(m_Compute, m_Kernel, OutputId, m_OutputTexture.innerHandle);
             cmd.SetComputeMatrixParam(m_Compute, InverseViewProjectionId, m_InverseViewProjection);

@@ -2,6 +2,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine;
@@ -80,9 +81,9 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Depth), 24);
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.WordOffset), 28);
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.SignMode), 32);
-            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding0), 36);
-            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding1), 40);
-            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding2), 44);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.PageOffset), 36);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding0), 40);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding1), 44);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Instance).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(64));
@@ -95,11 +96,48 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdHigh), 60);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Node).IsLayoutSequential, Is.True);
-            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Node>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Node>(), Is.EqualTo(48));
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Min), 0);
-            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.InstanceIndex), 12);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.FirstLeaf), 12);
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Max), 16);
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.EscapeIndex), 28);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.LeafCount), 32);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.LayerMask), 36);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding0), 40);
+            AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding1), 44);
+        }
+
+        [Test]
+        public void MeshSdfBricks_OmitsUniformRegionsAndPreservesBorderSamples()
+        {
+            var dimensions = new int3(41, 3, 2);
+            using var storage = new NativeArray<ushort>(dimensions.x * dimensions.y * dimensions.z, Allocator.Temp);
+            var source = storage;
+            for (int i = 0; i < source.Length; i++)
+            {
+                int x = i % dimensions.x;
+                source[i] = ((half)(x == 40 ? 0f : 18f - x)).value;
+            }
+
+            var pages = new List<uint>();
+            int words = VividMeshSdfBricks.Plan(source, dimensions, 1f, pages, out uint pageOffset);
+            Assert.That(pageOffset, Is.Zero);
+            Assert.That(pages, Is.EqualTo(new[] { VividMeshSdfBricks.EmptyOutside, 0u, VividMeshSdfBricks.EmptyInside, 39u }));
+            Assert.That(words, Is.EqualTo(54));
+            using var packed = new NativeArray<ushort>(words * 2, Allocator.Temp);
+            VividMeshSdfBricks.Write(source, dimensions, pages, pageOffset, packed, 0);
+            for (int row = 0; row < 6; row++)
+            {
+                for (int x = 0; x < 13; x++)
+                    Assert.That(packed[x + row * 13], Is.EqualTo(source[12 + x + row * dimensions.x]));
+                for (int x = 0; x < 5; x++)
+                    Assert.That(packed[78 + x + row * 5], Is.EqualTo(source[36 + x + row * dimensions.x]));
+            }
+
+            using var small = new NativeArray<ushort>(12, Allocator.Temp);
+            Assert.That(VividMeshSdfBricks.Plan(small, new int3(3, 2, 2), 1f, pages, out pageOffset), Is.EqualTo(6));
+            Assert.That(pageOffset, Is.EqualTo(VividMeshSdfBricks.Dense));
+            Assert.That(pages.Count, Is.EqualTo(4));
         }
 
         [Test]
@@ -113,17 +151,23 @@ namespace VividRP.Editor.Tests
             var mesh = new Mesh();
             var texture = new Texture3D(2, 2, 2, GraphicsFormat.R16_SFloat, TextureCreationFlags.None);
             var field = ScriptableObject.CreateInstance<VividMeshSdfAsset>();
-            var first = new GameObject("MeshSdfInstanceA");
-            var second = new GameObject("MeshSdfInstanceB");
+            var objects = new GameObject[5];
             try
             {
                 texture.SetPixelData(new ushort[8], 0);
                 texture.Apply(false, false);
                 field.Initialize(mesh, texture, new Bounds(Vector3.zero, Vector3.one), Vector3.zero, 1f,
                     VividMeshSdfSignMode.Solid, 0f);
-                var moving = Register(first);
-                Register(second);
-                var movingTransform = first.transform;
+                MeshletRenderer moving = null;
+                for (int i = 0; i < objects.Length; i++)
+                {
+                    var obj = new GameObject("MeshSdfInstance");
+                    objects[i] = obj;
+                    var renderer = Register(obj);
+                    if (i == 0)
+                        moving = renderer;
+                }
+                var movingTransform = moving.transform;
 
                 for (int i = 0; i < 8; i++)
                     Move(i);
@@ -162,8 +206,8 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                Object.DestroyImmediate(first);
-                Object.DestroyImmediate(second);
+                foreach (var obj in objects)
+                    Object.DestroyImmediate(obj);
                 Object.DestroyImmediate(field);
                 Object.DestroyImmediate(texture);
                 Object.DestroyImmediate(mesh);

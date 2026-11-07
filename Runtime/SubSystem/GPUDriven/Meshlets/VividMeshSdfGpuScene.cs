@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
@@ -16,7 +17,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             public Vector4 OriginAndVoxelSize;
             public uint Width, Height, Depth, WordOffset;
-            public uint SignMode, Padding0, Padding1, Padding2;
+            public uint SignMode, PageOffset, Padding0, Padding1;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -30,11 +31,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal struct Node
         {
             public Vector3 Min;
-            public uint InstanceIndex;
+            public uint FirstLeaf;
             public Vector3 Max;
             public uint EscapeIndex;
+            public uint LeafCount, LayerMask, Padding0, Padding1;
         }
 
+        private const int MaxLeafInstances = 4;
         private const VividMeshletRendererFlags VisibleFlags = VividMeshletRendererFlags.ActiveInHierarchy
             | VividMeshletRendererFlags.Enabled | VividMeshletRendererFlags.SourceRendererEnabled;
 
@@ -66,7 +69,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private struct Leaf
         {
             public Bounds Bounds;
-            public uint InstanceIndex;
+            public uint InstanceIndex, LayerMask;
         }
 
         private sealed class LeafComparer : IComparer<Leaf>
@@ -90,21 +93,25 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private List<InstanceSource> m_Instances = new();
         private List<InstanceSource> m_NextInstances = new();
         private readonly List<Field> m_FieldUpload = new();
+        private readonly List<uint> m_BrickPages = new();
         private readonly List<Instance> m_InstanceUpload = new();
         private readonly List<Leaf> m_Leaves = new();
         private readonly List<Node> m_Nodes = new();
-        private readonly List<int> m_LeafNodeIndices = new();
+        private readonly List<int> m_LeafSlotsByInstance = new();
+        private readonly List<uint> m_LeafInstanceUpload = new();
 
         private GraphicsBuffer m_Voxels;
         private GraphicsBuffer m_FieldBuffer;
         private GraphicsBuffer m_InstanceBuffer;
         private GraphicsBuffer m_NodeBuffer;
+        private GraphicsBuffer m_LeafInstanceBuffer;
         private long m_LastRejectedBytes;
 
         internal GraphicsBuffer Voxels => m_Voxels;
         internal GraphicsBuffer Fields => m_FieldBuffer;
         internal GraphicsBuffer Instances => m_InstanceBuffer;
         internal GraphicsBuffer Nodes => m_NodeBuffer;
+        internal GraphicsBuffer LeafInstances => m_LeafInstanceBuffer;
         internal int NodeCount { get; private set; }
 
         internal void Update(VividMeshletRendererDatabase database)
@@ -197,14 +204,20 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         private bool UploadFields()
         {
-            long wordCount = 0;
+            m_FieldUpload.Clear();
+            m_BrickPages.Clear();
+            long payloadWords = 0;
             foreach (var source in m_NextFields)
             {
                 var field = source.Layout;
-                long texelCount = (long)field.Width * field.Height * field.Depth;
-                wordCount += (texelCount + 1) / 2;
+                var dimensions = new int3((int)field.Width, (int)field.Height, (int)field.Depth);
+                field.WordOffset = (uint)payloadWords;
+                payloadWords += VividMeshSdfBricks.Plan(source.Texture.GetPixelData<ushort>(0), dimensions,
+                    field.OriginAndVoxelSize.w, m_BrickPages, out field.PageOffset);
+                m_FieldUpload.Add(field);
             }
 
+            long wordCount = m_BrickPages.Count + payloadWords;
             long bytes = wordCount * sizeof(uint);
             long deviceLimit = SystemInfo.maxGraphicsBufferSize;
             // The ushort view of the staging array must also fit in an int-sized NativeArray.
@@ -219,16 +232,18 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
             using var words = new NativeArray<uint>((int)wordCount, Allocator.TempJob);
             var texels = words.Reinterpret<ushort>(sizeof(uint));
-            m_FieldUpload.Clear();
-            int wordOffset = 0;
-            foreach (var source in m_NextFields)
+            var directory = words.GetSubArray(0, m_BrickPages.Count);
+            for (int i = 0; i < m_BrickPages.Count; i++)
+                directory[i] = m_BrickPages[i];
+
+            for (int i = 0; i < m_NextFields.Count; i++)
             {
-                var field = source.Layout;
-                var samples = source.Texture.GetPixelData<ushort>(0);
-                NativeArray<ushort>.Copy(samples, 0, texels, wordOffset * 2, samples.Length);
-                field.WordOffset = (uint)wordOffset;
-                m_FieldUpload.Add(field);
-                wordOffset += (samples.Length + 1) / 2;
+                var field = m_FieldUpload[i];
+                field.WordOffset += (uint)m_BrickPages.Count;
+                var dimensions = new int3((int)field.Width, (int)field.Height, (int)field.Depth);
+                VividMeshSdfBricks.Write(m_NextFields[i].Texture.GetPixelData<ushort>(0), dimensions, m_BrickPages,
+                    field.PageOffset, texels, 2 * (int)field.WordOffset);
+                m_FieldUpload[i] = field;
             }
 
             EnsureBuffer(ref m_Voxels, words.Length, sizeof(uint), "Mesh SDF Voxels");
@@ -254,7 +269,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             {
                 m_Leaves.Clear();
                 m_Nodes.Clear();
-                m_LeafNodeIndices.Clear();
+                m_LeafSlotsByInstance.Clear();
+                m_LeafInstanceUpload.Clear();
             }
 
             for (int i = 0; i < m_NextInstances.Count; i++)
@@ -265,18 +281,15 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 var extent = new Vector3(field.Width - 1, field.Height - 1, field.Depth - 1) * field.OriginAndVoxelSize.w;
                 var localBounds = new Bounds(origin + extent * 0.5f, extent);
                 var bounds = VividMeshletRendererDatabase.TransformBounds(localBounds, source.LocalToWorld);
+                var leaf = new Leaf { Bounds = bounds, InstanceIndex = (uint)i, LayerMask = source.LayerMask };
                 if (rebuildBvh)
                 {
-                    m_Leaves.Add(new Leaf { Bounds = bounds, InstanceIndex = (uint)i });
-                    m_LeafNodeIndices.Add(0);
+                    m_Leaves.Add(leaf);
+                    m_LeafSlotsByInstance.Add(0);
                 }
                 else
                 {
-                    int nodeIndex = m_LeafNodeIndices[i];
-                    var node = m_Nodes[nodeIndex];
-                    node.Min = bounds.min;
-                    node.Max = bounds.max;
-                    m_Nodes[nodeIndex] = node;
+                    m_Leaves[m_LeafSlotsByInstance[i]] = leaf;
                 }
 
                 m_InstanceUpload.Add(new Instance
@@ -292,7 +305,16 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             if (rebuildBvh)
+            {
                 BuildNode(0, m_Leaves.Count);
+                for (int i = 0; i < m_Leaves.Count; i++)
+                {
+                    uint instanceIndex = m_Leaves[i].InstanceIndex;
+                    m_LeafSlotsByInstance[(int)instanceIndex] = i;
+                    m_LeafInstanceUpload.Add(instanceIndex);
+                }
+                Upload(ref m_LeafInstanceBuffer, m_LeafInstanceUpload, "Mesh SDF Leaf Instances");
+            }
             else
                 RefitBvh();
         }
@@ -301,21 +323,18 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             var bounds = m_Leaves[start].Bounds;
             var centers = new Bounds(bounds.center, Vector3.zero);
+            uint layerMask = m_Leaves[start].LayerMask;
             for (int i = start + 1; i < start + count; i++)
             {
                 bounds.Encapsulate(m_Leaves[i].Bounds);
                 centers.Encapsulate(m_Leaves[i].Bounds.center);
+                layerMask |= m_Leaves[i].LayerMask;
             }
 
             int index = m_Nodes.Count;
             m_Nodes.Add(default);
-            uint instanceIndex = uint.MaxValue;
-            if (count == 1)
-            {
-                instanceIndex = m_Leaves[start].InstanceIndex;
-                m_LeafNodeIndices[(int)instanceIndex] = index;
-            }
-            else
+            bool isLeaf = count <= MaxLeafInstances;
+            if (!isLeaf)
             {
                 var size = centers.size;
                 int axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
@@ -329,8 +348,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             {
                 Min = bounds.min,
                 Max = bounds.max,
-                InstanceIndex = instanceIndex,
+                FirstLeaf = (uint)start,
                 EscapeIndex = (uint)m_Nodes.Count,
+                LeafCount = isLeaf ? (uint)count : 0u,
+                LayerMask = layerMask,
             };
         }
 
@@ -340,12 +361,28 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             for (int i = m_Nodes.Count - 1; i >= 0; i--)
             {
                 var node = m_Nodes[i];
-                if (node.InstanceIndex != uint.MaxValue)
-                    continue;
-                var left = m_Nodes[i + 1];
-                var right = m_Nodes[(int)left.EscapeIndex];
-                node.Min = Vector3.Min(left.Min, right.Min);
-                node.Max = Vector3.Max(left.Max, right.Max);
+                if (node.LeafCount != 0)
+                {
+                    int start = (int)node.FirstLeaf;
+                    var bounds = m_Leaves[start].Bounds;
+                    node.LayerMask = m_Leaves[start].LayerMask;
+                    int end = start + (int)node.LeafCount;
+                    for (int j = start + 1; j < end; j++)
+                    {
+                        bounds.Encapsulate(m_Leaves[j].Bounds);
+                        node.LayerMask |= m_Leaves[j].LayerMask;
+                    }
+                    node.Min = bounds.min;
+                    node.Max = bounds.max;
+                }
+                else
+                {
+                    var left = m_Nodes[i + 1];
+                    var right = m_Nodes[(int)left.EscapeIndex];
+                    node.Min = Vector3.Min(left.Min, right.Min);
+                    node.Max = Vector3.Max(left.Max, right.Max);
+                    node.LayerMask = left.LayerMask | right.LayerMask;
+                }
                 m_Nodes[i] = node;
             }
         }
@@ -381,7 +418,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_FieldBuffer?.Dispose();
             m_InstanceBuffer?.Dispose();
             m_NodeBuffer?.Dispose();
-            m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_NodeBuffer = null;
+            m_LeafInstanceBuffer?.Dispose();
+            m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_NodeBuffer = m_LeafInstanceBuffer = null;
             NodeCount = 0;
             m_FieldIndices.Clear();
             m_Fields.Clear();

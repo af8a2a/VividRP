@@ -49,6 +49,9 @@ namespace VividRP.Runtime.GPUDriven
         private VividMeshletCollectionAsset[] m_MeshletCollections = Array.Empty<VividMeshletCollectionAsset>();
 
         [SerializeField]
+        private VividMeshSdfAsset m_MeshSdf;
+
+        [SerializeField]
         private GPUDrivenMaterialProxy[] m_MaterialProxies = Array.Empty<GPUDrivenMaterialProxy>();
 
         [SerializeField]
@@ -103,6 +106,9 @@ namespace VividRP.Runtime.GPUDriven
         public bool sourceWasSkinned => m_SourceWasSkinned;
 
         public IReadOnlyList<VividMeshletCollectionAsset> meshletCollections => m_MeshletCollections;
+
+        public VividMeshSdfAsset meshSdf => !m_SourceWasSkinned && m_MeshSdf != null
+            && m_MeshSdf.SourceMesh == m_SourceMesh && m_MeshSdf.DistanceField != null ? m_MeshSdf : null;
 
         public IReadOnlyList<GPUDrivenMaterialProxy> materialProxies => m_MaterialProxies;
 

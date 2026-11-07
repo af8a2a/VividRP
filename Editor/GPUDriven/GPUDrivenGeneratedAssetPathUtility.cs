@@ -22,6 +22,11 @@ namespace VividRP.Editor.GPUDriven
             return EnsureGeneratedTree(sourceFolder) + "/" + MeshletAssetFolderName;
         }
 
+        internal static string EnsureMeshSdfFolder(string sourceFolder)
+        {
+            return EnsureFolder(EnsureGeneratedRoot(sourceFolder), "MeshSDF");
+        }
+
         internal static string ResolveStreamedVirtualTextureFolderForProxy(string proxyAssetPath)
         {
             string proxyFolder = NormalizeAssetPath(Path.GetDirectoryName(proxyAssetPath));
@@ -67,6 +72,13 @@ namespace VividRP.Editor.GPUDriven
 
         private static string EnsureGeneratedTree(string sourceFolder)
         {
+            string generatedRoot = EnsureGeneratedRoot(sourceFolder);
+            EnsureGeneratedTreeAtRoot(generatedRoot);
+            return generatedRoot;
+        }
+
+        private static string EnsureGeneratedRoot(string sourceFolder)
+        {
             string normalizedSourceFolder = NormalizeAssetPath(sourceFolder);
             if (string.IsNullOrWhiteSpace(normalizedSourceFolder))
             {
@@ -79,7 +91,6 @@ namespace VividRP.Editor.GPUDriven
                 generatedRoot = EnsureFolder(normalizedSourceFolder, RootFolderName);
             }
 
-            EnsureGeneratedTreeAtRoot(generatedRoot);
             return generatedRoot;
         }
 

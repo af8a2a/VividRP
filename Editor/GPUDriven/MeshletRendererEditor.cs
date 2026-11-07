@@ -129,6 +129,7 @@ namespace VividRP.Editor.GPUDriven
         private SerializedProperty m_MotionVectorGenerationMode;
         private SerializedProperty m_RenderingLayerMask;
         private SerializedProperty m_MeshletCollections;
+        private SerializedProperty m_MeshSdf;
         private SerializedProperty m_MaterialProxies;
         private SerializedProperty m_TakeOverSourceRenderer;
 
@@ -147,6 +148,7 @@ namespace VividRP.Editor.GPUDriven
             m_MotionVectorGenerationMode = serializedObject.FindProperty("m_MotionVectorGenerationMode");
             m_RenderingLayerMask = serializedObject.FindProperty("m_RenderingLayerMask");
             m_MeshletCollections = serializedObject.FindProperty("m_MeshletCollections");
+            m_MeshSdf = serializedObject.FindProperty("m_MeshSdf");
             m_MaterialProxies = serializedObject.FindProperty("m_MaterialProxies");
             m_TakeOverSourceRenderer = serializedObject.FindProperty("m_TakeOverSourceRenderer");
         }
@@ -181,9 +183,22 @@ namespace VividRP.Editor.GPUDriven
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Meshlets", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_MeshletCollections, true);
+            EditorGUILayout.PropertyField(m_MeshSdf);
             if (serializedObject.ApplyModifiedProperties())
             {
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+            }
+
+            if (targets.Length == 1 && meshletRenderer.sourceMesh != null && !meshletRenderer.sourceWasSkinned
+                && GUILayout.Button("Bake Mesh SDF"))
+            {
+                VividMeshSdfAsset asset = VividMeshSdfImporter.CreateForMesh(meshletRenderer.sourceMesh);
+                if (asset != null)
+                {
+                    serializedObject.Update();
+                    m_MeshSdf.objectReferenceValue = asset;
+                    serializedObject.ApplyModifiedProperties();
+                }
             }
 
             DrawStatus(meshletRenderer);

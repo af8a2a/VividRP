@@ -55,6 +55,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 076c46a560b442749bd5ba6c731dcf7c, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/MaterialDebug
     ResourceObject: {fileID: 4800000, guid: 6b5bf3748d3b7004c978ed4b9384424f, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/MeshSdfVizDebug
+    ResourceObject: {fileID: 4800000, guid: 62c2da7264b6d0743b05f50b7699ecb1, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/OverlayDebug
     ResourceObject: {fileID: 4800000, guid: e395d09a0901a0f41ab15bd086c17efd, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/RTASInstanceDebug

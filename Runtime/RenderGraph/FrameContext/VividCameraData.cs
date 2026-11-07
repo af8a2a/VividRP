@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.Rendering;
+using System.Runtime.CompilerServices;
 
 namespace VividRP.Runtime
 {
@@ -34,6 +35,10 @@ namespace VividRP.Runtime
         internal bool hdrOutputActive;
         internal HDROutputUtils.HDRDisplayInformation hdrDisplayInformation = VividHDROutputUtility.DefaultHDRDisplayInformation;
         internal ColorGamut hdrDisplayColorGamut = ColorGamut.sRGB;
+        private static readonly ConditionalWeakTable<Camera, string>.CreateValueCallback s_ReadCameraName =
+            camera => camera.name;
+        // Names label diagnostics. Keep one snapshot per camera wrapper across view switches and frame resets.
+        private readonly ConditionalWeakTable<Camera, string> m_CameraNames = new();
         private Camera m_CameraNameSource;
         private Camera m_DepthTextureModeSource;
         private bool m_DepthTextureModeHasRequiredFlags;
@@ -59,7 +64,7 @@ namespace VividRP.Runtime
             m_DepthTextureModeSource = null;
             m_DepthTextureModeHasRequiredFlags = false;
             hasCameraFrameProperties = false;
-            cameraName = value != null ? value.name : null;
+            cameraName = value != null ? m_CameraNames.GetValue(value, s_ReadCameraName) : null;
             cameraEntityId = value != null ? value.GetEntityId() : EntityId.None;
         }
 

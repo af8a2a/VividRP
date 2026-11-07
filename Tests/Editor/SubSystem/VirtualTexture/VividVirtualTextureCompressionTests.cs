@@ -103,6 +103,35 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        // The test cancels all leases before polling. The handle carries no result storage.
+        private sealed class CancelledReadBackend : IVTIOBackend, IVTIOBatch
+        {
+            internal int SubmittedBatchCount { get; private set; }
+            internal int SubmittedCommandCount { get; private set; }
+            public string Name => nameof(CancelledReadBackend);
+            public bool IsAvailable => true;
+            public int Count => 0;
+            public bool IsCompleted => true;
+            public bool Failed => false;
+            public string Error => null;
+
+            public IVTIOBatch CreateBatch(string path, IReadOnlyList<VTIOReadCommand> commands)
+            {
+                SubmittedBatchCount++;
+                SubmittedCommandCount += commands.Count;
+                return this;
+            }
+
+            public bool TryGetResult(int commandIndex, out byte[] data)
+            {
+                data = null;
+                return false;
+            }
+
+            public void Cancel() { }
+            public void Dispose() { }
+        }
+
         private sealed class CompletedIOBatch : IVTIOBatch
         {
             private readonly byte[][] m_Results;
@@ -954,6 +983,52 @@ namespace VividRP.Editor.Tests
             {
                 foreach (var lease in leases)
                     lease?.Dispose();
+            }
+        }
+
+        [TestCase(64, false)]
+        [TestCase(96, false)]
+        [TestCase(96, true)]
+        public void ChunkManager_SubmitsFirstConfiguredReadBurstWithoutAllocating(int chunkCount, bool sameFile)
+        {
+            var leases = new VTChunkLease[chunkCount];
+            var paths = new string[chunkCount];
+            var locations = new VividVirtualTextureTilePayloadLocation[chunkCount];
+            for (int index = 0; index < chunkCount; index++)
+            {
+                paths[index] = sameFile ? "shared.stream" : $"{index:D4}.stream";
+                locations[index] = CreateRawLocation(index, index * 16);
+            }
+
+            var backend = new CancelledReadBackend();
+            using (var warmup = new VTStreamChunkManager())
+            {
+                warmup.SetIOBackendForTesting(backend);
+                warmup.Acquire(paths[0], 1, locations[0], false);
+                warmup.Acquire(paths[1], 1, locations[1], false);
+                warmup.SubmitPendingReads();
+            }
+
+            backend = new CancelledReadBackend();
+            using var manager = new VTStreamChunkManager();
+            manager.Configure(VividVirtualTextureIOBackendMode.AsyncReadManager, chunkCount, 1, 1);
+            manager.SetIOBackendForTesting(backend);
+            for (int iteration = 0; iteration < 4; iteration++)
+            {
+                for (int index = 0; index < chunkCount; index++)
+                    leases[index] = manager.Acquire(paths[index], 1, locations[index], false);
+
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                manager.SubmitPendingReads();
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                foreach (VTChunkLease lease in leases)
+                    lease.Dispose();
+                manager.PollProgress();
+
+                Assert.That(allocated, Is.Zero, $"Burst {iteration}");
+                Assert.That(manager.PendingChunkCount, Is.Zero);
+                Assert.That(backend.SubmittedCommandCount, Is.EqualTo((iteration + 1) * chunkCount));
+                Assert.That(backend.SubmittedBatchCount, Is.EqualTo((iteration + 1) * (sameFile ? 2 : chunkCount)));
             }
         }
 

@@ -395,8 +395,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (texture?.desc == null)
                 return;
 
-            if (sourceDescriptor != null)
+            if (ReferenceEquals(texture.desc, sourceDescriptor))
                 texture.desc = sourceDescriptor.Clone();
+            else
+                sourceDescriptor.Copy(texture.desc);
 
             texture.desc.Name = name;
             texture.desc.Width = Mathf.Max(1, width);

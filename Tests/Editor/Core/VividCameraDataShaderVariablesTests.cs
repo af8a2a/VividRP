@@ -249,7 +249,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SetCamera_CachesCameraNameUntilCameraChanges()
+        public void SetCamera_ReusesNamesWhenAlternatingPrewarmedCameras()
         {
             var firstCamera = m_GameObject.AddComponent<Camera>();
             firstCamera.name = "First Camera";
@@ -274,6 +274,26 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(cameraData.camera, Is.SameAs(secondCamera));
                 Assert.That(cameraData.cameraName, Is.EqualTo("Second Camera"));
+                string secondName = cameraData.cameraName;
+
+                cameraData.SetCamera(firstCamera);
+                string firstName = cameraData.cameraName;
+                EntityId firstId = firstCamera.GetEntityId();
+                EntityId secondId = secondCamera.GetEntityId();
+                bool correct = true;
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 128; iteration++)
+                {
+                    cameraData.SetCamera(secondCamera);
+                    correct &= ReferenceEquals(cameraData.cameraName, secondName)
+                        && cameraData.cameraEntityId == secondId;
+                    cameraData.SetCamera(firstCamera);
+                    correct &= ReferenceEquals(cameraData.cameraName, firstName)
+                        && cameraData.cameraEntityId == firstId;
+                }
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(correct, Is.True);
+                Assert.That(allocated, Is.Zero);
 
                 cameraData.Reset();
 

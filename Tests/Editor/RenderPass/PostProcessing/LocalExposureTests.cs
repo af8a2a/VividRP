@@ -219,13 +219,17 @@ namespace VividRP.Editor.Tests
             source.desc.Width = 130;
             source.desc.Height = 65;
             source.desc.UseDynamicScale = true;
+            source.desc.ScaleFactor = new Vector2(0.5f, 0.75f);
 
             Assert.That(setMethod, Is.Not.Null);
             Assert.That(outputField, Is.Not.Null);
             Assert.That(gridField, Is.Not.Null);
 
             setMethod.Invoke(pass, new object[] { source });
-            pass.Prepare(new ContextContainer());
+            using var frameData = new ContextContainer();
+            frameData.Create<VividCameraData>();
+            frameData.Create<VividExposureData>();
+            pass.Prepare(frameData);
 
             var outputTexture = (RenderGraphTexture)outputField.GetValue(pass);
             var gridTexture = (RenderGraphTexture)gridField.GetValue(pass);
@@ -234,6 +238,8 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.Width, Is.EqualTo(130));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(65));
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(outputTexture.desc.UseDynamicScale, Is.True);
+            Assert.That(outputTexture.desc.ScaleFactor, Is.EqualTo(source.desc.ScaleFactor));
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(outputTexture.desc.Dimension, Is.EqualTo(TextureDimension.Tex2D));
             Assert.That(gridTexture.desc.Name, Is.EqualTo("LocalExposureBilateralGrid"));
@@ -243,6 +249,23 @@ namespace VividRP.Editor.Tests
             Assert.That(gridTexture.desc.Dimension, Is.EqualTo(TextureDimension.Tex3D));
             Assert.That(gridTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_SFloat));
             Assert.That(gridTexture.desc.EnableRandomWrite, Is.True);
+
+            var outputDescriptor = outputTexture.desc;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 128; iteration++)
+                pass.Prepare(frameData);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Assert.That(outputTexture.desc, Is.SameAs(outputDescriptor));
+
+            source.desc.Width = 320;
+            source.desc.UseDynamicScale = false;
+            pass.Prepare(frameData);
+            Assert.That(outputTexture.desc, Is.SameAs(outputDescriptor));
+            Assert.That(outputDescriptor.Width, Is.EqualTo(320));
+            Assert.That(outputDescriptor.UseDynamicScale, Is.False);
+            Assert.That(source.desc.Name, Is.EqualTo("Source"));
+            Assert.That(source.desc.EnableRandomWrite, Is.False);
         }
 
         [Test]

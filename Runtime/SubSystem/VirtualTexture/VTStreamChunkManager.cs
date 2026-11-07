@@ -73,6 +73,8 @@ namespace VividRP.Runtime
 
     internal sealed class VTStreamChunkManager : IDisposable
     {
+        private const int MaxReadCommandsPerBatch = 64;
+
         internal readonly struct ChunkKey : IEquatable<ChunkKey>
         {
             internal ChunkKey(
@@ -242,8 +244,9 @@ namespace VividRP.Runtime
 
         private sealed class ActiveBatch
         {
+            internal ActiveBatch NextFree;
             internal IVTIOBatch Batch;
-            internal readonly List<ChunkEntry> Entries = new();
+            internal readonly List<ChunkEntry> Entries = new(MaxReadCommandsPerBatch);
         }
 
         private sealed class ActiveBatchComparer : IComparer<ActiveBatch>
@@ -329,9 +332,10 @@ namespace VividRP.Runtime
         private readonly List<ChunkEntry> m_DecodingEntries = new(64);
         private readonly List<ActiveBatch> m_ActiveBatches = new(64);
         private readonly List<ActiveBatch> m_RetainedReadBatches = new(64);
-        private readonly Stack<ActiveBatch> m_ActiveBatchPool = new(64);
         private readonly List<ChunkEntry> m_SubmissionEntries = new();
         private readonly List<VTIOReadCommand> m_SubmissionCommands = new(64);
+        private ActiveBatch m_FreeActiveBatch;
+        private int m_PreparedReadBatchCount;
         private VTChunkLease m_FreeLease;
         private ChunkEntry m_FreeEntry;
         private ChunkEntry m_ReadyLruFirst;
@@ -368,6 +372,7 @@ namespace VividRP.Runtime
                 m_FreeEntry = new ChunkEntry { NextFree = m_FreeEntry };
                 m_FreeLease = new VTChunkLease { NextFree = m_FreeLease };
             }
+            PrepareReadBatches();
             m_IOBackend = CreateBackend(m_BackendMode);
             m_DecodeWork = decodeWork ?? DecodeEntry;
             EnsureDecodeWorkers();
@@ -439,10 +444,7 @@ namespace VividRP.Runtime
             m_MaxInFlightChunkCount = Mathf.Max(1, maxInFlightChunkCount);
             if (m_PendingDecodeEntries.Capacity < m_MaxInFlightChunkCount)
                 m_PendingDecodeEntries.Capacity = m_MaxInFlightChunkCount;
-            if (m_ActiveBatches.Capacity < m_MaxInFlightChunkCount)
-                m_ActiveBatches.Capacity = m_MaxInFlightChunkCount;
-            if (m_RetainedReadBatches.Capacity < m_MaxInFlightChunkCount)
-                m_RetainedReadBatches.Capacity = m_MaxInFlightChunkCount;
+            PrepareReadBatches();
             EnsureEntryCapacity();
             EnsureLeaseCapacity();
             int clampedDecodeConcurrency = Mathf.Clamp(decodeConcurrency, 1, 64);
@@ -483,6 +485,23 @@ namespace VividRP.Runtime
             m_PreparedLeaseCount += leases - previous.Leases;
             EnsureEntryCapacity();
             EnsureLeaseCapacity();
+        }
+
+        private void PrepareReadBatches()
+        {
+            if (m_PreparedReadBatchCount >= m_MaxInFlightChunkCount)
+                return;
+
+            // Different files can require one batch per admitted chunk.
+            m_ActiveBatches.Capacity = m_MaxInFlightChunkCount;
+            m_RetainedReadBatches.Capacity = m_MaxInFlightChunkCount;
+            m_QueuedEntries.Capacity = m_MaxInFlightChunkCount;
+            m_SubmissionEntries.Capacity = m_MaxInFlightChunkCount;
+            while (m_PreparedReadBatchCount < m_MaxInFlightChunkCount)
+            {
+                m_FreeActiveBatch = new ActiveBatch { NextFree = m_FreeActiveBatch };
+                m_PreparedReadBatchCount++;
+            }
         }
 
         private void PrepareReadBuffers()
@@ -637,7 +656,7 @@ namespace VividRP.Runtime
                     m_SubmissionCommands.Clear();
                     long batchByteSize = 0;
                     while (entryIndex < m_SubmissionEntries.Count
-                           && activeBatch.Entries.Count < 64
+                           && activeBatch.Entries.Count < MaxReadCommandsPerBatch
                            && string.Equals(
                                m_SubmissionEntries[entryIndex].Key.Path,
                                path,
@@ -799,7 +818,7 @@ namespace VividRP.Runtime
             for (int batchIndex = 0; batchIndex < m_ActiveBatches.Count; batchIndex++)
                 m_ActiveBatches[batchIndex].Batch.Dispose();
             m_ActiveBatches.Clear();
-            m_ActiveBatchPool.Clear();
+            m_FreeActiveBatch = null;
             m_SubmissionEntries.Clear();
             m_SubmissionCommands.Clear();
             m_FreeLease = null;
@@ -884,7 +903,7 @@ namespace VividRP.Runtime
                 }
 
                 m_ActiveBatches.RemoveAt(batchIndex);
-                if (activeBatch.Batch is IVTNativeIOBatch)
+                if (activeBatch.Batch is IVTNativeIOBatch && RetainNativeReadEntries(activeBatch))
                     m_RetainedReadBatches.Add(activeBatch);
                 else
                 {
@@ -1052,6 +1071,23 @@ namespace VividRP.Runtime
             }
         }
 
+        private bool RetainNativeReadEntries(ActiveBatch batch)
+        {
+            // A failed command can retry in another batch. Keep only entries with a
+            // view into this batch, so a later retry cannot extend its lifetime.
+            int retainedCount = 0;
+            for (int index = 0; index < batch.Entries.Count; index++)
+            {
+                ChunkEntry entry = batch.Entries[index];
+                if (entry.NativeStoredData.IsCreated)
+                    batch.Entries[retainedCount++] = entry;
+                else
+                    ReleaseBatchEntry(entry);
+            }
+            batch.Entries.RemoveRange(retainedCount, batch.Entries.Count - retainedCount);
+            return retainedCount > 0;
+        }
+
         private void RetryOrFail(ChunkEntry entry, string error)
         {
             if (entry.ReferenceCount <= 0)
@@ -1120,12 +1156,16 @@ namespace VividRP.Runtime
 
         private ActiveBatch RentActiveBatch()
         {
-            ActiveBatch activeBatch = m_ActiveBatchPool.Count > 0
-                ? m_ActiveBatchPool.Pop()
-                : new ActiveBatch();
-            activeBatch.Batch = null;
-            activeBatch.Entries.Clear();
-            return activeBatch;
+            // Cancelling a pending decode can return its chunk budget between polls.
+            // Reclaim empty retained batches before using that budget for a new read.
+            if (m_FreeActiveBatch == null)
+                ReleaseCompletedReadBatches();
+
+            ActiveBatch batch = m_FreeActiveBatch
+                ?? throw new InvalidOperationException("The VT read batch pool exhausted its in-flight chunk budget.");
+            m_FreeActiveBatch = batch.NextFree;
+            batch.NextFree = null;
+            return batch;
         }
 
         private void ReturnActiveBatch(ActiveBatch activeBatch)
@@ -1135,14 +1175,19 @@ namespace VividRP.Runtime
 
             activeBatch.Batch = null;
             for (int index = 0; index < activeBatch.Entries.Count; index++)
-            {
-                ChunkEntry entry = activeBatch.Entries[index];
-                entry.BatchReferenceCount -= 1;
-                TryRecycleEntry(entry);
-            }
+                ReleaseBatchEntry(activeBatch.Entries[index]);
             activeBatch.Entries.Clear();
             if (!m_Disposed)
-                m_ActiveBatchPool.Push(activeBatch);
+            {
+                activeBatch.NextFree = m_FreeActiveBatch;
+                m_FreeActiveBatch = activeBatch;
+            }
+        }
+
+        private void ReleaseBatchEntry(ChunkEntry entry)
+        {
+            entry.BatchReferenceCount -= 1;
+            TryRecycleEntry(entry);
         }
 
         private void RetireEntry(ChunkEntry entry)

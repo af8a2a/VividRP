@@ -345,11 +345,12 @@ namespace VividRP.Runtime.GPUDriven
 
         private void UploadRawIndexBuffer(List<byte> indices)
         {
-            int alignedByteCount = AlignUp(Mathf.Max(1, indices.Count), RawBufferStride);
+            int indexCount = indices.Count;
+            int alignedByteCount = AlignUp(Mathf.Max(1, indexCount), RawBufferStride);
             int rawBufferCount = alignedByteCount / RawBufferStride;
             EnsureRawBuffer(ref m_SharedIndexBuffer, rawBufferCount, "VividGPUDriven_SharedIndices");
 
-            if (indices.Count == 0)
+            if (indexCount == 0)
             {
                 return;
             }
@@ -358,12 +359,13 @@ namespace VividRP.Runtime.GPUDriven
             {
                 m_PaddedIndexUploadData = new byte[alignedByteCount];
             }
-            else
-            {
-                Array.Clear(m_PaddedIndexUploadData, 0, alignedByteCount);
-            }
 
             indices.CopyTo(m_PaddedIndexUploadData, 0);
+            if (indexCount < alignedByteCount)
+            {
+                Array.Clear(m_PaddedIndexUploadData, indexCount, alignedByteCount - indexCount);
+            }
+
             SharedIndexBuffer.SetData(m_PaddedIndexUploadData, 0, 0, alignedByteCount);
         }
 

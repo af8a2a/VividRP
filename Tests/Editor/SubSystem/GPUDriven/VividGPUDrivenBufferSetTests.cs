@@ -149,6 +149,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GlobalSdfResidency_WrapsPartialBricksAndReusesScratch()
+        {
+            var nodes = new[]
+            {
+                new VividMeshSdfGpuScene.Node
+                {
+                    Min = new Vector3(-1f, 0f, 0f), Max = new Vector3(-1f, 0f, 0f),
+                    LeafCount = 1, EscapeIndex = 1, LayerMask = 1,
+                },
+            };
+            var required = new bool[VividGlobalSdfClipmap.PagesPerLevel];
+            var origin = new int3(-1, 0, 0);
+            VividGlobalSdfClipmap.MarkRequiredPages(nodes, origin, 1f, 1, required);
+
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 32; i++)
+                VividGlobalSdfClipmap.MarkRequiredPages(nodes, origin, 1f, 1, required);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero);
+            int width = VividGlobalSdfClipmap.BrickResolution;
+            Assert.That(required[width - 1], Is.True);
+            Assert.That(required[0], Is.True);
+            Assert.That(required[1], Is.False);
+            Assert.That(required[2 * width - 1], Is.True);
+            Assert.That(required[width], Is.False);
+
+            VividGlobalSdfClipmap.MarkRequiredPages(nodes, origin, 1f, 2, required);
+            Assert.That(required, Has.None.True);
+        }
+
+        [Test]
         public void MeshSdfBricks_OmitsUniformRegionsAndPreservesBorderSamples()
         {
             var dimensions = new int3(41, 3, 2);

@@ -1,4 +1,5 @@
 #pragma kernel ComposeGlobalSdf
+#pragma kernel ClearGlobalSdfPages
 #pragma kernel ComposeGlobalSdfThinBricks
 #pragma kernel TraceGlobalSdfDebug
 
@@ -10,6 +11,7 @@ int3 _GlobalSdfRegionMin;
 int3 _GlobalSdfRegionSize;
 float _GlobalSdfVoxelSize;
 uint _GlobalSdfWriteLevel;
+uint _GlobalSdfFirstPage;
 
 float GlobalSdfInstanceDistance(VividMeshSdfInstance instance, VividMeshSdfField field, float3 positionWS)
 {
@@ -36,6 +38,11 @@ void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
         return;
 
     int3 cell = _GlobalSdfRegionMin + int3(id);
+    uint3 physical = uint3(cell & (VividGlobalSdfResolution - 1));
+    uint page = VividGlobalSdfPage(physical, _GlobalSdfWriteLevel);
+    if (page == 0u)
+        return;
+
     float3 position = float3(cell) * _GlobalSdfVoxelSize;
     float band = VividGlobalSdfBand * _GlobalSdfVoxelSize;
     float surface = band;
@@ -71,8 +78,15 @@ void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    uint3 physical = uint3(cell & (VividGlobalSdfResolution - 1));
-    _GlobalSdfWrite[physical] = clamp(surface / _GlobalSdfVoxelSize, -VividGlobalSdfBand, VividGlobalSdfBand);
+    _GlobalSdfWrite[VividGlobalSdfAtlasCell(page - 1u, physical)] =
+        clamp(surface / _GlobalSdfVoxelSize, -VividGlobalSdfBand, VividGlobalSdfBand);
+}
+
+[numthreads(4, 4, 4)]
+void ClearGlobalSdfPages(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = _GlobalSdfFirstPage + (id.x >> VividGlobalSdfBrickShift);
+    _GlobalSdfWrite[VividGlobalSdfAtlasCell(slot, id)] = VividGlobalSdfBand;
 }
 
 bool GlobalSdfBrickContainsThinShell(float3 center, float halfExtent)

@@ -125,6 +125,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal GraphicsBuffer Instances => m_InstanceBuffer;
         internal GraphicsBuffer Nodes => m_NodeBuffer;
         internal GraphicsBuffer LeafInstances => m_LeafInstanceBuffer;
+        internal IReadOnlyList<Node> BvhNodes => m_Nodes;
         internal int NodeCount { get; private set; }
         internal uint Revision { get; private set; }
 

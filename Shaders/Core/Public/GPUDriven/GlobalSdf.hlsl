@@ -7,6 +7,11 @@
 static const int VividGlobalSdfResolution = 128;
 static const uint VividGlobalSdfLevelCount = 3u;
 static const float VividGlobalSdfBand = 8.0;
+static const uint VividGlobalSdfBrickShift = 3u;
+static const uint VividGlobalSdfBrickSize = 1u << VividGlobalSdfBrickShift;
+static const uint VividGlobalSdfBrickResolution = uint(VividGlobalSdfResolution) >> VividGlobalSdfBrickShift;
+static const uint VividGlobalSdfPagesPerSlice = VividGlobalSdfBrickResolution * VividGlobalSdfBrickResolution;
+static const uint VividGlobalSdfPagesPerLevel = VividGlobalSdfPagesPerSlice * VividGlobalSdfBrickResolution;
 static const int VividGlobalSdfThinBrickSize = 8;
 static const int VividGlobalSdfThinBrickResolution = VividGlobalSdfResolution / VividGlobalSdfThinBrickSize + 1;
 static const uint VividGlobalSdfThinBrickWords =
@@ -16,6 +21,7 @@ Texture3D<float> _GlobalSdfNear;
 Texture3D<float> _GlobalSdfMiddle;
 Texture3D<float> _GlobalSdfFar;
 StructuredBuffer<uint> _GlobalSdfThinBricks;
+StructuredBuffer<uint> _GlobalSdfPages;
 float4 _GlobalSdfLevels[VividGlobalSdfLevelCount];
 float4 _GlobalSdfScroll[VividGlobalSdfLevelCount];
 uint _GlobalSdfLayerMask;
@@ -27,19 +33,72 @@ struct VividGlobalSdfHit
     uint level;
 };
 
+uint VividGlobalSdfPage(uint3 physical, uint level)
+{
+    uint3 brick = physical >> VividGlobalSdfBrickShift;
+    return _GlobalSdfPages[level * VividGlobalSdfPagesPerLevel
+        + brick.x + VividGlobalSdfBrickResolution * brick.y + VividGlobalSdfPagesPerSlice * brick.z];
+}
+
+uint3 VividGlobalSdfAtlasCell(uint slot, uint3 physical)
+{
+    uint3 tile = uint3(slot % VividGlobalSdfBrickResolution,
+        (slot / VividGlobalSdfBrickResolution) % VividGlobalSdfBrickResolution,
+        slot / VividGlobalSdfPagesPerSlice);
+    return tile * VividGlobalSdfBrickSize + (physical & (VividGlobalSdfBrickSize - 1u));
+}
+
+float VividGlobalSdfLoadCell(Texture3D<float> atlas, uint3 cell, uint level)
+{
+    uint3 physical = cell & (uint(VividGlobalSdfResolution) - 1u);
+    uint page = VividGlobalSdfPage(physical, level);
+    if (page == 0u)
+        return VividGlobalSdfBand;
+    return atlas.Load(int4(VividGlobalSdfAtlasCell(page - 1u, physical), 0));
+}
+
+float VividGlobalSdfSampleAtlas(Texture3D<float> atlas, float3 cell, uint level)
+{
+    uint3 low = uint3(cell);
+    float3 blend = frac(cell);
+    uint3 local = low & (VividGlobalSdfBrickSize - 1u);
+    if (all(local < VividGlobalSdfBrickSize - 1u))
+    {
+        uint3 physical = low & (uint(VividGlobalSdfResolution) - 1u);
+        uint page = VividGlobalSdfPage(physical, level);
+        if (page == 0u)
+            return VividGlobalSdfBand;
+        uint3 size;
+        atlas.GetDimensions(size.x, size.y, size.z);
+        float3 atlasCell = float3(VividGlobalSdfAtlasCell(page - 1u, physical)) + blend;
+        return atlas.SampleLevel(sampler_LinearClamp, (atlasCell + 0.5) / float3(size), 0);
+    }
+
+    // Interpolate across pages in clipmap space so atlas neighbors cannot bleed into a sample.
+    float x00 = lerp(VividGlobalSdfLoadCell(atlas, low, level),
+        VividGlobalSdfLoadCell(atlas, low + uint3(1, 0, 0), level), blend.x);
+    float x10 = lerp(VividGlobalSdfLoadCell(atlas, low + uint3(0, 1, 0), level),
+        VividGlobalSdfLoadCell(atlas, low + uint3(1, 1, 0), level), blend.x);
+    float x01 = lerp(VividGlobalSdfLoadCell(atlas, low + uint3(0, 0, 1), level),
+        VividGlobalSdfLoadCell(atlas, low + uint3(1, 0, 1), level), blend.x);
+    float x11 = lerp(VividGlobalSdfLoadCell(atlas, low + uint3(0, 1, 1), level),
+        VividGlobalSdfLoadCell(atlas, low + uint3(1, 1, 1), level), blend.x);
+    return lerp(lerp(x00, x10, blend.y), lerp(x01, x11, blend.y), blend.z);
+}
+
 float VividGlobalSdfSampleLevel(float3 positionWS, uint level)
 {
     level = min(level, VividGlobalSdfLevelCount - 1u);
     float4 layout = _GlobalSdfLevels[level];
     float3 grid = clamp((positionWS - layout.xyz) / layout.w, 0.0, VividGlobalSdfResolution - 1.0);
-    float3 uvw = (grid + _GlobalSdfScroll[level].xyz + 0.5) / VividGlobalSdfResolution;
+    float3 cell = grid + _GlobalSdfScroll[level].xyz;
     float value;
     if (level == 0u)
-        value = _GlobalSdfNear.SampleLevel(sampler_LinearRepeat, uvw, 0);
+        value = VividGlobalSdfSampleAtlas(_GlobalSdfNear, cell, level);
     else if (level == 1u)
-        value = _GlobalSdfMiddle.SampleLevel(sampler_LinearRepeat, uvw, 0);
+        value = VividGlobalSdfSampleAtlas(_GlobalSdfMiddle, cell, level);
     else
-        value = _GlobalSdfFar.SampleLevel(sampler_LinearRepeat, uvw, 0);
+        value = VividGlobalSdfSampleAtlas(_GlobalSdfFar, cell, level);
     return value * layout.w;
 }
 

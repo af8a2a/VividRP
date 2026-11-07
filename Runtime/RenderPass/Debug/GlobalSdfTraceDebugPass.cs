@@ -29,6 +29,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ModeId = Shader.PropertyToID("_GlobalSdfDebugMode");
         private static readonly int LayerMaskId = Shader.PropertyToID("_GlobalSdfLayerMask");
         private static readonly int ThinBricksId = Shader.PropertyToID("_GlobalSdfThinBricks");
+        private static readonly int PagesId = Shader.PropertyToID("_GlobalSdfPages");
 
         [RenderGraphResource(Name = "Near", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Near = RenderGraphTexture.CreateInput("Near", GraphicsFormat.R16_SFloat);
@@ -41,6 +42,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "Thin Shell Bricks", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_ThinBricks = RenderGraphBuffer.CreateStructured("Global SDF Thin Shell Bricks", sizeof(uint));
+
+        [RenderGraphResource(Name = "Page Table", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_Pages = RenderGraphBuffer.CreateStructured("Global SDF Page Table", sizeof(uint));
 
         [RenderGraphResource(Name = "OutputTexture", Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
@@ -98,24 +102,27 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public void PrepareRenderGraph(ContextContainer frameData)
         {
-            if (!HasClipmapInputs() || ReferenceEquals(m_ThinBricks, m_Frame.ThinBricks))
+            if (!HasClipmapInputs()
+                || (ReferenceEquals(m_ThinBricks, m_Frame.ThinBricks) && ReferenceEquals(m_Pages, m_Frame.Pages)))
                 return;
 
-            // Existing graphs connect the three level textures. The matching producer supplies the brick buffer.
+            // Existing graphs connect the three level textures. The matching producer supplies the lookup buffers.
             m_ThinBricks = m_Frame.ThinBricks;
+            m_Pages = m_Frame.Pages;
             IsPassResourceLayoutDirty = true;
         }
 
         public override void Record(ComputePassContext context)
         {
             if (m_Skip || m_Kernel < 0 || !HasClipmapInputs() || !m_Frame.Recorded
-                || !m_OutputTexture.innerHandle.IsValid() || !m_ThinBricks.innerHandle.IsValid())
+                || !m_OutputTexture.innerHandle.IsValid() || !m_ThinBricks.innerHandle.IsValid() || !m_Pages.innerHandle.IsValid())
                 return;
 
             var cmd = context.cmd;
             m_Frame.MeshScene.Bind(cmd, m_Shader, m_Kernel);
             cmd.SetComputeIntParam(m_Shader, LayerMaskId, m_Frame.LayerMask);
             cmd.SetComputeBufferParam(m_Shader, m_Kernel, ThinBricksId, m_ThinBricks.innerHandle);
+            cmd.SetComputeBufferParam(m_Shader, m_Kernel, PagesId, m_Pages.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, NearId, m_Near.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, MiddleId, m_Middle.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, FarId, m_Far.innerHandle);

@@ -1,0 +1,27 @@
+#pragma kernel SampleProbes
+#pragma use_dxc
+#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
+
+StructuredBuffer<float4> _ProbePositions;
+StructuredBuffer<float4> _ProbeNormals;
+RWStructuredBuffer<float4> _ProbeResults;
+uint _ProbeCount;
+
+[numthreads(1, 1, 1)]
+void SampleProbes(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _ProbeCount)
+        return;
+    float3 lighting = 0;
+    float status = -2;
+#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    APVSample sample = SampleAPV(_ProbePositions[id.x].xyz, _ProbeNormals[id.x].xyz,
+        0xFFFFFFFFu, float3(0, 0, -1));
+    status = sample.status;
+    EvaluateAdaptiveProbeVolume(sample, _ProbeNormals[id.x].xyz, lighting);
+#endif
+    _ProbeResults[id.x] = float4(lighting, status);
+}

@@ -94,6 +94,9 @@ float4x4 _VSMRasterViewProjection;
 #define unity_MatrixInvP _VividMatrixInvP
 #if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
 #define unity_MatrixVP (_VSMUnityRasterEnabled != 0 ? _VSMRasterViewProjection : _VividShadowVP[_VividShadowCascadeIndex])
+#elif defined(VIVIDRP_SHADERPASS_META) || defined(VIVIDRP_UNLIT_META_PASS) || defined(VIVID_TERRAIN_PASS_META)
+// Unity's lightmapper supplies its own UV-space raster camera, outside the SRP render loop.
+float4x4 unity_MatrixVP;
 #else
 #define unity_MatrixVP _VividMatrixVP
 #endif

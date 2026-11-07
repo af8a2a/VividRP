@@ -183,11 +183,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer4.Resize(width, height);
             m_GBufferDepth.Resize(width, height);
             m_GBufferDepth.desc.ClearBuffer = false;
-            m_GBuffer0.desc.ClearBuffer = false;
-            m_GBuffer1.desc.ClearBuffer = false;
-            m_GBuffer2.desc.ClearBuffer = false;
-            m_GBuffer3.desc.ClearBuffer = false;
-            m_GBuffer4.desc.ClearBuffer = false;
+            // RenderGraph clears each texture on first use. Later writers must preserve
+            // pixels already produced by VisibilityBufferGBufferResolvePass.
+            m_GBuffer0.desc.ClearBuffer = true;
+            m_GBuffer1.desc.ClearBuffer = true;
+            m_GBuffer2.desc.ClearBuffer = true;
+            m_GBuffer3.desc.ClearBuffer = true;
+            m_GBuffer4.desc.ClearBuffer = true;
 
             UpdateRenderListShaderTags(frameData);
             PrepareClusteredDecalParameters(frameData, width, height);
@@ -200,7 +202,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var nativeCmd = context.GetNativeCommandBuffer();
             BindGBufferTargets(nativeCmd);
-            nativeCmd.ClearRenderTarget(clearDepth: false, clearColor: true, Color.clear);
             ApplyClusteredDecalProperties(nativeCmd);
 
             if (m_RenderList != null && m_RenderList.IsValid)

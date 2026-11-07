@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d5a70373dd8ab94b9e683327443fffd, type: 3}
+  m_Name: MeshletAPVPipeline
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.VividRenderPipelineAsset
+  RenderGraphAsset: {fileID: 2841676755933307327, guid: a093fab8c6dd2ac41ad47af4cda0eb95, type: 3}
+  m_EnableAsyncCompute: 1
+  m_EnableGPUDriven: 1
+  m_EnableGPUDrivenOcclusionCulling: 1
+  m_GPUDrivenTextureBackend: 0
+  m_GPUDrivenVirtualTexturePhysicalPoolQuality: 3
+  m_EnableTerrainRuntimeVirtualTexture: 1
+  m_VirtualTextureIOBackend: 1
+  m_VirtualTextureMaxResidencyAllocationsPerFrame: 64
+  m_VirtualTextureMaxPrefetchAllocationsPerFrame: 0
+  m_VirtualTextureMaxPageUploadsPerFrame: 64
+  m_VirtualTextureMaxUploadBytesPerFrameMiB: 0
+  m_VirtualTextureMaxInFlightChunks: 64
+  m_VirtualTextureDecodeConcurrency: 0
+  m_VirtualTextureDecodedCacheBudgetMiB: 32
+  m_EnableGPUDrivenDecal: 0
+  m_DecalTechnique: 0
+  m_EnableSRPBatcher: 1
+  m_SupportProbeVolume: 1
+  m_ProbeVolumeSHBands: 2
+  m_ReflectionProbeAtlasResolution: 4096
+  m_ReflectionProbeAtlasFormat: 48
+  m_ReflectionProbeAtlasLastValidCubeMip: 3
+  m_ReflectionProbeAtlasDecreaseResToFit: 1
+  m_ColorGradingSpace: 0
+  m_AutoExposureImplementation: 1

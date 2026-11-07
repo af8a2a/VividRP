@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: daf37f5ef8b882645b35495af36ff45c, type: 3}
+  m_Name: Green_9a090d98afdd3094cb2d450ec20ce50b_0000000000200B20_GPUDriven
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.GPUDrivenMaterialProxy
+  m_SourceMaterial: {fileID: 2100000, guid: 9a090d98afdd3094cb2d450ec20ce50b, type: 2}
+  m_MaterialGraph: {fileID: 0}
+  m_Model: 0
+  m_DualSlabDefinition: {fileID: 0}
+  m_LayerWeight: 0.5
+  m_TextureMode: 1
+  m_BaseMap: {fileID: 0}
+  m_BaseColor: {r: 0.035, g: 0.54999995, b: 0.04, a: 1}
+  m_TextureTilingOffset: {x: 1, y: 1, z: 0, w: 0}
+  m_BumpMap: {fileID: 0}
+  m_BumpScale: 1
+  m_MaskMap: {fileID: 0}
+  m_StreamedVirtualTexture: {fileID: 0}
+  m_MaskMode: 0
+  m_Metallic: 0
+  m_Roughness: 0.85
+  m_MetallicRemap: {x: 0, y: 1}
+  m_SmoothnessRemap: {x: 0, y: 1}
+  m_AmbientOcclusionRemap: {x: 0, y: 1}
+  m_EmissionColor: {r: 0, g: 0, b: 0, a: 0}
+  m_AlphaClip: 0
+  m_Cutoff: 0.5
+  m_CullMode: 2
+  m_DisableLighting: 0
+  m_ParameterOverrides: []
+  m_TextureOverrides: []
+  m_Revision: 7

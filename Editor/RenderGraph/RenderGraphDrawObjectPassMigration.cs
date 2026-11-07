@@ -142,7 +142,10 @@ namespace VividRP.Editor.RenderGraph
             // Standard opaque migration is intentionally re-entrant. GraphToolkit
             // requires connected legacy nodes to be disconnected and persisted
             // before they can be removed safely on the next import.
-            changed |= RenderGraphStandardOpaqueMigration.Migrate(graph, assetPath);
+            if (RenderGraphGBufferOrderMigration.IsHybridGraph(graph))
+                changed |= RenderGraphGBufferOrderMigration.Migrate(graph);
+            else
+                changed |= RenderGraphStandardOpaqueMigration.Migrate(graph, assetPath);
             changed |= MigrateShadowReceiverInputs(graph);
 
             changed |= RenderGraphPostProcessMigration.Migrate(graph);

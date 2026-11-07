@@ -77,6 +77,50 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GBufferFirstMigration_ReversesMergeChain_PreservesConsumersAndIsIdempotent()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+            try
+            {
+                var native = new GBufferNode();
+                var resolve = new ResolveNode();
+                var visibility = new VisibilityNode();
+                var debug = new MaterialDebugNode();
+                RenderGraphTestUtility.AddTestNode(graph, native);
+                RenderGraphTestUtility.AddTestNode(graph, resolve);
+                RenderGraphTestUtility.AddTestNode(graph, visibility);
+                RenderGraphTestUtility.AddTestNode(graph, debug);
+                for (int i = 0; i < 5; i++)
+                    native.GetNodeOptionByName(RenderPassPortUtility.GetOverrideOptionName("m_GBuffer" + i)).TrySetValue(true);
+                native.DefineNode();
+                for (int i = 0; i < 5; i++)
+                {
+                    var field = "m_GBuffer" + i;
+                    Assert.That(graph.Connect(resolve.GetOutputPortByName(field + "_Out"), native.GetInputPortByName(field + "_In")), Is.True);
+                    Assert.That(graph.Connect(native.GetOutputPortByName(field), debug.GetInputPortByName(field)), Is.True);
+                }
+                var depth = visibility.GetOutputPortByName("m_Depth_Out");
+                Assert.That(graph.Connect(depth, native.GetInputPortByName("m_GBufferDepth_In")), Is.True);
+                Assert.That(RenderGraphGBufferOrderMigration.Migrate(graph), Is.True);
+                for (int i = 0; i < 5; i++)
+                {
+                    var field = "m_GBuffer" + i;
+                    Assert.That(resolve.GetInputPortByName(field + "_In").FirstConnectedPort,
+                        Is.SameAs(native.GetOutputPortByName(field)));
+                    Assert.That(debug.GetInputPortByName(field).FirstConnectedPort,
+                        Is.SameAs(resolve.GetOutputPortByName(field + "_Out")));
+                    Assert.That(native.GetInputPortByName(field + "_In"), Is.Null);
+                }
+                Assert.That(native.GetInputPortByName("m_GBufferDepth_In").FirstConnectedPort, Is.SameAs(depth));
+                Assert.That(RenderGraphGBufferOrderMigration.Migrate(graph), Is.False);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
         public void MigrateShadowReceivers_SharesResolveInputsAndPreservesExplicitConnections()
         {
             var graph = new RenderGraphEditorGraph();

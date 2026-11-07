@@ -45,6 +45,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_PreservesPriorWriters_AndRequestsOnlyFirstUseClears()
+        {
+            var pass = new GBufferPass();
+            var resources = ((IRenderPass)pass).Initialize();
+            // Exercise externally bound targets as used by the visibility-buffer resolve chain.
+            var shared = RenderGraphTexture.CreateColorTarget("ResolvedGBuffer", GraphicsFormat.R8G8B8A8_SRGB);
+            SetFieldValue(pass, "m_GBuffer0", shared);
+            try
+            {
+                pass.Prepare(CreateFrameData());
+                Assert.That(shared.desc.ClearBuffer, Is.True);
+                foreach (var entry in resources.Textures.Where(entry => !entry.IsDepthAttachment))
+                {
+                    var binding = new RenderGraphPassResourceBinding
+                    {
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Input
+                    };
+                    Assert.That(RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, entry.Access),
+                        Is.EqualTo(AccessFlags.ReadWrite));
+                    var texture = GetFieldValue<RenderGraphTexture>(pass, "m_" + entry.Name);
+                    Assert.That(texture.desc.ClearBuffer, Is.True);
+                }
+                Assert.That(GetFieldValue<RenderGraphTexture>(pass, "m_GBufferDepth").desc.ClearBuffer, Is.False);
+            }
+            finally
+            {
+                pass.Dispose();
+            }
+        }
+
+        [Test]
         public void Prepare_ResizesAllGBufferTargets_WhenCameraSizeChanges()
         {
             var pass = new GBufferPass();

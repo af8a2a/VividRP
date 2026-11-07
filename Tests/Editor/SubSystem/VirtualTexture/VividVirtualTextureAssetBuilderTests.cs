@@ -835,6 +835,59 @@ namespace VividRP.Editor.Tests
                 validationMessage);
         }
 
+        [Test]
+        public void Importer_GPUDrivenSurfaceProfile_SkipsUnrelatedPipelineSaveAndTracksSourceTexture()
+        {
+            Directory.CreateDirectory(TempFolder);
+            var previousQualityPipeline = QualitySettings.renderPipeline;
+            var pipeline = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            // Keep the project's effective border so this test does not invalidate other VTs.
+            pipeline.GPUDrivenVirtualTexturePhysicalPoolQuality =
+                VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality();
+            AssetDatabase.CreateAsset(pipeline, $"{TempFolder}/Pipeline.asset");
+
+            try
+            {
+                QualitySettings.renderPipeline = pipeline;
+                Assert.That(VividRenderPipelineAsset.GetActiveAsset(), Is.SameAs(pipeline));
+
+                Texture2D texture = CreateSourceTexture(4, 4, readable: true);
+                AssetDatabase.CreateAsset(texture, $"{TempFolder}/Source.asset");
+                string vtPath = $"{TempFolder}/Surface.vividvt";
+                File.WriteAllText(vtPath, VividVirtualTextureAssetImporter.Version3Marker);
+                AssetDatabase.ImportAsset(vtPath, ImportAssetOptions.ForceSynchronousImport);
+                var importer = (VividVirtualTextureAssetImporter)AssetImporter.GetAtPath(vtPath);
+                importer.SourceTexture = texture;
+                importer.BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
+                importer.StreamCompression = VividVirtualTextureStreamCompression.None;
+                EditorUtility.SetDirty(importer);
+                importer.SaveAndReimport();
+
+                var vt = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(vtPath);
+                Assert.That(vt.BuiltData.HasStreamData, Is.True);
+                string streamPath = vt.BuiltData.StreamDataPath;
+                var sentinel = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                File.SetLastWriteTimeUtc(streamPath, sentinel);
+
+                pipeline.EnableGPUDrivenOcclusionCulling = !pipeline.EnableGPUDrivenOcclusionCulling;
+                EditorUtility.SetDirty(pipeline);
+                AssetDatabase.SaveAssetIfDirty(pipeline);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                Assert.That(File.GetLastWriteTimeUtc(streamPath), Is.EqualTo(sentinel));
+
+                texture.SetPixel(0, 0, Color.magenta);
+                texture.Apply();
+                EditorUtility.SetDirty(texture);
+                AssetDatabase.SaveAssetIfDirty(texture);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                Assert.That(File.GetLastWriteTimeUtc(streamPath), Is.Not.EqualTo(sentinel));
+            }
+            finally
+            {
+                QualitySettings.renderPipeline = previousQualityPipeline;
+            }
+        }
+
         private static Texture2D CreateSourceTexture(int width, int height, bool readable)
         {
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: true);

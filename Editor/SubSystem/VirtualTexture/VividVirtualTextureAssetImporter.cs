@@ -15,7 +15,7 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [ScriptedImporter(8, Extension)]
+    [ScriptedImporter(9, Extension)]
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";
@@ -178,15 +178,8 @@ namespace VividRP.Editor
             if (BuildProfile != VividVirtualTextureBuildProfile.GPUDrivenSurface)
                 return BorderSize;
 
-            VividRenderPipelineAsset activeAsset = VividRenderPipelineAsset.GetActiveAsset();
-            string activeAssetPath = AssetDatabase.GetAssetPath(activeAsset);
-            if (!string.IsNullOrEmpty(activeAssetPath))
-                ctx.DependsOnSourceAsset(activeAssetPath);
-
-            return VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
-                    activeAsset?.GPUDrivenVirtualTexturePhysicalPoolQuality
-                    ?? GPUDrivenVirtualTexturePhysicalPoolQuality.Medium)
-                .BorderSize;
+            ctx.DependsOnCustomDependency(GPUDrivenVirtualTextureBorderDependency.Name);
+            return GPUDrivenVirtualTextureBorderDependency.ResolveActiveBorderSize();
         }
 
         internal void ConfigureTerrainCompositeSource(in VividTerrainCompositeSource source)
@@ -422,6 +415,54 @@ namespace VividRP.Editor
                 ? virtualTextureGUID
                 : "UnidentifiedVirtualTexture";
             return $"VividRP/VirtualTextures/{fileName}.stream";
+        }
+    }
+
+    [InitializeOnLoad]
+    internal static class GPUDrivenVirtualTextureBorderDependency
+    {
+        internal const string Name = "VividRP/GPUDrivenVirtualTexture/BorderSize";
+
+        private static int s_RegisteredBorderSize = -1;
+
+        static GPUDrivenVirtualTextureBorderDependency()
+        {
+            if (AssetDatabase.IsAssetImportWorkerProcess())
+                return;
+
+            // Register before the initial import so cached assets can match this dependency.
+            RegisterIfChanged();
+            EditorApplication.update += RefreshIfChanged;
+        }
+
+        internal static int ResolveActiveBorderSize()
+        {
+            return VirtualTextureGPUDrivenTextureBackend.ResolveDescriptorProfile(
+                    VirtualTextureGPUDrivenTextureBackend.ResolveActivePhysicalPoolQuality())
+                .BorderSize;
+        }
+
+        private static void RefreshIfChanged()
+        {
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating
+                || EditorApplication.isPlayingOrWillChangePlaymode)
+                return;
+
+            if (RegisterIfChanged())
+                AssetDatabase.Refresh();
+        }
+
+        private static bool RegisterIfChanged()
+        {
+            // Only the effective border affects the imported pages. Track it outside
+            // the importer so saves and pipeline switches with the same border are no-ops.
+            int borderSize = ResolveActiveBorderSize();
+            if (s_RegisteredBorderSize == borderSize)
+                return false;
+
+            AssetDatabase.RegisterCustomDependency(Name, new Hash128((ulong)borderSize, 0));
+            s_RegisteredBorderSize = borderSize;
+            return true;
         }
     }
 

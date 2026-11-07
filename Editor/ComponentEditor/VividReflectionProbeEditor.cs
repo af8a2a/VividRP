@@ -156,6 +156,9 @@ namespace VividRP.Editor
         private static readonly GUIContent s_ExpandAllLabel = EditorGUIUtility.TrTextContent("Expand All");
         private static readonly GUIContent s_CollapseAllLabel = EditorGUIUtility.TrTextContent("Collapse All");
 
+        private static readonly Color s_InfluenceGizmoColor = new(1.0f, 0.8f, 0.2f);
+        private static readonly Color s_ProxyGizmoColor = new(0.2f, 0.8f, 1.0f);
+
         private static readonly string[] s_BoxShapeOption = { "Box" };
         private static readonly GUIContent[] s_ModeOptions =
         {
@@ -210,6 +213,38 @@ namespace VividRP.Editor
         {
             EnsureExpandedState();
             m_SerializedReflectionProbe = new VividSerializedReflectionProbe(serializedObject);
+        }
+
+        [DrawGizmo(GizmoType.Selected)]
+        private static void DrawVolumeGizmos(ReflectionProbe probe, GizmoType gizmoType)
+        {
+            if (GraphicsSettings.currentRenderPipeline is not VividRenderPipelineAsset)
+                return;
+
+            var hasAdditionalData = VividAdditionalReflectionData.TryGetAdditionalData(probe, out var additionalData);
+            var previousMatrix = Gizmos.matrix;
+            var previousColor = Gizmos.color;
+
+            try
+            {
+                Gizmos.matrix = probe.transform.localToWorldMatrix;
+
+                if (hasAdditionalData && additionalData.proxyVolumeMode == VividReflectionProbeProxyVolumeMode.Box)
+                {
+                    Gizmos.color = s_ProxyGizmoColor;
+                    Gizmos.DrawWireCube(additionalData.GetProxyBoxOffset(), additionalData.GetProxyBoxSize());
+                }
+
+                Gizmos.color = s_InfluenceGizmoColor;
+                Gizmos.DrawWireCube(
+                    hasAdditionalData ? additionalData.influenceBoxOffset : probe.center,
+                    hasAdditionalData ? additionalData.influenceBoxSize : probe.size);
+            }
+            finally
+            {
+                Gizmos.matrix = previousMatrix;
+                Gizmos.color = previousColor;
+            }
         }
 
         public override void OnInspectorGUI()

@@ -13,6 +13,8 @@ Shader "Hidden/VividRP/UberPost"
 
             HLSLPROGRAM
             #pragma target 3.5
+            #pragma use_dxc
+            #pragma hlsl_version 2021
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_local _ _FILM_GRAIN

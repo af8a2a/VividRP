@@ -82,8 +82,8 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.WordOffset), 28);
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.SignMode), 32);
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.PageOffset), 36);
-            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding0), 40);
-            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding1), 44);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.ShellThickness), 40);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding), 44);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Instance).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(80));
@@ -111,18 +111,20 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding1), 44);
         }
 
-        [TestCase(0, 0, 0, false)]
-        [TestCase(1, -2, 3, false)]
-        [TestCase(-127, 2, -1, false)]
-        [TestCase(128, 0, 0, false)]
-        [TestCase(0, 0, 0, true)]
-        public void GlobalSdfUpdateRegions_CoverExactlyTheNewCells(int dx, int dy, int dz, bool reset)
+        [TestCase(0, 0, 0, false, VividGlobalSdfClipmap.Resolution)]
+        [TestCase(1, -2, 3, false, VividGlobalSdfClipmap.Resolution)]
+        [TestCase(-127, 2, -1, false, VividGlobalSdfClipmap.Resolution)]
+        [TestCase(128, 0, 0, false, VividGlobalSdfClipmap.Resolution)]
+        [TestCase(0, 0, 0, true, VividGlobalSdfClipmap.Resolution)]
+        [TestCase(0, 0, 0, false, VividGlobalSdfClipmap.ThinBrickResolution)]
+        [TestCase(-1, 2, -3, false, VividGlobalSdfClipmap.ThinBrickResolution)]
+        [TestCase(17, 0, 0, false, VividGlobalSdfClipmap.ThinBrickResolution)]
+        public void GlobalSdfUpdateRegions_CoverExactlyTheNewCells(int dx, int dy, int dz, bool reset, int resolution)
         {
-            const int resolution = VividGlobalSdfClipmap.Resolution;
             var previous = new int3(-130, -12, 115);
             var next = previous + new int3(dx, dy, dz);
             var regions = new VividGlobalSdfClipmap.Region[VividGlobalSdfClipmap.RegionsPerLevel];
-            int count = VividGlobalSdfClipmap.GetUpdateRegions(previous, next, reset, regions, 0);
+            int count = VividGlobalSdfClipmap.GetUpdateRegions(previous, next, reset, regions, 0, resolution);
             var overlapMin = math.max(previous, next);
             var overlapMax = math.min(previous + resolution, next + resolution);
             var overlapSize = math.max(overlapMax - overlapMin, 0);

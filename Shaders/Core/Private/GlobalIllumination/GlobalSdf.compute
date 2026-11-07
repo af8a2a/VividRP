@@ -1,13 +1,15 @@
 #pragma kernel ComposeGlobalSdf
+#pragma kernel ComposeGlobalSdfThinBricks
 #pragma kernel TraceGlobalSdfDebug
 
 #include "../../Public/GPUDriven/GlobalSdf.hlsl"
 
 RWTexture3D<float> _GlobalSdfWrite;
+RWStructuredBuffer<uint> _GlobalSdfThinBrickWrites;
 int3 _GlobalSdfRegionMin;
 int3 _GlobalSdfRegionSize;
 float _GlobalSdfVoxelSize;
-uint _GlobalSdfLayerMask;
+uint _GlobalSdfWriteLevel;
 
 float GlobalSdfInstanceDistance(VividMeshSdfInstance instance, VividMeshSdfField field, float3 positionWS)
 {
@@ -36,7 +38,7 @@ void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
     int3 cell = _GlobalSdfRegionMin + int3(id);
     float3 position = float3(cell) * _GlobalSdfVoxelSize;
     float band = VividGlobalSdfBand * _GlobalSdfVoxelSize;
-    float best = band;
+    float surface = band;
     uint nodeIndex = 0u;
     [loop]
     while (nodeIndex < _MeshSdfNodeCount)
@@ -44,29 +46,88 @@ void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
         VividMeshSdfNode node = _MeshSdfNodes[nodeIndex];
         float3 outside = max(0.0, max(node.boundsMin - position, position - node.boundsMax));
         float boxDistanceSquared = dot(outside, outside);
-        float limit = max(best, 0.0);
+        float limit = max(surface, 0.0);
         if ((node.layerMask & _GlobalSdfLayerMask) == 0u || boxDistanceSquared > limit * limit)
         {
             nodeIndex = node.escapeIndex;
             continue;
         }
         nodeIndex++;
+        if (node.leafCount == 0u)
+            continue;
 
+        float boxDistance = sqrt(boxDistanceSquared);
         [loop]
         for (uint i = 0u; i < node.leafCount; i++)
         {
             VividMeshSdfInstance instance = _MeshSdfInstances[_MeshSdfLeafInstances[node.firstLeaf + i]];
             if ((instance.layerMask & _GlobalSdfLayerMask) == 0u)
                 continue;
-            float distance = GlobalSdfInstanceDistance(instance, _MeshSdfFields[instance.fieldIndex], position);
-            if (distance > 0.0)
-                distance = max(distance, sqrt(boxDistanceSquared));
-            best = min(best, distance);
+            VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+            if (VividMeshSdfIsSubvoxelShell(field, instance, _GlobalSdfVoxelSize))
+                continue;
+            float distance = GlobalSdfInstanceDistance(instance, field, position);
+            surface = min(surface, distance > 0.0 ? max(distance, boxDistance) : distance);
         }
     }
 
     uint3 physical = uint3(cell & (VividGlobalSdfResolution - 1));
-    _GlobalSdfWrite[physical] = clamp(best / _GlobalSdfVoxelSize, -VividGlobalSdfBand, VividGlobalSdfBand);
+    _GlobalSdfWrite[physical] = clamp(surface / _GlobalSdfVoxelSize, -VividGlobalSdfBand, VividGlobalSdfBand);
+}
+
+bool GlobalSdfBrickContainsThinShell(float3 center, float halfExtent)
+{
+    uint nodeIndex = 0u;
+    [loop]
+    while (nodeIndex < _MeshSdfNodeCount)
+    {
+        VividMeshSdfNode node = _MeshSdfNodes[nodeIndex];
+        if ((node.layerMask & _GlobalSdfLayerMask) == 0u
+            || any(center + halfExtent < node.boundsMin) || any(center - halfExtent > node.boundsMax))
+        {
+            nodeIndex = node.escapeIndex;
+            continue;
+        }
+        nodeIndex++;
+        [loop]
+        for (uint i = 0u; i < node.leafCount; i++)
+        {
+            VividMeshSdfInstance instance = _MeshSdfInstances[_MeshSdfLeafInstances[node.firstLeaf + i]];
+            if ((instance.layerMask & _GlobalSdfLayerMask) == 0u)
+                continue;
+            VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+            if (!VividMeshSdfIsSubvoxelShell(field, instance, _GlobalSdfVoxelSize))
+                continue;
+
+            // Transform the brick bounds conservatively into the baked grid's local space.
+            float4 p = float4(center, 1.0);
+            float3 localCenter = float3(dot(instance.worldToLocal0, p), dot(instance.worldToLocal1, p),
+                dot(instance.worldToLocal2, p)) - field.originAndVoxelSize.xyz;
+            float3 localHalf = halfExtent * float3(dot(abs(instance.worldToLocal0.xyz), 1.0),
+                dot(abs(instance.worldToLocal1.xyz), 1.0), dot(abs(instance.worldToLocal2.xyz), 1.0));
+            float3 gridExtent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
+            if (all(localCenter + localHalf >= 0.0) && all(localCenter - localHalf <= gridExtent))
+                return true;
+        }
+    }
+    return false;
+}
+
+[numthreads(4, 4, 4)]
+void ComposeGlobalSdfThinBricks(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= uint3(_GlobalSdfRegionSize)))
+        return;
+
+    int3 brick = _GlobalSdfRegionMin + int3(id);
+    float size = VividGlobalSdfThinBrickSize * _GlobalSdfVoxelSize;
+    float3 center = (float3(brick) + 0.5) * size;
+    uint word, bit;
+    VividGlobalSdfThinBrickBit(brick, _GlobalSdfWriteLevel, word, bit);
+    if (GlobalSdfBrickContainsThinShell(center, size * 0.5 + 0.0001 * _GlobalSdfVoxelSize))
+        InterlockedOr(_GlobalSdfThinBrickWrites[word], bit);
+    else
+        InterlockedAnd(_GlobalSdfThinBrickWrites[word], ~bit);
 }
 
 RWTexture2D<float4> _GlobalSdfDebugOutput;
@@ -102,11 +163,16 @@ void TraceGlobalSdfDebug(uint3 id : SV_DispatchThreadID)
             float t = (_GlobalSdfSliceHeight - origin.y) / direction.y;
             float distance;
             uint level;
-            if (t >= 0.0 && t <= maxDistance && VividGlobalSdfTrySample(origin + t * direction, distance, level))
+            float3 position = origin + t * direction;
+            if (t >= 0.0 && t <= maxDistance && VividGlobalSdfTrySample(position, distance, level))
             {
-                float units = distance / _GlobalSdfLevels[level].w;
+                float voxel = _GlobalSdfLevels[level].w;
+                float units = distance / voxel;
                 float3 tint = units < 0.0 ? float3(1.0, 0.36, 0.09) : float3(0.06, 0.5, 1.0);
                 color = lerp(tint * (0.12 + 0.65 * exp(-0.4 * abs(units))), 1.0, saturate(1.0 - 3.0 * abs(units)));
+                int3 brick = int3(floor(position / (VividGlobalSdfThinBrickSize * voxel)));
+                if (VividGlobalSdfHasThinBrick(brick, level))
+                    color = lerp(color, float3(0.72, 0.35, 0.92), 0.35);
             }
         }
     }

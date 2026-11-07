@@ -11,7 +11,8 @@ struct VividMeshSdfField
     uint wordOffset;
     uint signMode;
     uint pageOffset;
-    uint2 padding;
+    float shellThickness;
+    uint padding;
 };
 
 struct VividMeshSdfInstance
@@ -253,9 +254,13 @@ bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfInstance ins
     return false;
 }
 
-// directionWS is normalized. The returned distance is measured from originWS in world units.
-bool VividTraceMeshSdfScene(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    uint layerMask, out VividMeshSdfHit hit)
+bool VividMeshSdfIsSubvoxelShell(VividMeshSdfField field, VividMeshSdfInstance instance, float voxelSize)
+{
+    return field.signMode == 2u && field.shellThickness * instance.distanceScale < voxelSize;
+}
+
+bool VividTraceMeshSdfSceneFiltered(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, float shellVoxelSize, out VividMeshSdfHit hit)
 {
     hit = (VividMeshSdfHit)0;
     hit.distance = maxDistance;
@@ -288,6 +293,8 @@ bool VividTraceMeshSdfScene(float3 originWS, float3 directionWS, float minDistan
                 continue;
 
             VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+            if (shellVoxelSize > 0.0 && !VividMeshSdfIsSubvoxelShell(field, instance, shellVoxelSize))
+                continue;
             float distance;
             float3 positionInGrid;
             if (VividMeshSdfTraceInstance(field, instance, originWS, directionWS, minDistance, hit.distance,
@@ -312,6 +319,13 @@ bool VividTraceMeshSdfScene(float3 originWS, float3 directionWS, float minDistan
     hit.entityId = hitInstance.entityId;
     hit.signMode = hitField.signMode;
     return true;
+}
+
+// directionWS is normalized. The returned distance is measured from originWS in world units.
+bool VividTraceMeshSdfScene(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, out VividMeshSdfHit hit)
+{
+    return VividTraceMeshSdfSceneFiltered(originWS, directionWS, minDistance, maxDistance, layerMask, 0.0, hit);
 }
 
 #endif

@@ -11,6 +11,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal const int Resolution = 128;
         internal const int LevelCount = 3;
         internal const int RegionsPerLevel = 3;
+        internal const int ThinBrickShift = 3;
+        // An unaligned 128-cell window can span one extra brick on each axis.
+        internal const int ThinBrickResolution = (Resolution >> ThinBrickShift) + 1;
+        internal const int ThinBrickWordsPerLevel =
+            (ThinBrickResolution * ThinBrickResolution * ThinBrickResolution + 31) / 32;
+        internal const int ThinBrickWordCount = LevelCount * ThinBrickWordsPerLevel;
         internal const float DefaultVoxelSize = 0.125f;
 
         internal struct Region
@@ -19,14 +25,15 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public int3 Size;
         }
 
-        internal static int GetUpdateRegions(int3 previous, int3 next, bool reset, Region[] regions, int offset)
+        internal static int GetUpdateRegions(int3 previous, int3 next, bool reset, Region[] regions, int offset,
+            int resolution = Resolution)
         {
-            int3 end = next + Resolution;
+            int3 end = next + resolution;
             int3 overlapMin = math.max(previous, next);
-            int3 overlapMax = math.min(previous + Resolution, end);
+            int3 overlapMax = math.min(previous + resolution, end);
             if (reset || math.any(overlapMin >= overlapMax))
             {
-                regions[offset] = new Region { Min = next, Size = new int3(Resolution) };
+                regions[offset] = new Region { Min = next, Size = new int3(resolution) };
                 return 1;
             }
 
@@ -52,14 +59,16 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
     internal sealed class VividGlobalSdfCameraState : CameraRelativeState
     {
+        private static readonly uint[] s_EmptyThinBricks = new uint[VividGlobalSdfClipmap.ThinBrickWordCount];
         internal readonly RTHandle[] Textures = new RTHandle[VividGlobalSdfClipmap.LevelCount];
         internal readonly int3[] Origins = new int3[VividGlobalSdfClipmap.LevelCount];
+        internal GraphicsBuffer ThinBricks;
         internal bool Valid;
         internal uint SceneRevision;
         internal int LayerMask;
         internal float BaseVoxelSize;
 
-        internal void EnsureTextures(GraphicsFormat format)
+        internal void EnsureResources(GraphicsFormat format)
         {
             const int size = VividGlobalSdfClipmap.Resolution;
             for (int i = 0; i < Textures.Length; i++)
@@ -74,6 +83,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     colorFormat: format, filterMode: FilterMode.Bilinear, wrapMode: TextureWrapMode.Repeat,
                     enableRandomWrite: true, name: "Global SDF Level " + i);
             }
+            if (ThinBricks == null || !ThinBricks.IsValid())
+            {
+                Valid = false;
+                ThinBricks?.Dispose();
+                ThinBricks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VividGlobalSdfClipmap.ThinBrickWordCount,
+                    sizeof(uint)) { name = "Global SDF Thin Shell Bricks" };
+                ThinBricks.SetData(s_EmptyThinBricks);
+            }
         }
 
         public override void Dispose()
@@ -83,6 +100,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 Textures[i]?.Release();
                 Textures[i] = null;
             }
+            ThinBricks?.Dispose();
+            ThinBricks = null;
             Valid = false;
         }
     }
@@ -94,6 +113,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal readonly int3[] Origins = new int3[VividGlobalSdfClipmap.LevelCount];
         internal VividGlobalSdfCameraState State;
         internal RenderGraphTexture[] Outputs;
+        internal VividMeshSdfGpuScene MeshScene;
+        internal RenderGraphBuffer ThinBricks;
         internal uint SceneRevision;
         internal int LayerMask;
         internal float BaseVoxelSize;
@@ -114,6 +135,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             State = null;
             Outputs = null;
+            MeshScene = null;
+            ThinBricks = null;
             Recorded = false;
         }
     }

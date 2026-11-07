@@ -12,7 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
         HorizontalSlice,
     }
 
-    public sealed class GlobalSdfTraceDebugPass : ComputePass
+    public sealed class GlobalSdfTraceDebugPass : ComputePass, IRenderGraphPreparePass, IStablePassResourceLayout
     {
         private const int GroupSize = 8;
         private const string KernelName = "TraceGlobalSdfDebug";
@@ -27,6 +27,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FarClipId = Shader.PropertyToID("_GlobalSdfFarClip");
         private static readonly int SliceHeightId = Shader.PropertyToID("_GlobalSdfSliceHeight");
         private static readonly int ModeId = Shader.PropertyToID("_GlobalSdfDebugMode");
+        private static readonly int LayerMaskId = Shader.PropertyToID("_GlobalSdfLayerMask");
+        private static readonly int ThinBricksId = Shader.PropertyToID("_GlobalSdfThinBricks");
 
         [RenderGraphResource(Name = "Near", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Near = RenderGraphTexture.CreateInput("Near", GraphicsFormat.R16_SFloat);
@@ -36,6 +38,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "Far", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Far = RenderGraphTexture.CreateInput("Far", GraphicsFormat.R16_SFloat);
+
+        [RenderGraphResource(Name = "Thin Shell Bricks", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_ThinBricks = RenderGraphBuffer.CreateStructured("Global SDF Thin Shell Bricks", sizeof(uint));
 
         [RenderGraphResource(Name = "OutputTexture", Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
@@ -51,6 +56,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_FarClip, m_SliceHeight;
         private int m_Width, m_Height;
         private bool m_Skip;
+
+        public bool IsPassResourceLayoutDirty { get; private set; }
+
+        public void ClearPassResourceLayoutDirty() => IsPassResourceLayoutDirty = false;
 
         public GlobalSdfTraceDebugPass()
         {
@@ -87,14 +96,26 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SliceHeight = camera.transform.position.y + m_SliceHeightOffset;
         }
 
+        public void PrepareRenderGraph(ContextContainer frameData)
+        {
+            if (!HasClipmapInputs() || ReferenceEquals(m_ThinBricks, m_Frame.ThinBricks))
+                return;
+
+            // Existing graphs connect the three level textures. The matching producer supplies the brick buffer.
+            m_ThinBricks = m_Frame.ThinBricks;
+            IsPassResourceLayoutDirty = true;
+        }
+
         public override void Record(ComputePassContext context)
         {
-            if (m_Skip || m_Kernel < 0 || !m_Frame.Recorded || !m_OutputTexture.innerHandle.IsValid()
-                || !ReferenceEquals(m_Near, m_Frame.Outputs[0]) || !ReferenceEquals(m_Middle, m_Frame.Outputs[1])
-                || !ReferenceEquals(m_Far, m_Frame.Outputs[2]))
+            if (m_Skip || m_Kernel < 0 || !HasClipmapInputs() || !m_Frame.Recorded
+                || !m_OutputTexture.innerHandle.IsValid() || !m_ThinBricks.innerHandle.IsValid())
                 return;
 
             var cmd = context.cmd;
+            m_Frame.MeshScene.Bind(cmd, m_Shader, m_Kernel);
+            cmd.SetComputeIntParam(m_Shader, LayerMaskId, m_Frame.LayerMask);
+            cmd.SetComputeBufferParam(m_Shader, m_Kernel, ThinBricksId, m_ThinBricks.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, NearId, m_Near.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, MiddleId, m_Middle.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, FarId, m_Far.innerHandle);
@@ -116,5 +137,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Shader = null;
             m_Kernel = -1;
         }
+
+        private bool HasClipmapInputs() => m_Frame?.Outputs != null
+            && ReferenceEquals(m_Near, m_Frame.Outputs[0])
+            && ReferenceEquals(m_Middle, m_Frame.Outputs[1])
+            && ReferenceEquals(m_Far, m_Frame.Outputs[2]);
     }
 }

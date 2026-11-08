@@ -40,6 +40,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
         public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
 
+        [Tooltip("Split the SDF trace into detail, clipmap-assisted and far segments. Reconstruct far lighting at the confirmed first hit.")]
+        public BoolParameter segmentedSdfTracing = new(false);
+
+        [Tooltip("Length of the initial Mesh SDF detail segment in world units.")]
+        public MinFloatParameter meshSdfDetailDistance = new(2f, 0.1f);
+
         [Tooltip("Sample the sky on confirmed Mesh SDF escapes. ReSTIR requires 2x2 integration and Far Radiance Cache. Physically Based Sky requires a cubemap baked without the sun disk.")]
         public BoolParameter occludedSky = new(false);
 

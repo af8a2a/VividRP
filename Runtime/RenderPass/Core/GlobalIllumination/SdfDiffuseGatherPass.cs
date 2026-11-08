@@ -95,10 +95,25 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RadiosityInputId = Shader.PropertyToID("_SdfRadiosityInput");
         private static readonly int RadiosityOutputId = Shader.PropertyToID("_SdfRadiosityOutput");
         private static readonly CameraHistoryId FarHistoryId = CameraHistoryId.Create("SdfFarRadiance");
+        private static readonly CameraHistoryId FarHitIdsHistoryId = CameraHistoryId.Create("SdfFarRadianceHitIds");
+        private static readonly CameraHistoryBufferDescriptor FarHitIdsDescriptor = new(FarProbeCount * FarDirectionCount,
+            sizeof(uint), GraphicsBuffer.Target.Structured);
         private static readonly ProfilingSampler FarCacheSampler = new("Diffuse GI Far Radiance Update");
         private static readonly ProfilingSampler NearOcclusionSampler = new("Diffuse GI Near Contact Occlusion");
         private static readonly int FarRadianceId = Shader.PropertyToID("_SdfFarRadiance");
         private static readonly int FarOutputId = Shader.PropertyToID("_SdfFarOutput");
+        private static readonly int FarHitIdsId = Shader.PropertyToID("_SdfFarHitIds");
+        private static readonly int FarHitIdsOutputId = Shader.PropertyToID("_SdfFarHitIdsOutput");
+        private static readonly int MeshDetailDistanceId = Shader.PropertyToID("_SdfMeshDetailDistance");
+        private static readonly int UseGlobalClipmapId = Shader.PropertyToID("_SdfUseGlobalClipmap");
+        private static readonly int GlobalNearId = Shader.PropertyToID("_GlobalSdfNear");
+        private static readonly int GlobalMiddleId = Shader.PropertyToID("_GlobalSdfMiddle");
+        private static readonly int GlobalFarId = Shader.PropertyToID("_GlobalSdfFar");
+        private static readonly int GlobalLevelsId = Shader.PropertyToID("_GlobalSdfLevels");
+        private static readonly int GlobalScrollId = Shader.PropertyToID("_GlobalSdfScroll");
+        private static readonly int GlobalPagesId = Shader.PropertyToID("_GlobalSdfPages");
+        private static readonly int GlobalThinBricksId = Shader.PropertyToID("_GlobalSdfThinBricks");
+        private static readonly int GlobalLayerMaskId = Shader.PropertyToID("_GlobalSdfLayerMask");
         private static readonly int FarUpdatesId = Shader.PropertyToID("_SdfFarUpdates");
         private static readonly int FarClearId = Shader.PropertyToID("_SdfFarClear");
         private static readonly int FarDistanceId = Shader.PropertyToID("_SdfFarTraceDistance");
@@ -196,6 +211,13 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Screen Trace Motion", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ScreenMotion;
 
+        [RenderGraphResource(Name = "Global SDF Near", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ClipmapNear;
+
+        [RenderGraphResource(Name = "Global SDF Fallback", Access = AccessFlags.Read)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_GlobalFallback = CreateGlobalFallback();
+
         [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_Output = CreateOutput("Realtime Diffuse GI", ProbeFormat);
 
@@ -228,6 +250,8 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
             internal bool DirectionalCache, DirectionalGuide;
+            internal float MeshDetailDistance;
+            internal bool GlobalClipmapUsed;
             internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
@@ -334,7 +358,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private ulong m_RadiosityCardVersion;
         private readonly Vector4[] m_FarUpdates = new Vector4[FarProbesPerFrame];
         private CameraHistoryTexture m_FarHistory;
+        private CameraHistoryBuffer m_FarHitIdsHistory;
         private TextureHandle m_FarAtlas;
+        private BufferHandle m_FarHitIds;
+        private VividGlobalSdfFrameData m_GlobalClipmap;
+        private TextureHandle m_GlobalNear, m_GlobalMiddle, m_GlobalFar;
+        private BufferHandle m_GlobalPages, m_GlobalThinBricks;
+        private float m_MeshDetailDistance;
         private Vector3Int m_FarWindow;
         private bool m_FarClear, m_FarPending;
         private int m_FarUpdateCount;
@@ -482,7 +512,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityTargetOrders = m_RadiosityOrder = m_RadiosityCursor = m_RadiosityUpdateCards = 0;
             m_RadiosityCardVersion = 0;
             m_FarHistory = null;
+            m_FarHitIdsHistory = null;
             m_FarAtlas = default;
+            m_FarHitIds = default;
+            m_GlobalClipmap = null;
+            m_MeshDetailDistance = 0f;
             m_FarUpdateCount = 0;
             m_FarDistance = 0f;
             m_FarCardVersion = 0;
@@ -609,6 +643,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ProbeCameraForward = -view.GetRow(2);
             m_LayerMask = camera.cullingMask;
             m_TraceDistance = float.IsFinite(m_MaxDistance) ? Mathf.Max(0.1f, m_MaxDistance) : 12f;
+            if (useSettings && m_UseSdf && !m_OffscreenOnly && settings.segmentedSdfTracing.value)
+                m_MeshDetailDistance = Mathf.Clamp(
+                    float.IsFinite(settings.meshSdfDetailDistance.value) ? settings.meshSdfDetailDistance.value : 2f,
+                    0.1f, m_TraceDistance);
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
             ReadLight();
             bool farConfigured = useSettings && settings.farRadianceCache.value && m_UseSdf && cache != null
@@ -680,6 +718,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.Width == m_Width && m_State.Height == m_Height
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
+                && m_State.MeshDetailDistance == m_MeshDetailDistance
                 && m_State.SkyTraceDistance == m_SkyTraceDistance && m_State.SkyContentHash == m_SkyContentHash
                 && m_State.SkyTextureParams.Equals(m_SkyTextureParams) && m_State.SkyTextureTint.Equals(m_SkyTextureTint)
                 && m_State.LightPositionRange.Equals(m_LightPositionRange) && m_State.LightColorShadow.Equals(m_LightColorShadow)
@@ -758,6 +797,27 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReceiverVisibility = m_ReceiverVisibilitySource.innerHandle;
                 PassRecorder.RegisterImportedTextureForPass(this, m_ReceiverVisibility);
             }
+            if (m_MeshDetailDistance <= 0f || !frameData.Contains<VividGlobalSdfFrameData>())
+                return;
+            var clipmap = frameData.Get<VividGlobalSdfFrameData>();
+            if (clipmap.State == null || clipmap.LayerMask != m_LayerMask
+                || !ReferenceEquals(m_ClipmapNear, clipmap.Outputs[0]))
+                return;
+            m_GlobalNear = m_ClipmapNear.innerHandle;
+            m_GlobalMiddle = clipmap.Outputs[1].innerHandle;
+            m_GlobalFar = clipmap.Outputs[2].innerHandle;
+            m_GlobalPages = clipmap.Pages.innerHandle;
+            m_GlobalThinBricks = clipmap.ThinBricks.innerHandle;
+            if (!m_GlobalNear.IsValid() || !m_GlobalMiddle.IsValid() || !m_GlobalFar.IsValid()
+                || !m_GlobalPages.IsValid() || !m_GlobalThinBricks.IsValid())
+                return;
+
+            // Share the producer's handles so the graph orders the atlas and page-table accesses.
+            PassRecorder.RegisterImportedTextureForPass(this, m_GlobalMiddle);
+            PassRecorder.RegisterImportedTextureForPass(this, m_GlobalFar);
+            PassRecorder.RegisterImportedBufferForPass(this, m_GlobalPages);
+            PassRecorder.RegisterImportedBufferForPass(this, m_GlobalThinBricks);
+            m_GlobalClipmap = clipmap;
         }
 
         public override void Record(ComputePassContext context)
@@ -797,9 +857,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 probeTarget = m_FilteredProbes.innerHandle;
             cmd.SetComputeTextureParam(m_Compute, traceKernel, ProbeId, probeTarget);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, GeometryId, m_Geometry.innerHandle);
+            bool useGlobalClipmap = m_UseSdf && m_GlobalClipmap?.Recorded == true;
             if (m_UseSdf)
             {
                 m_Scene.Bind(cmd, m_Compute, traceKernel);
+                BindSegmentedTracing(cmd, traceKernel, useGlobalClipmap);
                 cmd.SetComputeBufferParam(m_Compute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, SkyTextureId, m_SkyTexture);
                 cmd.SetComputeVectorParam(m_Compute, SkyTextureParamsId, m_SkyTextureParams);
@@ -830,7 +892,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_CurrentPixelGeometry.innerHandle.IsValid() && m_PreviousPixelLighting.innerHandle.IsValid()
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
-                && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting;
+                && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting
+                && m_State.GlobalClipmapUsed == useGlobalClipmap;
             bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather && !m_DirectionalCache;
             bool useDirectionalHistory = m_DirectionalCache && hasHistory && m_DirectionalHistoryValid
                 && m_PreviousDirectional.innerHandle.IsValid();
@@ -955,6 +1018,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.PixelTemporal = pixelTemporal;
             m_State.CorrectReceiverSelfHits = correctReceiver;
             m_State.ScreenCardLighting = screenCardLighting;
+            m_State.MeshDetailDistance = m_MeshDetailDistance;
+            m_State.GlobalClipmapUsed = useGlobalClipmap;
             m_State.ScreenJitterUv = m_ScreenJitterUv;
             m_State.SceneRevision = m_Scene.Revision;
             m_State.Width = m_Width;
@@ -1165,11 +1230,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarDesc.Resize(FarGridSize * FarGridSize, FarGridSize * (FarDirectionCount + 1));
             m_FarHistory = history.GetOrCreateTexture(FarHistoryId, 1,
                 CameraHistoryRenderGraphBridge.CreateDescriptor(m_FarDesc.desc));
+            m_FarHitIdsHistory = history.GetOrCreateBuffer(FarHitIdsHistoryId, 1, FarHitIdsDescriptor);
             m_FarDistance = distance;
             m_FarCardVersion = cache.CardVersion;
             var center = Vector3Int.FloorToInt(camera.transform.position / FarCellSize);
             m_FarWindow = center - new Vector3Int(FarGridSize / 2, FarGridSize / 2, FarGridSize / 2);
-            m_FarClear = !m_FarHistory.IsValid(0) || m_State.FarDistance != m_FarDistance
+            m_FarClear = !m_FarHistory.IsValid(0) || !m_FarHitIdsHistory.IsValid(0) || m_State.FarDistance != m_FarDistance
                 || m_State.SceneRevision != m_Scene.Revision || !ReferenceEquals(m_State.Cache, cache)
                 || m_State.FarCardVersion != m_FarCardVersion || m_State.GatherRadiosityOrder != m_RadiosityOrder
                 || m_State.LayerMask != m_LayerMask || m_State.LightLayerMask != m_LightLayerMask
@@ -1197,13 +1263,19 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             m_FarAtlas = CameraHistoryRenderGraphBridge.ImportForPass(this, m_FarHistory, 0,
                 m_FarClear || m_FarUpdateCount > 0 ? AccessFlags.ReadWrite : AccessFlags.Read);
+            m_FarHitIds = CameraHistoryRenderGraphBridge.ImportForPass(this, m_FarHitIdsHistory, 0,
+                m_FarUpdateCount > 0 ? AccessFlags.ReadWrite : AccessFlags.Read);
         }
 
         private void RecordFarCache(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black)
         {
-            bool ready = m_FarAtlas.IsValid();
+            bool ready = m_FarAtlas.IsValid() && m_FarHitIds.IsValid();
             cmd.SetComputeFloatParam(m_Compute, FarDistanceId, ready ? m_FarDistance : 0f);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, FarRadianceId, ready ? m_FarAtlas : black);
+            if (ready)
+                cmd.SetComputeBufferParam(m_Compute, traceKernel, FarHitIdsId, m_FarHitIds);
+            else
+                cmd.SetComputeBufferParam(m_Compute, traceKernel, FarHitIdsId, m_Scene.LeafInstances);
             if (!ready)
                 return;
             cmd.SetComputeVectorParam(m_Compute, FarWindowId, new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f));
@@ -1222,6 +1294,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityInputId,
                     m_RadiosityInput.IsValid() ? m_RadiosityInput : black);
                 cmd.SetComputeTextureParam(m_Compute, kernel, FarOutputId, m_FarAtlas);
+                cmd.SetComputeBufferParam(m_Compute, kernel, FarHitIdsOutputId, m_FarHitIds);
                 if (m_FarClear)
                 {
                     cmd.SetComputeIntParam(m_Compute, FarClearId, 1);
@@ -1241,6 +1314,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             }
             m_FarHistory.MarkWritten();
+            m_FarHitIdsHistory.MarkWritten();
+        }
+
+        private void BindSegmentedTracing(ComputeCommandBuffer cmd, int kernel, bool useGlobalClipmap)
+        {
+            cmd.SetComputeFloatParam(m_Compute, MeshDetailDistanceId, m_MeshDetailDistance);
+            cmd.SetComputeFloatParam(m_Compute, FarDistanceId, 0f);
+            cmd.SetComputeIntParam(m_Compute, UseGlobalClipmapId, useGlobalClipmap ? 1 : 0);
+            var fallback = m_GlobalFallback.innerHandle;
+            cmd.SetComputeTextureParam(m_Compute, kernel, GlobalNearId, useGlobalClipmap ? m_GlobalNear : fallback);
+            cmd.SetComputeTextureParam(m_Compute, kernel, GlobalMiddleId, useGlobalClipmap ? m_GlobalMiddle : fallback);
+            cmd.SetComputeTextureParam(m_Compute, kernel, GlobalFarId, useGlobalClipmap ? m_GlobalFar : fallback);
+            if (!useGlobalClipmap)
+            {
+                cmd.SetComputeBufferParam(m_Compute, kernel, GlobalPagesId, m_Scene.LeafInstances);
+                cmd.SetComputeBufferParam(m_Compute, kernel, GlobalThinBricksId, m_Scene.LeafInstances);
+                return;
+            }
+            cmd.SetComputeBufferParam(m_Compute, kernel, GlobalPagesId, m_GlobalPages);
+            cmd.SetComputeBufferParam(m_Compute, kernel, GlobalThinBricksId, m_GlobalThinBricks);
+            cmd.SetComputeIntParam(m_Compute, GlobalLayerMaskId, m_GlobalClipmap.LayerMask);
+            cmd.SetComputeVectorArrayParam(m_Compute, GlobalLevelsId, m_GlobalClipmap.Levels);
+            cmd.SetComputeVectorArrayParam(m_Compute, GlobalScrollId, m_GlobalClipmap.Scroll);
         }
 
         private void RecordNearOcclusion(ComputeCommandBuffer cmd)
@@ -1471,6 +1567,14 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var texture = CreateOutput(name, format);
             texture.desc.ClearBuffer = false;
+            return texture;
+        }
+
+        private static RenderGraphTexture CreateGlobalFallback()
+        {
+            var texture = RenderGraphTexture.CreateOutput("Unused Global SDF Binding", GraphicsFormat.R32_SFloat);
+            texture.Resize(1, 1);
+            texture.desc.Dimension = TextureDimension.Tex3D;
             return texture;
         }
     }

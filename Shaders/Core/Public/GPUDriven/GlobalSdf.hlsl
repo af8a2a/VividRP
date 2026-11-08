@@ -178,7 +178,7 @@ float3 VividGlobalSdfNormal(float3 positionWS, uint level)
 
 // directionWS is normalized. Distances are in world units.
 bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    out VividGlobalSdfHit hit)
+    out VividGlobalSdfHit hit, bool computeNormal = true)
 {
     hit = (VividGlobalSdfHit)0;
     float3 entry = FLT_MAX;
@@ -243,7 +243,8 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
             {
                 hit.distance = t;
                 hit.level = level;
-                hit.normalWS = VividGlobalSdfNormal(originWS + t * directionWS, level);
+                if (computeNormal)
+                    hit.normalWS = VividGlobalSdfNormal(originWS + t * directionWS, level);
             }
             return true;
         }

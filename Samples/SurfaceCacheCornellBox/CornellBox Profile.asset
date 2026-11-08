@@ -212,18 +212,63 @@ MonoBehaviour:
   cacheSunVisibility:
     m_OverrideState: 1
     m_Value: 0
+  surfaceCacheBounceOrders:
+    m_OverrideState: 0
+    m_Value: 0
+  screenHitCardLighting:
+    m_OverrideState: 0
+    m_Value: 1
   traceMode:
     m_OverrideState: 1
+    m_Value: 2
+  segmentedSdfTracing:
+    m_OverrideState: 0
     m_Value: 0
+  meshSdfDetailDistance:
+    m_OverrideState: 0
+    m_Value: 2
+  occludedSky:
+    m_OverrideState: 1
+    m_Value: 1
+  skyTraceDistance:
+    m_OverrideState: 0
+    m_Value: 64
+  farRadianceCache:
+    m_OverrideState: 0
+    m_Value: 0
+  farTraceDistance:
+    m_OverrideState: 0
+    m_Value: 64
+  nearOcclusionStrength:
+    m_OverrideState: 0
+    m_Value: 0
+  nearOcclusionRadius:
+    m_OverrideState: 0
+    m_Value: 0.35
   directionalScreenProbes:
     m_OverrideState: 1
     m_Value: 0
+  screenProbeDirectionalCache:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeSamplingGuide:
+    m_OverrideState: 0
+    m_Value: 1
   adaptiveScreenProbes:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
   screenProbeSpatialFilter:
     m_OverrideState: 1
     m_Value: 1
+  screenProbeHitDistanceFilter:
+    m_OverrideState: 0
+    m_Value: 0
+  restirGather:
+    m_OverrideState: 1
+    m_Value: 1
+  restirPixelIntegration:
+    m_OverrideState: 1
+    m_Value: 0
   pixelTemporal:
     m_OverrideState: 1
     m_Value: 1

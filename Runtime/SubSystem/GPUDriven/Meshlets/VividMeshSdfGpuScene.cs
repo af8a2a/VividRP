@@ -55,7 +55,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public Vector4 AlbedoAndValid;
             public Vector4 Emission;
             public Vector4 CardMinAndFirst;
-            public Vector4 CardExtent;
+            public Vector4 CardExtent; // w is the 1-based runtime lighting instance slot.
 
             public readonly bool Equals(DiffuseSurface other) =>
                 AlbedoAndValid.Equals(other.AlbedoAndValid) && Emission.Equals(other.Emission)
@@ -138,6 +138,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private GraphicsBuffer m_NodeBuffer;
         private GraphicsBuffer m_LeafInstanceBuffer;
         private GraphicsBuffer m_DiffuseSurfaceBuffer;
+        private GraphicsBuffer m_SurfaceLightingInstanceBuffer;
+        private readonly List<uint> m_NextSurfaceLightingInstances;
         private List<DiffuseSurface> m_DiffuseSurfaces;
         private List<DiffuseSurface> m_NextDiffuseSurfaces;
         private readonly Shader m_DiffuseShader;
@@ -152,6 +154,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal int NodeCount { get; private set; }
         internal uint Revision { get; private set; }
         internal GraphicsBuffer DiffuseSurfaces => m_DiffuseSurfaceBuffer;
+        internal GraphicsBuffer SurfaceLightingInstances => m_SurfaceLightingInstanceBuffer;
+        internal int SurfaceLightingInstanceCount { get; private set; }
         internal VividSdfSurfaceCache SurfaceCache { get; set; }
 
         internal VividMeshSdfGpuScene() { }
@@ -161,6 +165,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_DiffuseShader = diffuseShader;
             m_DiffuseSurfaces = new List<DiffuseSurface>();
             m_NextDiffuseSurfaces = new List<DiffuseSurface>();
+            m_NextSurfaceLightingInstances = new List<uint>();
         }
 
         internal void Bind(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
@@ -193,6 +198,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (surfacesChanged)
             {
                 Upload(ref m_DiffuseSurfaceBuffer, m_NextDiffuseSurfaces, "Mesh SDF Diffuse Surfaces");
+                SurfaceLightingInstanceCount = m_NextSurfaceLightingInstances.Count;
+                if (SurfaceLightingInstanceCount != 0)
+                    Upload(ref m_SurfaceLightingInstanceBuffer, m_NextSurfaceLightingInstances, "Mesh SDF Surface Lighting Instances");
+                else
+                {
+                    m_SurfaceLightingInstanceBuffer?.Dispose();
+                    m_SurfaceLightingInstanceBuffer = null;
+                }
                 (m_DiffuseSurfaces, m_NextDiffuseSurfaces) = (m_NextDiffuseSurfaces, m_DiffuseSurfaces);
                 m_NextDiffuseSurfaces.Clear();
             }
@@ -225,6 +238,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextFields.Clear();
             m_NextInstances.Clear();
             m_NextDiffuseSurfaces?.Clear();
+            m_NextSurfaceLightingInstances?.Clear();
             var rendererData = database.rendererData;
             var resources = database.rendererResources;
             for (int i = 0; i < rendererData.Count; i++)
@@ -277,7 +291,15 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     EntityId = EntityId.ToULong(data.meshletRendererEntityId),
                 });
                 if (m_NextDiffuseSurfaces != null)
-                    m_NextDiffuseSurfaces.Add(ReadDiffuseSurface(renderer));
+                {
+                    var surface = ReadDiffuseSurface(renderer);
+                    if (surface.CardMinAndFirst.w != 0f)
+                    {
+                        surface.CardExtent.w = m_NextSurfaceLightingInstances.Count + 1;
+                        m_NextSurfaceLightingInstances.Add((uint)(m_NextInstances.Count - 1));
+                    }
+                    m_NextDiffuseSurfaces.Add(surface);
+                }
             }
         }
 
@@ -546,7 +568,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NodeBuffer?.Dispose();
             m_LeafInstanceBuffer?.Dispose();
             m_DiffuseSurfaceBuffer?.Dispose();
+            m_SurfaceLightingInstanceBuffer?.Dispose();
+            m_SurfaceLightingInstanceBuffer = null;
             m_DiffuseSurfaceBuffer = null;
+            SurfaceLightingInstanceCount = 0;
             m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_NodeBuffer = m_LeafInstanceBuffer = null;
             NodeCount = 0;
             m_FieldIndices.Clear();
@@ -556,6 +581,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextInstances.Clear();
             m_DiffuseSurfaces?.Clear();
             m_NextDiffuseSurfaces?.Clear();
+            m_NextSurfaceLightingInstances?.Clear();
         }
     }
 }

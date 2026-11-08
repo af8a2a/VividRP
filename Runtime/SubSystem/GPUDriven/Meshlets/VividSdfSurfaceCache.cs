@@ -25,6 +25,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         internal RTHandle AlbedoDepthHandle => m_AlbedoDepthHandle ??= RTHandles.Alloc(m_AlbedoDepth);
         internal RTHandle NormalCoverageHandle => m_NormalCoverageHandle ??= RTHandles.Alloc(m_NormalCoverage);
+        internal Vector2Int CardSize => new(m_AlbedoDepth.width, m_AlbedoDepth.height);
+        internal ulong CardVersion => ((ulong)m_AlbedoDepth.updateCount << 32) | m_NormalCoverage.updateCount;
         internal bool IsUsable => m_Entries != null && m_Entries.Length != 0
             && m_AlbedoDepth != null && m_NormalCoverage != null
             && m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh

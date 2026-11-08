@@ -8,7 +8,7 @@ struct DiffuseSurface
     float4 albedoAndValid;
     float4 emission;
     float4 cardMinAndFirst;
-    float4 cardExtent;
+    float4 cardExtent; // w is the 1-based runtime lighting instance slot.
 };
 
 StructuredBuffer<DiffuseSurface> _SdfDiffuseSurfaces;
@@ -17,9 +17,12 @@ StructuredBuffer<DiffuseSurface> _SdfDiffuseSurfaces;
 Texture2DArray<float4> _SdfSurfaceAlbedoDepth;
 Texture2DArray<float4> _SdfSurfaceNormalCoverage;
 
-bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface, out float3 normalWS)
+bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
+    out float3 normalWS, out uint3 cardTexel, out float surfaceError)
 {
     normalWS = hit.normalWS;
+    cardTexel = 0u;
+    surfaceError = 0.0;
     if (surface.cardMinAndFirst.w == 0.0)
         return false;
 
@@ -71,6 +74,8 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
                 best = score;
                 bestNormal = normal;
                 bestAlbedo = texelData.rgb;
+                cardTexel = uint3(pixel, slice - ((uint)surface.cardMinAndFirst.w - 1u));
+                surfaceError = depthError;
             }
         }
     }
@@ -80,6 +85,25 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
     normalWS = SafeNormalize(bestNormal.x * instance.worldToLocal0.xyz
         + bestNormal.y * instance.worldToLocal1.xyz + bestNormal.z * instance.worldToLocal2.xyz);
     return true;
+}
+
+bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface, out float3 normalWS)
+{
+    uint3 cardTexel;
+    float surfaceError;
+    return VividTrySampleSdfSurface(hit, positionWS, surface, normalWS, cardTexel, surfaceError);
+}
+#endif
+
+#if defined(VIVID_SDF_CACHED_SUN) || defined(VIVID_SDF_SUN_UPDATE)
+// xy: baked card resolution, z: atlas columns. Each resident instance owns
+// six consecutive cards in the same face order as the material capture.
+float4 _SdfSunLayout;
+
+uint2 VividSdfSunAtlasPixel(uint card, uint2 pixel)
+{
+    uint columns = (uint)_SdfSunLayout.z;
+    return uint2(card % columns, card / columns) * uint2(_SdfSunLayout.xy) + pixel;
 }
 #endif
 

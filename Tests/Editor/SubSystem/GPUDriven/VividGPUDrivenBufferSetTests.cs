@@ -10,11 +10,23 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
     public class VividGPUDrivenBufferSetTests
     {
+        [TestCase(64, 146, 16384, 16, 876)]
+        [TestCase(64, 1000, 16384, 16, 1020)]
+        [TestCase(128, 1000, 1024, 8, 60)]
+        [TestCase(256, 1000, 16384, 0, 0)]
+        public void SdfSunAtlasLayoutKeepsCompleteInstancesWithinTheBudget(
+            int resolution, int instances, int maxSize, int columns, int cards)
+        {
+            Assert.That(SdfDiffuseGatherPass.ResolveSunAtlasLayout(new Vector2Int(resolution, resolution), instances, maxSize),
+                Is.EqualTo((columns, cards)));
+        }
+
         internal static VividMeshLODNode ExpandMeshLODNode(VividMeshLODNodePacked node, IReadOnlyList<VividMeshLODGroup> groups)
         {
             bool hasParent = node.ParentGroupIndex != VividMeshLODNodePacked.InvalidGroupIndex;

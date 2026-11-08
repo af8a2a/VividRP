@@ -12,7 +12,7 @@
 #pragma kernel FilterSdfDiffuseProbes
 #pragma kernel FilterSdfDirectionalHits
 #pragma kernel ResampleSdfRestirTemporal
-#pragma kernel ResampleSdfRestirSpatial
+#pragma kernel ResampleSdfRestirSpatial VIVID_SDF_RESTIR_SPATIAL
 #pragma kernel TemporalSdfDiffuseGI
 #pragma kernel TemporalSdfRestirDiffuseGI VIVID_SDF_RESTIR_PIXEL_HISTORY
 #pragma kernel DenoiseSdfRestir

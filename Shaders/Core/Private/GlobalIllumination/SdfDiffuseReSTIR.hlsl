@@ -11,6 +11,13 @@ Texture2D<float> _SdfRestirVariance;
 RWTexture2D<float> _SdfRestirVarianceOutput;
 Texture2D<float4> _SdfRestirFilterInput;
 
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+#define RESTIR_SPATIAL_GROUP_SIZE 8
+#define RESTIR_SPATIAL_GROUP_THREADS (RESTIR_SPATIAL_GROUP_SIZE * RESTIR_SPATIAL_GROUP_SIZE)
+
+groupshared uint2 RestirSpatialVisibility[RESTIR_SPATIAL_GROUP_THREADS];
+#endif
+
 struct RestirSample
 {
     float3 position;
@@ -30,6 +37,9 @@ struct RestirReuseDomain
 {
     float4 geometry;
     uint count;
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+    uint groupLane;
+#endif
 };
 
 float RestirLuminance(float3 radiance)
@@ -181,8 +191,15 @@ bool RestirEndpointVisible(RestirSample sample, float3 origin, float3 direction,
 
 uint RestirMerge(inout RestirReservoir reservoir, inout float weightSum, RestirReservoir other,
     float4 otherGeometry, float3 origin, float3 normal, uint countLimit, uint ageIncrement, float random,
-    uint sourceIndex, inout uint selectedSource)
+    uint sourceIndex, inout uint selectedSource
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+    , out uint visibility
+#endif
+    )
 {
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+    visibility = 0u;
+#endif
     uint count = min(other.count, countLimit);
     if (count == 0u || other.age + ageIncrement > 3u)
         return 0u;
@@ -196,8 +213,20 @@ uint RestirMerge(inout RestirReservoir reservoir, inout float weightSum, RestirR
         float3 direction;
         float distance;
         float jacobian = RestirShiftJacobian(other.sample, origin, normal, sourceOrigin, direction, distance);
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+        if (jacobian > 0.0)
+        {
+            if (any(sourceOrigin != origin))
+            {
+                bool visible = RestirEndpointVisible(other.sample, origin, direction, distance);
+                visibility = visible ? 3u : 2u;
+                if (!visible)
+                    return count;
+            }
+#else
         if (jacobian > 0.0 && (all(sourceOrigin == origin) || RestirEndpointVisible(other.sample, origin, direction, distance)))
         {
+#endif
             float target = RestirLuminance(other.sample.radiance) * dot(normal, direction);
             if (RestirUpdate(reservoir, weightSum, other.sample, target * jacobian * other.inversePdf * float(count),
                 other.age + ageIncrement, random))
@@ -208,7 +237,11 @@ uint RestirMerge(inout RestirReservoir reservoir, inout float weightSum, RestirR
 }
 
 void RestirFinalizeReuse(inout RestirReservoir reservoir, float weightSum, float3 origin, float3 normal,
-    uint localCount, uint selectedSource, RestirReuseDomain sources[2])
+    uint localCount, uint selectedSource, RestirReuseDomain sources[2]
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+    , uint localSampleKey
+#endif
+    )
 {
     float target = RestirTarget(reservoir.sample, origin, normal);
     if (!(target > 0.0 && weightSum > 0.0) || !isfinite(weightSum))
@@ -237,10 +270,34 @@ void RestirFinalizeReuse(inout RestirReservoir reservoir, float weightSum, float
             float jacobian = RestirShiftJacobian(reservoir.sample, origin, normal, sourceOrigin, direction, distance);
             float3 sourceRay = reservoir.sample.position - sourceOrigin;
             float sourceDistance = length(sourceRay);
+#if defined(VIVID_SDF_RESTIR_SPATIAL)
+            if (jacobian == 0.0 || sourceDistance > _SdfDiffuseMaxDistance)
+                sourceTarget = 0.0;
+            else if (any(sourceOrigin != origin))
+            {
+                uint cached = 0u;
+                if (localSampleKey != 0u && sources[i].groupLane < RESTIR_SPATIAL_GROUP_THREADS)
+                {
+                    // The source lane traced from this origin to our unmodified temporal sample.
+                    uint2 queries = RestirSpatialVisibility[sources[i].groupLane];
+                    cached = (queries.x >> 1u) == localSampleKey ? queries.x
+                        : ((queries.y >> 1u) == localSampleKey ? queries.y : 0u);
+                }
+                bool visible;
+                if (cached != 0u)
+                    visible = (cached & 1u) != 0u;
+                else
+                    visible = RestirEndpointVisible(reservoir.sample, sourceOrigin,
+                        sourceRay / max(sourceDistance, 1e-5), sourceDistance);
+                if (!visible)
+                    sourceTarget = 0.0;
+            }
+#else
             if (jacobian == 0.0 || sourceDistance > _SdfDiffuseMaxDistance
                 || (any(sourceOrigin != origin)
                     && !RestirEndpointVisible(reservoir.sample, sourceOrigin, sourceRay / max(sourceDistance, 1e-5), sourceDistance)))
                 sourceTarget = 0.0;
+#endif
         }
         support += sourceTarget * float(sources[i].count);
     }
@@ -249,6 +306,7 @@ void RestirFinalizeReuse(inout RestirReservoir reservoir, float weightSum, float
     reservoir.inversePdf = support > 0.0 ? (weightSum / target) * (selectedTarget / support) : 0.0;
 }
 
+#if !defined(VIVID_SDF_RESTIR_SPATIAL)
 [numthreads(8, 8, 1)]
 void ResampleSdfRestirTemporal(uint3 id : SV_DispatchThreadID)
 {
@@ -306,27 +364,39 @@ void ResampleSdfRestirTemporal(uint3 id : SV_DispatchThreadID)
     StoreRestir(id.xy, grid.x, reservoir);
 }
 
-[numthreads(8, 8, 1)]
-void ResampleSdfRestirSpatial(uint3 id : SV_DispatchThreadID)
+#else
+[numthreads(RESTIR_SPATIAL_GROUP_SIZE, RESTIR_SPATIAL_GROUP_SIZE, 1)]
+void ResampleSdfRestirSpatial(uint3 id : SV_DispatchThreadID, uint3 lane : SV_GroupThreadID, uint groupIndex : SV_GroupIndex)
 {
     uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
-    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
-        return;
+    bool dense = _SdfRestirDense != 0u;
+    bool inBounds = all(id.xy < grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes));
 
-    float4 geometry = _SdfDiffuseGeometry[id.xy];
-    float confidence = _SdfDiffuseProbeInput.Load(int3(id.xy, 0)).a;
+    float4 geometry = float4(0.0, 0.0, 0.0, -1.0);
+    float confidence = 0.0;
+    if (inBounds)
+    {
+        geometry = _SdfDiffuseGeometry[id.xy];
+        confidence = _SdfDiffuseProbeInput.Load(int3(id.xy, 0)).a;
+    }
     float3 lighting = 0.0;
     float3x3 moments = (float3x3)0.0;
     RestirReservoir reservoir = (RestirReservoir)0;
-    if (geometry.w >= 0.0 && (confidence > 0.0 || _SdfRestirDense != 0u))
+    bool valid = geometry.w >= 0.0 && (confidence > 0.0 || dense);
+    float3 normal = 0.0;
+    float3 origin = 0.0;
+    uint localCount = 0u;
+    float weightSum = 0.0;
+    uint selectedSource = 0u;
+    RestirReuseDomain sources[2];
+    uint2 queries = 0u;
+    if (valid)
     {
-        float3 normal = UnpackProbeNormal(geometry.w);
-        float3 origin = geometry.xyz + normal * _SdfDiffuseRayBias;
+        normal = UnpackProbeNormal(geometry.w);
+        origin = geometry.xyz + normal * _SdfDiffuseRayBias;
         reservoir = LoadRestir(_SdfRestirTemporal, id.xy, grid.x);
-        uint localCount = reservoir.count;
-        float weightSum = reservoir.inversePdf * float(localCount) * RestirTarget(reservoir.sample, origin, normal);
-        uint selectedSource = 0u;
-        RestirReuseDomain sources[2];
+        localCount = reservoir.count;
+        weightSum = reservoir.inversePdf * float(localCount) * RestirTarget(reservoir.sample, origin, normal);
         float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
         float radius = clamp(0.05 * eyeDepth, 0.15, 0.8);
         int2 uniformTile = int2(id.x, id.y % grid.y);
@@ -359,13 +429,38 @@ void ResampleSdfRestirSpatial(uint3 id : SV_DispatchThreadID)
             if (match > 0.20)
             {
                 sources[i].geometry = other;
+                uint visibility;
                 sources[i].count = RestirMerge(reservoir, weightSum, LoadRestir(_SdfRestirTemporal, tile, grid.x), other,
-                    origin, normal, ProbeRayCount(), 0u, RestirRandom(seed + i + 1u), i + 1u, selectedSource);
+                    origin, normal, ProbeRayCount(), 0u, RestirRandom(seed + i + 1u), i + 1u, selectedSource, visibility);
+                uint2 sourceLane = tile - (id.xy - lane.xy);
+                sources[i].groupLane = RESTIR_SPATIAL_GROUP_THREADS;
+                if (dense && all(sourceLane < RESTIR_SPATIAL_GROUP_SIZE))
+                {
+                    uint sourceIndex = sourceLane.y * RESTIR_SPATIAL_GROUP_SIZE + sourceLane.x;
+                    sources[i].groupLane = sourceIndex;
+                    // Zero means no exact query was issued. The low bit carries its result.
+                    if (visibility != 0u)
+                        queries = uint2(queries.y, ((sourceIndex + 1u) << 1u) | (visibility & 1u));
+                }
             }
         }
+    }
+    if (dense)
+    {
+        // Include lanes outside the grid in the last partial group.
+        RestirSpatialVisibility[groupIndex] = queries;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (!inBounds)
+        return;
+    if (valid)
+    {
         if (sources[0].count != 0u || sources[1].count != 0u)
-            RestirFinalizeReuse(reservoir, weightSum, origin, normal, localCount, selectedSource, sources);
-        if (_SdfRestirDense == 0u)
+        {
+            uint localSampleKey = dense && selectedSource == 0u ? groupIndex + 1u : 0u;
+            RestirFinalizeReuse(reservoir, weightSum, origin, normal, localCount, selectedSource, sources, localSampleKey);
+        }
+        if (!dense)
         {
             float3 direction = SafeNormalize(reservoir.sample.position - origin);
             lighting = min(reservoir.sample.radiance * (reservoir.inversePdf * saturate(dot(normal, direction))), 65000.0);
@@ -373,11 +468,12 @@ void ResampleSdfRestirSpatial(uint3 id : SV_DispatchThreadID)
                 moments = ProbeSampleMoments(lighting, direction, normal);
         }
     }
-    if (_SdfRestirDense != 0u)
+    if (dense)
         StoreRestir(id.xy, grid.x, reservoir);
     else
         StoreProbe(id.xy, float4(lighting, confidence), moments);
 }
+#endif
 
 void IntegrateRestirLighting(uint3 id)
 {

@@ -9,12 +9,30 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class SdfDiffuseGatherPass : ComputePass
     {
+#if UNITY_EDITOR
+        internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
+#endif
         private const int ProbeSpacing = 16; // Keep in sync with SdfDiffuseGather.compute.
+        private const int RaysPerProbe = 8;
         private const int GroupSize = 8;
         private const GraphicsFormat ProbeFormat = GraphicsFormat.R16G16B16A16_SFloat;
         private const GraphicsFormat GeometryFormat = GraphicsFormat.R32G32B32A32_SFloat;
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
+        private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenRadianceHistory");
+        private static readonly CameraHistoryId ScreenGeometryHistoryId = CameraHistoryId.Create("SdfDiffuseScreenGeometryHistory");
+        private static readonly ProfilingSampler ScreenTraceSampler = new("Diffuse GI Screen Trace");
+        private static readonly ProfilingSampler GatherSampler = new("Diffuse GI Gather and SDF Fallback");
+        private static readonly int HzbId = Shader.PropertyToID("_SdfScreenHzb");
+        private static readonly int MotionId = Shader.PropertyToID("_SdfScreenMotion");
+        private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
+        private static readonly int ScreenGeometryId = Shader.PropertyToID("_SdfScreenPreviousGeometry");
+        private static readonly int PreviousInverseVpId = Shader.PropertyToID("_SdfScreenPreviousInverseVP");
+        private static readonly int JitterDeltaId = Shader.PropertyToID("_SdfScreenJitterDelta");
+        private static readonly int ScreenRaysId = Shader.PropertyToID("_SdfScreenRays");
+        private static readonly int ScreenRaysOutputId = Shader.PropertyToID("_SdfScreenRaysOutput");
+        private static readonly int UseScreenRaysId = Shader.PropertyToID("_SdfDiffuseUseScreenRays");
+        private static readonly int TraceSourcesId = Shader.PropertyToID("_SdfDiffuseTraceSources");
         private static readonly int DepthId = Shader.PropertyToID("_SdfDiffuseDepth");
         private static readonly int GBuffer0Id = Shader.PropertyToID("_SdfDiffuseGBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_SdfDiffuseGBuffer1");
@@ -51,11 +69,20 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
 
+        [RenderGraphResource(Name = "Screen Trace HZB", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ScreenHzb;
+
+        [RenderGraphResource(Name = "Screen Trace Motion", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ScreenMotion;
+
         [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.Write)]
         private RenderGraphTexture m_Output = CreateOutput("Realtime Diffuse GI", ProbeFormat);
 
         [RenderGraphResource(Name = "Probe Hit Lighting", Access = AccessFlags.Write)]
         private RenderGraphTexture m_HitLighting = CreateOutput("SDF Diffuse Probe Hit Lighting", ProbeFormat);
+
+        [RenderGraphResource(Name = "GI Trace Sources (Screen / SDF / Unresolved)", Access = AccessFlags.Write)]
+        private RenderGraphTexture m_TraceSources = CreateOutput("Diffuse GI Trace Sources", ProbeFormat);
 
         [SerializeField, Min(0.1f)] private float m_MaxDistance = 12f;
         [SerializeField, Min(0.001f)] private float m_RayBias = 0.04f;
@@ -66,6 +93,9 @@ namespace VividRP.Runtime.RenderPass.Core
             internal Matrix4x4 ViewProjection;
             internal VividSdfSurfaceCache Cache;
             internal bool OffscreenOnly;
+            internal SdfDiffuseTraceMode TraceMode;
+            internal bool HasScreenRays;
+            internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
             internal int Width, Height, LayerMask, LightLayerMask;
@@ -80,19 +110,36 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_PreviousGeometry = RenderGraphTexture.CreateInput("Previous SDF Diffuse Geometry", GeometryFormat);
         private readonly RenderGraphTexture m_Probes = CreateOutput("SDF Diffuse Probes", ProbeFormat);
         private readonly RenderGraphTexture m_Geometry = CreateOutput("SDF Diffuse Geometry", GeometryFormat);
+        private readonly RenderGraphTexture m_LocalHzb = RenderGraphTexture.CreateInput("Screen Trace HZB", GraphicsFormat.R32_SFloat);
+        private readonly RenderGraphTexture m_LocalMotion = RenderGraphTexture.CreateInput("Screen Trace Motion", GraphicsFormat.R16G16_SFloat);
+        private readonly RenderGraphTexture m_ScreenRadianceDesc = CreateOutput("Screen Diffuse Source Radiance", ProbeFormat);
+        private readonly RenderGraphTexture m_ScreenGeometryDesc = CreateOutput("Screen Diffuse Source Geometry", GraphicsFormat.R32G32_SFloat);
+        [RenderGraphResource(Name = "Screen Ray Samples", Access = AccessFlags.ReadWrite)]
+        private RenderGraphTexture m_ScreenRays = CreateOutput("Diffuse GI Screen Rays", ProbeFormat);
         private VividMeshSdfGpuScene m_Scene;
         private ComputeShader m_Compute;
         private CameraHistoryTexture m_ProbeHistory, m_GeometryHistory;
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection;
         private TextureHandle m_CardAlbedoDepth, m_CardNormalCoverage;
+        private TextureHandle m_PreviousScreenRadiance, m_PreviousScreenGeometry;
+        private Vector2 m_ScreenJitterUv, m_ScreenJitterDelta;
         private Vector4 m_LightPositionRange, m_LightColorShadow;
         private int m_TraceKernel = -1, m_CachedTraceKernel = -1, m_ResolveKernel = -1;
+        private int m_ScreenTraceKernel = -1, m_ScreenGatherKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private float m_TraceDistance, m_Bias;
         private bool m_HasHistory, m_RealtimeOnly, m_OffscreenOnly;
+        private bool m_HasScreenHistory, m_UseSdf;
+        private SdfDiffuseTraceMode m_TraceMode;
 
-        public SdfDiffuseGatherPass() => profilingSampler = new ProfilingSampler(nameof(SdfDiffuseGatherPass));
+        public SdfDiffuseGatherPass()
+        {
+            profilingSampler = new ProfilingSampler(nameof(SdfDiffuseGatherPass));
+            m_ScreenHzb = m_LocalHzb;
+            m_ScreenMotion = m_LocalMotion;
+            m_ScreenRays.desc.ClearBuffer = false;
+        }
 
         public override void Create()
         {
@@ -107,6 +154,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
             if (SystemInfo.supports2DArrayTextures && m_Compute.HasKernel("TraceSdfDiffuseCachedProbes"))
                 m_CachedTraceKernel = m_Compute.FindKernel("TraceSdfDiffuseCachedProbes");
+            if (SystemInfo.usesReversedZBuffer
+                && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_SFloat, GraphicsFormatUsage.LoadStore)
+                && m_Compute.HasKernel("TraceDiffuseScreenRays") && m_Compute.HasKernel("GatherScreenDiffuseProbes"))
+            {
+                m_ScreenTraceKernel = m_Compute.FindKernel("TraceDiffuseScreenRays");
+                m_ScreenGatherKernel = m_Compute.FindKernel("GatherScreenDiffuseProbes");
+            }
             m_Scene = new VividMeshSdfGpuScene(Shader.Find("VividRP/Material/StandardLit"));
         }
 
@@ -116,12 +170,14 @@ namespace VividRP.Runtime.RenderPass.Core
             var camera = cameraData.camera;
             m_State = null;
             m_ProbeHistory = m_GeometryHistory = null;
+            m_HasScreenHistory = false;
             m_Width = CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
             m_Height = CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
             m_ProbeWidth = CoreUtils.DivRoundUp(m_Width, ProbeSpacing);
             m_ProbeHeight = CoreUtils.DivRoundUp(m_Height, ProbeSpacing);
             m_Output.Resize(m_Width, m_Height);
             m_HitLighting.Resize(m_ProbeWidth, m_ProbeHeight);
+            m_TraceSources.Resize(m_ProbeWidth, m_ProbeHeight);
             if (m_TraceKernel < 0 || camera == null || camera.cullingMask == 0 || camera.stereoEnabled
                 || DebugPassCameraUtility.ShouldSkipExecution(camera))
                 return;
@@ -130,21 +186,32 @@ namespace VividRP.Runtime.RenderPass.Core
             if (settings != null && settings.active && !settings.enabled.value)
                 return;
             var cache = settings != null && settings.active ? settings.surfaceCache.value : null;
-            if (cache != null && (m_CachedTraceKernel < 0 || !cache.IsUsable))
-                return;
-            m_Scene.SurfaceCache = cache;
             m_RealtimeOnly = settings != null && settings.active && settings.realtimeOnly.value;
             m_OffscreenOnly = settings != null && settings.active && settings.offscreenBounceOnly.value;
-            m_Scene.Update(VividMeshletRendererDatabase.instance);
-            if (m_Scene.NodeCount == 0 || m_Scene.DiffuseSurfaces == null)
-                return;
-            if (m_Scene.SurfaceCache != null)
+            m_TraceMode = settings != null && settings.active ? settings.traceMode.value : SdfDiffuseTraceMode.SdfOnly;
+            m_UseSdf = m_TraceMode != SdfDiffuseTraceMode.ScreenOnly
+                && (cache == null || (m_CachedTraceKernel >= 0 && cache.IsUsable));
+            if (m_UseSdf)
             {
-                m_CardAlbedoDepth = PassRecorder.ImportTextureForPass(this, cache.AlbedoDepthHandle);
-                m_CardNormalCoverage = PassRecorder.ImportTextureForPass(this, cache.NormalCoverageHandle);
-                if (!m_CardAlbedoDepth.IsValid() || !m_CardNormalCoverage.IsValid())
-                    return;
+                m_Scene.SurfaceCache = cache;
+                m_Scene.Update(VividMeshletRendererDatabase.instance);
+                m_UseSdf = m_Scene.NodeCount != 0 && m_Scene.DiffuseSurfaces != null;
+                if (m_UseSdf && cache != null)
+                {
+                    m_CardAlbedoDepth = PassRecorder.ImportTextureForPass(this, cache.AlbedoDepthHandle);
+                    m_CardNormalCoverage = PassRecorder.ImportTextureForPass(this, cache.NormalCoverageHandle);
+                    m_UseSdf = m_CardAlbedoDepth.IsValid() && m_CardNormalCoverage.IsValid();
+                }
             }
+
+            var temporal = frameData.Get<VividTemporalData>();
+            bool screenConfigured = !m_OffscreenOnly && m_TraceMode != SdfDiffuseTraceMode.SdfOnly
+                && m_ScreenTraceKernel >= 0 && m_ScreenHzb != null && m_ScreenMotion != null
+                && !ReferenceEquals(m_ScreenHzb, m_LocalHzb)
+                && !ReferenceEquals(m_ScreenMotion, m_LocalMotion);
+            m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * RaysPerProbe : 1, screenConfigured ? m_ProbeHeight : 1);
+            if (!m_UseSdf && !screenConfigured)
+                return;
 
             m_ViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_LayerMask = camera.cullingMask;
@@ -153,6 +220,13 @@ namespace VividRP.Runtime.RenderPass.Core
             ReadLight();
             m_Cameras.PurgeDestroyedCameras();
             m_State = m_Cameras.GetOrCreateBase(camera);
+            if (screenConfigured)
+            {
+                var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
+                    * cameraData.GetGPUProjectionMatrixNoJitter(renderIntoTexture: true).inverse;
+                m_ScreenJitterUv = new Vector2(jitter.m03, SystemInfo.graphicsUVStartsAtTop ? -jitter.m13 : jitter.m13) * 0.5f;
+                PrepareScreenHistory(frameData, camera, temporal);
+            }
             m_Probes.Resize(m_ProbeWidth, m_ProbeHeight);
             m_Geometry.Resize(m_ProbeWidth, m_ProbeHeight);
             bool probesValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
@@ -161,29 +235,32 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_PreviousGeometry, m_Geometry, m_Geometry.desc, out m_GeometryHistory);
             m_HasHistory = probesValid && geometryValid && m_State.SceneRevision == m_Scene.Revision
                 && ReferenceEquals(m_State.Cache, m_Scene.SurfaceCache)
-                && m_State.OffscreenOnly == m_OffscreenOnly
+                && m_State.OffscreenOnly == m_OffscreenOnly && m_State.TraceMode == m_TraceMode
                 && m_State.Width == m_Width && m_State.Height == m_Height
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
                 && m_State.LightPositionRange.Equals(m_LightPositionRange) && m_State.LightColorShadow.Equals(m_LightColorShadow)
-                && !frameData.Get<VividTemporalData>().isFirstFrame;
+                && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
         }
 
         public override void Record(ComputePassContext context)
         {
             if (m_State == null || m_ProbeHistory == null || m_GeometryHistory == null
                 || !m_Probes.innerHandle.IsValid() || !m_Geometry.innerHandle.IsValid()
-                || !m_Output.innerHandle.IsValid() || !m_HitLighting.innerHandle.IsValid()
+                || !m_Output.innerHandle.IsValid() || !m_HitLighting.innerHandle.IsValid() || !m_TraceSources.innerHandle.IsValid()
                 || !m_Depth.innerHandle.IsValid() || !m_GBuffer0.innerHandle.IsValid() || !m_GBuffer1.innerHandle.IsValid())
                 return;
 
             var cmd = context.cmd;
-            var cache = m_Scene.SurfaceCache;
-            int traceKernel = cache != null ? m_CachedTraceKernel : m_TraceKernel;
+            var cache = m_UseSdf ? m_Scene.SurfaceCache : null;
+            int traceKernel = !m_UseSdf ? m_ScreenGatherKernel : cache != null ? m_CachedTraceKernel : m_TraceKernel;
             BindReceiver(cmd, traceKernel);
             BindReceiver(cmd, m_ResolveKernel);
-            m_Scene.Bind(cmd, m_Compute, traceKernel);
-            cmd.SetComputeBufferParam(m_Compute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
+            if (m_UseSdf)
+            {
+                m_Scene.Bind(cmd, m_Compute, traceKernel);
+                cmd.SetComputeBufferParam(m_Compute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
+            }
             if (cache != null)
             {
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, CardAlbedoDepthId, m_CardAlbedoDepth);
@@ -191,9 +268,14 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             bool hasHistory = m_HasHistory && m_PreviousProbes.innerHandle.IsValid() && m_PreviousGeometry.innerHandle.IsValid();
             var black = context.renderGraphContext.defaultResources.blackTexture;
+            bool useScreenRays = m_HasScreenHistory && m_ScreenRays.innerHandle.IsValid()
+                && m_ScreenHzb.innerHandle.IsValid() && m_ScreenMotion.innerHandle.IsValid();
+            hasHistory &= m_State.HasScreenRays == useScreenRays;
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, TraceSourcesId, m_TraceSources.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, ScreenRaysId, useScreenRays ? m_ScreenRays.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, m_ResolveKernel, OutputId, m_Output.innerHandle);
             cmd.SetComputeMatrixParam(m_Compute, InverseViewProjectionId, m_ViewProjection.inverse);
             cmd.SetComputeMatrixParam(m_Compute, PreviousViewProjectionId, m_State.ViewProjection);
@@ -209,15 +291,27 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
             cmd.SetComputeMatrixParam(m_Compute, ViewProjectionId, m_ViewProjection);
-            cmd.DispatchCompute(m_Compute, traceKernel, CoreUtils.DivRoundUp(m_ProbeWidth, GroupSize),
-                CoreUtils.DivRoundUp(m_ProbeHeight, GroupSize), 1);
+            cmd.SetComputeIntParam(m_Compute, UseScreenRaysId, useScreenRays ? 1 : 0);
+            int groupsX = CoreUtils.DivRoundUp(m_ProbeWidth, GroupSize);
+            int groupsY = CoreUtils.DivRoundUp(m_ProbeHeight, GroupSize);
+            if (useScreenRays)
+                RecordScreenTrace(cmd, groupsX, groupsY);
+            using (new ProfilingScope(cmd, GatherSampler))
+                cmd.DispatchCompute(m_Compute, traceKernel, groupsX, groupsY, 1);
             cmd.DispatchCompute(m_Compute, m_ResolveKernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
                 CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+#if UNITY_EDITOR
+            EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
+                m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
+#endif
             m_ProbeHistory.MarkWritten();
             m_GeometryHistory.MarkWritten();
             m_State.ViewProjection = m_ViewProjection;
-            m_State.Cache = cache;
+            m_State.Cache = m_Scene.SurfaceCache;
             m_State.OffscreenOnly = m_OffscreenOnly;
+            m_State.TraceMode = m_TraceMode;
+            m_State.HasScreenRays = useScreenRays;
+            m_State.ScreenJitterUv = m_ScreenJitterUv;
             m_State.SceneRevision = m_Scene.Revision;
             m_State.Width = m_Width;
             m_State.Height = m_Height;
@@ -236,15 +330,57 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Scene = null;
             m_Compute = null;
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
+            m_ScreenTraceKernel = m_ScreenGatherKernel = -1;
         }
 
-        private void BindReceiver(ComputeCommandBuffer cmd, int kernel)
+        private void PrepareScreenHistory(ContextContainer frameData, Camera camera, VividTemporalData temporal)
+        {
+            var history = camera.GetVividCameraHistory();
+            if (!history.IsFrameActive)
+                return;
+
+            m_ScreenRadianceDesc.Resize(m_Width, m_Height);
+            m_ScreenGeometryDesc.Resize(m_Width, m_Height);
+            var screen = frameData.GetOrCreate<VividSdfScreenTraceData>();
+            screen.radiance = history.GetOrCreateTexture(ScreenRadianceHistoryId, 2,
+                CameraHistoryRenderGraphBridge.CreateDescriptor(m_ScreenRadianceDesc.desc));
+            screen.geometry = history.GetOrCreateTexture(ScreenGeometryHistoryId, 2,
+                CameraHistoryRenderGraphBridge.CreateDescriptor(m_ScreenGeometryDesc.desc));
+            if (temporal.isFirstFrame || temporal.resetPostProcessingHistory || m_State.Width != m_Width
+                || m_State.Height != m_Height || !screen.radiance.IsValid() || !screen.geometry.IsValid())
+                return;
+
+            m_PreviousScreenRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this, screen.radiance, 1, AccessFlags.Read);
+            m_PreviousScreenGeometry = CameraHistoryRenderGraphBridge.ImportForPass(this, screen.geometry, 1, AccessFlags.Read);
+            m_HasScreenHistory = m_PreviousScreenRadiance.IsValid() && m_PreviousScreenGeometry.IsValid();
+            m_ScreenJitterDelta = m_State.ScreenJitterUv - m_ScreenJitterUv;
+        }
+
+        private void RecordScreenTrace(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            using var scope = new ProfilingScope(cmd, ScreenTraceSampler);
+            int kernel = m_ScreenTraceKernel;
+            BindReceiver(cmd, kernel, bindProbes: false);
+            cmd.SetComputeTextureParam(m_Compute, kernel, HzbId, m_ScreenHzb.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, kernel, MotionId, m_ScreenMotion.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, kernel, ScreenRadianceId, m_PreviousScreenRadiance);
+            cmd.SetComputeTextureParam(m_Compute, kernel, ScreenGeometryId, m_PreviousScreenGeometry);
+            cmd.SetComputeTextureParam(m_Compute, kernel, ScreenRaysOutputId, m_ScreenRays.innerHandle);
+            cmd.SetComputeMatrixParam(m_Compute, PreviousInverseVpId, m_State.ViewProjection.inverse);
+            cmd.SetComputeVectorParam(m_Compute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
+            cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+        }
+
+        private void BindReceiver(ComputeCommandBuffer cmd, int kernel, bool bindProbes = true)
         {
             cmd.SetComputeTextureParam(m_Compute, kernel, DepthId, m_Depth.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, ProbeId, m_Probes.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
+            if (bindProbes)
+            {
+                cmd.SetComputeTextureParam(m_Compute, kernel, ProbeId, m_Probes.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
+            }
         }
 
         private void ReadLight()

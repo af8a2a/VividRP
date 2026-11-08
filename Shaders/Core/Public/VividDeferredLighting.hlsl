@@ -466,11 +466,12 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
 // Non-sky pixels only. Returns complete pre-exposed lighting (including emission).
 // Compute tile scheduling and raster geometry remain the caller's responsibility.
 float3 VividEvaluateDeferredSurfacePixel(
-    uint2 pixelCoord, float deviceDepth, out float4 debugLighting)
+    uint2 pixelCoord, float deviceDepth, out float4 debugLighting, out float3 bounceSource)
 {
     debugLighting = 0.0;
     VividSurfaceSummaryData summary = LoadVividSurfaceSummary(pixelCoord);
-    float3 emission = VividApplyPreExposure(max(summary.emissive, 0.0));
+    bounceSource = max(summary.emissive, 0.0);
+    float3 emission = VividApplyPreExposure(bounceSource);
     uint deferredExportClass = VividGetDeferredExportClass(
         summary.deferredExportHeader);
     // Empty/Unlit need no BSDF resources. Reserved lit classes are not silently
@@ -529,6 +530,7 @@ float3 VividEvaluateDeferredSurfacePixel(
             pixelCoord,
             positionWS);
     }
+    bounceSource += max(lightLoopOutput.diffuseLighting - lightLoopOutput.indirectDiffuseLighting, 0.0);
     float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
     float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting, 0.0));
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, summary);
@@ -541,6 +543,12 @@ float3 VividEvaluateDeferredSurfacePixel(
         lightLoopOutput.indirectDiffuseLighting + lightLoopOutput.indirectSpecularLighting, 0.0));
     debugLighting = float4(indirectLighting, reflectionWeight);
     return emission + lighting;
+}
+
+float3 VividEvaluateDeferredSurfacePixel(uint2 pixelCoord, float deviceDepth, out float4 debugLighting)
+{
+    float3 unusedBounceSource;
+    return VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting, unusedBounceSource);
 }
 
 #endif

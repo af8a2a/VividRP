@@ -1,9 +1,13 @@
 #pragma kernel TraceSdfDiffuseProbes
 #pragma kernel TraceSdfDiffuseCachedProbes VIVID_SDF_SURFACE_CACHE
+#pragma kernel TraceDiffuseScreenRays
+#pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
 #pragma kernel ResolveSdfDiffuseGI
 
+#include "../../Public/Input.hlsl"
 #include "../../Public/GPUDriven/SdfSurfaceCache.hlsl"
 #include "../../Public/SurfaceSummaryGBuffer.hlsl"
+#include "../../Public/MotionVectorsCommon.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
 static const uint ProbeSpacing = 16u;
@@ -14,14 +18,23 @@ Texture2D<float4> _SdfDiffuseGBuffer0;
 Texture2D<float4> _SdfDiffuseGBuffer1;
 Texture2D<float4> _SdfDiffusePreviousProbes;
 Texture2D<float4> _SdfDiffusePreviousGeometry;
+Texture2D<float> _SdfScreenHzb;
+Texture2D<float2> _SdfScreenMotion;
+Texture2D<float4> _SdfScreenPreviousRadiance;
+Texture2D<float2> _SdfScreenPreviousGeometry;
+Texture2D<float4> _SdfScreenRays;
+RWTexture2D<float4> _SdfScreenRaysOutput;
 RWTexture2D<float4> _SdfDiffuseProbes;
 RWTexture2D<float4> _SdfDiffuseGeometry;
 RWTexture2D<float4> _SdfDiffuseHitLighting;
 RWTexture2D<float4> _SdfDiffuseOutput;
+RWTexture2D<float4> _SdfDiffuseTraceSources;
 
 float4x4 _SdfDiffuseInverseVP;
 float4x4 _SdfDiffuseVP;
 float4x4 _SdfDiffusePreviousVP;
+float4x4 _SdfScreenPreviousInverseVP;
+float2 _SdfScreenJitterDelta;
 float4 _SdfDiffuseScreenSize;
 float4 _SdfDiffuseLightPositionRange;
 float4 _SdfDiffuseLightColorShadow;
@@ -33,6 +46,7 @@ uint _SdfDiffuseFrame;
 uint _SdfDiffuseHasHistory;
 uint _SdfDiffuseRealtimeOnly;
 uint _SdfDiffuseOffscreenOnly;
+uint _SdfDiffuseUseScreenRays;
 
 bool LoadReceiver(uint2 pixel, out float3 position, out float3 normal)
 {
@@ -73,6 +87,174 @@ uint HashProbe(uint value)
     value ^= value >> 15u;
     value *= 0x846ca68bu;
     return value ^ (value >> 16u);
+}
+
+uint2 ProbeReceiverPixel(uint2 tile, uint2 screenSize)
+{
+    return min(tile * ProbeSpacing + ProbeSpacing / 2u, screenSize - 1u);
+}
+
+uint ProbeSeed(uint2 tile)
+{
+    return HashProbe(tile.x + tile.y * 65537u + _SdfDiffuseFrame * 0x9e3779b9u);
+}
+
+float3 ProbeRayDirection(uint ray, uint seed, float3x3 basis)
+{
+    float u = (float(ray) + float(seed >> 16u) / 65536.0) / float(RaysPerProbe);
+    float phi = TWO_PI * frac(float(seed & 65535u) / 65536.0 + float(ray) * 0.61803398875);
+    float s, c;
+    sincos(phi, s, c);
+    return mul(float3(sqrt(u) * c, sqrt(u) * s, sqrt(1.0 - u)), basis);
+}
+
+float2 ScreenUv(float4 clip)
+{
+    float2 uv = clip.xy / clip.w * 0.5 + 0.5;
+    #if UNITY_UV_STARTS_AT_TOP
+        uv.y = 1.0 - uv.y;
+    #endif
+    return uv;
+}
+
+bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thickness, out float3 radiance)
+{
+    radiance = 0.0;
+    float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
+    if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
+        return false;
+
+    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+    if (PixelSetAsNoMotionVectors(packedMotion))
+        return false;
+    float2 motion;
+    DecodeMotionVector(packedMotion, motion);
+    float2 previousUv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw - motion + _SdfScreenJitterDelta;
+    if (any(previousUv < 0.0) || any(previousUv >= 1.0))
+        return false;
+
+    uint2 previousPixel = uint2(previousUv * _SdfDiffuseScreenSize.xy);
+    float2 geometry = _SdfScreenPreviousGeometry.Load(int3(previousPixel, 0));
+    if (geometry.y < 0.0)
+        return false;
+    uint oct = (uint)geometry.y;
+    float3 previousNormal = VividDecodeSurfaceSummaryNormal(float2(oct & 1023u, oct >> 10u) / 1023.0);
+    if (dot(normal, previousNormal) < 0.92)
+        return false;
+
+    float2 sampleUv = (float2(previousPixel) + 0.5) * _SdfDiffuseScreenSize.zw;
+    float3 previousPosition = ComputeWorldSpacePosition(sampleUv, geometry.x, _SdfScreenPreviousInverseVP);
+    float3 expectedDepthPosition = ComputeWorldSpacePosition(sampleUv, previousClip.z / previousClip.w,
+        _SdfScreenPreviousInverseVP);
+    if (distance(previousPosition, expectedDepthPosition) > thickness)
+        return false;
+
+    radiance = _SdfScreenPreviousRadiance.Load(int3(previousPixel, 0)).rgb;
+    return all(isfinite(radiance));
+}
+
+// Traverse a reversed-Z closest-depth pyramid in projected pixel space.
+bool TraceScreenRay(float3 origin, float3 direction, out float3 radiance)
+{
+    radiance = 0.0;
+    float4 start = mul(_SdfDiffuseVP, float4(origin, 1.0));
+    float4 end = mul(_SdfDiffuseVP, float4(origin + direction * _SdfDiffuseMaxDistance, 1.0));
+    if (start.w <= 0.0 || start.z > start.w || start.z <= 0.0)
+        return false;
+    if (end.z > end.w)
+        end = lerp(start, end, 0.999 * (start.w - start.z) / (start.w - start.z + end.z - end.w));
+    if (end.w <= 0.0)
+        return false;
+
+    float2 screenSize = _SdfDiffuseScreenSize.xy;
+    float2 startPixel = ScreenUv(start) * screenSize;
+    float2 delta = ScreenUv(end) * screenSize - startPixel;
+    float major = max(abs(delta.x), abs(delta.y));
+    if (major < 1.0)
+        return false;
+
+    float epsilon = 0.002 / major;
+    float startDepth = start.z / start.w;
+    float endDepth = end.z / end.w;
+    float t = epsilon;
+    uint width, height, mips;
+    _SdfScreenHzb.GetDimensions(0, width, height, mips);
+    int maxMip = min(4, int(mips) - 1);
+    int mip = maxMip;
+    [loop]
+    for (uint iteration = 0u; iteration < 48u && t < 1.0; iteration++)
+    {
+        float2 pixel = startPixel + delta * t;
+        if (any(pixel < 0.0) || any(pixel >= screenSize))
+            break;
+        uint cellSize = 1u << mip;
+        uint2 cell = uint2(pixel) >> mip;
+        if (mip > 0 && any(cell >= (uint2(width, height) >> mip)))
+        {
+            // A floor-sized mip can omit the odd edge texel.
+            mip--;
+            continue;
+        }
+
+        float2 boundary = (float2(cell) + step(0.0, delta)) * cellSize;
+        float2 exitT = float2(abs(delta.x) > 1e-6 ? (boundary.x - startPixel.x) / delta.x : 2.0,
+            abs(delta.y) > 1e-6 ? (boundary.y - startPixel.y) / delta.y : 2.0);
+        float nextT = min(1.0, max(t, min(exitT.x, exitT.y)));
+        float closest = mip == 0 ? _SdfDiffuseDepth.Load(int3(cell, 0)) : _SdfScreenHzb.Load(int3(cell, mip));
+        if (closest == UNITY_RAW_FAR_CLIP_VALUE
+            || min(lerp(startDepth, endDepth, t), lerp(startDepth, endDepth, nextT)) > closest)
+        {
+            t = nextT + epsilon;
+            mip = min(mip + 1, maxMip);
+            continue;
+        }
+        if (mip > 0)
+        {
+            mip--;
+            continue;
+        }
+
+        float4 packedNormal = _SdfDiffuseGBuffer1.Load(int3(cell, 0));
+        if (!VividIsSurfaceSummaryGBufferABIValid(packedNormal.a))
+            return false;
+        float3 normal = VividDecodeSurfaceSummaryNormal(packedNormal.xy);
+        float2 uv = (float2(cell) + 0.5) * _SdfDiffuseScreenSize.zw;
+        float3 position = ComputeWorldSpacePosition(uv, closest, _SdfDiffuseInverseVP);
+        float3 footprint = ComputeWorldSpacePosition(uv + _SdfDiffuseScreenSize.zw, closest, _SdfDiffuseInverseVP);
+        float thickness = clamp(1.25 * distance(footprint, position), 0.02, 0.15);
+        float travel = dot(position - origin, direction);
+        if (travel <= _SdfDiffuseRayBias || travel > _SdfDiffuseMaxDistance
+            || dot(normal, direction) >= -0.05
+            || distance(position, origin + direction * travel) > thickness)
+            return false;
+
+        return ReadScreenRadiance(cell, position, normal, thickness, radiance);
+    }
+    return false;
+}
+
+[numthreads(8, 8, 1)]
+void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
+{
+    uint2 tile = id.xy;
+    uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(tile * ProbeSpacing >= screenSize))
+        return;
+
+    float3 position, normal;
+    bool receiver = LoadReceiver(ProbeReceiverPixel(tile, screenSize), position, normal);
+    float3x3 basis = GetLocalFrame(receiver ? normal : float3(0.0, 1.0, 0.0));
+    float3 origin = position + normal * _SdfDiffuseRayBias;
+    uint seed = ProbeSeed(tile);
+    [loop]
+    for (uint ray = 0u; ray < RaysPerProbe; ray++)
+    {
+        float3 radiance = 0.0;
+        bool hit = false;
+        if (receiver)
+            hit = TraceScreenRay(origin, ProbeRayDirection(ray, seed, basis), radiance);
+        _SdfScreenRaysOutput[uint2(tile.x * RaysPerProbe + ray, tile.y)] = float4(hit ? radiance : 0.0, hit ? 1.0 : 0.0);
+    }
 }
 
 float3 TraceHitLighting(float3 position, float3 normal, float3 geometryNormal, DiffuseSurface surface, uint layerMask)
@@ -132,10 +314,7 @@ float4 AccumulateProbe(float4 current, float3 position, float3 normal)
     float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     if (clip.w <= 0.0)
         return current;
-    float2 uv = clip.xy / clip.w * 0.5 + 0.5;
-    #if UNITY_UV_STARTS_AT_TOP
-        uv.y = 1.0 - uv.y;
-    #endif
+    float2 uv = ScreenUv(clip);
     if (any(uv < 0.0) || any(uv >= 1.0))
         return current;
 
@@ -158,32 +337,40 @@ void TraceProbe(uint3 id)
     if (any(tile * ProbeSpacing >= screenSize))
         return;
 
-    uint2 pixel = min(tile * ProbeSpacing + ProbeSpacing / 2u, screenSize - 1u);
+    uint2 pixel = ProbeReceiverPixel(tile, screenSize);
     float3 position, normal;
     if (!LoadReceiver(pixel, position, normal))
     {
         _SdfDiffuseProbes[tile] = 0.0;
         _SdfDiffuseGeometry[tile] = float4(0.0, 0.0, 0.0, -1.0);
         _SdfDiffuseHitLighting[tile] = 0.0;
+        _SdfDiffuseTraceSources[tile] = 0.0;
         return;
     }
 
     float3x3 basis = GetLocalFrame(normal);
     float3 origin = position + normal * _SdfDiffuseRayBias;
-    uint seed = HashProbe(tile.x + tile.y * 65537u + _SdfDiffuseFrame * 0x9e3779b9u);
-    float rotation = float(seed & 65535u) / 65536.0;
-    float jitter = float(seed >> 16u) / 65536.0;
+    uint seed = ProbeSeed(tile);
     float3 sum = 0.0;
     uint valid = 0u;
+    uint screenHits = 0u;
     uint unknown = 0u;
     [loop]
     for (uint ray = 0u; ray < RaysPerProbe; ray++)
     {
-        float u = (float(ray) + jitter) / float(RaysPerProbe);
-        float phi = TWO_PI * frac(rotation + float(ray) * 0.61803398875);
-        float s, c;
-        sincos(phi, s, c);
-        float3 direction = mul(float3(sqrt(u) * c, sqrt(u) * s, sqrt(1.0 - u)), basis);
+        if (_SdfDiffuseUseScreenRays != 0u)
+        {
+            float4 screenHit = _SdfScreenRays.Load(int3(tile.x * RaysPerProbe + ray, tile.y, 0));
+            if (screenHit.a != 0.0)
+            {
+                sum += screenHit.rgb;
+                screenHits++;
+                valid++;
+                continue;
+            }
+        }
+        #if !defined(VIVID_SDF_SCREEN_ONLY)
+        float3 direction = ProbeRayDirection(ray, seed, basis);
         VividMeshSdfHit hit;
         if (!VividTraceMeshSdfScene(origin, direction, 0.0, _SdfDiffuseMaxDistance, _SdfDiffuseLayerMask, hit))
             continue;
@@ -212,11 +399,12 @@ void TraceProbe(uint3 id)
         }
         sum += TraceHitLighting(hitPosition, lightingNormal, hit.normalWS, surface,
             _MeshSdfInstances[hit.instanceIndex].layerMask);
+        #endif
     }
 
     // Cosine sampling estimates irradiance divided by pi, before the receiver's albedo.
     // A miss contributes black in this local one-bounce estimator.
-    #if defined(VIVID_SDF_SURFACE_CACHE)
+    #if defined(VIVID_SDF_SURFACE_CACHE) || defined(VIVID_SDF_SCREEN_ONLY)
         // Keep the baked fallback where cards cover few of the gather rays.
         float confidence = float(valid) / float(RaysPerProbe);
     #else
@@ -226,9 +414,16 @@ void TraceProbe(uint3 id)
     _SdfDiffuseProbes[tile] = AccumulateProbe(current, position, normal);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / RaysPerProbe);
+    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits, RaysPerProbe - valid) / RaysPerProbe, 1.0);
 }
 
-#if defined(VIVID_SDF_SURFACE_CACHE)
+#if defined(VIVID_SDF_SCREEN_ONLY)
+[numthreads(8, 8, 1)]
+void GatherScreenDiffuseProbes(uint3 id : SV_DispatchThreadID)
+{
+    TraceProbe(id);
+}
+#elif defined(VIVID_SDF_SURFACE_CACHE)
 [numthreads(8, 8, 1)]
 void TraceSdfDiffuseCachedProbes(uint3 id : SV_DispatchThreadID)
 {

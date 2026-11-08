@@ -4,6 +4,11 @@
 #pragma kernel DeferredLit_Variant1
 #pragma kernel DeferredLit_Variant2
 #pragma kernel DeferredLit_Variant3
+#pragma kernel ClearDeferredLitSdfSource VIVID_SSGI_SOURCE
+#pragma kernel DeferredLitSdfSourceVariant0 VIVID_SSGI_SOURCE
+#pragma kernel DeferredLitSdfSourceVariant1 VIVID_SSGI_SOURCE
+#pragma kernel DeferredLitSdfSourceVariant2 VIVID_SSGI_SOURCE
+#pragma kernel DeferredLitSdfSourceVariant3 VIVID_SSGI_SOURCE
 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
@@ -18,6 +23,20 @@ StructuredBuffer<uint> _MaterialFeatureTileList;
 
 RWTexture2D<float4> _LightingTexture;
 RWTexture2D<float4> _LightingDebugTexture;
+
+#if defined(VIVID_SSGI_SOURCE)
+RWTexture2D<float4> _SdfScreenSourceRadiance;
+RWTexture2D<float2> _SdfScreenSourceGeometry;
+
+void StoreSdfScreenSource(uint2 pixel, float depth, float3 radiance)
+{
+    float4 packedNormal = _GBuffer1.Load(int3(pixel, 0));
+    bool valid = depth != UNITY_RAW_FAR_CLIP_VALUE && VividIsSurfaceSummaryGBufferABIValid(packedNormal.a);
+    uint2 oct = uint2(round(saturate(packedNormal.xy) * 1023.0));
+    _SdfScreenSourceRadiance[pixel] = float4(min(max(radiance, 0.0), 65000.0), 0.0);
+    _SdfScreenSourceGeometry[pixel] = float2(depth, valid ? float(oct.x + 1024u * oct.y) : -1.0);
+}
+#endif
 
 uint _MaterialTileCountX;
 uint _MaterialFeatureTileListOffset;
@@ -40,7 +59,11 @@ float3 EvaluateDeferredSkyLighting(uint2 pixelCoord)
 }
 
 [numthreads(8, 8, 1)]
+#if defined(VIVID_SSGI_SOURCE)
+void ClearDeferredLitSdfSource(uint3 dispatchThreadId : SV_DispatchThreadID)
+#else
 void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
+#endif
 {
     if (dispatchThreadId.x >= (uint)_ScreenSize.x || dispatchThreadId.y >= (uint)_ScreenSize.y)
         return;
@@ -52,6 +75,9 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
         : VividApplyPreExposure(max(_GBuffer3.Load(int3(pixelCoord, 0)).rgb, 0.0));
     _LightingTexture[pixelCoord] = float4(lighting, 1.0);
     _LightingDebugTexture[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
+    #if defined(VIVID_SSGI_SOURCE)
+        StoreSdfScreenSource(pixelCoord, deviceDepth, _GBuffer3.Load(int3(pixelCoord, 0)).rgb);
+    #endif
 }
 
 uint GetDeferredVariantBit(uint deferredVariant)
@@ -88,31 +114,53 @@ void DeferredLitVariant(
         return;
 
     float4 debugLighting;
-    float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting);
+    #if defined(VIVID_SSGI_SOURCE)
+        float3 bounceSource;
+        float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting, bounceSource);
+        StoreSdfScreenSource(pixelCoord, deviceDepth, bounceSource);
+    #else
+        float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting);
+    #endif
     _LightingTexture[pixelCoord] = float4(lighting, 1.0);
     _LightingDebugTexture[pixelCoord] = debugLighting;
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+#if defined(VIVID_SSGI_SOURCE)
+void DeferredLitSdfSourceVariant0(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#else
 void DeferredLit_Variant0(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#endif
 {
     DeferredLitVariant(0u, groupId, groupThreadId);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+#if defined(VIVID_SSGI_SOURCE)
+void DeferredLitSdfSourceVariant1(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#else
 void DeferredLit_Variant1(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#endif
 {
     DeferredLitVariant(1u, groupId, groupThreadId);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+#if defined(VIVID_SSGI_SOURCE)
+void DeferredLitSdfSourceVariant2(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#else
 void DeferredLit_Variant2(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#endif
 {
     DeferredLitVariant(2u, groupId, groupThreadId);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+#if defined(VIVID_SSGI_SOURCE)
+void DeferredLitSdfSourceVariant3(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#else
 void DeferredLit_Variant3(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+#endif
 {
     DeferredLitVariant(3u, groupId, groupThreadId);
 }

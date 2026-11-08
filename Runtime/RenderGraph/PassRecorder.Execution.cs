@@ -89,6 +89,8 @@ namespace VividRP.Runtime
                 ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
                 VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
                 VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
+                if (s_FrameData.Contains<VividSdfScreenTraceData>())
+                    s_FrameData.Get<VividSdfScreenTraceData>().Reset();
                 if (s_FrameData.Contains<VividGlobalSdfFrameData>())
                     s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
             }

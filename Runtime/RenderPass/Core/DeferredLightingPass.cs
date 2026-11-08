@@ -19,6 +19,13 @@ namespace VividRP.Runtime.RenderPass.Core
             "DeferredLit_Variant2",
             "DeferredLit_Variant3"
         };
+        private static readonly string[] SdfScreenSourceKernelNames =
+        {
+            "DeferredLitSdfSourceVariant0",
+            "DeferredLitSdfSourceVariant1",
+            "DeferredLitSdfSourceVariant2",
+            "DeferredLitSdfSourceVariant3"
+        };
 
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
@@ -27,6 +34,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
         private static readonly int RealtimeDiffuseGIId = Shader.PropertyToID("_RealtimeDiffuseGI");
         private static readonly int RealtimeDiffuseGIEnabledId = Shader.PropertyToID("_RealtimeDiffuseGIEnabled");
+        private static readonly int SdfScreenSourceRadianceId = Shader.PropertyToID("_SdfScreenSourceRadiance");
+        private static readonly int SdfScreenSourceGeometryId = Shader.PropertyToID("_SdfScreenSourceGeometry");
         private static readonly int LayerAux0Id = Shader.PropertyToID("_LayerAux0");
         private static readonly int LayerAux1Id = Shader.PropertyToID("_LayerAux1");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
@@ -177,6 +186,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_DeferredLitCompute;
         private int m_ClearDeferredLitKernel = -1;
+        private int m_ClearSdfScreenSourceKernel = -1;
+        private readonly int[] m_SdfScreenSourceKernels = new int[DeferredVariantCount];
+        private VividSdfScreenTraceData m_SdfScreenSource;
+        private TextureHandle m_SdfScreenSourceRadiance;
+        private TextureHandle m_SdfScreenSourceGeometry;
         private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1 };
         private int m_LightingWidth = 1;
         private int m_LightingHeight = 1;
@@ -329,6 +343,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearDeferredLitKernel = m_DeferredLitCompute.FindKernel(ClearDeferredLitKernelName);
             for (var i = 0; i < DeferredVariantCount; i++)
                 m_DeferredLitVariantKernels[i] = m_DeferredLitCompute.FindKernel(DeferredLitVariantKernelNames[i]);
+            const string clearScreenSource = "ClearDeferredLitSdfSource";
+            if (m_DeferredLitCompute.HasKernel(clearScreenSource))
+            {
+                for (var i = 0; i < DeferredVariantCount; i++)
+                    m_SdfScreenSourceKernels[i] = m_DeferredLitCompute.FindKernel(SdfScreenSourceKernelNames[i]);
+                m_ClearSdfScreenSourceKernel = m_DeferredLitCompute.FindKernel(clearScreenSource);
+            }
         }
         
 
@@ -353,6 +374,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
+            m_SdfScreenSource = m_ClearSdfScreenSourceKernel >= 0 && frameData.Contains<VividSdfScreenTraceData>()
+                ? frameData.Get<VividSdfScreenTraceData>() : null;
+            m_SdfScreenSourceRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this,
+                m_SdfScreenSource?.radiance, 0, AccessFlags.Write);
+            m_SdfScreenSourceGeometry = CameraHistoryRenderGraphBridge.ImportForPass(this,
+                m_SdfScreenSource?.geometry, 0, AccessFlags.Write);
 
             m_GBuffer0.Resize(width, height);
             m_GBuffer1.Resize(width, height);
@@ -388,16 +415,19 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cmd = context.cmd;
             var nativeCmd = context.cmd;
+            bool writeScreenSource = m_SdfScreenSourceRadiance.IsValid() && m_SdfScreenSourceGeometry.IsValid();
+            int clearKernel = writeScreenSource ? m_ClearSdfScreenSourceKernel : m_ClearDeferredLitKernel;
+            var variantKernels = writeScreenSource ? m_SdfScreenSourceKernels : m_DeferredLitVariantKernels;
 
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
-                BindSharedParameters(context, cmd, m_ClearDeferredLitKernel);
-                BindSkyTextureParameters(cmd, m_ClearDeferredLitKernel);
-                cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
+                BindSharedParameters(context, cmd, clearKernel);
+                BindSkyTextureParameters(cmd, clearKernel);
+                cmd.DispatchCompute(m_DeferredLitCompute, clearKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
                 for (var variant = 0; variant < DeferredVariantCount; variant++)
                 {
-                    var kernel = m_DeferredLitVariantKernels[variant];
+                    var kernel = variantKernels[variant];
                     BindSharedParameters(context, cmd, kernel);
                     BindIndirectLightingParameters(context, cmd, kernel);
                     BindLightLoopParameters(cmd, kernel);
@@ -405,12 +435,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     DispatchMaterialFeatureVariant(cmd, kernel, variant);
                 }
             }
+            if (writeScreenSource)
+            {
+                m_SdfScreenSource.radiance.MarkWritten();
+                m_SdfScreenSource.geometry.MarkWritten();
+            }
         }
 
         public override void Dispose()
         {
             m_DeferredLitCompute = null;
             m_ClearDeferredLitKernel = -1;
+            m_ClearSdfScreenSourceKernel = -1;
             ResetDeferredLitVariantKernels();
             m_ScreenSpaceReflectionTexture = m_LocalScreenSpaceReflectionTexture;
             m_FrameContextScreenSpaceReflectionTexture = null;
@@ -558,6 +594,11 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingDebugTextureId, m_DebugTexture.innerHandle);
+            if (m_SdfScreenSourceRadiance.IsValid() && m_SdfScreenSourceGeometry.IsValid())
+            {
+                cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SdfScreenSourceRadianceId, m_SdfScreenSourceRadiance);
+                cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SdfScreenSourceGeometryId, m_SdfScreenSourceGeometry);
+            }
         }
 
         private void BindOptionalTexture(

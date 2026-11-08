@@ -111,9 +111,11 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding1), 44);
 
             Assert.That(typeof(VividMeshSdfGpuScene.DiffuseSurface).IsLayoutSequential, Is.True);
-            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.DiffuseSurface>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.DiffuseSurface>(), Is.EqualTo(64));
             AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.AlbedoAndValid), 0);
             AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.Emission), 16);
+            AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.CardMinAndFirst), 32);
+            AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.CardExtent), 48);
         }
 
         [TestCase(0, 0, 0, false, VividGlobalSdfClipmap.Resolution)]

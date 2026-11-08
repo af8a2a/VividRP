@@ -1,20 +1,14 @@
 #pragma kernel TraceSdfDiffuseProbes
+#pragma kernel TraceSdfDiffuseCachedProbes VIVID_SDF_SURFACE_CACHE
 #pragma kernel ResolveSdfDiffuseGI
 
-#include "../../Public/GPUDriven/MeshSdfTrace.hlsl"
+#include "../../Public/GPUDriven/SdfSurfaceCache.hlsl"
 #include "../../Public/SurfaceSummaryGBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
 static const uint ProbeSpacing = 16u;
 static const uint RaysPerProbe = 8u;
 
-struct DiffuseSurface
-{
-    float4 albedoAndValid;
-    float4 emission;
-};
-
-StructuredBuffer<DiffuseSurface> _SdfDiffuseSurfaces;
 Texture2D<float> _SdfDiffuseDepth;
 Texture2D<float4> _SdfDiffuseGBuffer0;
 Texture2D<float4> _SdfDiffuseGBuffer1;
@@ -26,6 +20,7 @@ RWTexture2D<float4> _SdfDiffuseHitLighting;
 RWTexture2D<float4> _SdfDiffuseOutput;
 
 float4x4 _SdfDiffuseInverseVP;
+float4x4 _SdfDiffuseVP;
 float4x4 _SdfDiffusePreviousVP;
 float4 _SdfDiffuseScreenSize;
 float4 _SdfDiffuseLightPositionRange;
@@ -36,6 +31,8 @@ uint _SdfDiffuseLayerMask;
 uint _SdfDiffuseLightLayerMask;
 uint _SdfDiffuseFrame;
 uint _SdfDiffuseHasHistory;
+uint _SdfDiffuseRealtimeOnly;
+uint _SdfDiffuseOffscreenOnly;
 
 bool LoadReceiver(uint2 pixel, out float3 position, out float3 normal)
 {
@@ -78,39 +75,51 @@ uint HashProbe(uint value)
     return value ^ (value >> 16u);
 }
 
-float3 TraceHitLighting(float3 position, float3 normal, DiffuseSurface surface, uint layerMask)
+float3 TraceHitLighting(float3 position, float3 normal, float3 geometryNormal, DiffuseSurface surface, uint layerMask)
 {
     float3 radiance = max(surface.emission.rgb, 0.0);
     float range = _SdfDiffuseLightPositionRange.w;
-    if (range <= 0.0 || (layerMask & _SdfDiffuseLightLayerMask) == 0u)
+    if (range == 0.0 || (layerMask & _SdfDiffuseLightLayerMask) == 0u)
         return radiance;
 
-    float3 toLight = _SdfDiffuseLightPositionRange.xyz - position;
-    float distanceSquared = dot(toLight, toLight);
-    if (distanceSquared <= 1e-6 || distanceSquared >= range * range)
-        return radiance;
-    float3 direction = toLight * rsqrt(distanceSquared);
+    bool directional = range < 0.0;
+    float3 direction = _SdfDiffuseLightPositionRange.xyz;
+    float attenuation = 1.0;
+    if (!directional)
+    {
+        float3 toLight = direction - position;
+        float distanceSquared = dot(toLight, toLight);
+        if (distanceSquared <= 1e-6 || distanceSquared >= range * range)
+            return radiance;
+        direction = toLight * rsqrt(distanceSquared);
+        float relativeDistance = distanceSquared / (range * range);
+        float window = saturate(1.0 - relativeDistance * relativeDistance);
+        attenuation = window * window / max(distanceSquared, 0.01);
+    }
     float nDotL = dot(normal, direction);
     if (nDotL <= 0.0)
+        return radiance;
+    if (dot(geometryNormal, direction) <= 0.0)
         return radiance;
 
     float shadow = 1.0;
     float strength = _SdfDiffuseLightColorShadow.w;
     if (strength > 0.0)
     {
-        float3 origin = position + normal * _SdfDiffuseRayBias;
-        float3 shadowRay = _SdfDiffuseLightPositionRange.xyz - origin;
-        float shadowDistance = length(shadowRay);
-        VividMeshSdfHit blocker;
+        float3 origin = position + geometryNormal * _SdfDiffuseRayBias;
+        float3 shadowDirection = direction;
+        float shadowDistance = -range;
+        if (!directional)
+        {
+            float3 shadowRay = _SdfDiffuseLightPositionRange.xyz - origin;
+            shadowDistance = length(shadowRay);
+            shadowDirection = shadowRay / max(shadowDistance, 1e-6);
+        }
         if (shadowDistance > _SdfDiffuseRayBias
-            && VividTraceMeshSdfScene(origin, shadowRay / shadowDistance, 0.0, shadowDistance,
-                _SdfDiffuseLightLayerMask, blocker))
+            && VividOccludeMeshSdfScene(origin, shadowDirection, shadowDistance, _SdfDiffuseLightLayerMask))
             shadow -= strength;
     }
 
-    float relativeDistance = distanceSquared / (range * range);
-    float window = saturate(1.0 - relativeDistance * relativeDistance);
-    float attenuation = window * window / max(distanceSquared, 0.01);
     return radiance + saturate(surface.albedoAndValid.rgb) * max(_SdfDiffuseLightColorShadow.rgb, 0.0)
         * (INV_PI * nDotL * attenuation * shadow);
 }
@@ -142,8 +151,7 @@ float4 AccumulateProbe(float4 current, float3 position, float3 normal)
     return current;
 }
 
-[numthreads(8, 8, 1)]
-void TraceSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
+void TraceProbe(uint3 id)
 {
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
     uint2 tile = id.xy;
@@ -186,19 +194,53 @@ void TraceSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
             unknown++;
             continue;
         }
+        float3 hitPosition = origin + hit.distance * direction;
+        float3 lightingNormal = hit.normalWS;
+        #if defined(VIVID_SDF_SURFACE_CACHE)
+            if (!VividTrySampleSdfSurface(hit, hitPosition, surface, lightingNormal))
+            {
+                unknown++;
+                continue;
+            }
+        #endif
         valid++;
-        sum += TraceHitLighting(origin + hit.distance * direction, hit.normalWS, surface,
+        if (_SdfDiffuseOffscreenOnly != 0u)
+        {
+            float4 hitClip = mul(_SdfDiffuseVP, float4(hitPosition, 1.0));
+            if (hitClip.w > 0.0 && all(abs(hitClip.xy) <= hitClip.w))
+                continue;
+        }
+        sum += TraceHitLighting(hitPosition, lightingNormal, hit.normalWS, surface,
             _MeshSdfInstances[hit.instanceIndex].layerMask);
     }
 
     // Cosine sampling estimates irradiance divided by pi, before the receiver's albedo.
     // A miss contributes black in this local one-bounce estimator.
-    float confidence = valid > 0u ? 1.0 - float(unknown) / float(RaysPerProbe) : 0.0;
+    #if defined(VIVID_SDF_SURFACE_CACHE)
+        // Keep the baked fallback where cards cover few of the gather rays.
+        float confidence = float(valid) / float(RaysPerProbe);
+    #else
+        float confidence = valid > 0u ? 1.0 - float(unknown) / float(RaysPerProbe) : 0.0;
+    #endif
     float4 current = float4(min(sum / float(RaysPerProbe), 65000.0), confidence);
     _SdfDiffuseProbes[tile] = AccumulateProbe(current, position, normal);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / RaysPerProbe);
 }
+
+#if defined(VIVID_SDF_SURFACE_CACHE)
+[numthreads(8, 8, 1)]
+void TraceSdfDiffuseCachedProbes(uint3 id : SV_DispatchThreadID)
+{
+    TraceProbe(id);
+}
+#else
+[numthreads(8, 8, 1)]
+void TraceSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
+{
+    TraceProbe(id);
+}
+#endif
 
 [numthreads(8, 8, 1)]
 void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
@@ -235,6 +277,8 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         }
         result.rgb /= max(result.a, 1e-5);
         result.a /= max(totalWeight, 1e-5);
+        if (_SdfDiffuseRealtimeOnly != 0u)
+            result.a = 1.0;
     }
     _SdfDiffuseOutput[id.xy] = result;
 }

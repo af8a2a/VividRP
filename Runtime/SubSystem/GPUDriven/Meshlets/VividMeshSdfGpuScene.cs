@@ -54,9 +54,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             public Vector4 AlbedoAndValid;
             public Vector4 Emission;
+            public Vector4 CardMinAndFirst;
+            public Vector4 CardExtent;
 
             public readonly bool Equals(DiffuseSurface other) =>
-                AlbedoAndValid.Equals(other.AlbedoAndValid) && Emission.Equals(other.Emission);
+                AlbedoAndValid.Equals(other.AlbedoAndValid) && Emission.Equals(other.Emission)
+                && CardMinAndFirst.Equals(other.CardMinAndFirst) && CardExtent.Equals(other.CardExtent);
         }
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -149,6 +152,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal int NodeCount { get; private set; }
         internal uint Revision { get; private set; }
         internal GraphicsBuffer DiffuseSurfaces => m_DiffuseSurfaceBuffer;
+        internal VividSdfSurfaceCache SurfaceCache { get; set; }
 
         internal VividMeshSdfGpuScene() { }
 
@@ -292,11 +296,21 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             float diffuse = 1f - Mathf.Clamp01(material.GetFloat(MetallicId));
             if (!math.all(math.isfinite(baseColor)) || !math.all(math.isfinite(emission)) || !float.IsFinite(diffuse))
                 return default;
-            return new DiffuseSurface
+            var surface = new DiffuseSurface
             {
                 AlbedoAndValid = new Vector4(baseColor.x * diffuse, baseColor.y * diffuse, baseColor.z * diffuse, 1f),
                 Emission = new Vector4(emission.x, emission.y, emission.z, 0f),
             };
+            if (SurfaceCache == null)
+                return surface;
+            if (!SurfaceCache.TryGetCards(renderer.sourceMesh, material, out var bounds, out int firstCard))
+                return default;
+
+            var min = bounds.min;
+            var size = bounds.size;
+            surface.CardMinAndFirst = new Vector4(min.x, min.y, min.z, firstCard + 1);
+            surface.CardExtent = new Vector4(size.x, size.y, size.z, 0f);
+            return surface;
         }
 
         private bool UploadFields()

@@ -40,6 +40,7 @@ struct VividMeshSdfHit
 {
     float distance;
     float3 normalWS;
+    float3 normalLS;
     uint2 entityId;
     uint instanceIndex;
     uint signMode;
@@ -259,8 +260,8 @@ bool VividMeshSdfIsSubvoxelShell(VividMeshSdfField field, VividMeshSdfInstance i
     return field.signMode == 2u && field.shellThickness * instance.distanceScale < voxelSize;
 }
 
-bool VividTraceMeshSdfSceneFiltered(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    uint layerMask, float shellVoxelSize, out VividMeshSdfHit hit)
+bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, float shellVoxelSize, bool anyHit, out VividMeshSdfHit hit)
 {
     hit = (VividMeshSdfHit)0;
     hit.distance = maxDistance;
@@ -301,6 +302,8 @@ bool VividTraceMeshSdfSceneFiltered(float3 originWS, float3 directionWS, float m
                 distance, positionInGrid)
                 && (distance < hit.distance || (distance == hit.distance && instanceIndex < hit.instanceIndex)))
             {
+                if (anyHit)
+                    return true;
                 hit.distance = distance;
                 hit.instanceIndex = instanceIndex;
                 hitInstance = instance;
@@ -314,11 +317,25 @@ bool VividTraceMeshSdfSceneFiltered(float3 originWS, float3 directionWS, float m
         return false;
 
     float3 gradient = VividMeshSdfGradient(hitField, hitPosition);
+    hit.normalLS = SafeNormalize(gradient);
     hit.normalWS = SafeNormalize(gradient.x * hitInstance.worldToLocal0.xyz
         + gradient.y * hitInstance.worldToLocal1.xyz + gradient.z * hitInstance.worldToLocal2.xyz);
     hit.entityId = hitInstance.entityId;
     hit.signMode = hitField.signMode;
     return true;
+}
+
+bool VividTraceMeshSdfSceneFiltered(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, float shellVoxelSize, out VividMeshSdfHit hit)
+{
+    return VividTraceMeshSdfSceneInternal(originWS, directionWS, minDistance, maxDistance,
+        layerMask, shellVoxelSize, false, hit);
+}
+
+bool VividOccludeMeshSdfScene(float3 originWS, float3 directionWS, float maxDistance, uint layerMask)
+{
+    VividMeshSdfHit unused;
+    return VividTraceMeshSdfSceneInternal(originWS, directionWS, 0.0, maxDistance, layerMask, 0.0, true, unused);
 }
 
 // directionWS is normalized. The returned distance is measured from originWS in world units.

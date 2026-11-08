@@ -36,6 +36,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int LayerMaskId = Shader.PropertyToID("_SdfDiffuseLayerMask");
         private static readonly int FrameId = Shader.PropertyToID("_SdfDiffuseFrame");
         private static readonly int HasHistoryId = Shader.PropertyToID("_SdfDiffuseHasHistory");
+        private static readonly int RealtimeOnlyId = Shader.PropertyToID("_SdfDiffuseRealtimeOnly");
+        private static readonly int OffscreenOnlyId = Shader.PropertyToID("_SdfDiffuseOffscreenOnly");
+        private static readonly int ViewProjectionId = Shader.PropertyToID("_SdfDiffuseVP");
+        private static readonly int CardAlbedoDepthId = Shader.PropertyToID("_SdfSurfaceAlbedoDepth");
+        private static readonly int CardNormalCoverageId = Shader.PropertyToID("_SdfSurfaceNormalCoverage");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
@@ -54,10 +59,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [SerializeField, Min(0.1f)] private float m_MaxDistance = 12f;
         [SerializeField, Min(0.001f)] private float m_RayBias = 0.04f;
+        [SerializeField, Min(1f)] private float m_SunShadowDistance = 64f;
 
         private sealed class HistoryState : CameraRelativeState
         {
             internal Matrix4x4 ViewProjection;
+            internal VividSdfSurfaceCache Cache;
+            internal bool OffscreenOnly;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
             internal int Width, Height, LayerMask, LightLayerMask;
@@ -77,11 +85,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private CameraHistoryTexture m_ProbeHistory, m_GeometryHistory;
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection;
+        private TextureHandle m_CardAlbedoDepth, m_CardNormalCoverage;
         private Vector4 m_LightPositionRange, m_LightColorShadow;
-        private int m_TraceKernel = -1, m_ResolveKernel = -1;
+        private int m_TraceKernel = -1, m_CachedTraceKernel = -1, m_ResolveKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private float m_TraceDistance, m_Bias;
-        private bool m_HasHistory;
+        private bool m_HasHistory, m_RealtimeOnly, m_OffscreenOnly;
 
         public SdfDiffuseGatherPass() => profilingSampler = new ProfilingSampler(nameof(SdfDiffuseGatherPass));
 
@@ -96,6 +105,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_TraceKernel = m_Compute.FindKernel("TraceSdfDiffuseProbes");
             m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
+            if (SystemInfo.supports2DArrayTextures && m_Compute.HasKernel("TraceSdfDiffuseCachedProbes"))
+                m_CachedTraceKernel = m_Compute.FindKernel("TraceSdfDiffuseCachedProbes");
             m_Scene = new VividMeshSdfGpuScene(Shader.Find("VividRP/Material/StandardLit"));
         }
 
@@ -115,15 +126,31 @@ namespace VividRP.Runtime.RenderPass.Core
                 || DebugPassCameraUtility.ShouldSkipExecution(camera))
                 return;
 
+            var settings = VolumeManager.instance.stack.GetComponent<SdfDiffuseGISettings>();
+            if (settings != null && settings.active && !settings.enabled.value)
+                return;
+            var cache = settings != null && settings.active ? settings.surfaceCache.value : null;
+            if (cache != null && (m_CachedTraceKernel < 0 || !cache.IsUsable))
+                return;
+            m_Scene.SurfaceCache = cache;
+            m_RealtimeOnly = settings != null && settings.active && settings.realtimeOnly.value;
+            m_OffscreenOnly = settings != null && settings.active && settings.offscreenBounceOnly.value;
             m_Scene.Update(VividMeshletRendererDatabase.instance);
             if (m_Scene.NodeCount == 0 || m_Scene.DiffuseSurfaces == null)
                 return;
+            if (m_Scene.SurfaceCache != null)
+            {
+                m_CardAlbedoDepth = PassRecorder.ImportTextureForPass(this, cache.AlbedoDepthHandle);
+                m_CardNormalCoverage = PassRecorder.ImportTextureForPass(this, cache.NormalCoverageHandle);
+                if (!m_CardAlbedoDepth.IsValid() || !m_CardNormalCoverage.IsValid())
+                    return;
+            }
 
             m_ViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_LayerMask = camera.cullingMask;
             m_TraceDistance = float.IsFinite(m_MaxDistance) ? Mathf.Max(0.1f, m_MaxDistance) : 12f;
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
-            ReadPointLight();
+            ReadLight();
             m_Cameras.PurgeDestroyedCameras();
             m_State = m_Cameras.GetOrCreateBase(camera);
             m_Probes.Resize(m_ProbeWidth, m_ProbeHeight);
@@ -133,6 +160,8 @@ namespace VividRP.Runtime.RenderPass.Core
             bool geometryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, GeometryHistoryId,
                 m_PreviousGeometry, m_Geometry, m_Geometry.desc, out m_GeometryHistory);
             m_HasHistory = probesValid && geometryValid && m_State.SceneRevision == m_Scene.Revision
+                && ReferenceEquals(m_State.Cache, m_Scene.SurfaceCache)
+                && m_State.OffscreenOnly == m_OffscreenOnly
                 && m_State.Width == m_Width && m_State.Height == m_Height
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
@@ -149,15 +178,22 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var cmd = context.cmd;
-            BindReceiver(cmd, m_TraceKernel);
+            var cache = m_Scene.SurfaceCache;
+            int traceKernel = cache != null ? m_CachedTraceKernel : m_TraceKernel;
+            BindReceiver(cmd, traceKernel);
             BindReceiver(cmd, m_ResolveKernel);
-            m_Scene.Bind(cmd, m_Compute, m_TraceKernel);
-            cmd.SetComputeBufferParam(m_Compute, m_TraceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
+            m_Scene.Bind(cmd, m_Compute, traceKernel);
+            cmd.SetComputeBufferParam(m_Compute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
+            if (cache != null)
+            {
+                cmd.SetComputeTextureParam(m_Compute, traceKernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_Compute, traceKernel, CardNormalCoverageId, m_CardNormalCoverage);
+            }
             bool hasHistory = m_HasHistory && m_PreviousProbes.innerHandle.IsValid() && m_PreviousGeometry.innerHandle.IsValid();
             var black = context.renderGraphContext.defaultResources.blackTexture;
-            cmd.SetComputeTextureParam(m_Compute, m_TraceKernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, m_TraceKernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, m_TraceKernel, HitLightingId, m_HitLighting.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, m_ResolveKernel, OutputId, m_Output.innerHandle);
             cmd.SetComputeMatrixParam(m_Compute, InverseViewProjectionId, m_ViewProjection.inverse);
             cmd.SetComputeMatrixParam(m_Compute, PreviousViewProjectionId, m_State.ViewProjection);
@@ -170,13 +206,18 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Compute, LayerMaskId, m_LayerMask);
             cmd.SetComputeIntParam(m_Compute, FrameId, unchecked((int)m_State.Frame++));
             cmd.SetComputeIntParam(m_Compute, HasHistoryId, hasHistory ? 1 : 0);
-            cmd.DispatchCompute(m_Compute, m_TraceKernel, CoreUtils.DivRoundUp(m_ProbeWidth, GroupSize),
+            cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);
+            cmd.SetComputeIntParam(m_Compute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
+            cmd.SetComputeMatrixParam(m_Compute, ViewProjectionId, m_ViewProjection);
+            cmd.DispatchCompute(m_Compute, traceKernel, CoreUtils.DivRoundUp(m_ProbeWidth, GroupSize),
                 CoreUtils.DivRoundUp(m_ProbeHeight, GroupSize), 1);
             cmd.DispatchCompute(m_Compute, m_ResolveKernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
                 CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
             m_ProbeHistory.MarkWritten();
             m_GeometryHistory.MarkWritten();
             m_State.ViewProjection = m_ViewProjection;
+            m_State.Cache = cache;
+            m_State.OffscreenOnly = m_OffscreenOnly;
             m_State.SceneRevision = m_Scene.Revision;
             m_State.Width = m_Width;
             m_State.Height = m_Height;
@@ -194,7 +235,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Scene?.Dispose();
             m_Scene = null;
             m_Compute = null;
-            m_TraceKernel = m_ResolveKernel = -1;
+            m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
         }
 
         private void BindReceiver(ComputeCommandBuffer cmd, int kernel)
@@ -206,20 +247,24 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
         }
 
-        private void ReadPointLight()
+        private void ReadLight()
         {
             m_LightPositionRange = m_LightColorShadow = Vector4.zero;
             m_LightLayerMask = 0;
             var database = VividLightRenderDatabase.instance;
-            var point = database.FindBrightestPointLight(m_LayerMask);
-            if (point == null)
+            var sun = RenderSettings.sun;
+            bool useSun = sun != null && sun.isActiveAndEnabled && sun.type == LightType.Directional
+                && sun.lightmapBakeType != LightmapBakeType.Baked && (sun.cullingMask & m_LayerMask) != 0;
+            var source = useSun ? sun : database.FindBrightestPointLight(m_LayerMask);
+            if (source == null)
                 return;
 
-            var light = database.UpdateLightData(point);
-            var position = light.positionWS;
+            var light = database.UpdateLightData(source);
+            var positionOrDirection = useSun ? -light.forwardWS : light.positionWS;
+            float range = useSun ? -(float.IsFinite(m_SunShadowDistance) ? Mathf.Max(1f, m_SunShadowDistance) : 64f) : light.range;
             var color = light.color;
-            m_LightLayerMask = point.cullingMask & m_LayerMask;
-            m_LightPositionRange = new Vector4(position.x, position.y, position.z, light.range);
+            m_LightLayerMask = source.cullingMask & m_LayerMask;
+            m_LightPositionRange = new Vector4(positionOrDirection.x, positionOrDirection.y, positionOrDirection.z, range);
             m_LightColorShadow = new Vector4(color.x, color.y, color.z, Mathf.Clamp01(light.shadowStrength));
         }
 

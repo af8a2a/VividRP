@@ -7,6 +7,7 @@
 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#define VIVID_REALTIME_DIFFUSE_GI 1
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividDeferredLighting.hlsl"
 #define CLASSIFY_TILE_SIZE 8
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"

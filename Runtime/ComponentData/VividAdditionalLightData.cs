@@ -83,6 +83,25 @@ namespace VividRP.Runtime
 
         internal IReadOnlyList<VividLightRenderData> sceneLightData => m_PreparedSceneLightData;
 
+        internal Light FindBrightestPointLight(int cullingMask)
+        {
+            Light selected = null;
+            float intensity = 0f;
+            for (int i = 0; i < m_RegisteredAdditionalLightData.Count; i++)
+            {
+                var additional = m_RegisteredAdditionalLightData[i];
+                var light = additional != null && additional.isActiveAndEnabled ? additional.light : null;
+                if (light == null || !light.isActiveAndEnabled || light.type != LightType.Point
+                    || light.lightmapBakeType == LightmapBakeType.Baked || (light.cullingMask & cullingMask) == 0
+                    || light.range <= 0f || light.intensity <= intensity)
+                    continue;
+
+                selected = light;
+                intensity = light.intensity;
+            }
+            return selected;
+        }
+
         internal void RegisterProvider(IVividLightRenderDataProvider provider)
         {
             if (provider != null && !m_ExternalLightProviders.Contains(provider))

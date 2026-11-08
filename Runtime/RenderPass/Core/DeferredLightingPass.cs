@@ -25,6 +25,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
         private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
+        private static readonly int RealtimeDiffuseGIId = Shader.PropertyToID("_RealtimeDiffuseGI");
+        private static readonly int RealtimeDiffuseGIEnabledId = Shader.PropertyToID("_RealtimeDiffuseGIEnabled");
         private static readonly int LayerAux0Id = Shader.PropertyToID("_LayerAux0");
         private static readonly int LayerAux1Id = Shader.PropertyToID("_LayerAux1");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
@@ -86,6 +88,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DiffuseIrradiance", Access = AccessFlags.Read)]
         // Keep the legacy field name as the serialized RenderGraph port key.
         private RenderGraphTexture m_GBuffer4;
+
+        [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_RealtimeDiffuseGI;
 
         [RenderGraphResource(Name = "LayerAux0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_LayerAux0;
@@ -200,6 +205,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsLogBaseBufferEnabled;
         private bool m_IsPassResourceLayoutDirty;
         private readonly RenderGraphTexture m_LocalDiffuseIrradiance;
+        private readonly RenderGraphTexture m_LocalRealtimeDiffuseGI;
         private readonly RenderGraphTexture m_LocalLayerAux0;
         private readonly RenderGraphTexture m_LocalLayerAux1;
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
@@ -239,6 +245,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalDiffuseIrradiance.desc.ClearBuffer = true;
             m_LocalDiffuseIrradiance.desc.ClearColor = Color.clear;
             m_GBuffer4 = m_LocalDiffuseIrradiance;
+            m_LocalRealtimeDiffuseGI = RenderGraphTexture.CreateInput("RealtimeDiffuseGI", GraphicsFormat.R16G16B16A16_SFloat);
+            m_RealtimeDiffuseGI = m_LocalRealtimeDiffuseGI;
             m_LocalLayerAux0 = RenderGraphTexture.CreateColorTarget(
                 "LayerAux0",
                 GraphicsFormat.R8G8B8A8_SRGB);
@@ -582,6 +590,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
         {
             var rgDefaultResource = context.renderGraphContext.defaultResources;
+            bool hasRealtimeGI = !ReferenceEquals(m_RealtimeDiffuseGI, m_LocalRealtimeDiffuseGI)
+                && m_RealtimeDiffuseGI?.innerHandle.IsValid() == true;
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, RealtimeDiffuseGIId,
+                hasRealtimeGI ? m_RealtimeDiffuseGI.innerHandle : rgDefaultResource.blackTexture);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIEnabledId, hasRealtimeGI ? 1 : 0);
             bool slabLutReady = m_SlabLutTexture != null && m_SlabLutTexture.innerHandle.IsValid();
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, VividSlabLut.TextureId,
                 slabLutReady ? m_SlabLutTexture.innerHandle : rgDefaultResource.blackTexture);

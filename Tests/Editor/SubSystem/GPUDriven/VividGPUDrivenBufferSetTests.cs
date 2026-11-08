@@ -109,6 +109,11 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.LayerMask), 36);
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding0), 40);
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Padding1), 44);
+
+            Assert.That(typeof(VividMeshSdfGpuScene.DiffuseSurface).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.DiffuseSurface>(), Is.EqualTo(32));
+            AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.AlbedoAndValid), 0);
+            AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.Emission), 16);
         }
 
         [TestCase(0, 0, 0, false, VividGlobalSdfClipmap.Resolution)]
@@ -213,15 +218,20 @@ namespace VividRP.Editor.Tests
             Assert.That(pages.Count, Is.EqualTo(4));
         }
 
-        [Test]
-        public void MeshSdfScene_RefitsMovingInstancesWithoutManagedAllocations()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MeshSdfScene_RefitsMovingInstancesWithoutManagedAllocations(bool useDiffuseSurfaces)
         {
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
                 Assert.Ignore("Mesh SDF scene uploads require a graphics device.");
 
-            using var scene = new VividMeshSdfGpuScene();
+            var shader = useDiffuseSurfaces ? Shader.Find("VividRP/Material/StandardLit") : null;
+            if (useDiffuseSurfaces)
+                Assert.That(shader, Is.Not.Null);
+            var material = useDiffuseSurfaces ? new Material(shader) : null;
+            using var scene = useDiffuseSurfaces ? new VividMeshSdfGpuScene(shader) : new VividMeshSdfGpuScene();
             var database = new VividMeshletRendererDatabase();
-            var mesh = new Mesh();
+            var mesh = new Mesh { subMeshCount = 1 };
             var texture = new Texture3D(2, 2, 2, GraphicsFormat.R16_SFloat, TextureCreationFlags.None);
             var field = ScriptableObject.CreateInstance<VividMeshSdfAsset>();
             var objects = new GameObject[5];
@@ -245,6 +255,14 @@ namespace VividRP.Editor.Tests
                 for (int i = 0; i < 8; i++)
                     Move(i);
                 var voxelBuffer = scene.Voxels;
+                var surfaceBuffer = scene.DiffuseSurfaces;
+                if (useDiffuseSurfaces)
+                {
+                    Assert.That(surfaceBuffer.count, Is.EqualTo(objects.Length));
+                    var surfaceData = new VividMeshSdfGpuScene.DiffuseSurface[objects.Length];
+                    surfaceBuffer.GetData(surfaceData);
+                    Assert.That(surfaceData.All(surface => surface.AlbedoAndValid.w == 1f), Is.True);
+                }
                 Assert.That(scene.Fields.count, Is.EqualTo(1));
                 Assert.That(scene.NodeCount, Is.EqualTo(3));
 
@@ -255,12 +273,13 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(allocated, Is.Zero);
                 Assert.That(scene.Voxels, Is.SameAs(voxelBuffer));
+                Assert.That(scene.DiffuseSurfaces, Is.SameAs(surfaceBuffer));
                 Assert.That(scene.NodeCount, Is.EqualTo(3));
 
                 MeshletRenderer Register(GameObject obj)
                 {
                     obj.AddComponent<MeshFilter>().sharedMesh = mesh;
-                    obj.AddComponent<MeshRenderer>();
+                    obj.AddComponent<MeshRenderer>().sharedMaterial = material;
                     var renderer = obj.AddComponent<MeshletRenderer>();
                     renderer.CaptureSourceFromGameObject();
                     using var serialized = new UnityEditor.SerializedObject(renderer);
@@ -284,6 +303,7 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(field);
                 Object.DestroyImmediate(texture);
                 Object.DestroyImmediate(mesh);
+                Object.DestroyImmediate(material);
             }
         }
 

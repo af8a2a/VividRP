@@ -80,10 +80,12 @@ float3 VividSampleSimpleSlabEnvironment(VividLightingLoopContext lightLoop,
 VividSimpleSlabIndirectLighting VividEvaluateSimpleSlabIndirectLighting(
     VividSurfaceSummaryData summary, VividSimpleSlabData slab,
     VividSimpleSlabPreLightData preLight, VividLightingLoopContext lightLoop,
-    float3 positionWS, float3 viewDirectionWS)
+    float3 positionWS, float3 viewDirectionWS, float4 realtimeDiffuseGI)
 {
     float3 diffuseIrradiance;
-    if (VividHasDeferredExportFlag(summary.deferredExportHeader,
+    if (realtimeDiffuseGI.a >= 1.0f)
+        diffuseIrradiance = realtimeDiffuseGI.rgb;
+    else if (VividHasDeferredExportFlag(summary.deferredExportHeader,
             VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE))
         diffuseIrradiance = summary.diffuseIrradiance;
     else if (VividHasProbeVolumeGI())
@@ -91,6 +93,8 @@ VividSimpleSlabIndirectLighting VividEvaluateSimpleSlabIndirectLighting(
             slab.normalWS, viewDirectionWS, 0xFFFFFFFFu);
     else
         diffuseIrradiance = VividSampleAmbientProbe(slab.normalWS);
+    if (realtimeDiffuseGI.a > 0.0f && realtimeDiffuseGI.a < 1.0f)
+        diffuseIrradiance = lerp(diffuseIrradiance, realtimeDiffuseGI.rgb, realtimeDiffuseGI.a);
 
     float3 singleScatterRadiance = VividSampleSimpleSlabEnvironment(
         lightLoop, positionWS, slab.normalWS, preLight.reflectionDirectionWS,

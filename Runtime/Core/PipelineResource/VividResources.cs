@@ -271,6 +271,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/GlobalSdf.compute")]
         public ComputeShader GlobalSdfCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfDiffuseGather.compute")]
+        public ComputeShader SdfDiffuseGatherCompute;
+
         [VividResourcePath("Shaders/Core/Private/Debug/ReflectionProbeAtlasDebug")]
         public Shader ReflectionProbeAtlasDebugShader;
 

@@ -49,6 +49,22 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public uint LeafCount, LayerMask, Padding0, Padding1;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct DiffuseSurface : IEquatable<DiffuseSurface>
+        {
+            public Vector4 AlbedoAndValid;
+            public Vector4 Emission;
+
+            public readonly bool Equals(DiffuseSurface other) =>
+                AlbedoAndValid.Equals(other.AlbedoAndValid) && Emission.Equals(other.Emission);
+        }
+
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
+        private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
+        private static readonly int SurfaceId = Shader.PropertyToID("_Surface");
+        private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
+
         private const int MaxLeafInstances = 4;
         private const VividMeshletRendererFlags VisibleFlags = VividMeshletRendererFlags.ActiveInHierarchy
             | VividMeshletRendererFlags.Enabled | VividMeshletRendererFlags.SourceRendererEnabled;
@@ -118,6 +134,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private GraphicsBuffer m_InstanceBuffer;
         private GraphicsBuffer m_NodeBuffer;
         private GraphicsBuffer m_LeafInstanceBuffer;
+        private GraphicsBuffer m_DiffuseSurfaceBuffer;
+        private List<DiffuseSurface> m_DiffuseSurfaces;
+        private List<DiffuseSurface> m_NextDiffuseSurfaces;
+        private readonly Shader m_DiffuseShader;
         private long m_LastRejectedBytes;
 
         internal GraphicsBuffer Voxels => m_Voxels;
@@ -128,6 +148,16 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal IReadOnlyList<Node> BvhNodes => m_Nodes;
         internal int NodeCount { get; private set; }
         internal uint Revision { get; private set; }
+        internal GraphicsBuffer DiffuseSurfaces => m_DiffuseSurfaceBuffer;
+
+        internal VividMeshSdfGpuScene() { }
+
+        internal VividMeshSdfGpuScene(Shader diffuseShader)
+        {
+            m_DiffuseShader = diffuseShader;
+            m_DiffuseSurfaces = new List<DiffuseSurface>();
+            m_NextDiffuseSurfaces = new List<DiffuseSurface>();
+        }
 
         internal void Bind(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
         {
@@ -150,14 +180,29 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             bool fieldsChanged = NodeCount == 0 || !SameSources(m_Fields, m_NextFields);
-            if (!fieldsChanged && SameSources(m_Instances, m_NextInstances))
+            bool instancesChanged = fieldsChanged || !SameSources(m_Instances, m_NextInstances);
+            if (instancesChanged && !UpdateGeometry(fieldsChanged))
                 return;
 
+            bool surfacesChanged = m_NextDiffuseSurfaces != null
+                && (m_DiffuseSurfaceBuffer == null || !SameSources(m_DiffuseSurfaces, m_NextDiffuseSurfaces));
+            if (surfacesChanged)
+            {
+                Upload(ref m_DiffuseSurfaceBuffer, m_NextDiffuseSurfaces, "Mesh SDF Diffuse Surfaces");
+                (m_DiffuseSurfaces, m_NextDiffuseSurfaces) = (m_NextDiffuseSurfaces, m_DiffuseSurfaces);
+                m_NextDiffuseSurfaces.Clear();
+            }
+            if (instancesChanged || surfacesChanged)
+                Revision++;
+        }
+
+        private bool UpdateGeometry(bool fieldsChanged)
+        {
             bool rebuildBvh = NodeCount == 0 || !HasSameInstanceOrder();
             // A failed or interrupted upload cannot leave the previous scene marked ready.
             NodeCount = 0;
             if (fieldsChanged && !UploadFields())
-                return;
+                return false;
 
             UpdateInstancesAndBvh(rebuildBvh);
             Upload(ref m_InstanceBuffer, m_InstanceUpload, "Mesh SDF Instances");
@@ -167,7 +212,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextFields.Clear();
             m_NextInstances.Clear();
             NodeCount = m_Nodes.Count;
-            Revision++;
+            return true;
         }
 
         private void CollectSources(VividMeshletRendererDatabase database)
@@ -175,6 +220,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_FieldIndices.Clear();
             m_NextFields.Clear();
             m_NextInstances.Clear();
+            m_NextDiffuseSurfaces?.Clear();
             var rendererData = database.rendererData;
             var resources = database.rendererResources;
             for (int i = 0; i < rendererData.Count; i++)
@@ -226,7 +272,31 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     LayerMask = data.cameraLayerMask,
                     EntityId = EntityId.ToULong(data.meshletRendererEntityId),
                 });
+                if (m_NextDiffuseSurfaces != null)
+                    m_NextDiffuseSurfaces.Add(ReadDiffuseSurface(renderer));
             }
+        }
+
+        private DiffuseSurface ReadDiffuseSurface(MeshletRenderer renderer)
+        {
+            var materials = renderer.sourceMaterials;
+            if (m_DiffuseShader == null || materials.Count != 1)
+                return default;
+            var material = materials[0];
+            if (material == null || material.shader != m_DiffuseShader
+                || material.GetFloat(SurfaceId) != 0f || material.GetFloat(AlphaClipId) != 0f)
+                return default;
+
+            var baseColor = GPUDrivenMaterialCompiler.ConvertMaterialColorForGPU(material.GetColor(BaseColorId));
+            var emission = GPUDrivenMaterialCompiler.ConvertMaterialColorForGPU(material.GetColor(EmissionColorId));
+            float diffuse = 1f - Mathf.Clamp01(material.GetFloat(MetallicId));
+            if (!math.all(math.isfinite(baseColor)) || !math.all(math.isfinite(emission)) || !float.IsFinite(diffuse))
+                return default;
+            return new DiffuseSurface
+            {
+                AlbedoAndValid = new Vector4(baseColor.x * diffuse, baseColor.y * diffuse, baseColor.z * diffuse, 1f),
+                Emission = new Vector4(emission.x, emission.y, emission.z, 0f),
+            };
         }
 
         private bool UploadFields()
@@ -461,6 +531,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_InstanceBuffer?.Dispose();
             m_NodeBuffer?.Dispose();
             m_LeafInstanceBuffer?.Dispose();
+            m_DiffuseSurfaceBuffer?.Dispose();
+            m_DiffuseSurfaceBuffer = null;
             m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_NodeBuffer = m_LeafInstanceBuffer = null;
             NodeCount = 0;
             m_FieldIndices.Clear();
@@ -468,6 +540,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextFields.Clear();
             m_Instances.Clear();
             m_NextInstances.Clear();
+            m_DiffuseSurfaces?.Clear();
+            m_NextDiffuseSurfaces?.Clear();
         }
     }
 }

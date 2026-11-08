@@ -26,6 +26,20 @@ uint _ScreenSpaceReflectionEnabled;
 uint _VividSlabLutReady;
 uint _VividOpenPBRLutsReady;
 
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+Texture2D<float4> _RealtimeDiffuseGI;
+uint _RealtimeDiffuseGIEnabled;
+#endif
+
+float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord)
+{
+    #if defined(VIVID_REALTIME_DIFFUSE_GI)
+        if (_RealtimeDiffuseGIEnabled != 0u)
+            return _RealtimeDiffuseGI.Load(int3(pixelCoord, 0));
+    #endif
+    return 0.0;
+}
+
 VividSurfaceSummaryData LoadVividSurfaceSummary(uint2 pixelCoord)
 {
     float4 rt0 = _GBuffer0.Load(int3(pixelCoord, 0));
@@ -121,7 +135,7 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared);
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
     result = VividEvaluateOpenPBROpaqueIndirect(inputs, albedo, lightLoop,
-        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion));
+        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion), LoadVividRealtimeDiffuseGI(pixelCoord));
     [loop]
     for (uint i = 0u; i < _DirectionalLightCount; ++i)
     {
@@ -163,7 +177,7 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
         VividPrepareSimpleSlabDeferredLighting(slab, viewDirectionWS);
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
     VividSimpleSlabIndirectLighting indirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        summary, slab, preLight, lightLoop, positionWS, viewDirectionWS);
+        summary, slab, preLight, lightLoop, positionWS, viewDirectionWS, LoadVividRealtimeDiffuseGI(pixelCoord));
     VividSimpleSlabDirectLighting directLighting = VividCreateEmptySimpleSlabDirectLighting();
 
     [loop]
@@ -319,10 +333,11 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     float3 baseEnvironmentWeight = isVerticalLayer
         ? lerp(1.0.xxx, environmentTransmittance, layerWeight)
         : (1.0 - layerWeight).xxx;
+    float4 realtimeDiffuseGI = LoadVividRealtimeDiffuseGI(pixelCoord);
     VividSimpleSlabIndirectLighting baseIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS);
+        baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS, realtimeDiffuseGI);
     VividSimpleSlabIndirectLighting topIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS);
+        topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS, realtimeDiffuseGI);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

@@ -59,12 +59,17 @@ void VividAccumulateOpenPBROpaqueLight(OpenPBR_DiffuseSpecular light,
 
 VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     VividOpenPBROpaqueInputs inputs, OpenPBR_DiffuseSpecular albedo,
-    VividLightingLoopContext lightLoop, float3 positionWS, float3 viewDirectionWS, float ao)
+    VividLightingLoopContext lightLoop, float3 positionWS, float3 viewDirectionWS, float ao, float4 realtimeDiffuseGI)
 {
     VividSimpleSlabDeferredLighting result = (VividSimpleSlabDeferredLighting)0;
-    float3 irradiance = VividHasProbeVolumeGI()
-        ? SampleVividProbeVolume(positionWS, inputs.normalWS, viewDirectionWS, 0xFFFFFFFFu)
-        : VividSampleAmbientProbe(inputs.normalWS);
+    float3 irradiance = realtimeDiffuseGI.rgb;
+    if (realtimeDiffuseGI.a < 1.0f)
+    {
+        float3 fallback = VividHasProbeVolumeGI()
+            ? SampleVividProbeVolume(positionWS, inputs.normalWS, viewDirectionWS, 0xFFFFFFFFu)
+            : VividSampleAmbientProbe(inputs.normalWS);
+        irradiance = lerp(fallback, irradiance, realtimeDiffuseGI.a);
+    }
     float3 reflection = GetSpecularDominantDir(inputs.normalWS,
         reflect(-viewDirectionWS, inputs.normalWS), inputs.specularRoughness,
         saturate(dot(inputs.normalWS, viewDirectionWS)));

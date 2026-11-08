@@ -550,13 +550,30 @@ bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thick
     return all(isfinite(radiance));
 }
 
-// Traverse a reversed-Z closest-depth pyramid in projected pixel space.
-bool TraceScreenRay(float3 origin, float3 direction, out float3 radiance, out float hitDistance)
+struct ScreenRayHit
 {
-    radiance = 0.0;
-    hitDistance = 0.0;
+    float3 position;
+    float3 normal;
+    float distance;
+    float thickness;
+    uint2 pixel;
+};
+
+bool LoadScreenHitGeometry(uint2 pixel, float depth, out float3 position, out float3 normal)
+{
+    float4 packedNormal = _SdfDiffuseGBuffer1.Load(int3(pixel, 0));
+    normal = VividDecodeSurfaceSummaryNormal(packedNormal.xy);
+    float2 uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw;
+    position = ComputeWorldSpacePosition(uv, depth, _SdfDiffuseInverseVP);
+    return depth != UNITY_RAW_FAR_CLIP_VALUE && VividIsSurfaceSummaryGBufferABIValid(packedNormal.a);
+}
+
+// Traverse a reversed-Z closest-depth pyramid in projected pixel space.
+bool TraceScreenGeometry(float3 origin, float3 direction, float maxDistance, out ScreenRayHit hit)
+{
+    hit = (ScreenRayHit)0;
     float4 start = mul(_SdfDiffuseVP, float4(origin, 1.0));
-    float4 end = mul(_SdfDiffuseVP, float4(origin + direction * _SdfDiffuseMaxDistance, 1.0));
+    float4 end = mul(_SdfDiffuseVP, float4(origin + direction * maxDistance, 1.0));
     if (start.w <= 0.0 || start.z > start.w || start.z <= 0.0)
         return false;
     if (end.z > end.w)
@@ -612,25 +629,26 @@ bool TraceScreenRay(float3 origin, float3 direction, out float3 radiance, out fl
             continue;
         }
 
-        float4 packedNormal = _SdfDiffuseGBuffer1.Load(int3(cell, 0));
-        if (!VividIsSurfaceSummaryGBufferABIValid(packedNormal.a))
+        if (!LoadScreenHitGeometry(cell, closest, hit.position, hit.normal))
             return false;
-        float3 normal = VividDecodeSurfaceSummaryNormal(packedNormal.xy);
         float2 uv = (float2(cell) + 0.5) * _SdfDiffuseScreenSize.zw;
-        float3 position = ComputeWorldSpacePosition(uv, closest, _SdfDiffuseInverseVP);
         float3 footprint = ComputeWorldSpacePosition(uv + _SdfDiffuseScreenSize.zw, closest, _SdfDiffuseInverseVP);
-        float thickness = clamp(1.25 * distance(footprint, position), 0.02, 0.15);
-        float travel = dot(position - origin, direction);
-        if (travel <= _SdfDiffuseRayBias || travel > _SdfDiffuseMaxDistance
-            || dot(normal, direction) >= -0.05
-            || distance(position, origin + direction * travel) > thickness)
+        hit.thickness = clamp(1.25 * distance(footprint, hit.position), 0.02, 0.15);
+        float travel = dot(hit.position - origin, direction);
+        if (travel <= _SdfDiffuseRayBias || travel > maxDistance
+            || dot(hit.normal, direction) >= -0.05
+            || distance(hit.position, origin + direction * travel) > hit.thickness)
             return false;
 
-        hitDistance = travel;
-        return ReadScreenRadiance(cell, position, normal, thickness, radiance);
+        hit.pixel = cell;
+        hit.distance = travel;
+        return true;
     }
     return false;
 }
+
+// A positive finite bit pattern carries an exact linear pixel index in the dense RGBA32F scratch.
+static const uint ScreenHitPixelBase = 0x3f800000u;
 
 [numthreads(8, 8, 1)]
 void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
@@ -645,16 +663,30 @@ void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
     float3x3 basis = GetLocalFrame(receiver ? normal : float3(0.0, 1.0, 0.0));
     float3 origin = position + normal * _SdfDiffuseRayBias;
     uint seed = ProbeSeed(tile);
+    uint rayCount = ProbeRayCount();
     [loop]
-    for (uint ray = 0u; ray < RaysPerProbe; ray++)
+    for (uint ray = 0u; ray < rayCount; ray++)
     {
         float3 radiance = 0.0;
-        float distance = 0.0;
-        bool hit = false;
-        if (receiver)
-            hit = TraceScreenRay(origin, ProbeRayDirection(ray, seed, basis), radiance, distance);
-        // A negative distance retains a geometric hit that failed to fetch history lighting.
-        _SdfScreenRaysOutput[uint2(tile.x * RaysPerProbe + ray, tile.y)] = float4(hit ? radiance : 0.0, hit ? distance : -distance);
+        float encodedHit = 0.0;
+        ScreenRayHit hit;
+        if (receiver && TraceScreenGeometry(origin, ProbeRayDirection(ray, seed, basis), _SdfDiffuseMaxDistance, hit))
+        {
+            encodedHit = -hit.distance;
+            bool compatible = true;
+            if (_SdfRestirDense != 0u)
+            {
+                float3 rayToHit = hit.position - origin;
+                float3 directionToHit = SafeNormalize(rayToHit);
+                compatible = length(rayToHit) <= _SdfDiffuseMaxDistance
+                    && dot(normal, directionToHit) > 0.02 && dot(hit.normal, directionToHit) < -0.05;
+            }
+            if (compatible && ReadScreenRadiance(hit.pixel, hit.position, hit.normal, hit.thickness, radiance))
+                encodedHit = _SdfRestirDense != 0u
+                    ? asfloat(ScreenHitPixelBase + hit.pixel.y * screenSize.x + hit.pixel.x) : hit.distance;
+        }
+        // A negative distance retains the geometric hit of a rejected screen candidate.
+        _SdfScreenRaysOutput[uint2(tile.x * rayCount + ray, tile.y)] = float4(encodedHit > 0.0 ? radiance : 0.0, encodedHit);
     }
 }
 
@@ -1070,25 +1102,45 @@ void TraceProbe(uint3 id)
         uint screenState = 0u;
         if (_SdfDiffuseUseScreenRays != 0u)
         {
-            float4 screenHit = _SdfScreenRays.Load(int3(tile.x * RaysPerProbe + ray, tile.y, 0));
+            float4 screenHit = _SdfScreenRays.Load(int3(tile.x * rayCount + ray, tile.y, 0));
             if (screenHit.a > 0.0)
             {
                 float3 direction = ProbeRayDirection(ray, seed, basis);
-                StoreTraceSample(tile, ray, RayScreenHit, screenHit.a, screenHit.rgb, direction);
-                if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                float distance = screenHit.a;
+                bool accepted = true;
+                if (_SdfRestirDense != 0u)
                 {
-                    VividMeshSdfHit miss = (VividMeshSdfHit)0;
-                    miss.instanceIndex = 0xffffffffu;
-                    StoreFirstHitDiagnostic(tile, ray, origin, direction, miss, 0u);
+                    uint address = asuint(screenHit.a) - ScreenHitPixelBase;
+                    uint2 pixel = uint2(address % screenSize.x, address / screenSize.x);
+                    RestirSample sample;
+                    accepted = LoadScreenHitGeometry(pixel, _SdfDiffuseDepth.Load(int3(pixel, 0)), sample.position, sample.normal);
+                    if (accepted)
+                    {
+                        distance = dot(sample.position - origin, direction);
+                        sample.radiance = screenHit.rgb;
+                        sample.fromScreen = true;
+                        RestirUpdate(reservoir, reservoirWeightSum, sample, RestirLuminance(sample.radiance), 0u,
+                            RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));
+                    }
                 }
-                sum += screenHit.rgb;
-                if (_SdfDiffuseDirectionalProbes != 0u)
-                    moments += ProbeSampleMoments(screenHit.rgb, direction, normal);
-                screenHits++;
-                valid++;
-                continue;
+                if (accepted)
+                {
+                    StoreTraceSample(tile, ray, RayScreenHit, distance, screenHit.rgb, direction);
+                    if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                    {
+                        VividMeshSdfHit miss = (VividMeshSdfHit)0;
+                        miss.instanceIndex = 0xffffffffu;
+                        StoreFirstHitDiagnostic(tile, ray, origin, direction, miss, 0u);
+                    }
+                    sum += screenHit.rgb;
+                    if (_SdfDiffuseDirectionalProbes != 0u)
+                        moments += ProbeSampleMoments(screenHit.rgb, direction, normal);
+                    screenHits++;
+                    valid++;
+                    continue;
+                }
             }
-            screenState = screenHit.a < 0.0 ? RayScreenHistoryRejected : 0u;
+            screenState = screenHit.a != 0.0 ? RayScreenHistoryRejected : 0u;
         }
         #if !defined(VIVID_SDF_SCREEN_ONLY)
         float3 direction = ProbeRayDirection(ray, seed, basis);
@@ -1177,6 +1229,7 @@ void TraceProbe(uint3 id)
             sample.position = hitPosition;
             sample.normal = hit.normalWS;
             sample.radiance = radiance;
+            sample.fromScreen = false;
             // Target and the original proposal both contain the receiver cosine.
             RestirUpdate(reservoir, reservoirWeightSum, sample, RestirLuminance(radiance), 0u,
                 RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));

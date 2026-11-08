@@ -55,10 +55,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
         public BoolParameter screenProbeHitDistanceFilter = new(false);
 
-        [Tooltip("Use temporal and spatial reservoir resampling for SDF Only diffuse GI. Requires a Mesh SDF scene and replaces the screen probe spatial filters.")]
+        [Tooltip("Use temporal and spatial reservoir resampling. Requires a Mesh SDF scene and replaces the screen probe spatial filters. Hybrid also requires ReSTIR Pixel Integration.")]
         public BoolParameter restirGather = new(false);
 
-        [Tooltip("Generate one ReSTIR candidate per 2x2 pixels and use per-pixel reservoir integration with variance-guided filtering.")]
+        [Tooltip("Generate one ReSTIR candidate per 2x2 pixels. Hybrid uses valid screen hits first and falls back to Mesh SDF. Integrate per pixel with variance-guided filtering.")]
         public BoolParameter restirPixelIntegration = new(false);
 
         [Tooltip("Reproject the resolved indirect diffuse lighting with motion vectors instead of accumulating the probe grid.")]

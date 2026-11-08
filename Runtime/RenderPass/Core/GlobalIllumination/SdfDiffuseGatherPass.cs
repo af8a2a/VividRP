@@ -448,11 +448,12 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_UseSdf && !screenConfigured)
                 return;
 
-            m_RestirGather = useSettings && settings.restirGather.value && m_RestirTemporalKernel >= 0
-                && m_UseSdf && m_TraceMode == SdfDiffuseTraceMode.SdfOnly && !m_OffscreenOnly;
-            m_RestirPixelIntegration = m_RestirGather && settings.restirPixelIntegration.value && m_RestirDenoiseKernel >= 0
+            bool canRestir = useSettings && settings.restirGather.value && m_RestirTemporalKernel >= 0
+                && m_UseSdf && !m_OffscreenOnly;
+            m_RestirPixelIntegration = canRestir && settings.restirPixelIntegration.value && m_RestirDenoiseKernel >= 0
                 && 4 * CoreUtils.DivRoundUp(m_Width, RestirPixelSpacing) <= SystemInfo.maxTextureSize
                 && 2 * CoreUtils.DivRoundUp(m_Height, RestirPixelSpacing) <= SystemInfo.maxTextureSize;
+            m_RestirGather = canRestir && (m_TraceMode == SdfDiffuseTraceMode.SdfOnly || m_RestirPixelIntegration);
             m_AdaptiveProbes &= !m_RestirPixelIntegration;
             m_DirectionalProbes &= !m_RestirPixelIntegration;
             m_HitDistanceFilter &= !m_RestirGather;
@@ -468,7 +469,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FirstHitDiagnostics.Resize(m_RecordFirstHitDiagnostics ? m_ProbeWidth * rayCount : 1,
                 m_RecordFirstHitDiagnostics ? 3 * m_AtlasHeight : 1);
             m_AdaptivePlacement.Resize(m_AdaptiveProbes ? m_ProbeWidth : 1, m_AdaptiveProbes ? m_ProbeHeight : 1);
-            m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * RaysPerProbe : 1, screenConfigured ? m_AtlasHeight : 1);
+            // Dense screen rays carry the exact hit pixel in W instead of travel distance.
+            m_ScreenRays.desc.ColorFormat = screenConfigured && m_RestirPixelIntegration ? GeometryFormat : ProbeFormat;
+            m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * rayCount : 1, screenConfigured ? m_AtlasHeight : 1);
             bool rawResolved = pixelTemporal || m_RestirPixelIntegration;
             m_RawResolved.Resize(rawResolved ? m_Width : 1, rawResolved ? m_Height : 1);
             m_RestirVariance.Resize(m_RestirPixelIntegration ? m_Width : 1, m_RestirPixelIntegration ? m_Height : 1);
@@ -728,7 +731,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 using (new ProfilingScope(cmd, GatherSampler))
                     cmd.DispatchCompute(m_Compute, traceKernel, groupsX, groupsY, 1);
                 if (m_RestirGather)
-                    RecordRestir(cmd, black, hasHistory && m_RestirHistory.IsValid()
+                    RecordRestir(cmd, black, useScreenRays ? m_ScreenHzb.innerHandle : black, hasHistory && m_RestirHistory.IsValid()
                         && m_PreviousRestir.innerHandle.IsValid(), groupsX, groupsY);
                 else if (m_HitDistanceFilter)
                 {
@@ -989,14 +992,23 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HasScreenHistory = m_PreviousScreenRadiance.IsValid() && m_PreviousScreenGeometry.IsValid();
         }
 
-        private void RecordRestir(ComputeCommandBuffer cmd, TextureHandle black, bool hasHistory, int groupsX, int groupsY)
+        private void BindRestirReuse(ComputeCommandBuffer cmd, int kernel, TextureHandle hzb)
+        {
+            m_Scene.Bind(cmd, m_Compute, kernel);
+            cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, kernel, DepthId, m_Depth.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, kernel, HzbId, hzb);
+        }
+
+        private void RecordRestir(ComputeCommandBuffer cmd, TextureHandle black, TextureHandle hzb, bool hasHistory,
+            int groupsX, int groupsY)
         {
             int kernel = m_RestirTemporalKernel;
             using (new ProfilingScope(cmd, RestirTemporalSampler))
             {
-                m_Scene.Bind(cmd, m_Compute, kernel);
+                BindRestirReuse(cmd, kernel, hzb);
                 cmd.SetComputeIntParam(m_Compute, RestirHasHistoryId, hasHistory ? 1 : 0);
-                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
                 cmd.SetComputeTextureParam(m_Compute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
                 cmd.SetComputeTextureParam(m_Compute, kernel, HitSamplesInputId, m_HitSamples.innerHandle);
                 cmd.SetComputeTextureParam(m_Compute, kernel, RestirPreviousId, hasHistory ? m_PreviousRestir.innerHandle : black);
@@ -1006,8 +1018,7 @@ namespace VividRP.Runtime.RenderPass.Core
             kernel = m_RestirSpatialKernel;
             using (new ProfilingScope(cmd, RestirSpatialSampler))
             {
-                m_Scene.Bind(cmd, m_Compute, kernel);
-                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
+                BindRestirReuse(cmd, kernel, hzb);
                 cmd.SetComputeTextureParam(m_Compute, kernel, RestirTemporalId, m_CurrentRestir.innerHandle);
                 cmd.SetComputeTextureParam(m_Compute, kernel, ProbeInputId, m_FilteredProbes.innerHandle);
                 cmd.SetComputeTextureParam(m_Compute, kernel, ProbeId, m_Probes.innerHandle);

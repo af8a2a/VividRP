@@ -23,6 +23,7 @@ struct RestirSample
     float3 position;
     float3 normal;
     float3 radiance;
+    bool fromScreen;
 };
 
 struct RestirReservoir
@@ -85,17 +86,19 @@ void RestirPack(RestirReservoir reservoir, out float4 geometry, out float4 light
     // This numeric 24-bit integer survives both R32F and RGBA32F storage exactly.
     uint normal = reservoir.inversePdf > 0.0 ? uint(PackProbeNormal(reservoir.sample.normal)) : 0u;
     uint packed = normal | (reservoir.count << 16u) | (reservoir.age << 22u);
-    geometry = float4(reservoir.sample.position, float(packed));
+    // The sign tags screen endpoints without reducing normal, age, or count precision.
+    geometry = float4(reservoir.sample.position, reservoir.sample.fromScreen ? -float(packed) : float(packed));
     lighting = float4(reservoir.sample.radiance, reservoir.inversePdf);
 }
 
 RestirReservoir RestirUnpack(float4 geometry, float4 lighting)
 {
     RestirReservoir reservoir;
-    uint packed = uint(geometry.w);
+    uint packed = uint(abs(geometry.w));
     reservoir.sample.position = geometry.xyz;
     reservoir.sample.normal = UnpackProbeNormal(float(packed & 65535u));
     reservoir.sample.radiance = lighting.rgb;
+    reservoir.sample.fromScreen = geometry.w < 0.0;
     reservoir.inversePdf = lighting.a;
     reservoir.count = (packed >> 16u) & 63u;
     reservoir.age = packed >> 22u;
@@ -184,8 +187,28 @@ bool RestirEndpointVisible(RestirSample sample, float3 origin, float3 direction,
     // Require the reconnected ray's first hit to agree with the cached endpoint.
     // Keeping this interval short limits reuse across opposite sides of thin geometry.
     float tolerance = clamp(0.5 * _SdfDiffuseRayBias, 0.01, 0.025);
+    if (sample.fromScreen)
+    {
+        // A screen sample must still be the first visible surface in the current frame.
+        if (_SdfDiffuseUseScreenRays == 0u)
+            return false;
+        float4 clip = mul(_SdfDiffuseVP, float4(sample.position, 1.0));
+        if (clip.w <= 0.0 || clip.z <= 0.0 || clip.z > clip.w || any(abs(clip.xy) >= clip.w))
+            return false;
+        ScreenRayHit screenHit;
+        if (!TraceScreenGeometry(origin, direction, distance + tolerance, screenHit)
+            || length(screenHit.position - sample.position) > tolerance || dot(screenHit.normal, sample.normal) < 0.9)
+            return false;
+    }
+
+    // Screen depth can omit occluders. Check the open SDF segment up to the tolerance
+    // around the triangle endpoint. An SDF sample still requires the exact first hit.
+    float limit = distance + (sample.fromScreen ? -tolerance : tolerance);
     VividMeshSdfHit hit;
-    return VividTraceMeshSdfScene(origin, direction, 0.0, distance + tolerance, _SdfDiffuseLayerMask, hit)
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, limit, _SdfDiffuseLayerMask,
+        0.0, sample.fromScreen, (VividMeshSdfReceiver)0, hit, advancedReceiver, incomplete);
+    return sample.fromScreen ? !traced && !incomplete : traced
         && abs(hit.distance - distance) <= tolerance && dot(hit.normalWS, sample.normal) >= 0.8;
 }
 
@@ -216,7 +239,7 @@ uint RestirMerge(inout RestirReservoir reservoir, inout float weightSum, RestirR
 #if defined(VIVID_SDF_RESTIR_SPATIAL)
         if (jacobian > 0.0)
         {
-            if (any(sourceOrigin != origin))
+            if (other.sample.fromScreen || any(sourceOrigin != origin))
             {
                 bool visible = RestirEndpointVisible(other.sample, origin, direction, distance);
                 visibility = visible ? 3u : 2u;
@@ -224,7 +247,8 @@ uint RestirMerge(inout RestirReservoir reservoir, inout float weightSum, RestirR
                     return count;
             }
 #else
-        if (jacobian > 0.0 && (all(sourceOrigin == origin) || RestirEndpointVisible(other.sample, origin, direction, distance)))
+        if (jacobian > 0.0 && ((!other.sample.fromScreen && all(sourceOrigin == origin))
+            || RestirEndpointVisible(other.sample, origin, direction, distance)))
         {
 #endif
             float target = RestirLuminance(other.sample.radiance) * dot(normal, direction);
@@ -273,7 +297,7 @@ void RestirFinalizeReuse(inout RestirReservoir reservoir, float weightSum, float
 #if defined(VIVID_SDF_RESTIR_SPATIAL)
             if (jacobian == 0.0 || sourceDistance > _SdfDiffuseMaxDistance)
                 sourceTarget = 0.0;
-            else if (any(sourceOrigin != origin))
+            else if (reservoir.sample.fromScreen || any(sourceOrigin != origin))
             {
                 uint cached = 0u;
                 if (localSampleKey != 0u && sources[i].groupLane < RESTIR_SPATIAL_GROUP_THREADS)
@@ -294,7 +318,7 @@ void RestirFinalizeReuse(inout RestirReservoir reservoir, float weightSum, float
             }
 #else
             if (jacobian == 0.0 || sourceDistance > _SdfDiffuseMaxDistance
-                || (any(sourceOrigin != origin)
+                || ((reservoir.sample.fromScreen || any(sourceOrigin != origin))
                     && !RestirEndpointVisible(reservoir.sample, sourceOrigin, sourceRay / max(sourceDistance, 1e-5), sourceDistance)))
                 sourceTarget = 0.0;
 #endif

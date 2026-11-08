@@ -23,6 +23,23 @@ namespace VividRP.Editor.GPUDriven.Meshlets
         private static readonly int MinAndFace = Shader.PropertyToID("_CardMinAndFace");
         private static readonly int InverseExtent = Shader.PropertyToID("_CardInverseExtent");
 
+        /// <summary>Mesh-space capture bounds. Faces are -X, +X, -Y, +Y, -Z, +Z.</summary>
+        public readonly struct LocalCardCapture
+        {
+            public Mesh Mesh { get; }
+            public Material Material { get; }
+            public Bounds Bounds { get; }
+            public int Face { get; }
+
+            public LocalCardCapture(Mesh mesh, Material material, Bounds bounds, int face)
+            {
+                Mesh = mesh;
+                Material = material;
+                Bounds = bounds;
+                Face = face;
+            }
+        }
+
         [MenuItem("Assets/Create/VividRP/SDF Surface Cache from Selection")]
         private static void BakeSelection()
         {
@@ -36,13 +53,28 @@ namespace VividRP.Editor.GPUDriven.Meshlets
 
         public static VividSdfSurfaceCache Bake(IReadOnlyList<MeshletRenderer> renderers, string path, int resolution = 64)
         {
-            return Bake(renderers, path, resolution, null, default, 0);
+            return Bake(renderers, path, resolution, Array.Empty<LocalCardCapture>());
         }
 
         /// <summary>Adds one local capture in mesh space. Faces are -X, +X, -Y, +Y, -Z, +Z.</summary>
         public static VividSdfSurfaceCache Bake(IReadOnlyList<MeshletRenderer> renderers, string path, int resolution,
             MeshletRenderer localCardRenderer, Bounds localCardBounds, int localCardFace)
         {
+            if (localCardRenderer == null)
+                return Bake(renderers, path, resolution);
+            if (localCardRenderer.sourceMaterials.Count != 1)
+                throw new ArgumentException("A local card needs a renderer with one material.", nameof(localCardRenderer));
+            return Bake(renderers, path, resolution, new[]
+            {
+                new LocalCardCapture(localCardRenderer.sourceMesh, localCardRenderer.sourceMaterials[0], localCardBounds, localCardFace)
+            });
+        }
+
+        public static VividSdfSurfaceCache Bake(IReadOnlyList<MeshletRenderer> renderers, string path, int resolution,
+            IReadOnlyList<LocalCardCapture> localCards)
+        {
+            if (localCards == null)
+                throw new ArgumentNullException(nameof(localCards));
             if (!path.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || AssetDatabase.LoadMainAssetAtPath(path) != null)
                 throw new ArgumentException("Choose an unused .asset path for the surface cache.", nameof(path));
 
@@ -52,21 +84,21 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 throw new InvalidOperationException("Surface cards require MRT raster capture and texture array readback.");
 
             var entries = CollectEntries(renderers);
-            int localCardEntry = -1;
-            if (localCardRenderer != null)
-            {
-                if (localCardRenderer.sourceMaterials.Count == 1)
-                    localCardEntry = entries.FindIndex(entry => entry.Mesh == localCardRenderer.sourceMesh
-                        && entry.Material == localCardRenderer.sourceMaterials[0]);
-                Vector3 min = localCardBounds.min;
-                Vector3 max = localCardBounds.max;
-                if (localCardEntry < 0 || (uint)localCardFace >= VividSdfSurfaceCache.CardsPerMesh
-                    || !IsValidInterval(min.x, max.x) || !IsValidInterval(min.y, max.y) || !IsValidInterval(min.z, max.z))
-                    throw new ArgumentException("A local card needs an eligible renderer, a face from 0 to 5 and finite mesh-space bounds.");
-            }
-            int sliceCount = entries.Count * VividSdfSurfaceCache.CardsPerMesh + (localCardEntry >= 0 ? 1 : 0);
-            if (entries.Count == 0 || sliceCount > SystemInfo.maxTextureArraySlices)
+            int baseSlices = entries.Count * VividSdfSurfaceCache.CardsPerMesh;
+            int sliceCount = checked(baseSlices + localCards.Count);
+            if (baseSlices == 0 || sliceCount > SystemInfo.maxTextureArraySlices)
                 throw new InvalidOperationException($"Surface cache needs a supported number of array slices, found {sliceCount}.");
+
+            var cards = new VividSdfSurfaceCache.LocalCard[localCards.Count];
+            for (int i = 0; i < cards.Length; i++)
+            {
+                var card = localCards[i];
+                int entry = entries.FindIndex(item => item.Mesh == card.Mesh && item.Material == card.Material);
+                if (entry < 0 || (uint)card.Face >= VividSdfSurfaceCache.CardsPerMesh
+                    || !VividSdfSurfaceCache.IsValidLocalCardBounds(card.Bounds))
+                    throw new ArgumentException($"Local card {i} needs an eligible mesh and material, a face from 0 to 5 and finite mesh-space bounds.", nameof(localCards));
+                cards[i] = new VividSdfSurfaceCache.LocalCard { EntryIndex = entry, Bounds = card.Bounds, Face = card.Face };
+            }
 
             resolution = Mathf.Clamp(resolution, 16, 128);
             var albedo = new Texture2DArray(resolution, resolution, sliceCount, AlbedoDepthFormat, TextureCreationFlags.None)
@@ -76,8 +108,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             var cache = ScriptableObject.CreateInstance<VividSdfSurfaceCache>();
             try
             {
-                Capture(entries, shader, resolution, albedo, normal, localCardEntry, localCardFace, localCardBounds);
-                cache.Initialize(entries.ToArray(), albedo, normal, localCardEntry, localCardFace, localCardBounds);
+                Capture(entries, shader, resolution, albedo, normal, cards);
+                cache.Initialize(entries.ToArray(), albedo, normal, cards);
                 AssetDatabase.CreateAsset(cache, path);
                 AssetDatabase.AddObjectToAsset(albedo, cache);
                 AssetDatabase.AddObjectToAsset(normal, cache);
@@ -97,8 +129,6 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 throw;
             }
         }
-
-        private static bool IsValidInterval(float min, float max) => float.IsFinite(max - min) && min < max;
 
         private static List<VividSdfSurfaceCache.Entry> CollectEntries(IReadOnlyList<MeshletRenderer> renderers)
         {
@@ -124,7 +154,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
         }
 
         private static void Capture(List<VividSdfSurfaceCache.Entry> entries, Shader shader, int resolution,
-            Texture2DArray albedo, Texture2DArray normal, int localCardEntry, int localCardFace, Bounds localCardBounds)
+            Texture2DArray albedo, Texture2DArray normal, VividSdfSurfaceCache.LocalCard[] localCards)
         {
             var albedoTarget = RenderTexture.GetTemporary(new RenderTextureDescriptor(resolution, resolution, AlbedoDepthFormat, 24));
             var normalTarget = RenderTexture.GetTemporary(new RenderTextureDescriptor(resolution, resolution, NormalFormat, 0));
@@ -141,11 +171,13 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                     for (int face = 0; face < VividSdfSurfaceCache.CardsPerMesh; face++)
                         CaptureCard(entry.Mesh, entry.Bounds, face, entryIndex * VividSdfSurfaceCache.CardsPerMesh + face);
                 }
-                if (localCardEntry >= 0)
+                int firstLocalSlice = entries.Count * VividSdfSurfaceCache.CardsPerMesh;
+                for (int i = 0; i < localCards.Length; i++)
                 {
-                    var entry = entries[localCardEntry];
+                    var card = localCards[i];
+                    var entry = entries[card.EntryIndex];
                     SetMaterialProperties(entry.Material, properties);
-                    CaptureCard(entry.Mesh, localCardBounds, localCardFace, albedo.depth - 1);
+                    CaptureCard(entry.Mesh, card.Bounds, card.Face, firstLocalSlice + i);
                 }
                 Graphics.ExecuteCommandBuffer(cmd);
                 var albedoReadback = AsyncGPUReadback.Request(albedo, 0);

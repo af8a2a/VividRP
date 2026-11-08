@@ -24,9 +24,8 @@ static const uint VividSdfCardNormalRejected = 4u;
 static const uint VividSdfCardDepthRejected = 5u;
 
 
-uint _SdfLocalCardOwner;
-float4 _SdfLocalCardMinAndSlice;
-float4 _SdfLocalCardExtentAndFace;
+// Ranges indexed by the base card owner, followed by packed local-card pairs.
+StructuredBuffer<float4> _SdfLocalCardTable;
 
 static const uint VividSdfLocalCardSlot = 6u;
 
@@ -118,16 +117,23 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
             face, size, tolerance, diagnose, rejection, best);
     }
 
-    // The local capture fills a coverage hole and leaves already resolved base-card hits intact.
-    if (best.score == 2.0 && owner == _SdfLocalCardOwner)
+    // Use local cards to fill coverage holes while preserving accepted base-card hits.
+    if (best.score == 2.0)
     {
-        uint face = (uint)_SdfLocalCardExtentAndFace.w;
-        uint axis = face >> 1u;
-        float facing = hit.normalLS[axis] * ((face & 1u) != 0u ? 1.0 : -1.0);
-        float3 relativeLocal = (local - _SdfLocalCardMinAndSlice.xyz) / _SdfLocalCardExtentAndFace.xyz;
-        if (facing >= 0.3 && all(relativeLocal >= 0.0) && all(relativeLocal <= 1.0))
-            VividSampleSdfCard(hit, relativeLocal, axis, facing, _SdfLocalCardExtentAndFace[axis],
-                (uint)_SdfLocalCardMinAndSlice.w, VividSdfLocalCardSlot, size, tolerance, diagnose, rejection, best);
+        uint2 rows = (uint2)_SdfLocalCardTable[(owner - 1u) / 6u].xy;
+        [loop]
+        for (uint row = rows.x; row < rows.y; row += 2u)
+        {
+            float4 minAndSlice = _SdfLocalCardTable[row];
+            float4 extentAndFace = _SdfLocalCardTable[row + 1u];
+            uint face = (uint)extentAndFace.w;
+            uint axis = face >> 1u;
+            float facing = hit.normalLS[axis] * ((face & 1u) != 0u ? 1.0 : -1.0);
+            float3 relativeLocal = (local - minAndSlice.xyz) / extentAndFace.xyz;
+            if (facing >= 0.3 && all(relativeLocal >= 0.0) && all(relativeLocal <= 1.0))
+                VividSampleSdfCard(hit, relativeLocal, axis, facing, extentAndFace[axis],
+                    (uint)minAndSlice.w, VividSdfLocalCardSlot, size, tolerance, diagnose, rejection, best);
+        }
     }
 
     if (best.score == 2.0)

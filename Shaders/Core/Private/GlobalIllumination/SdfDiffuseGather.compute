@@ -11,6 +11,8 @@
 #pragma kernel PlaceSdfAdaptiveProbes
 #pragma kernel FilterSdfDiffuseProbes
 #pragma kernel FilterSdfDirectionalHits
+#pragma kernel ResampleSdfRestirTemporal
+#pragma kernel ResampleSdfRestirSpatial
 #pragma kernel TemporalSdfDiffuseGI
 
 #include "../../Public/Input.hlsl"
@@ -738,6 +740,8 @@ void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 directi
     _SdfDiffuseFirstHitDiagnostics[pixel + uint2(0u, 2u)] = float4(direction, advancedReceiver ? 1.0 : 0.0);
 }
 
+#include "SdfDiffuseReSTIR.hlsl"
+
 void TraceProbe(uint3 id)
 {
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
@@ -749,6 +753,8 @@ void TraceProbe(uint3 id)
     uint2 receiverPixel;
     if (!LoadProbeReceiverPixel(tile, screenSize, receiverPixel) || !LoadReceiver(receiverPixel, position, normal))
     {
+        if (_SdfRestirEnabled != 0u)
+            StoreInitialRestir(tile, (RestirReservoir)0);
         StoreProbe(tile, 0.0, (float3x3)0.0);
         _SdfDiffuseGeometry[tile] = float4(0.0, 0.0, 0.0, -1.0);
         _SdfDiffuseHitLighting[tile] = 0.0;
@@ -785,6 +791,8 @@ void TraceProbe(uint3 id)
     uint screenHits = 0u;
     uint unknown = 0u;
     uint cachedSunHits = 0u;
+    RestirReservoir reservoir = (RestirReservoir)0;
+    float reservoirWeightSum = 0.0;
     [loop]
     for (uint ray = 0u; ray < RaysPerProbe; ray++)
     {
@@ -873,6 +881,16 @@ void TraceProbe(uint3 id)
             cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
         #endif
         float3 radiance = TraceHitLighting(hitPosition, lightingNormal, hit, surface, cachedVisibility);
+        if (_SdfRestirEnabled != 0u)
+        {
+            RestirSample sample;
+            sample.position = hitPosition;
+            sample.normal = hit.normalWS;
+            sample.radiance = radiance;
+            // Target and the original proposal both contain the receiver cosine.
+            RestirUpdate(reservoir, reservoirWeightSum, sample, RestirLuminance(radiance), 0u, 0u,
+                RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));
+        }
         StoreTraceSample(tile, ray, screenState | RaySdfHit, hit.distance, radiance, direction);
         sum += radiance;
         if (_SdfDiffuseDirectionalProbes != 0u)
@@ -898,7 +916,15 @@ void TraceProbe(uint3 id)
     #endif
     float4 current = float4(min(sum / float(RaysPerProbe), 65000.0), confidence);
     moments /= float(RaysPerProbe);
-    if (_SdfDiffuseHitFilterEnabled == 0u)
+    if (_SdfRestirEnabled != 0u)
+    {
+        reservoir.count = RaysPerProbe;
+        // Use the same packed receiver normal as the resampling passes.
+        float3 storedNormal = UnpackProbeNormal(PackProbeNormal(normal));
+        RestirFinalize(reservoir, reservoirWeightSum, position + storedNormal * _SdfDiffuseRayBias, storedNormal);
+        StoreInitialRestir(tile, reservoir);
+    }
+    else if (_SdfDiffuseHitFilterEnabled == 0u)
         current = AccumulateProbe(current, position, normal, moments);
     StoreProbe(tile, current, moments);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
@@ -1090,7 +1116,7 @@ void FilterSdfDirectionalHits(uint3 group : SV_GroupID, uint3 lane : SV_GroupThr
                 float3 origin = geometry.xyz + normal * _SdfDiffuseRayBias;
                 float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
                 int2 uniformTile = int2(tile.x, tile.y % grid.y);
-                [loop]
+                [unroll]
                 for (uint i = 0u; i < 4u; ++i)
                 {
                     uint2 selected;

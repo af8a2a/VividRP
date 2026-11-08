@@ -547,9 +547,9 @@ void IntegrateRestirLighting(uint3 id)
                 float cosine = saturate(dot(normal, direction));
                 // Limit the interpolation gain for a sample grazing the source receiver.
                 cosine = min(cosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
-                float3 lighting = min(reservoir.sample.radiance * (reservoir.inversePdf * cosine), 65000.0);
-                float confidence = _SdfDiffuseProbeInput.Load(int3(tile, 0)).a;
-                result += weight * float4(lighting, confidence);
+                float4 distant = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+                float3 lighting = min(reservoir.sample.radiance * (reservoir.inversePdf * cosine) + distant.rgb, 65000.0);
+                result += weight * float4(lighting, distant.a);
                 total += weight;
 
                 // Weighted log-luminance variance keeps HDR outliers in a useful FP16 range.

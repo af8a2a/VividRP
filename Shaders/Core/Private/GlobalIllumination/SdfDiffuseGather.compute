@@ -6,6 +6,7 @@
 #pragma kernel TraceSdfReceiverCachedSunProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 #pragma kernel UpdateSdfSurfaceSunVisibility VIVID_SDF_SURFACE_CACHE VIVID_SDF_SUN_UPDATE
 #pragma kernel UpdateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
+#pragma kernel UpdateSdfFarRadiance VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
 #pragma kernel ResolveSdfDiffuseGI
@@ -17,6 +18,7 @@
 #pragma kernel TemporalSdfDiffuseGI
 #pragma kernel TemporalSdfRestirDiffuseGI VIVID_SDF_RESTIR_PIXEL_HISTORY
 #pragma kernel DenoiseSdfRestir
+#pragma kernel ApplySdfNearOcclusion
 
 #include "../../Public/Input.hlsl"
 #include "../../Public/GPUDriven/SdfSurfaceCache.hlsl"
@@ -40,6 +42,7 @@ static const uint RaySkyVisible = 7u;
 static const uint RayScreenHistoryRejected = 8u;
 static const uint RaySkyOccluded = 16u;
 static const uint RaySkyUnresolved = 32u;
+static const uint RayFarCache = 64u;
 
 Texture2D<float> _SdfDiffuseDepth;
 Texture2D<float4> _SdfDiffuseGBuffer0;
@@ -82,6 +85,8 @@ float4 _SdfDiffuseLightPositionRange;
 float4 _SdfDiffuseLightColorShadow;
 float _SdfDiffuseMaxDistance;
 float _SdfDiffuseSkyTraceDistance;
+float _SdfFarTraceDistance;
+float4 _SdfFarWindow;
 float _SdfDiffuseRayBias;
 uint _SdfDiffuseLayerMask;
 uint _SdfDiffuseLightLayerMask;
@@ -897,6 +902,114 @@ void UpdateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
 }
 #endif
 
+#if defined(VIVID_SDF_SURFACE_CACHE)
+// Keep in sync with SdfDiffuseGatherPass. The last atlas plane holds exact
+// world-cell keys, so toroidal reuse never exposes an evicted probe.
+static const uint FarGridSize = 16u;
+static const uint FarOctSize = 8u;
+static const uint FarDirections = FarOctSize * FarOctSize;
+static const float FarCellSize = 2.5;
+Texture2D<float4> _SdfFarRadiance;
+
+uint2 FarAtlasAddress(int3 cell, uint bin)
+{
+    uint3 slot = uint3(cell) & (FarGridSize - 1u);
+    return uint2(slot.x + FarGridSize * slot.z, slot.y + FarGridSize * bin);
+}
+
+float3 FarProbePosition(int3 cell)
+{
+    return (float3(cell) + 0.5) * FarCellSize;
+}
+
+float3 FarProbeDirection(uint bin)
+{
+    return VividDecodeSurfaceSummaryNormal((float2(bin % FarOctSize, bin / FarOctSize) + 0.5) / FarOctSize);
+}
+
+bool TryLoadFarRadiance(float3 origin, float3 direction, out float3 radiance, out float distance)
+{
+    radiance = 0.0;
+    distance = 0.0;
+    float3 start = origin + _SdfDiffuseMaxDistance * direction;
+    int3 cell = int3(floor(start / FarCellSize));
+    if (any(uint3(cell - int3(_SdfFarWindow.xyz)) >= FarGridSize))
+        return false;
+    float4 key = _SdfFarRadiance.Load(int3(FarAtlasAddress(cell, FarDirections), 0));
+    if (key.w == 0.0 || any(key.xyz != float3(cell)))
+        return false;
+
+    uint2 oct = min(uint2(saturate(VividEncodeSurfaceSummaryNormal(direction)) * FarOctSize), FarOctSize - 1u);
+    uint bin = oct.x + FarOctSize * oct.y;
+    float4 cached = _SdfFarRadiance.Load(int3(FarAtlasAddress(cell, bin), 0));
+    if (cached.a <= 0.0)
+        return false;
+    float3 cacheDirection = FarProbeDirection(bin);
+    float3 end = FarProbePosition(cell) + cacheDirection * cached.a;
+    float3 delta = end - start;
+    float travel = length(delta);
+    float3 reconnect = delta / max(travel, 1e-5);
+    if (travel <= 0.5 * FarCellSize || travel + _SdfDiffuseMaxDistance > _SdfFarTraceDistance
+        || dot(reconnect, direction) < 0.965)
+        return false;
+
+    // Match the cached endpoint after the near trace. An intervening hit or
+    // an unfinished march leaves the far sample unresolved.
+    float tolerance = clamp(0.5 * _SdfDiffuseRayBias, 0.01, 0.025);
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(start, reconnect, 0.0, travel + tolerance,
+        _SdfDiffuseLayerMask, 0.0, false, (VividMeshSdfReceiver)0, hit, advancedReceiver, incomplete);
+    if (!traced || incomplete || abs(hit.distance - travel) > tolerance
+        || dot(hit.normalWS, reconnect) >= -0.05 || dot(hit.normalWS, cacheDirection) >= -0.05)
+        return false;
+    radiance = cached.rgb;
+    distance = travel + _SdfDiffuseMaxDistance;
+    return true;
+}
+#endif
+
+#if defined(VIVID_SDF_FAR_UPDATE)
+RWTexture2D<float4> _SdfFarOutput;
+float4 _SdfFarUpdates[64];
+uint _SdfFarClear;
+
+float4 TraceFarProbe(float3 origin, float3 direction)
+{
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfFarTraceDistance - _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, (VividMeshSdfReceiver)0, hit, advancedReceiver, incomplete);
+    if (!traced || incomplete || hit.distance < 0.5 * FarCellSize || dot(hit.normalWS, direction) >= -0.05)
+        return 0.0;
+
+    float3 position = origin + direction * hit.distance;
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    float3 normal;
+    uint3 texel;
+    float error;
+    if (surface.albedoAndValid.a == 0.0 || !VividTrySampleSdfSurface(hit, position, surface, normal, texel, error))
+        return 0.0;
+    float3 radiance = TraceHitLighting(position, normal, hit, surface, -1.0) + LoadCardIndirect(surface, hit, texel);
+    return float4(clamp(radiance, 0.0, 65000.0), hit.distance);
+}
+
+[numthreads(8, 8, 1)]
+void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    if (_SdfFarClear != 0u)
+    {
+        uint slot = group.x * FarDirections + lane;
+        _SdfFarOutput[uint2(slot % (FarGridSize * FarGridSize), slot / (FarGridSize * FarGridSize) + FarGridSize * FarDirections)] = 0.0;
+        return;
+    }
+    int3 cell = int3(_SdfFarUpdates[group.x].xyz);
+    _SdfFarOutput[FarAtlasAddress(cell, lane)] = TraceFarProbe(FarProbePosition(cell), FarProbeDirection(lane));
+    if (lane == 0u)
+        _SdfFarOutput[FarAtlasAddress(cell, FarDirections)] = float4(float3(cell), 1.0);
+}
+#endif
+
 uint2 ProbePlaneStride()
 {
     return uint2((uint(_SdfDiffuseScreenSize.x) + ProbeSpacing - 1u) / ProbeSpacing, 0u);
@@ -996,8 +1109,9 @@ void StoreTraceSample(uint2 tile, uint ray, uint state, float distance, float3 r
     }
     if (_SdfDiffuseRecordRayDiagnostics != 0u)
     {
-        // RGB is unexposed radiance. Decode W as floor(W) and frac(W) * 2 * maxDistance.
-        float encoded = float(state) + 0.5 * saturate(distance / _SdfDiffuseMaxDistance);
+        // Decode W as floor(W) and frac(W) * 2 * the corresponding trace range.
+        float range = (state & RayFarCache) != 0u ? _SdfFarTraceDistance : _SdfDiffuseMaxDistance;
+        float encoded = float(state) + 0.5 * saturate(distance / range);
         _SdfDiffuseRayDiagnostics[address] = float4(radiance, encoded);
     }
 }
@@ -1036,6 +1150,73 @@ void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 directi
 void DenoiseSdfRestir(uint3 id : SV_DispatchThreadID)
 {
     FilterRestirLighting(id);
+}
+
+float4 _SdfNearOcclusion;
+
+float3 LoadContactDelta(int2 pixel, float3 origin)
+{
+    if (any(pixel < 0) || any(pixel >= int2(_SdfDiffuseScreenSize.xy)))
+        return 0.0;
+    float depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
+    if (depth == UNITY_RAW_FAR_CLIP_VALUE)
+        return 0.0;
+    float2 uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw;
+    return ComputeWorldSpacePosition(uv, depth, _SdfDiffuseInverseVP) - origin;
+}
+
+float3 ContactTangent(int2 pixel, int2 axis, float3 position)
+{
+    float3 ahead = LoadContactDelta(pixel + axis, position);
+    float3 behind = -LoadContactDelta(pixel - axis, position);
+    float a = dot(ahead, ahead);
+    float b = dot(behind, behind);
+    return (b == 0.0 || (a > 0.0 && a < b)) ? ahead : behind;
+}
+
+[numthreads(8, 8, 1)]
+void ApplySdfNearOcclusion(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_SdfDiffuseScreenSize.xy)))
+        return;
+    float4 lighting = _SdfDiffuseOutput[id.xy];
+    float3 position, normal;
+    if (lighting.a <= 0.0 || !LoadReceiver(id.xy, position, normal))
+        return;
+
+    float radius = _SdfNearOcclusion.x;
+    int2 pixel = int2(id.xy);
+    float3 dx = ContactTangent(pixel, int2(1, 0), position);
+    float3 dy = ContactTangent(pixel, int2(0, 1), position);
+    float3 geometricNormal = SafeNormalize(cross(dx, dy));
+    float agreement = dot(geometricNormal, normal);
+    if (abs(agreement) > 0.25 && max(dot(dx, dx), dot(dy, dy)) < radius * radius * 0.25)
+        normal = geometricNormal * (agreement < 0.0 ? -1.0 : 1.0);
+
+    float eyeW = mul(_SdfDiffuseVP, float4(position, 1.0)).w;
+    float pixelRadius = clamp(0.5 * radius * _SdfDiffuseScreenSize.y * length(_SdfDiffuseVP[1].xyz)
+        / max(eyeW, 1e-3), 1.0, 32.0);
+    const float2 directions[8] = { float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1),
+        float2(0.7071, 0.7071), float2(-0.7071, 0.7071), float2(0.7071, -0.7071), float2(-0.7071, -0.7071) };
+    float occlusion = 0.0;
+    [unroll]
+    for (uint ray = 0u; ray < 8u; ray++)
+    {
+        float horizon = 0.0;
+        [unroll]
+        for (uint tap = 1u; tap <= 2u; tap++)
+        {
+            float2 offset = directions[ray] * pixelRadius * (tap * 0.45);
+            float3 delta = LoadContactDelta(pixel + int2(round(offset)), position);
+            float distance = length(delta);
+            float elevation = (dot(delta, normal) - 0.015) / max(distance, 1e-5);
+            horizon = max(horizon, saturate(elevation) * saturate(1.0 - distance / radius));
+        }
+        occlusion += horizon;
+    }
+    // Apply after temporal accumulation so contact visibility is never fed back.
+    lighting.rgb *= 1.0 - _SdfNearOcclusion.y * saturate(0.25 * occlusion);
+    _SdfDiffuseOutput[id.xy] = lighting;
 }
 
 void TraceProbe(uint3 id)
@@ -1087,10 +1268,12 @@ void TraceProbe(uint3 id)
     uint valid = 0u;
     uint screenHits = 0u;
     uint skyHits = 0u;
+    uint farHits = 0u;
     uint unknown = 0u;
     uint cachedSunHits = 0u;
     RestirReservoir reservoir = (RestirReservoir)0;
     float reservoirWeightSum = 0.0;
+    float3 distant = 0.0;
     #if defined(VIVID_SDF_SCREEN_ONLY)
         const bool useSky = false;
     #else
@@ -1157,20 +1340,36 @@ void TraceProbe(uint3 id)
         if (!traced)
         {
             uint missState = RayMiss;
+            float3 radiance = 0.0;
+            float farDistance = 0.0;
+            #if defined(VIVID_SDF_SURFACE_CACHE)
+                [branch]
+                if (_SdfFarTraceDistance > 0.0 && !incomplete && screenState == 0u)
+                {
+                    if (TryLoadFarRadiance(origin, direction, radiance, farDistance))
+                    {
+                        missState |= RayFarCache;
+                        farHits++;
+                    }
+                }
+            #endif
             [branch]
-            if (useSky)
+            if (missState == RayMiss && useSky)
                 missState = ResolveSdfSkyMiss(origin, direction, incomplete, screenState);
-            float3 sky = 0.0;
             if (missState == RaySkyVisible)
             {
-                sky = clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0);
-                sum += sky;
-                if (_SdfDiffuseDirectionalProbes != 0u)
-                    moments += ProbeSampleMoments(sky, direction, normal);
+                radiance = clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0);
                 skyHits++;
+            }
+            if (missState == RaySkyVisible || (missState & RayFarCache) != 0u)
+            {
+                sum += radiance;
+                distant += radiance;
+                if (_SdfDiffuseDirectionalProbes != 0u)
+                    moments += ProbeSampleMoments(radiance, direction, normal);
                 valid++;
             }
-            StoreTraceSample(tile, ray, screenState | missState, 0.0, sky, direction);
+            StoreTraceSample(tile, ray, screenState | missState, farDistance, radiance, direction);
             if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                 StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
             continue;
@@ -1257,10 +1456,14 @@ void TraceProbe(uint3 id)
     #else
         float confidence = valid > 0u ? 1.0 - float(unknown) / float(rayCount) : 0.0;
     #endif
-    float normalization = useSky ? float(max(1u, valid)) : float(rayCount);
-    if (useSky)
+    bool normalizeCoverage = useSky || farHits > 0u;
+    float normalization = normalizeCoverage ? float(max(1u, valid)) : float(rayCount);
+    if (normalizeCoverage)
         confidence = float(valid) / float(rayCount);
     float4 current = float4(min(sum / normalization, 65000.0), confidence);
+    // Dense gather integrates the distant term separately from positional reservoirs.
+    if (_SdfRestirDense != 0u)
+        current.rgb = distant;
     moments /= normalization;
     if (_SdfRestirEnabled != 0u)
     {
@@ -1277,8 +1480,8 @@ void TraceProbe(uint3 id)
     StoreProbe(tile, current, moments);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / rayCount);
-    // Sky occupies the residual of the three source fractions.
-    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits - skyHits, rayCount - valid) / rayCount, 1.0);
+    // Sky and the far cache occupy the residual of the three source fractions.
+    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits - skyHits - farHits, rayCount - valid) / rayCount, 1.0);
     #if defined(VIVID_SDF_CACHED_SUN)
         _SdfSunCacheHits[tile] = float4(float(cachedSunHits) / rayCount, 0.0, 0.0, 1.0);
     #endif

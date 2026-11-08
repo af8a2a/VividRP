@@ -37,11 +37,23 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
         public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
 
-        [Tooltip("Sample the sky on confirmed Mesh SDF escapes in the Screen Probe gather. Physically Based Sky requires a cubemap baked without the sun disk.")]
+        [Tooltip("Sample the sky on confirmed Mesh SDF escapes. ReSTIR requires 2x2 integration and Far Radiance Cache. Physically Based Sky requires a cubemap baked without the sun disk.")]
         public BoolParameter occludedSky = new(false);
 
         [Tooltip("Maximum sky visibility distance. A ray that reaches the limit inside the SDF scene is unresolved.")]
         public MinFloatParameter skyTraceDistance = new(64f, 1f);
+
+        [Tooltip("Use a budgeted world-space directional Surface Cache for rays that leave the near trace range.")]
+        public BoolParameter farRadianceCache = new(false);
+
+        [Tooltip("Maximum distance from the receiver for a far-cache hit.")]
+        public MinFloatParameter farTraceDistance = new(64f, 1f);
+
+        [Tooltip("Strength of current-frame contact occlusion on realtime diffuse GI.")]
+        public ClampedFloatParameter nearOcclusionStrength = new(0f, 0f, 1f);
+
+        [Tooltip("World-space radius of realtime diffuse contact occlusion.")]
+        public ClampedFloatParameter nearOcclusionRadius = new(0.35f, 0.05f, 1f);
 
         [Tooltip("Gather first-order directional lighting in the screen probes and evaluate it at the receiver normal.")]
         public BoolParameter directionalScreenProbes = new(false);

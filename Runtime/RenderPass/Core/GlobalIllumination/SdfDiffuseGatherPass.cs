@@ -40,6 +40,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int RadiosityColumns = 16;
         private const int RadiosityCardLimit = 4096;
         private const int RadiosityCardsPerFrame = 16;
+        // Keep the grid and directional resolution in sync with SdfDiffuseGather.compute.
+        private const int FarGridSize = 16;
+        private const int FarDirectionCount = 64;
+        private const int FarProbeCount = FarGridSize * FarGridSize * FarGridSize;
+        private const int FarProbesPerFrame = 64;
+        private const float FarCellSize = 2.5f;
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
@@ -74,6 +80,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RadiosityFirstCardId = Shader.PropertyToID("_SdfRadiosityFirstCard");
         private static readonly int RadiosityInputId = Shader.PropertyToID("_SdfRadiosityInput");
         private static readonly int RadiosityOutputId = Shader.PropertyToID("_SdfRadiosityOutput");
+        private static readonly CameraHistoryId FarHistoryId = CameraHistoryId.Create("SdfFarRadiance");
+        private static readonly ProfilingSampler FarCacheSampler = new("Diffuse GI Far Radiance Update");
+        private static readonly ProfilingSampler NearOcclusionSampler = new("Diffuse GI Near Contact Occlusion");
+        private static readonly int FarRadianceId = Shader.PropertyToID("_SdfFarRadiance");
+        private static readonly int FarOutputId = Shader.PropertyToID("_SdfFarOutput");
+        private static readonly int FarUpdatesId = Shader.PropertyToID("_SdfFarUpdates");
+        private static readonly int FarClearId = Shader.PropertyToID("_SdfFarClear");
+        private static readonly int FarDistanceId = Shader.PropertyToID("_SdfFarTraceDistance");
+        private static readonly int FarWindowId = Shader.PropertyToID("_SdfFarWindow");
+        private static readonly int NearOcclusionId = Shader.PropertyToID("_SdfNearOcclusion");
         private static readonly int HzbId = Shader.PropertyToID("_SdfScreenHzb");
         private static readonly int MotionId = Shader.PropertyToID("_SdfScreenMotion");
         private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
@@ -164,7 +180,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Screen Trace Motion", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ScreenMotion;
 
-        [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_Output = CreateOutput("Realtime Diffuse GI", ProbeFormat);
 
         [RenderGraphResource(Name = "Probe Hit Lighting", Access = AccessFlags.Write)]
@@ -208,6 +224,11 @@ namespace VividRP.Runtime.RenderPass.Core
             internal int SunReadyCards;
             internal ulong RadiosityCardVersion;
             internal int RadiosityTargetOrders, RadiosityOrder, RadiosityCursor, GatherRadiosityOrder;
+            internal Vector3Int[] FarKeys;
+            internal Vector3Int FarWindow;
+            internal bool FarPending;
+            internal float FarDistance;
+            internal ulong FarCardVersion;
 
             public override void Dispose() { }
         }
@@ -259,6 +280,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_ScreenGeometryDesc = CreateOutput("Screen Diffuse Source Geometry", GraphicsFormat.R32G32_SFloat);
         private readonly RenderGraphTexture m_SunHistoryDesc = CreateOutput("Surface Cache Sun Visibility", SunVisibilityFormat);
         private readonly RenderGraphTexture m_RadiosityDesc = CreateOutput("Surface Cache Radiosity", ProbeFormat);
+        private readonly RenderGraphTexture m_FarDesc = CreateOutput("World Diffuse Far Radiance", GeometryFormat);
         [RenderGraphResource(Name = "Screen Ray Samples", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_ScreenRays = CreateOutput("Diffuse GI Screen Rays", ProbeFormat);
         private VividMeshSdfGpuScene m_Scene;
@@ -272,6 +294,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_RadiosityKernel = -1;
         private int m_RadiosityTargetOrders, m_RadiosityOrder, m_RadiosityCursor, m_RadiosityUpdateCards;
         private ulong m_RadiosityCardVersion;
+        private readonly Vector4[] m_FarUpdates = new Vector4[FarProbesPerFrame];
+        private CameraHistoryTexture m_FarHistory;
+        private TextureHandle m_FarAtlas;
+        private Vector3Int m_FarWindow;
+        private bool m_FarClear, m_FarPending;
+        private int m_FarUpdateCount;
+        private ulong m_FarCardVersion;
+        private float m_FarDistance;
+        private Vector4 m_NearOcclusion;
+        private int m_FarKernel = -1, m_NearOcclusionKernel = -1;
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection;
         private TextureHandle m_CardAlbedoDepth, m_CardNormalCoverage;
@@ -336,6 +368,12 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Compute.HasKernel("UpdateSdfSurfaceRadiosity")
                 && SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample))
                 m_RadiosityKernel = m_Compute.FindKernel("UpdateSdfSurfaceRadiosity");
+            if (SystemInfo.IsFormatSupported(GeometryFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
+                && m_Compute.HasKernel("UpdateSdfFarRadiance"))
+                m_FarKernel = m_Compute.FindKernel("UpdateSdfFarRadiance");
+            if (SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
+                && m_Compute.HasKernel("ApplySdfNearOcclusion"))
+                m_NearOcclusionKernel = m_Compute.FindKernel("ApplySdfNearOcclusion");
             m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
@@ -395,6 +433,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityInput = m_RadiosityOutput = default;
             m_RadiosityTargetOrders = m_RadiosityOrder = m_RadiosityCursor = m_RadiosityUpdateCards = 0;
             m_RadiosityCardVersion = 0;
+            m_FarHistory = null;
+            m_FarAtlas = default;
+            m_FarUpdateCount = 0;
+            m_FarDistance = 0f;
+            m_FarCardVersion = 0;
+            m_FarPending = m_FarClear = false;
+            m_NearOcclusion = default;
             m_SkyTexture = default;
             m_SkyTraceDistance = 0f;
             m_SkyContentHash = 0;
@@ -509,10 +554,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TraceDistance = float.IsFinite(m_MaxDistance) ? Mathf.Max(0.1f, m_MaxDistance) : 12f;
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
             ReadLight();
+            bool farConfigured = useSettings && settings.farRadianceCache.value && m_UseSdf && cache != null
+                && m_FarKernel >= 0 && !m_OffscreenOnly && (!m_RestirGather || m_RestirPixelIntegration)
+                && float.IsFinite(settings.farTraceDistance.value) && settings.farTraceDistance.value > m_TraceDistance + FarCellSize;
             if (m_UseSdf)
             {
                 m_SkyTexture = PassRecorder.ImportTextureForPass(this, SkyManager.GetSkySourceCubemapHandle());
-                if (useSettings && settings.occludedSky.value && !m_RestirGather && !m_OffscreenOnly && m_SkyTexture.IsValid())
+                if (useSettings && settings.occludedSky.value && (!m_RestirGather || farConfigured)
+                    && !m_OffscreenOnly && m_SkyTexture.IsValid())
                     PrepareOccludedSky(frameData.GetOrCreate<VividSkyData>(), settings.skyTraceDistance.value);
             }
             m_Cameras.PurgeDestroyedCameras();
@@ -522,6 +571,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 PrepareSunCache(camera, cache);
             if (m_UseSdf && cache != null && m_RadiosityKernel >= 0 && settings.surfaceCacheBounceOrders.value > 0)
                 PrepareRadiosity(camera, cache, settings.surfaceCacheBounceOrders.value);
+            if (farConfigured)
+                PrepareFarCache(camera, cache, settings.farTraceDistance.value);
+            if (useSettings && m_NearOcclusionKernel >= 0 && !m_OffscreenOnly
+                && float.IsFinite(settings.nearOcclusionStrength.value) && float.IsFinite(settings.nearOcclusionRadius.value))
+                m_NearOcclusion = new Vector4(settings.nearOcclusionRadius.value, settings.nearOcclusionStrength.value, 0f, 0f);
             if (screenConfigured || pixelTemporal)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
@@ -554,6 +608,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && (m_SunHistory == null || m_State.SunCardVersion == m_SunCardVersion)
                 && m_State.GatherRadiosityOrder == m_RadiosityOrder
                 && m_State.RadiosityCardVersion == m_RadiosityCardVersion
+                && m_State.FarDistance == m_FarDistance && m_State.FarCardVersion == m_FarCardVersion
                 && m_State.Width == m_Width && m_State.Height == m_Height
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
@@ -725,7 +780,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (useSunCache)
                     RecordSunCache(cmd, traceKernel);
                 if (cache != null)
+                {
                     RecordRadiosity(cmd, traceKernel, cache, black);
+                    RecordFarCache(cmd, traceKernel, cache, black);
+                }
                 if (useScreenRays)
                     RecordScreenTrace(cmd, groupsX, groupsY, placement);
                 using (new ProfilingScope(cmd, GatherSampler))
@@ -760,6 +818,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordPixelTemporal(cmd, hasHistory && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid());
                 if (m_RestirPixelIntegration)
                     RecordRestirDenoise(cmd, pixelTemporal);
+                if (m_NearOcclusion.y > 0f)
+                    RecordNearOcclusion(cmd);
             }
             if (m_SkyTextureParams.w > 0.5f)
                 context.GetOrCreate<VividSdfSkyFrameData>().Output = m_Output;
@@ -805,6 +865,10 @@ namespace VividRP.Runtime.RenderPass.Core
             bool finishedSweep = m_RadiosityUpdateCards > 0 && cursor == m_Scene.RadiosityCardCount;
             m_State.RadiosityCursor = finishedSweep ? 0 : cursor;
             m_State.RadiosityOrder = m_RadiosityOrder + (finishedSweep ? 1 : 0);
+            m_State.FarDistance = m_FarDistance;
+            m_State.FarCardVersion = m_FarCardVersion;
+            m_State.FarPending = m_FarPending;
+            m_State.FarWindow = m_FarWindow;
             m_State.LightPositionRange = m_LightPositionRange;
             m_State.LightColorShadow = m_LightColorShadow;
         }
@@ -821,6 +885,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenTraceKernel = m_ScreenGatherKernel = -1;
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
             m_RadiosityKernel = -1;
+            m_FarKernel = m_NearOcclusionKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
@@ -968,6 +1033,110 @@ namespace VividRP.Runtime.RenderPass.Core
             // frames as well; the order and cursor gate all reads of unfinished sweeps.
             m_RadiosityReadHistory?.MarkWritten();
             m_RadiosityWriteHistory?.MarkWritten();
+        }
+
+        private static int FarSlot(Vector3Int cell)
+        {
+            const int mask = FarGridSize - 1;
+            return (cell.x & mask) + FarGridSize * ((cell.z & mask) + FarGridSize * (cell.y & mask));
+        }
+
+        private void PrepareFarCache(Camera camera, VividSdfSurfaceCache cache, float distance)
+        {
+            var history = camera.GetVividCameraHistory();
+            if (!history.IsFrameActive || SystemInfo.maxTextureSize < FarGridSize * (FarDirectionCount + 1))
+                return;
+
+            m_FarDesc.Resize(FarGridSize * FarGridSize, FarGridSize * (FarDirectionCount + 1));
+            m_FarHistory = history.GetOrCreateTexture(FarHistoryId, 1,
+                CameraHistoryRenderGraphBridge.CreateDescriptor(m_FarDesc.desc));
+            m_FarDistance = distance;
+            m_FarCardVersion = cache.CardVersion;
+            var center = Vector3Int.FloorToInt(camera.transform.position / FarCellSize);
+            m_FarWindow = center - new Vector3Int(FarGridSize / 2, FarGridSize / 2, FarGridSize / 2);
+            m_FarClear = !m_FarHistory.IsValid(0) || m_State.FarDistance != m_FarDistance
+                || m_State.SceneRevision != m_Scene.Revision || !ReferenceEquals(m_State.Cache, cache)
+                || m_State.FarCardVersion != m_FarCardVersion || m_State.GatherRadiosityOrder != m_RadiosityOrder
+                || m_State.LayerMask != m_LayerMask || m_State.LightLayerMask != m_LightLayerMask
+                || m_State.MaxDistance != m_TraceDistance || m_State.RayBias != m_Bias
+                || !m_State.LightPositionRange.Equals(m_LightPositionRange) || !m_State.LightColorShadow.Equals(m_LightColorShadow);
+            var keys = m_State.FarKeys ??= new Vector3Int[FarProbeCount];
+            if (m_FarClear)
+                System.Array.Fill(keys, new Vector3Int(int.MinValue, int.MinValue, int.MinValue));
+
+            if (m_FarClear || m_State.FarPending || m_State.FarWindow != m_FarWindow)
+            {
+                for (int i = 0; i < FarProbeCount; i++)
+                {
+                    var cell = m_FarWindow + new Vector3Int(i % FarGridSize, i / (FarGridSize * FarGridSize),
+                        (i / FarGridSize) % FarGridSize);
+                    if (keys[FarSlot(cell)] == cell)
+                        continue;
+                    m_FarUpdates[m_FarUpdateCount++] = new Vector4(cell.x, cell.y, cell.z, 0f);
+                    if (m_FarUpdateCount == FarProbesPerFrame)
+                    {
+                        m_FarPending = true;
+                        break;
+                    }
+                }
+            }
+            m_FarAtlas = CameraHistoryRenderGraphBridge.ImportForPass(this, m_FarHistory, 0,
+                m_FarClear || m_FarUpdateCount > 0 ? AccessFlags.ReadWrite : AccessFlags.Read);
+        }
+
+        private void RecordFarCache(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black)
+        {
+            bool ready = m_FarAtlas.IsValid();
+            cmd.SetComputeFloatParam(m_Compute, FarDistanceId, ready ? m_FarDistance : 0f);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, FarRadianceId, ready ? m_FarAtlas : black);
+            if (!ready)
+                return;
+            cmd.SetComputeVectorParam(m_Compute, FarWindowId, new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f));
+
+            if (m_FarClear || m_FarUpdateCount > 0)
+            {
+                using var scope = new ProfilingScope(cmd, FarCacheSampler);
+                int kernel = m_FarKernel;
+                m_Scene.Bind(cmd, m_Compute, kernel);
+                cmd.SetComputeBufferParam(m_Compute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeBufferParam(m_Compute, kernel, LocalCardTableId, cache.LocalCardTable);
+                cmd.SetComputeTextureParam(m_Compute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_Compute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeBufferParam(m_Compute, kernel, RadiosityWorkId,
+                    m_RadiosityTargetOrders > 0 ? m_Scene.RadiosityWork : m_Scene.LeafInstances);
+                cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityInputId,
+                    m_RadiosityInput.IsValid() ? m_RadiosityInput : black);
+                cmd.SetComputeTextureParam(m_Compute, kernel, FarOutputId, m_FarAtlas);
+                if (m_FarClear)
+                {
+                    cmd.SetComputeIntParam(m_Compute, FarClearId, 1);
+                    cmd.DispatchCompute(m_Compute, kernel, FarProbeCount / FarDirectionCount, 1, 1);
+                }
+                cmd.SetComputeIntParam(m_Compute, FarClearId, 0);
+                if (m_FarUpdateCount > 0)
+                {
+                    cmd.SetComputeVectorArrayParam(m_Compute, FarUpdatesId, m_FarUpdates);
+                    cmd.DispatchCompute(m_Compute, kernel, m_FarUpdateCount, 1, 1);
+                    for (int i = 0; i < m_FarUpdateCount; i++)
+                    {
+                        var p = m_FarUpdates[i];
+                        var cell = new Vector3Int((int)p.x, (int)p.y, (int)p.z);
+                        m_State.FarKeys[FarSlot(cell)] = cell;
+                    }
+                }
+            }
+            m_FarHistory.MarkWritten();
+        }
+
+        private void RecordNearOcclusion(ComputeCommandBuffer cmd)
+        {
+            using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
+            int kernel = m_NearOcclusionKernel;
+            BindReceiver(cmd, kernel, bindProbes: false);
+            cmd.SetComputeVectorParam(m_Compute, NearOcclusionId, m_NearOcclusion);
+            cmd.SetComputeTextureParam(m_Compute, kernel, OutputId, m_Output.innerHandle);
+            cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
+                CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
 
         private void PrepareScreenHistory(ContextContainer frameData, Camera camera, VividTemporalData temporal)

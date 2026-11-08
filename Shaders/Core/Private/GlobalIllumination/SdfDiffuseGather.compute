@@ -10,6 +10,7 @@
 #pragma kernel ResolveSdfDiffuseGI
 #pragma kernel PlaceSdfAdaptiveProbes
 #pragma kernel FilterSdfDiffuseProbes
+#pragma kernel FilterSdfDirectionalHits
 #pragma kernel TemporalSdfDiffuseGI
 
 #include "../../Public/Input.hlsl"
@@ -42,11 +43,13 @@ Texture2D<float2> _SdfScreenPreviousGeometry;
 Texture2D<float4> _SdfScreenRays;
 Texture2D<float> _SdfAdaptivePlacement;
 Texture2D<float4> _SdfDiffuseProbeInput;
+Texture2D<float> _SdfDiffuseHitSamplesInput;
 Texture2D<float4> _SdfDiffuseCurrentResolved;
 Texture2D<float4> _SdfDiffusePreviousPixelLighting;
 Texture2D<uint> _SdfDiffusePreviousPixelGeometry;
 RWTexture2D<float> _SdfAdaptivePlacementOutput;
 RWTexture2D<float4> _SdfDiffuseFilteredProbes;
+RWTexture2D<float> _SdfDiffuseHitSamples;
 RWTexture2D<float4> _SdfScreenRaysOutput;
 RWTexture2D<float4> _SdfDiffuseProbes;
 RWTexture2D<float4> _SdfDiffuseGeometry;
@@ -76,6 +79,7 @@ uint _SdfDiffuseHasHistory;
 uint _SdfDiffuseDirectionalProbes;
 uint _SdfDiffuseAdaptiveProbes;
 uint _SdfDiffuseSpatialFilter;
+uint _SdfDiffuseHitFilterEnabled;
 uint _SdfDiffuseRealtimeOnly;
 uint _SdfDiffuseOffscreenOnly;
 uint _SdfDiffuseUseScreenRays;
@@ -682,13 +686,27 @@ float4 AccumulateProbe(float4 current, float3 position, float3 normal, inout flo
     return current;
 }
 
-void StoreRayDiagnostic(uint2 tile, uint ray, uint state, float distance, float3 radiance)
+void StoreTraceSample(uint2 tile, uint ray, uint state, float distance, float3 radiance, float3 direction = 0.0)
 {
+    uint2 address = uint2(tile.x * RaysPerProbe + ray, tile.y);
+    if (_SdfDiffuseHitFilterEnabled != 0u)
+    {
+        uint packed = 0u;
+        uint hitState = state & 7u;
+        if (hitState == RayScreenHit || hitState == RaySdfHit)
+        {
+            // Numeric float32 stores this 24-bit integer exactly. Zero marks an invalid hit.
+            uint2 oct = uint2(round(saturate(VividEncodeSurfaceSummaryNormal(direction)) * 63.0));
+            uint depth = max(1u, uint(round(saturate(distance / _SdfDiffuseMaxDistance) * 4095.0)));
+            packed = (depth << 12u) | (oct.y << 6u) | oct.x;
+        }
+        _SdfDiffuseHitSamples[address] = float(packed);
+    }
     if (_SdfDiffuseRecordRayDiagnostics != 0u)
     {
         // RGB is unexposed radiance. Decode W as floor(W) and frac(W) * 2 * maxDistance.
         float encoded = float(state) + 0.5 * saturate(distance / _SdfDiffuseMaxDistance);
-        _SdfDiffuseRayDiagnostics[uint2(tile.x * RaysPerProbe + ray, tile.y)] = float4(radiance, encoded);
+        _SdfDiffuseRayDiagnostics[address] = float4(radiance, encoded);
     }
 }
 
@@ -740,7 +758,7 @@ void TraceProbe(uint3 id)
             [unroll]
             for (uint ray = 0u; ray < RaysPerProbe; ++ray)
             {
-                StoreRayDiagnostic(tile, ray, 0u, 0.0, 0.0);
+                StoreTraceSample(tile, ray, 0u, 0.0, 0.0);
                 if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                 {
                     VividMeshSdfHit miss = (VividMeshSdfHit)0;
@@ -776,16 +794,17 @@ void TraceProbe(uint3 id)
             float4 screenHit = _SdfScreenRays.Load(int3(tile.x * RaysPerProbe + ray, tile.y, 0));
             if (screenHit.a > 0.0)
             {
-                StoreRayDiagnostic(tile, ray, RayScreenHit, screenHit.a, screenHit.rgb);
+                float3 direction = ProbeRayDirection(ray, seed, basis);
+                StoreTraceSample(tile, ray, RayScreenHit, screenHit.a, screenHit.rgb, direction);
                 if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                 {
                     VividMeshSdfHit miss = (VividMeshSdfHit)0;
                     miss.instanceIndex = 0xffffffffu;
-                    StoreFirstHitDiagnostic(tile, ray, origin, ProbeRayDirection(ray, seed, basis), miss, 0u);
+                    StoreFirstHitDiagnostic(tile, ray, origin, direction, miss, 0u);
                 }
                 sum += screenHit.rgb;
                 if (_SdfDiffuseDirectionalProbes != 0u)
-                    moments += ProbeSampleMoments(screenHit.rgb, ProbeRayDirection(ray, seed, basis), normal);
+                    moments += ProbeSampleMoments(screenHit.rgb, direction, normal);
                 screenHits++;
                 valid++;
                 continue;
@@ -804,7 +823,7 @@ void TraceProbe(uint3 id)
         #endif
         if (!traced)
         {
-            StoreRayDiagnostic(tile, ray, screenState | RayMiss, 0.0, 0.0);
+            StoreTraceSample(tile, ray, screenState | RayMiss, 0.0, 0.0);
             if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                 StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
             continue;
@@ -814,7 +833,7 @@ void TraceProbe(uint3 id)
         bool backface = dot(hit.normalWS, direction) >= 0.0;
         if (surface.albedoAndValid.a == 0.0 || backface)
         {
-            StoreRayDiagnostic(tile, ray, screenState | (backface ? RayBackface : RayMissingSurface), hit.distance, 0.0);
+            StoreTraceSample(tile, ray, screenState | (backface ? RayBackface : RayMissingSurface), hit.distance, 0.0);
             if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                 StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, backface ? 0u : 6u, advancedReceiver);
             unknown++;
@@ -829,7 +848,7 @@ void TraceProbe(uint3 id)
             if (!VividTrySampleSdfSurface(hit, hitPosition, surface, lightingNormal, cardTexel, surfaceError,
                 _SdfDiffuseRecordFirstHitDiagnostics != 0u, rejection))
             {
-                StoreRayDiagnostic(tile, ray, screenState | RayMissingSurface, hit.distance, 0.0);
+                StoreTraceSample(tile, ray, screenState | RayMissingSurface, hit.distance, 0.0);
                 if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                     StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, rejection, advancedReceiver);
                 unknown++;
@@ -844,7 +863,7 @@ void TraceProbe(uint3 id)
             float4 hitClip = mul(_SdfDiffuseVP, float4(hitPosition, 1.0));
             if (hitClip.w > 0.0 && all(abs(hitClip.xy) <= hitClip.w))
             {
-                StoreRayDiagnostic(tile, ray, screenState | RayOffscreenOnlyRejected, hit.distance, 0.0);
+                StoreTraceSample(tile, ray, screenState | RayOffscreenOnlyRejected, hit.distance, 0.0);
                 continue;
             }
         }
@@ -854,12 +873,12 @@ void TraceProbe(uint3 id)
             cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
         #endif
         float3 radiance = TraceHitLighting(hitPosition, lightingNormal, hit, surface, cachedVisibility);
-        StoreRayDiagnostic(tile, ray, screenState | RaySdfHit, hit.distance, radiance);
+        StoreTraceSample(tile, ray, screenState | RaySdfHit, hit.distance, radiance, direction);
         sum += radiance;
         if (_SdfDiffuseDirectionalProbes != 0u)
             moments += ProbeSampleMoments(radiance, direction, normal);
         #else
-            StoreRayDiagnostic(tile, ray, screenState | RayMiss, 0.0, 0.0);
+            StoreTraceSample(tile, ray, screenState | RayMiss, 0.0, 0.0);
             if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
             {
                 VividMeshSdfHit miss = (VividMeshSdfHit)0;
@@ -879,7 +898,8 @@ void TraceProbe(uint3 id)
     #endif
     float4 current = float4(min(sum / float(RaysPerProbe), 65000.0), confidence);
     moments /= float(RaysPerProbe);
-    current = AccumulateProbe(current, position, normal, moments);
+    if (_SdfDiffuseHitFilterEnabled == 0u)
+        current = AccumulateProbe(current, position, normal, moments);
     StoreProbe(tile, current, moments);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / RaysPerProbe);
@@ -936,48 +956,46 @@ float FilterNeighborWeight(uint2 tile, float4 center, float3 normal, float eyeDe
     return weight * _SdfDiffuseProbeInput.Load(int3(tile, 0)).a;
 }
 
-[numthreads(8, 8, 1)]
-void FilterSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
-{
-    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
-    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
-        return;
+static const int2 ProbeFilterOffsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
 
-    uint2 stride = uint2(grid.x, 0);
-    float4 center = _SdfDiffuseProbeInput.Load(int3(id.xy, 0));
-    float4 geometry = _SdfDiffuseGeometry[id.xy];
-    uint planes = _SdfDiffuseDirectionalProbes != 0u ? 4u : 1u;
-    float3 lighting[4];
+float SelectFilterNeighbor(int2 neighbor, uint2 grid, float4 center, float3 normal, float eyeDepth, out uint2 selected)
+{
+    selected = uint2(neighbor);
+    if (any(neighbor < 0) || any(neighbor >= int2(grid)))
+        return 0.0;
+    float weight = FilterNeighborWeight(selected, center, normal, eyeDepth);
+    if (_SdfDiffuseAdaptiveProbes != 0u)
+    {
+        uint2 adaptive = selected + uint2(0, grid.y);
+        float alternateWeight = FilterNeighborWeight(adaptive, center, normal, eyeDepth);
+        if (alternateWeight > weight)
+        {
+            weight = alternateWeight;
+            selected = adaptive;
+        }
+    }
+    return weight * 0.65;
+}
+
+void FilterProbeLighting(uint2 tile, uint2 grid, float4 center, float4 geometry, float3 normal,
+    float4 compatibility, uint planes, out float3 lighting[4])
+{
+    uint2 stride = uint2(grid.x, 0u);
     [loop]
     for (uint plane = 0u; plane < planes; ++plane)
-        lighting[plane] = _SdfDiffuseProbeInput.Load(int3(id.xy + plane * stride, 0)).rgb;
+        lighting[plane] = _SdfDiffuseProbeInput.Load(int3(tile + plane * stride, 0)).rgb;
 
     float total = 1.0;
     if (geometry.w >= 0.0 && center.a > 0.0)
     {
-        float3 normal = UnpackProbeNormal(geometry.w);
         float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
-        int2 tile = int2(id.x, id.y % grid.y);
-        const int2 offsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+        int2 uniformTile = int2(tile.x, tile.y % grid.y);
         [loop]
         for (uint i = 0u; i < 4u; ++i)
         {
-            int2 neighbor = tile + offsets[i];
-            if (any(neighbor < 0) || any(neighbor >= int2(grid)))
-                continue;
-            uint2 selected = uint2(neighbor);
-            float weight = FilterNeighborWeight(selected, geometry, normal, eyeDepth);
-            if (_SdfDiffuseAdaptiveProbes != 0u)
-            {
-                uint2 adaptive = selected + uint2(0, grid.y);
-                float alternateWeight = FilterNeighborWeight(adaptive, geometry, normal, eyeDepth);
-                if (alternateWeight > weight)
-                {
-                    weight = alternateWeight;
-                    selected = adaptive;
-                }
-            }
-            weight *= 0.65;
+            uint2 selected;
+            float weight = SelectFilterNeighbor(uniformTile + ProbeFilterOffsets[i], grid, geometry, normal, eyeDepth, selected);
+            weight *= compatibility[i];
             if (weight <= 0.0)
                 continue;
             total += weight;
@@ -989,7 +1007,122 @@ void FilterSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
 
     [loop]
     for (uint plane = 0u; plane < planes; ++plane)
-        _SdfDiffuseFilteredProbes[id.xy + plane * stride] = float4(lighting[plane] / total, plane == 0u ? center.a : 0.0);
+        lighting[plane] /= total;
+}
+
+[numthreads(8, 8, 1)]
+void FilterSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+        return;
+
+    float4 center = _SdfDiffuseProbeInput.Load(int3(id.xy, 0));
+    float4 geometry = _SdfDiffuseGeometry[id.xy];
+    float3 normal = geometry.w >= 0.0 ? UnpackProbeNormal(geometry.w) : 0.0;
+    uint planes = _SdfDiffuseDirectionalProbes != 0u ? 4u : 1u;
+    float3 lighting[4];
+    FilterProbeLighting(id.xy, grid, center, geometry, normal, 1.0, planes, lighting);
+    uint2 stride = uint2(grid.x, 0u);
+    [loop]
+    for (uint plane = 0u; plane < planes; ++plane)
+        _SdfDiffuseFilteredProbes[id.xy + plane * stride] = float4(lighting[plane], plane == 0u ? center.a : 0.0);
+}
+
+float3 DecodeHitDirection(uint packed)
+{
+    return VividDecodeSurfaceSummaryNormal(float2(packed & 63u, (packed >> 6u) & 63u) / 63.0);
+}
+
+float HitDistanceRejection(uint2 tile, float3 origin, float3 direction, float distance)
+{
+    float bestAlignment = 0.92;
+    float3 bestHit = 0.0;
+    [loop]
+    for (uint ray = 0u; ray < RaysPerProbe; ++ray)
+    {
+        uint packed = uint(_SdfDiffuseHitSamplesInput.Load(int3(tile.x * RaysPerProbe + ray, tile.y, 0)));
+        if (packed == 0u)
+            continue;
+        float3 neighborDirection = DecodeHitDirection(packed);
+        float alignment = dot(direction, neighborDirection);
+        if (alignment > bestAlignment)
+        {
+            bestAlignment = alignment;
+            bestHit = neighborDirection * (float(packed >> 12u) * (_SdfDiffuseMaxDistance / 4095.0));
+        }
+    }
+    if (bestAlignment <= 0.92)
+        return 0.0;
+
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    float3 offset = geometry.xyz + UnpackProbeNormal(geometry.w) * _SdfDiffuseRayBias - origin;
+    float3 hit = offset + bestHit;
+    float tolerance = max(0.12, 0.15 * distance) + 0.25 * length(offset);
+    float separation = abs(dot(hit, direction) - distance);
+    return smoothstep(0.92, 0.99, bestAlignment) * smoothstep(tolerance, 2.0 * tolerance, separation);
+}
+
+groupshared float4 ProbeHitRejection[8][RaysPerProbe];
+
+[numthreads(8, 8, 1)]
+void FilterSdfDirectionalHits(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+{
+    uint2 tile = uint2(group.x * 8u + lane.y, group.y);
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    bool inBounds = tile.x < grid.x;
+    float4 center = 0.0;
+    float4 geometry = 0.0;
+    float3 normal = 0.0;
+    float4 rejection = 0.0;
+    if (inBounds)
+    {
+        center = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+        geometry = _SdfDiffuseGeometry[tile];
+        if (center.a > 0.0 && geometry.w >= 0.0)
+        {
+            normal = UnpackProbeNormal(geometry.w);
+            uint packed = uint(_SdfDiffuseHitSamplesInput.Load(int3(tile.x * RaysPerProbe + lane.x, tile.y, 0)));
+            if (packed != 0u)
+            {
+                float3 direction = DecodeHitDirection(packed);
+                float distance = float(packed >> 12u) * (_SdfDiffuseMaxDistance / 4095.0);
+                float3 origin = geometry.xyz + normal * _SdfDiffuseRayBias;
+                float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
+                int2 uniformTile = int2(tile.x, tile.y % grid.y);
+                [loop]
+                for (uint i = 0u; i < 4u; ++i)
+                {
+                    uint2 selected;
+                    float weight = SelectFilterNeighbor(uniformTile + ProbeFilterOffsets[i], grid, geometry, normal, eyeDepth, selected);
+                    if (weight > 0.0)
+                        rejection[i] = HitDistanceRejection(selected, origin, direction, distance);
+                }
+            }
+        }
+    }
+
+    ProbeHitRejection[lane.y][lane.x] = rejection;
+    GroupMemoryBarrierWithGroupSync();
+    if (!inBounds || lane.x != 0u)
+        return;
+
+    [unroll]
+    for (uint ray = 1u; ray < RaysPerProbe; ++ray)
+        rejection += ProbeHitRejection[lane.y][ray];
+
+    // Only aligned rays provide evidence of a discontinuity. Keep the original
+    // spatial weight where sparse samples cannot establish a correspondence.
+    float4 compatibility = 1.0 - 0.75 * saturate(0.5 * rejection);
+    uint planes = _SdfDiffuseDirectionalProbes != 0u ? 4u : 1u;
+    float3 lighting[4];
+    FilterProbeLighting(tile, grid, center, geometry, normal, compatibility, planes, lighting);
+    float3x3 moments = (float3x3)0.0;
+    if (planes > 1u)
+        moments = float3x3(lighting[1], lighting[2], lighting[3]);
+    center.rgb = lighting[0];
+    center = AccumulateProbe(center, geometry.xyz, normal, moments);
+    StoreProbe(tile, center, moments);
 }
 
 void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal, float eyeDepth,

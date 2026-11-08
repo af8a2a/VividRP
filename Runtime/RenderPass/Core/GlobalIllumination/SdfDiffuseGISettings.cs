@@ -43,6 +43,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Filter neighboring screen probes using depth and normal agreement before resolving diffuse GI.")]
         public BoolParameter screenProbeSpatialFilter = new(false);
 
+        [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
+        public BoolParameter screenProbeHitDistanceFilter = new(false);
+
         [Tooltip("Reproject the resolved indirect diffuse lighting with motion vectors instead of accumulating the probe grid.")]
         public BoolParameter pixelTemporal = new(false);
 

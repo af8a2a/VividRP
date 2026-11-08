@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using Unity.Scripting.LifecycleManagement;
 
@@ -83,6 +84,10 @@ namespace VividRP.Runtime.GPUDriven
 
     internal static class GPUDrivenMaterialCompiler
     {
+        private const string StandardLitEmissionKeyword = "_EMISSION";
+        private static readonly int s_EmissionMapId = Shader.PropertyToID("_EmissionMap");
+        private static readonly int s_EmissionColorId = Shader.PropertyToID("_EmissionColor");
+
         internal const uint RuntimeAbiVersion = MaterialProgramContract.RuntimeAbiVersion;
 
         // Compatibility name used by the current HLSL contract and existing callers.
@@ -1177,6 +1182,59 @@ namespace VividRP.Runtime.GPUDriven
                 ResourceBindingAddress = surfaceBindingIndex,
                 Flags = VividMaterialRuntimeFlags.None,
             };
+        }
+
+        internal static Color ResolveStandardLitEmissionColor(Material material, out bool approximatesTexture)
+        {
+            approximatesTexture = false;
+            Color tint = material.GetColor(s_EmissionColorId);
+            Color black = new Color(0f, 0f, 0f, tint.a);
+            if (!material.IsKeywordEnabled(StandardLitEmissionKeyword))
+                return black;
+
+            Texture map = material.GetTexture(s_EmissionMapId);
+            if (map == null || map == Texture2D.blackTexture)
+                return black;
+
+            if (map != Texture2D.whiteTexture)
+            {
+                // Cornell box fixtures and imported materials can use a saved white/black texel.
+                if (TryGetReadableEmissionTexel(map, out Texture2D texel))
+                {
+                    Color sample = texel.GetPixel(0, 0);
+                    if (sample.r == 0f && sample.g == 0f && sample.b == 0f)
+                        return black;
+                    approximatesTexture = sample.r != 1f || sample.g != 1f || sample.b != 1f;
+                }
+                else
+                {
+                    approximatesTexture = true;
+                }
+            }
+
+            return tint;
+        }
+
+        internal static uint GetEmissionTexelRevision(Material material)
+        {
+            if (!material.IsKeywordEnabled(StandardLitEmissionKeyword) || !material.HasProperty(s_EmissionMapId))
+                return 0u;
+
+            return TryGetReadableEmissionTexel(material.GetTexture(s_EmissionMapId), out Texture2D texel)
+                ? texel.updateCount : 0u;
+        }
+
+        private static bool TryGetReadableEmissionTexel(Texture map, out Texture2D texel)
+        {
+            texel = map as Texture2D;
+            return texel != null && texel.width == 1 && texel.height == 1 && texel.isReadable
+                && !GraphicsFormatUtility.IsCrunchFormat(texel.format);
+        }
+
+        internal static float4 ResolveStandardLitProxyEmission(GPUDrivenMaterialProxy proxy)
+        {
+            return ResolveProxyParameter(MaterialNativeTemplateDeclarationAdapter.GetParameter(MaterialParameter.Emission),
+                proxy, null);
         }
 
         internal static float4 ConvertMaterialColorForGPU(Color color)

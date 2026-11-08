@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: 336bc81574956354b97f89a2af2fdefe
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 71e8772aad0a4a446992b2748b522394, type: 3}
+  Mesh: {fileID: 4300000, guid: 6917a7ebdfad4e946a96a4a711161ace, type: 2}
+  SubMeshIndex: 0
+  OptimizeVertexCache: 0
+  TargetError: 0.01
+  TargetErrorSloppy: 0.001
+  NormalWeight: 0.1
+  UVWeight: 0.05
+  MinTriangleReductionPerStep: 0.8
+  MaxMeshLODLevelCount: 0

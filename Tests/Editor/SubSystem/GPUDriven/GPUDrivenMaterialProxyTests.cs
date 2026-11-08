@@ -356,6 +356,8 @@ namespace VividRP.Editor.Tests
                 material.SetFloat("_Metallic", 0.4f);
                 material.SetFloat("_Smoothness", 0.3f);
                 material.SetColor("_EmissionColor", new Color(1.0f, 0.5f, 0.0f, 1.0f));
+                material.SetTexture("_EmissionMap", Texture2D.whiteTexture);
+                material.EnableKeyword("_EMISSION");
                 material.SetFloat("_AlphaClip", 1.0f);
                 material.SetFloat("_Cutoff", 0.33f);
                 material.SetFloat("_Cull", (float) CullMode.Off);
@@ -468,6 +470,35 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [TestCase(false, true, false)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, true)]
+        public void SyncFromSourceMaterial_ResolvesStandardLitEmission(bool enabled, bool hasWhiteMap, bool emits)
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            Assert.That(shader, Is.Not.Null);
+            var material = new Material(shader);
+            var proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            try
+            {
+                var tint = new Color(2f, 1f, 0.5f, 1f);
+                material.SetColor("_EmissionColor", tint);
+                material.SetTexture("_EmissionMap", hasWhiteMap ? Texture2D.whiteTexture : null);
+                if (enabled)
+                    material.EnableKeyword("_EMISSION");
+                else
+                    material.DisableKeyword("_EMISSION");
+
+                Assert.That(proxy.SyncFromSourceMaterial(material).Success, Is.True);
+                Assert.That(proxy.EmissionColor, Is.EqualTo(emits ? tint : Color.black));
+            }
+            finally
+            {
+                Object.DestroyImmediate(proxy);
+                Object.DestroyImmediate(material);
+            }
+        }
+
         [Test]
         public void CollectUnsupportedWarnings_ReturnsWarnings_WhenMaterialUsesUnsupportedFeatures()
         {
@@ -489,13 +520,14 @@ namespace VividRP.Editor.Tests
                 opacityMap = new Texture2D(1, 1);
                 metallicGlossMap = new Texture2D(1, 1);
                 roughnessMap = new Texture2D(1, 1);
-                emissionMap = new Texture2D(1, 1);
+                emissionMap = new Texture2D(2, 1);
                 occlusionMap = new Texture2D(1, 1);
                 material = new Material(shader);
                 material.SetTexture("_OpacityMap", opacityMap);
                 material.SetTexture("_MetallicGlossMap", metallicGlossMap);
                 material.SetTexture("_RoughnessMap", roughnessMap);
                 material.SetTexture("_EmissionMap", emissionMap);
+                material.EnableKeyword("_EMISSION");
                 material.SetTexture("_OcclusionMap", occlusionMap);
                 material.SetFloat("_ClearCoatMask", 1.0f);
                 material.SetFloat("_SmoothnessTextureChannel", 1.0f);

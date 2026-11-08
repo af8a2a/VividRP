@@ -2008,6 +2008,7 @@ namespace VividRP.Editor.Tests
             Texture2D baseMap = null;
             Texture2D normalMap = null;
             Texture2D metallicMap = null;
+            Texture2D emissionMap = null;
             VividMeshletCollectionAsset meshletCollection = null;
 
             try
@@ -2027,6 +2028,11 @@ namespace VividRP.Editor.Tests
                 material.SetFloat("_Metallic", 0.4f);
                 material.SetFloat("_Smoothness", 0.2f);
                 material.SetColor("_EmissionColor", new Color(1.0f, 0.5f, 0.0f, 0.25f));
+                emissionMap = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                emissionMap.SetPixel(0, 0, Color.white);
+                emissionMap.Apply();
+                material.SetTexture("_EmissionMap", emissionMap);
+                material.EnableKeyword("_EMISSION");
                 material.SetFloat("_AlphaClip", 1.0f);
                 material.SetFloat("_Cutoff", 0.33f);
                 material.SetFloat("_Cull", 0.0f);
@@ -2101,6 +2107,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.Emission.w, Is.EqualTo(0.25f).Within(0.0001f));
                 Assert.That(materialData.RendererListID, Is.EqualTo(VividRendererListID.CullOff | VividRendererListID.AlphaTest));
                 Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.33f).Within(0.0001f));
+
+                emissionMap.SetPixel(0, 0, Color.black);
+                emissionMap.Apply();
+                system.PrepareFrame();
+                Assert.That(system.SceneData.Materials[0].Emission.xyz, Is.EqualTo(new float3(0f)));
             }
             finally
             {
@@ -2119,6 +2130,11 @@ namespace VividRP.Editor.Tests
                 if (metallicMap != null)
                 {
                     Object.DestroyImmediate(metallicMap);
+                }
+
+                if (emissionMap != null)
+                {
+                    Object.DestroyImmediate(emissionMap);
                 }
             }
         }

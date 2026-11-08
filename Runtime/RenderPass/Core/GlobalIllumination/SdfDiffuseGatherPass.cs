@@ -107,6 +107,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ViewProjectionId = Shader.PropertyToID("_SdfDiffuseVP");
         private static readonly int CardAlbedoDepthId = Shader.PropertyToID("_SdfSurfaceAlbedoDepth");
         private static readonly int CardNormalCoverageId = Shader.PropertyToID("_SdfSurfaceNormalCoverage");
+        private static readonly int LocalCardOwnerId = Shader.PropertyToID("_SdfLocalCardOwner");
+        private static readonly int LocalCardMinAndSliceId = Shader.PropertyToID("_SdfLocalCardMinAndSlice");
+        private static readonly int LocalCardExtentAndFaceId = Shader.PropertyToID("_SdfLocalCardExtentAndFace");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
@@ -491,6 +494,10 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, CardAlbedoDepthId, m_CardAlbedoDepth);
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cache.GetLocalCard(out int owner, out var minAndSlice, out var extentAndFace);
+                cmd.SetComputeIntParam(m_Compute, LocalCardOwnerId, owner);
+                cmd.SetComputeVectorParam(m_Compute, LocalCardMinAndSliceId, minAndSlice);
+                cmd.SetComputeVectorParam(m_Compute, LocalCardExtentAndFaceId, extentAndFace);
             }
             bool hasHistory = m_HasHistory && m_PreviousProbes.innerHandle.IsValid() && m_PreviousGeometry.innerHandle.IsValid();
             var black = context.renderGraphContext.defaultResources.blackTexture;

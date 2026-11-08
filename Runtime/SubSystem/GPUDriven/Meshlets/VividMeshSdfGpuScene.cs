@@ -64,7 +64,6 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
-        private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
         private static readonly int SurfaceId = Shader.PropertyToID("_Surface");
         private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
 
@@ -314,7 +313,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 return default;
 
             var baseColor = GPUDrivenMaterialCompiler.ConvertMaterialColorForGPU(material.GetColor(BaseColorId));
-            var emission = GPUDrivenMaterialCompiler.ConvertMaterialColorForGPU(material.GetColor(EmissionColorId));
+            var proxies = renderer.materialProxies;
+            var proxy = proxies.Count > 0 ? proxies[0] : null;
+            var emission = proxy != null && proxy.Model == GPUDrivenMaterialProxyModel.StandardLit && proxy.MaterialGraph == null
+                ? GPUDrivenMaterialCompiler.ResolveStandardLitProxyEmission(proxy)
+                : GPUDrivenMaterialCompiler.ConvertMaterialColorForGPU(
+                    GPUDrivenMaterialCompiler.ResolveStandardLitEmissionColor(material, out _));
             float diffuse = 1f - Mathf.Clamp01(material.GetFloat(MetallicId));
             if (!math.all(math.isfinite(baseColor)) || !math.all(math.isfinite(emission)) || !float.IsFinite(diffuse))
                 return default;

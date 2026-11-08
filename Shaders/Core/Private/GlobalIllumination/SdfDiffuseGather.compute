@@ -182,7 +182,7 @@ float LoadCachedSunVisibility(DiffuseSurface surface, uint3 cardTexel, float sur
 {
     uint card = ((uint)surface.cardExtent.w - 1u) * 6u + cardTexel.z;
     uint2 pixel = cardTexel.xy;
-    if (card >= _SdfSunReadyCards || any(pixel == 0u) || any(pixel + 1u >= uint2(_SdfSunLayout.xy))
+    if (cardTexel.z == VividSdfLocalCardSlot || card >= _SdfSunReadyCards || any(pixel == 0u) || any(pixel + 1u >= uint2(_SdfSunLayout.xy))
         || dot(hit.normalWS, lightingNormal) < 0.95
         || dot(hit.normalWS, _SdfDiffuseLightPositionRange.xyz) <= 0.0)
         return -1.0;

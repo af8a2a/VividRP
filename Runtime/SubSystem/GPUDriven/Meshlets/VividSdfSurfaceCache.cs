@@ -20,6 +20,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         [SerializeField] private Texture2DArray m_AlbedoDepth;
         [SerializeField] private Texture2DArray m_NormalCoverage;
         [SerializeField] private Entry[] m_Entries;
+        [SerializeField] private int m_LocalCardEntry = -1;
+        [SerializeField] private int m_LocalCardFace;
+        [SerializeField] private Bounds m_LocalCardBounds;
         private Dictionary<(Mesh, Material), int> m_Indices;
         private RTHandle m_AlbedoDepthHandle, m_NormalCoverageHandle;
 
@@ -27,19 +30,39 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal RTHandle NormalCoverageHandle => m_NormalCoverageHandle ??= RTHandles.Alloc(m_NormalCoverage);
         internal Vector2Int CardSize => new(m_AlbedoDepth.width, m_AlbedoDepth.height);
         internal ulong CardVersion => ((ulong)m_AlbedoDepth.updateCount << 32) | m_NormalCoverage.updateCount;
+        private bool HasLocalCard => m_LocalCardEntry >= 0 && m_LocalCardEntry < m_Entries.Length
+            && (uint)m_LocalCardFace < CardsPerMesh && m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh + 1;
         internal bool IsUsable => m_Entries != null && m_Entries.Length != 0
             && m_AlbedoDepth != null && m_NormalCoverage != null
-            && m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh
+            && (m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh || HasLocalCard)
             && m_NormalCoverage.depth == m_AlbedoDepth.depth
             && m_NormalCoverage.width == m_AlbedoDepth.width && m_NormalCoverage.height == m_AlbedoDepth.height;
 
-        internal void Initialize(Entry[] entries, Texture2DArray albedoDepth, Texture2DArray normalCoverage)
+        internal void Initialize(Entry[] entries, Texture2DArray albedoDepth, Texture2DArray normalCoverage,
+            int localCardEntry = -1, int localCardFace = 0, Bounds localCardBounds = default)
         {
             OnDisable();
             m_Entries = entries;
             m_AlbedoDepth = albedoDepth;
             m_NormalCoverage = normalCoverage;
+            m_LocalCardEntry = localCardEntry;
+            m_LocalCardFace = localCardFace;
+            m_LocalCardBounds = localCardBounds;
             m_Indices = null;
+        }
+
+        internal void GetLocalCard(out int owner, out Vector4 minAndSlice, out Vector4 extentAndFace)
+        {
+            owner = 0;
+            minAndSlice = extentAndFace = default;
+            if (!HasLocalCard)
+                return;
+
+            Vector3 min = m_LocalCardBounds.min;
+            Vector3 extent = m_LocalCardBounds.size;
+            owner = m_LocalCardEntry * CardsPerMesh + 1;
+            minAndSlice = new Vector4(min.x, min.y, min.z, m_AlbedoDepth.depth - 1);
+            extentAndFace = new Vector4(extent.x, extent.y, extent.z, m_LocalCardFace);
         }
 
         private void OnDisable()

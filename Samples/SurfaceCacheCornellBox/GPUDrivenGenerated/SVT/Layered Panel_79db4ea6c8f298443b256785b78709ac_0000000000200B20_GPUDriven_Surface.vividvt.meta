@@ -1,0 +1,36 @@
+fileFormatVersion: 2
+guid: 5017d00630f757f44805511776eb903e
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 9d714e2d1ea690345bfa9c59b7fd29ba, type: 3}
+  SourceTexture: {fileID: 2800000, guid: ccc816356131a314fbd8d1c8d9f99ce6, type: 2}
+  NormalTexture: {instanceID: 0}
+  MaskTexture: {instanceID: 0}
+  BuildProfile: 1
+  AddressMode: 1
+  StorageProfile: 1
+  StreamCompression: 1
+  MaskStorage: 0
+  BCQuality: 1
+  ZstdLevel: 3
+  ChunkTargetKiB: 256
+  storageSettingsInitialized: 0
+  sourceKind: 0
+  terrainCompositeSource:
+    sourceTerrainDataGUID: 
+    terrainSize: {x: 0, y: 0}
+    maxResolution: 0
+    outputResolution: {x: 0, y: 0}
+    layers: []
+    controlMaps: []
+  PageSize: 128
+  BorderSize: 8
+  MipCount: 0
+  FallbackColor: {r: 1, g: 1, b: 1, a: 1}
+  NormalFallbackColor: {r: 0.5, g: 0.5, b: 1, a: 0.5}
+  MaskFallbackColor: {r: 1, g: 1, b: 1, a: 1}

@@ -168,7 +168,9 @@ namespace VividRP.Editor.GPUDriven
                 sourceMaterial,
                 s_AORemapMinId,
                 s_AORemapMaxId);
-            materialProxy.EmissionColor = GetColor(sourceMaterial, s_EmissionColorId, Color.black);
+            materialProxy.EmissionColor = sourceMaterial.shader != null && sourceMaterial.shader.name == StandardLitShaderName
+                ? GPUDrivenMaterialCompiler.ResolveStandardLitEmissionColor(sourceMaterial, out _)
+                : GetColor(sourceMaterial, s_EmissionColorId, Color.black);
             materialProxy.AlphaClip = IsAlphaClipEnabled(sourceMaterial);
             materialProxy.Cutoff = GetFloat(sourceMaterial, s_CutoffId, 0.5f);
             materialProxy.CullMode = (CullMode) Mathf.RoundToInt(GetFloat(sourceMaterial, s_CullId, (float) CullMode.Back));
@@ -248,7 +250,8 @@ namespace VividRP.Editor.GPUDriven
                 return;
             }
 
-            if (sourceMaterial.shader == null || sourceMaterial.shader.name != StandardLitShaderName)
+            bool isStandardLit = sourceMaterial.shader != null && sourceMaterial.shader.name == StandardLitShaderName;
+            if (!isStandardLit)
             {
                 warnings.Add(
                     $"Source shader '{sourceMaterial.shader?.name ?? "<null>"}' is outside the V1 GPUDriven StandardLit sync target; values are synchronized best-effort."
@@ -266,9 +269,14 @@ namespace VividRP.Editor.GPUDriven
                 warnings.Add("_RoughnessMap is ignored because _MetallicGlossMap already occupies the GPUDriven mask layer.");
             }
 
-            if (HasTexture(sourceMaterial, s_EmissionMapId))
+            bool approximatesEmissionTexture;
+            if (isStandardLit)
+                GPUDrivenMaterialCompiler.ResolveStandardLitEmissionColor(sourceMaterial, out approximatesEmissionTexture);
+            else
+                approximatesEmissionTexture = HasTexture(sourceMaterial, s_EmissionMapId);
+            if (approximatesEmissionTexture)
             {
-                warnings.Add("_EmissionMap is not consumed by the V1 GPUDriven StandardLit path.");
+                warnings.Add("V1 GPUDriven uses _EmissionColor as a constant approximation for this _EmissionMap.");
             }
 
             if (HasTexture(sourceMaterial, s_OcclusionMapId))

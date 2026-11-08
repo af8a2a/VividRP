@@ -36,6 +36,13 @@ namespace VividRP.Editor.GPUDriven.Meshlets
 
         public static VividSdfSurfaceCache Bake(IReadOnlyList<MeshletRenderer> renderers, string path, int resolution = 64)
         {
+            return Bake(renderers, path, resolution, null, default, 0);
+        }
+
+        /// <summary>Adds one local capture in mesh space. Faces are -X, +X, -Y, +Y, -Z, +Z.</summary>
+        public static VividSdfSurfaceCache Bake(IReadOnlyList<MeshletRenderer> renderers, string path, int resolution,
+            MeshletRenderer localCardRenderer, Bounds localCardBounds, int localCardFace)
+        {
             if (!path.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || AssetDatabase.LoadMainAssetAtPath(path) != null)
                 throw new ArgumentException("Choose an unused .asset path for the surface cache.", nameof(path));
 
@@ -45,8 +52,20 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 throw new InvalidOperationException("Surface cards require MRT raster capture and texture array readback.");
 
             var entries = CollectEntries(renderers);
-            int sliceCount = entries.Count * VividSdfSurfaceCache.CardsPerMesh;
-            if (sliceCount == 0 || sliceCount > SystemInfo.maxTextureArraySlices)
+            int localCardEntry = -1;
+            if (localCardRenderer != null)
+            {
+                if (localCardRenderer.sourceMaterials.Count == 1)
+                    localCardEntry = entries.FindIndex(entry => entry.Mesh == localCardRenderer.sourceMesh
+                        && entry.Material == localCardRenderer.sourceMaterials[0]);
+                Vector3 min = localCardBounds.min;
+                Vector3 max = localCardBounds.max;
+                if (localCardEntry < 0 || (uint)localCardFace >= VividSdfSurfaceCache.CardsPerMesh
+                    || !IsValidInterval(min.x, max.x) || !IsValidInterval(min.y, max.y) || !IsValidInterval(min.z, max.z))
+                    throw new ArgumentException("A local card needs an eligible renderer, a face from 0 to 5 and finite mesh-space bounds.");
+            }
+            int sliceCount = entries.Count * VividSdfSurfaceCache.CardsPerMesh + (localCardEntry >= 0 ? 1 : 0);
+            if (entries.Count == 0 || sliceCount > SystemInfo.maxTextureArraySlices)
                 throw new InvalidOperationException($"Surface cache needs a supported number of array slices, found {sliceCount}.");
 
             resolution = Mathf.Clamp(resolution, 16, 128);
@@ -57,8 +76,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             var cache = ScriptableObject.CreateInstance<VividSdfSurfaceCache>();
             try
             {
-                Capture(entries, shader, resolution, albedo, normal);
-                cache.Initialize(entries.ToArray(), albedo, normal);
+                Capture(entries, shader, resolution, albedo, normal, localCardEntry, localCardFace, localCardBounds);
+                cache.Initialize(entries.ToArray(), albedo, normal, localCardEntry, localCardFace, localCardBounds);
                 AssetDatabase.CreateAsset(cache, path);
                 AssetDatabase.AddObjectToAsset(albedo, cache);
                 AssetDatabase.AddObjectToAsset(normal, cache);
@@ -78,6 +97,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 throw;
             }
         }
+
+        private static bool IsValidInterval(float min, float max) => float.IsFinite(max - min) && min < max;
 
         private static List<VividSdfSurfaceCache.Entry> CollectEntries(IReadOnlyList<MeshletRenderer> renderers)
         {
@@ -103,7 +124,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
         }
 
         private static void Capture(List<VividSdfSurfaceCache.Entry> entries, Shader shader, int resolution,
-            Texture2DArray albedo, Texture2DArray normal)
+            Texture2DArray albedo, Texture2DArray normal, int localCardEntry, int localCardFace, Bounds localCardBounds)
         {
             var albedoTarget = RenderTexture.GetTemporary(new RenderTextureDescriptor(resolution, resolution, AlbedoDepthFormat, 24));
             var normalTarget = RenderTexture.GetTemporary(new RenderTextureDescriptor(resolution, resolution, NormalFormat, 0));
@@ -117,21 +138,14 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 {
                     var entry = entries[entryIndex];
                     SetMaterialProperties(entry.Material, properties);
-                    var size = entry.Bounds.size;
-                    var min = entry.Bounds.min;
-                    properties.SetVector(InverseExtent, new Vector4(1f / size.x, 1f / size.y, 1f / size.z, 0f));
                     for (int face = 0; face < VividSdfSurfaceCache.CardsPerMesh; face++)
-                    {
-                        properties.SetVector(MinAndFace, new Vector4(min.x, min.y, min.z, face));
-                        cmd.SetRenderTarget(targets, albedoTarget);
-                        cmd.SetViewport(new Rect(0f, 0f, resolution, resolution));
-                        cmd.DisableScissorRect();
-                        cmd.ClearRenderTarget(true, true, Color.clear);
-                        cmd.DrawMesh(entry.Mesh, Matrix4x4.identity, capture, 0, 0, properties);
-                        int slice = entryIndex * VividSdfSurfaceCache.CardsPerMesh + face;
-                        cmd.CopyTexture(albedoTarget, 0, 0, albedo, slice, 0);
-                        cmd.CopyTexture(normalTarget, 0, 0, normal, slice, 0);
-                    }
+                        CaptureCard(entry.Mesh, entry.Bounds, face, entryIndex * VividSdfSurfaceCache.CardsPerMesh + face);
+                }
+                if (localCardEntry >= 0)
+                {
+                    var entry = entries[localCardEntry];
+                    SetMaterialProperties(entry.Material, properties);
+                    CaptureCard(entry.Mesh, localCardBounds, localCardFace, albedo.depth - 1);
                 }
                 Graphics.ExecuteCommandBuffer(cmd);
                 var albedoReadback = AsyncGPUReadback.Request(albedo, 0);
@@ -155,6 +169,21 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 Object.DestroyImmediate(capture);
                 RenderTexture.ReleaseTemporary(albedoTarget);
                 RenderTexture.ReleaseTemporary(normalTarget);
+            }
+
+            void CaptureCard(Mesh mesh, Bounds bounds, int face, int slice)
+            {
+                var size = bounds.size;
+                var min = bounds.min;
+                properties.SetVector(InverseExtent, new Vector4(1f / size.x, 1f / size.y, 1f / size.z, 0f));
+                properties.SetVector(MinAndFace, new Vector4(min.x, min.y, min.z, face));
+                cmd.SetRenderTarget(targets, albedoTarget);
+                cmd.SetViewport(new Rect(0f, 0f, resolution, resolution));
+                cmd.DisableScissorRect();
+                cmd.ClearRenderTarget(true, true, Color.clear);
+                cmd.DrawMesh(mesh, Matrix4x4.identity, capture, 0, 0, properties);
+                cmd.CopyTexture(albedoTarget, 0, 0, albedo, slice, 0);
+                cmd.CopyTexture(normalTarget, 0, 0, normal, slice, 0);
             }
         }
 

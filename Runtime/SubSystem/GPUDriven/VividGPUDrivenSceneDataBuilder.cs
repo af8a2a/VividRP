@@ -1608,9 +1608,11 @@ namespace VividRP.Runtime.GPUDriven
 
         private static uint ComputeFallbackMaterialRevision(Material material)
         {
-            return material != null
-                ? unchecked((uint) material.ComputeCRC())
-                : 0u;
+            if (material == null)
+                return 0u;
+
+            // The material CRC covers the texture binding. The emission tint can also depend on its texel.
+            return unchecked((uint) material.ComputeCRC() * 16777619u ^ GPUDrivenMaterialCompiler.GetEmissionTexelRevision(material));
         }
 
         private static void AppendGenericMaterialResources(
@@ -1990,7 +1992,9 @@ namespace VividRP.Runtime.GPUDriven
             {
                 AlbedoColor = GetColor(material, s_BaseColorPropertyId, Color.white),
                 TextureTilingOffset = GetTilingOffset(material),
-                Emission = GetColor(material, s_EmissionColorPropertyId, Color.black),
+                Emission = material != null && IsStandardLitShader(material.shader)
+                    ? ConvertMaterialColorForGPU(GPUDrivenMaterialCompiler.ResolveStandardLitEmissionColor(material, out _))
+                    : GetColor(material, s_EmissionColorPropertyId, Color.black),
                 MetallicSmoothnessRemap = new float4(
                     GetFloat(material, s_MetallicRemapMinPropertyId, 0.0f),
                     GetFloat(material, s_MetallicRemapMaxPropertyId, 1.0f),

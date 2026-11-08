@@ -22,6 +22,7 @@
 #include "../../Public/SurfaceSummaryGBuffer.hlsl"
 #include "../../Public/MotionVectorsCommon.hlsl"
 #include "../../Public/GPUDriven/VividVisibilityBuffer.hlsl"
+#include "../../Public/VividSkyLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
 static const uint ProbeSpacing = 16u;
@@ -34,7 +35,10 @@ static const uint RayMissingSurface = 3u;
 static const uint RayMiss = 4u;
 static const uint RayBackface = 5u;
 static const uint RayOffscreenOnlyRejected = 6u;
+static const uint RaySkyVisible = 7u;
 static const uint RayScreenHistoryRejected = 8u;
+static const uint RaySkyOccluded = 16u;
+static const uint RaySkyUnresolved = 32u;
 
 Texture2D<float> _SdfDiffuseDepth;
 Texture2D<float4> _SdfDiffuseGBuffer0;
@@ -76,6 +80,7 @@ float4 _SdfProbeCameraForward;
 float4 _SdfDiffuseLightPositionRange;
 float4 _SdfDiffuseLightColorShadow;
 float _SdfDiffuseMaxDistance;
+float _SdfDiffuseSkyTraceDistance;
 float _SdfDiffuseRayBias;
 uint _SdfDiffuseLayerMask;
 uint _SdfDiffuseLightLayerMask;
@@ -91,6 +96,32 @@ uint _SdfDiffuseOffscreenOnly;
 uint _SdfDiffuseUseScreenRays;
 uint _SdfDiffuseRecordRayDiagnostics;
 uint _SdfDiffuseRecordFirstHitDiagnostics;
+
+uint ResolveSdfSkyMiss(float3 origin, float3 direction, bool incomplete, uint screenState)
+{
+    // A depth hit without readable history still blocks the sky on this ray.
+    if (screenState != 0u)
+        return RayMiss | RaySkyOccluded;
+    if (incomplete)
+        return RayMiss | RaySkyUnresolved;
+
+    VividMeshSdfNode root = _MeshSdfNodes[0];
+    float entry = _SdfDiffuseMaxDistance;
+    float exit = FLT_MAX;
+    if (!VividMeshSdfClipRay(origin, direction, root.boundsMin, root.boundsMax, entry, exit))
+        return RaySkyVisible;
+
+    float limit = min(exit, _SdfDiffuseSkyTraceDistance);
+    if (entry <= limit)
+    {
+        VividMeshSdfHit unused;
+        bool advancedReceiver;
+        if (VividTraceMeshSdfSceneInternal(origin, direction, entry, limit, _SdfDiffuseLayerMask,
+            0.0, true, (VividMeshSdfReceiver)0, unused, advancedReceiver, incomplete))
+            return RayMiss | RaySkyOccluded;
+    }
+    return !incomplete && exit <= _SdfDiffuseSkyTraceDistance ? RaySkyVisible : (RayMiss | RaySkyUnresolved);
+}
 
 float ResolveSunShadowBias(VividMeshSdfField field, VividMeshSdfInstance instance, float3 normalWS)
 {
@@ -853,10 +884,16 @@ void TraceProbe(uint3 id)
     float3x3 moments = (float3x3)0.0;
     uint valid = 0u;
     uint screenHits = 0u;
+    uint skyHits = 0u;
     uint unknown = 0u;
     uint cachedSunHits = 0u;
     RestirReservoir reservoir = (RestirReservoir)0;
     float reservoirWeightSum = 0.0;
+    #if defined(VIVID_SDF_SCREEN_ONLY)
+        const bool useSky = false;
+    #else
+        bool useSky = HasSkyTexture();
+    #endif
     [loop]
     for (uint ray = 0u; ray < rayCount; ray++)
     {
@@ -887,15 +924,31 @@ void TraceProbe(uint3 id)
         float3 direction = ProbeRayDirection(ray, seed, basis);
         VividMeshSdfHit hit;
         bool advancedReceiver = false;
+        bool incomplete;
         #if defined(VIVID_SDF_RECEIVER)
             bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
-                _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver);
+                _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver, incomplete);
         #else
-            bool traced = VividTraceMeshSdfScene(origin, direction, 0.0, _SdfDiffuseMaxDistance, _SdfDiffuseLayerMask, hit);
+            bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
+                _SdfDiffuseLayerMask, 0.0, false, (VividMeshSdfReceiver)0, hit, advancedReceiver, incomplete);
         #endif
         if (!traced)
         {
-            StoreTraceSample(tile, ray, screenState | RayMiss, 0.0, 0.0);
+            uint missState = RayMiss;
+            [branch]
+            if (useSky)
+                missState = ResolveSdfSkyMiss(origin, direction, incomplete, screenState);
+            float3 sky = 0.0;
+            if (missState == RaySkyVisible)
+            {
+                sky = clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0);
+                sum += sky;
+                if (_SdfDiffuseDirectionalProbes != 0u)
+                    moments += ProbeSampleMoments(sky, direction, normal);
+                skyHits++;
+                valid++;
+            }
+            StoreTraceSample(tile, ray, screenState | missState, 0.0, sky, direction);
             if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                 StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
             continue;
@@ -971,15 +1024,18 @@ void TraceProbe(uint3 id)
     }
 
     // Cosine sampling estimates irradiance divided by pi, before the receiver's albedo.
-    // A miss contributes black in this local one-bounce estimator.
+    // Sky-aware output is the mean of the resolved rays. Coverage blends in the unresolved fraction once.
     #if defined(VIVID_SDF_SURFACE_CACHE) || defined(VIVID_SDF_SCREEN_ONLY)
         // Keep the baked fallback where cards cover few of the gather rays.
         float confidence = float(valid) / float(rayCount);
     #else
         float confidence = valid > 0u ? 1.0 - float(unknown) / float(rayCount) : 0.0;
     #endif
-    float4 current = float4(min(sum / float(rayCount), 65000.0), confidence);
-    moments /= float(rayCount);
+    float normalization = useSky ? float(max(1u, valid)) : float(rayCount);
+    if (useSky)
+        confidence = float(valid) / float(rayCount);
+    float4 current = float4(min(sum / normalization, 65000.0), confidence);
+    moments /= normalization;
     if (_SdfRestirEnabled != 0u)
     {
         // Misses and shaded black hits are known zero contributions. Rejected geometry
@@ -995,7 +1051,8 @@ void TraceProbe(uint3 id)
     StoreProbe(tile, current, moments);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / rayCount);
-    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits, rayCount - valid) / rayCount, 1.0);
+    // Sky occupies the residual of the three source fractions.
+    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits - skyHits, rayCount - valid) / rayCount, 1.0);
     #if defined(VIVID_SDF_CACHED_SUN)
         _SdfSunCacheHits[tile] = float4(float(cachedSunHits) / rayCount, 0.0, 0.0, 1.0);
     #endif

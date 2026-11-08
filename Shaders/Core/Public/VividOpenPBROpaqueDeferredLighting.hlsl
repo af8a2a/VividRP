@@ -65,9 +65,10 @@ VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     float3 irradiance = realtimeDiffuseGI.rgb;
     if (realtimeDiffuseGI.a < 1.0f)
     {
+        bool allowAmbientFallback = VividAllowUnoccludedSkyFallback();
         float3 fallback = VividHasProbeVolumeGI()
-            ? SampleVividProbeVolume(positionWS, inputs.normalWS, viewDirectionWS, 0xFFFFFFFFu)
-            : VividSampleAmbientProbe(inputs.normalWS);
+            ? SampleVividProbeVolume(positionWS, inputs.normalWS, viewDirectionWS, 0xFFFFFFFFu, allowAmbientFallback)
+            : (allowAmbientFallback ? VividSampleAmbientProbe(inputs.normalWS) : 0.0);
         irradiance = lerp(fallback, irradiance, realtimeDiffuseGI.a);
     }
     float3 reflection = GetSpecularDominantDir(inputs.normalWS,

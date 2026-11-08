@@ -34,6 +34,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
         public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
 
+        [Tooltip("Sample the sky on confirmed Mesh SDF escapes in the Screen Probe gather. Physically Based Sky requires a cubemap baked without the sun disk.")]
+        public BoolParameter occludedSky = new(false);
+
+        [Tooltip("Maximum sky visibility distance. A ray that reaches the limit inside the SDF scene is unresolved.")]
+        public MinFloatParameter skyTraceDistance = new(64f, 1f);
+
         [Tooltip("Gather first-order directional lighting in the screen probes and evaluate it at the receiver normal.")]
         public BoolParameter directionalScreenProbes = new(false);
 

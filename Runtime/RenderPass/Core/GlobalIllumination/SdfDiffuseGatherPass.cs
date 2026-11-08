@@ -14,6 +14,12 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Reset() => Visibility = Depth = GBuffer0 = GBuffer1 = null;
     }
 
+    internal sealed class VividSdfSkyFrameData : ContextItem
+    {
+        internal RenderGraphTexture Output;
+        public override void Reset() => Output = null;
+    }
+
     public sealed class SdfDiffuseGatherPass : ComputePass, IRenderGraphPreparePass
     {
 #if UNITY_EDITOR
@@ -95,6 +101,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int LightColorShadowId = Shader.PropertyToID("_SdfDiffuseLightColorShadow");
         private static readonly int LightLayerMaskId = Shader.PropertyToID("_SdfDiffuseLightLayerMask");
         private static readonly int MaxDistanceId = Shader.PropertyToID("_SdfDiffuseMaxDistance");
+        private static readonly int SkyTraceDistanceId = Shader.PropertyToID("_SdfDiffuseSkyTraceDistance");
+        private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
+        private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
+        private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int RayBiasId = Shader.PropertyToID("_SdfDiffuseRayBias");
         private static readonly int LayerMaskId = Shader.PropertyToID("_SdfDiffuseLayerMask");
         private static readonly int FrameId = Shader.PropertyToID("_SdfDiffuseFrame");
@@ -177,6 +187,9 @@ namespace VividRP.Runtime.RenderPass.Core
             internal uint SceneRevision;
             internal int Width, Height, LayerMask, LightLayerMask;
             internal float MaxDistance, RayBias;
+            internal float SkyTraceDistance;
+            internal int SkyContentHash;
+            internal Vector4 SkyTextureParams, SkyTextureTint;
             internal uint Frame;
             internal bool SunConfigured;
             internal ulong SunCardVersion;
@@ -242,6 +255,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection;
         private TextureHandle m_CardAlbedoDepth, m_CardNormalCoverage;
+        private TextureHandle m_SkyTexture;
         private TextureHandle m_PreviousScreenRadiance, m_PreviousScreenGeometry;
         private TextureHandle m_SunAtlas;
         private Vector2Int m_SunCardSize;
@@ -261,6 +275,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_AtlasHeight;
         private Vector4 m_ProbeCameraForward;
         private float m_TraceDistance, m_Bias;
+        private float m_SkyTraceDistance;
+        private int m_SkyContentHash;
+        private Vector4 m_SkyTextureParams, m_SkyTextureTint;
         private bool m_HasHistory, m_RealtimeOnly, m_OffscreenOnly;
         private bool m_HasScreenHistory, m_UseSdf;
         private bool m_DirectionalProbes;
@@ -351,6 +368,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelHistory = m_PixelGeometryHistory = null;
             m_SunHistory = null;
             m_SunAtlas = default;
+            m_SkyTexture = default;
+            m_SkyTraceDistance = 0f;
+            m_SkyContentHash = 0;
+            m_SkyTextureParams = m_SkyTextureTint = default;
             m_SunReadyCards = m_SunUpdateCards = 0;
             m_HasScreenHistory = false;
             m_ScreenJitterUv = default;
@@ -458,6 +479,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TraceDistance = float.IsFinite(m_MaxDistance) ? Mathf.Max(0.1f, m_MaxDistance) : 12f;
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
             ReadLight();
+            if (m_UseSdf)
+            {
+                m_SkyTexture = PassRecorder.ImportTextureForPass(this, SkyManager.GetSkySourceCubemapHandle());
+                if (useSettings && settings.occludedSky.value && !m_RestirGather && !m_OffscreenOnly && m_SkyTexture.IsValid())
+                    PrepareOccludedSky(frameData.GetOrCreate<VividSkyData>(), settings.skyTraceDistance.value);
+            }
             m_Cameras.PurgeDestroyedCameras();
             m_State = m_Cameras.GetOrCreateBase(camera);
             if (m_UseSdf && cache != null && settings.cacheSunVisibility.value
@@ -496,8 +523,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.Width == m_Width && m_State.Height == m_Height
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
+                && m_State.SkyTraceDistance == m_SkyTraceDistance && m_State.SkyContentHash == m_SkyContentHash
+                && m_State.SkyTextureParams.Equals(m_SkyTextureParams) && m_State.SkyTextureTint.Equals(m_SkyTextureTint)
                 && m_State.LightPositionRange.Equals(m_LightPositionRange) && m_State.LightColorShadow.Equals(m_LightColorShadow)
                 && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
+        }
+
+        private void PrepareOccludedSky(VividSkyData sky, float maxDistance)
+        {
+            if (sky.activeSkyType == SkyType.None || !SkyManager.HasValidSkyTexture(sky.specularCubemap))
+                return;
+            // Keep the directional sun in the direct-light path.
+            if (sky.activeSkyType == SkyType.PhysicallyBased
+                && SkySettingsVolume.GetIncludeSunInBaking(VividVolumeManagerUtility.GetSkySettingsVolume())
+                && VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume()?.renderSunDisk.value == true)
+                return;
+
+            m_SkyTraceDistance = Mathf.Max(m_TraceDistance, float.IsFinite(maxDistance) ? maxDistance : 64f);
+            m_SkyTextureParams = DeferredLightingPass.BuildSkyTextureParams(0, sky.exposure, sky.rotation, true);
+            m_SkyTextureTint = sky.tint;
+            m_SkyContentHash = sky.skyContentHash;
         }
 
         private void PrepareReceiverEntities(VividGPUDrivenSceneData scene)
@@ -569,6 +614,10 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_Scene.Bind(cmd, m_Compute, traceKernel);
                 cmd.SetComputeBufferParam(m_Compute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeTextureParam(m_Compute, traceKernel, SkyTextureId, m_SkyTexture);
+                cmd.SetComputeVectorParam(m_Compute, SkyTextureParamsId, m_SkyTextureParams);
+                cmd.SetComputeVectorParam(m_Compute, SkyTextureTintId, m_SkyTextureTint);
+                cmd.SetComputeFloatParam(m_Compute, SkyTraceDistanceId, m_SkyTraceDistance);
             }
             if (cache != null)
             {
@@ -676,6 +725,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_RestirPixelIntegration)
                     RecordRestirDenoise(cmd, pixelTemporal);
             }
+            if (m_SkyTextureParams.w > 0.5f)
+                context.GetOrCreate<VividSdfSkyFrameData>().Output = m_Output;
 #if UNITY_EDITOR
             EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
                 m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
@@ -704,6 +755,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.LightLayerMask = m_LightLayerMask;
             m_State.MaxDistance = m_TraceDistance;
             m_State.RayBias = m_Bias;
+            m_State.SkyTraceDistance = m_SkyTraceDistance;
+            m_State.SkyContentHash = m_SkyContentHash;
+            m_State.SkyTextureParams = m_SkyTextureParams;
+            m_State.SkyTextureTint = m_SkyTextureTint;
             m_State.SunConfigured = m_SunHistory != null;
             m_State.SunReadyCards = useSunCache ? m_SunReadyCards : 0;
             m_State.SunCardVersion = m_SunCardVersion;

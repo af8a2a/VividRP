@@ -90,9 +90,9 @@ VividSimpleSlabIndirectLighting VividEvaluateSimpleSlabIndirectLighting(
         diffuseIrradiance = summary.diffuseIrradiance;
     else if (VividHasProbeVolumeGI())
         diffuseIrradiance = SampleVividProbeVolume(positionWS,
-            slab.normalWS, viewDirectionWS, 0xFFFFFFFFu);
+            slab.normalWS, viewDirectionWS, 0xFFFFFFFFu, VividAllowUnoccludedSkyFallback());
     else
-        diffuseIrradiance = VividSampleAmbientProbe(slab.normalWS);
+        diffuseIrradiance = VividAllowUnoccludedSkyFallback() ? VividSampleAmbientProbe(slab.normalWS) : 0.0;
     if (realtimeDiffuseGI.a > 0.0f && realtimeDiffuseGI.a < 1.0f)
         diffuseIrradiance = lerp(diffuseIrradiance, realtimeDiffuseGI.rgb, realtimeDiffuseGI.a);
 

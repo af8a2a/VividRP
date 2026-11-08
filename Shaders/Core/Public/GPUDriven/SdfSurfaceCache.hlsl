@@ -17,12 +17,19 @@ StructuredBuffer<DiffuseSurface> _SdfDiffuseSurfaces;
 Texture2DArray<float4> _SdfSurfaceAlbedoDepth;
 Texture2DArray<float4> _SdfSurfaceNormalCoverage;
 
+static const uint VividSdfCardMissing = 1u;
+static const uint VividSdfCardOutsideProjection = 2u;
+static const uint VividSdfCardNoCoverage = 3u;
+static const uint VividSdfCardNormalRejected = 4u;
+static const uint VividSdfCardDepthRejected = 5u;
+
 bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
-    out float3 normalWS, out uint3 cardTexel, out float surfaceError)
+    out float3 normalWS, out uint3 cardTexel, out float surfaceError, bool diagnose, out uint rejection)
 {
     normalWS = hit.normalWS;
     cardTexel = 0u;
     surfaceError = 0.0;
+    rejection = VividSdfCardMissing;
     if (surface.cardMinAndFirst.w == 0.0)
         return false;
 
@@ -36,6 +43,7 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
     float best = 2.0;
     float3 bestNormal = 0.0;
     float3 bestAlbedo = 0.0;
+    rejection = VividSdfCardOutsideProjection;
     [loop]
     for (uint axis = 0u; axis < 3u; axis++)
     {
@@ -47,6 +55,8 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
         float2 texel = uv * float2(width, height) - 0.5;
         if (any(texel < -1.0) || any(texel >= float2(width, height)))
             continue;
+        if (diagnose)
+            rejection = max(rejection, VividSdfCardNoCoverage);
         int2 base = int2(floor(texel));
         uint slice = (uint)surface.cardMinAndFirst.w - 1u + axis * 2u + (facing > 0.0 ? 1u : 0u);
         // Match the original surface within the SDF sampling error. The extra
@@ -59,10 +69,14 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
             float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(pixel, slice, 0));
             if (packedNormal.a == 0.0)
                 continue;
+            if (diagnose)
+                rejection = max(rejection, VividSdfCardNormalRejected);
             float3 normal = SafeNormalize(packedNormal.xyz * 2.0 - 1.0);
             float agreement = dot(normal, hit.normalLS);
             if (agreement < 0.4)
                 continue;
+            if (diagnose)
+                rejection = max(rejection, VividSdfCardDepthRejected);
             float4 texelData = _SdfSurfaceAlbedoDepth.Load(int4(pixel, slice, 0));
             float depthError = abs(texelData.a - relative[axis]) * surface.cardExtent[axis];
             if (depthError > tolerance)
@@ -81,10 +95,18 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
     }
     if (best == 2.0)
         return false;
+    rejection = 0u;
     surface.albedoAndValid.rgb = bestAlbedo;
     normalWS = SafeNormalize(bestNormal.x * instance.worldToLocal0.xyz
         + bestNormal.y * instance.worldToLocal1.xyz + bestNormal.z * instance.worldToLocal2.xyz);
     return true;
+}
+
+bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
+    out float3 normalWS, out uint3 cardTexel, out float surfaceError)
+{
+    uint rejection;
+    return VividTrySampleSdfSurface(hit, positionWS, surface, normalWS, cardTexel, surfaceError, false, rejection);
 }
 
 bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface, out float3 normalWS)

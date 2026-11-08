@@ -91,6 +91,8 @@ namespace VividRP.Runtime
                 VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
                 if (s_FrameData.Contains<VividSdfScreenTraceData>())
                     s_FrameData.Get<VividSdfScreenTraceData>().Reset();
+                if (s_FrameData.Contains<VividSdfReceiverFrameData>())
+                    s_FrameData.Get<VividSdfReceiverFrameData>().Reset();
                 if (s_FrameData.Contains<VividGlobalSdfFrameData>())
                     s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
             }

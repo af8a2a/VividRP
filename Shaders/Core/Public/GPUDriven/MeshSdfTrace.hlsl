@@ -46,6 +46,13 @@ struct VividMeshSdfHit
     uint signMode;
 };
 
+struct VividMeshSdfReceiver
+{
+    uint2 entityId;
+    float3 positionWS;
+    float3 normalWS;
+};
+
 StructuredBuffer<uint> _MeshSdfVoxels;
 StructuredBuffer<VividMeshSdfField> _MeshSdfFields;
 StructuredBuffer<VividMeshSdfInstance> _MeshSdfInstances;
@@ -260,9 +267,60 @@ bool VividMeshSdfIsSubvoxelShell(VividMeshSdfField field, VividMeshSdfInstance i
     return field.signMode == 2u && field.shellThickness * instance.distanceScale < voxelSize;
 }
 
-bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    uint layerMask, float shellVoxelSize, bool anyHit, out VividMeshSdfHit hit)
+#if defined(VIVID_SDF_RECEIVER)
+bool VividMeshSdfTryAdvanceReceiver(VividMeshSdfField field, VividMeshSdfInstance instance,
+    VividMeshSdfReceiver receiver, float3 originWS, float3 directionWS, float3 hitGrid,
+    float distance, float maxDistance, out float nextDistance)
 {
+    nextDistance = distance;
+    if (field.signMode != 2u || !all(receiver.entityId == instance.entityId))
+        return false;
+
+    float outgoing = dot(directionWS, receiver.normalWS);
+    float3x3 worldToLocal = float3x3(instance.worldToLocal0.xyz, instance.worldToLocal1.xyz,
+        instance.worldToLocal2.xyz);
+    float voxel = field.originAndVoxelSize.w;
+    float extent = (0.5 * field.shellThickness + 0.75 * voxel) / length(mul(worldToLocal, receiver.normalWS));
+    float planeOffset = dot(originWS - receiver.positionWS, receiver.normalWS);
+    if (outgoing <= 0.05 || abs(planeOffset + distance * outgoing) > extent)
+        return false;
+
+    float4 p = float4(originWS, 1.0);
+    float3 gridOrigin = float3(dot(instance.worldToLocal0, p), dot(instance.worldToLocal1, p),
+        dot(instance.worldToLocal2, p)) - field.originAndVoxelSize.xyz;
+    float3 gridExtent = float3(field.dimensions - 1u) * voxel;
+    if (any(gridOrigin < 0.0) || any(gridOrigin > gridExtent) || VividMeshSdfSample(field, gridOrigin) >= 0.0)
+        return false;
+
+    float3 gradient = SafeNormalize(mul(VividMeshSdfGradient(field, hitGrid), worldToLocal));
+    if (dot(gradient, receiver.normalWS) < 0.75 || dot(gradient, directionWS) <= 0.0)
+        return false;
+
+    // Step only across this instance's local exit, keeping the original scene ray and all other hits.
+    float3 localDirection = mul(worldToLocal, directionWS);
+    float stepDistance = 0.125 * voxel / length(localDirection);
+    float limit = min(maxDistance, (extent - planeOffset) / outgoing);
+    [loop]
+    for (uint step = 1u; step <= 12u; ++step)
+    {
+        float candidate = distance + step * stepDistance;
+        if (candidate >= limit)
+            break;
+        if (VividMeshSdfSample(field, hitGrid + localDirection * (candidate - distance)) > 0.075 * voxel)
+        {
+            nextDistance = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
+bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, float shellVoxelSize, bool anyHit, VividMeshSdfReceiver receiver, out VividMeshSdfHit hit,
+    out bool advancedReceiver)
+{
+    advancedReceiver = false;
     hit = (VividMeshSdfHit)0;
     hit.distance = maxDistance;
     hit.instanceIndex = 0xffffffffu;
@@ -298,9 +356,21 @@ bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float m
                 continue;
             float distance;
             float3 positionInGrid;
-            if (VividMeshSdfTraceInstance(field, instance, originWS, directionWS, minDistance, hit.distance,
-                distance, positionInGrid)
-                && (distance < hit.distance || (distance == hit.distance && instanceIndex < hit.instanceIndex)))
+            if (!VividMeshSdfTraceInstance(field, instance, originWS, directionWS, minDistance, hit.distance,
+                distance, positionInGrid))
+                continue;
+            #if defined(VIVID_SDF_RECEIVER)
+                float nextDistance;
+                if (any(receiver.entityId) && VividMeshSdfTryAdvanceReceiver(field, instance, receiver,
+                    originWS, directionWS, positionInGrid, distance, hit.distance, nextDistance))
+                {
+                    advancedReceiver = true;
+                    if (!VividMeshSdfTraceInstance(field, instance, originWS, directionWS, nextDistance, hit.distance,
+                        distance, positionInGrid))
+                        continue;
+                }
+            #endif
+            if (distance < hit.distance || (distance == hit.distance && instanceIndex < hit.instanceIndex))
             {
                 if (anyHit)
                     return true;
@@ -328,14 +398,17 @@ bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float m
 bool VividTraceMeshSdfSceneFiltered(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
     uint layerMask, float shellVoxelSize, out VividMeshSdfHit hit)
 {
+    bool unused;
     return VividTraceMeshSdfSceneInternal(originWS, directionWS, minDistance, maxDistance,
-        layerMask, shellVoxelSize, false, hit);
+        layerMask, shellVoxelSize, false, (VividMeshSdfReceiver)0, hit, unused);
 }
 
 bool VividOccludeMeshSdfScene(float3 originWS, float3 directionWS, float maxDistance, uint layerMask)
 {
     VividMeshSdfHit unused;
-    return VividTraceMeshSdfSceneInternal(originWS, directionWS, 0.0, maxDistance, layerMask, 0.0, true, unused);
+    bool advancedReceiver;
+    return VividTraceMeshSdfSceneInternal(originWS, directionWS, 0.0, maxDistance, layerMask, 0.0, true,
+        (VividMeshSdfReceiver)0, unused, advancedReceiver);
 }
 
 // directionWS is normalized. The returned distance is measured from originWS in world units.

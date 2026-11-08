@@ -302,6 +302,11 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwnedTexture(m_Barycentrics, m_DefaultBarycentrics, width, height);
             ResizePassOwnedTexture(m_Depth, m_DefaultDepth, width, height);
 
+            var receiver = frameData.GetOrCreate<VividSdfReceiverFrameData>();
+            receiver.Visibility = m_VisibilityBuffer;
+            receiver.Depth = m_Depth;
+            receiver.GBuffer0 = receiver.GBuffer1 = null;
+
             var gpuDrivenFrameData = frameData.GetOrCreate<VividGPUDrivenFrameData>();
             m_PrimitiveDrawSet = gpuDrivenFrameData.primitiveDrawSet;
             GraphicsBuffer visibleMeshletRenderRequestsBuffer = gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer;

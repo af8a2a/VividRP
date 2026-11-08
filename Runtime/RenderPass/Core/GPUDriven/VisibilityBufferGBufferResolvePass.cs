@@ -240,6 +240,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            if (m_Material != null && frameData.Contains<VividSdfReceiverFrameData>())
+            {
+                var receiver = frameData.Get<VividSdfReceiverFrameData>();
+                if (ReferenceEquals(receiver.Visibility, m_VisibilityBuffer))
+                {
+                    receiver.GBuffer0 = m_GBuffer0;
+                    receiver.GBuffer1 = m_GBuffer1;
+                }
+            }
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_RequiresDualSlabSidecar = frameData
                 .GetOrCreate<VividGPUDrivenFrameData>()

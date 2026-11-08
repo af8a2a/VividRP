@@ -7,7 +7,14 @@ using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class SdfDiffuseGatherPass : ComputePass
+    internal sealed class VividSdfReceiverFrameData : ContextItem
+    {
+        internal RenderGraphTexture Visibility, Depth, GBuffer0, GBuffer1;
+
+        public override void Reset() => Visibility = Depth = GBuffer0 = GBuffer1 = null;
+    }
+
+    public sealed class SdfDiffuseGatherPass : ComputePass, IRenderGraphPreparePass
     {
 #if UNITY_EDITOR
         internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
@@ -55,7 +62,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int UseScreenRaysId = Shader.PropertyToID("_SdfDiffuseUseScreenRays");
         private static readonly int TraceSourcesId = Shader.PropertyToID("_SdfDiffuseTraceSources");
         private static readonly int RayDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRayDiagnostics");
+        private static readonly int FirstHitDiagnosticsId = Shader.PropertyToID("_SdfDiffuseFirstHitDiagnostics");
+        private static readonly int ReceiverVisibilityId = Shader.PropertyToID("_SdfReceiverVisibility");
+        private static readonly int ReceiverEntitiesId = Shader.PropertyToID("_SdfReceiverEntities");
+        private static readonly int ReceiverCountId = Shader.PropertyToID("_SdfReceiverCount");
         private static readonly int RecordRayDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRecordRayDiagnostics");
+        private static readonly int RecordFirstHitDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRecordFirstHitDiagnostics");
         private static readonly int CurrentResolvedId = Shader.PropertyToID("_SdfDiffuseCurrentResolved");
         private static readonly int PreviousPixelLightingId = Shader.PropertyToID("_SdfDiffusePreviousPixelLighting");
         private static readonly int PreviousPixelGeometryId = Shader.PropertyToID("_SdfDiffusePreviousPixelGeometry");
@@ -137,6 +149,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool DirectionalProbes;
             internal bool AdaptiveProbes, SpatialFilter;
             internal bool PixelTemporal;
+            internal bool CorrectReceiverSelfHits;
             internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
@@ -151,6 +164,12 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private readonly CameraRelativeSystem<HistoryState> m_Cameras = new();
+        private RenderGraphTexture m_ReceiverVisibilitySource;
+        private TextureHandle m_ReceiverVisibility;
+        private GraphicsBuffer m_ReceiverEntities;
+        private ulong[] m_ReceiverEntityIds;
+        private int m_ReceiverCount;
+        private int m_ReceiverTraceKernel = -1, m_ReceiverCachedKernel = -1, m_ReceiverCachedSunKernel = -1;
         private readonly RenderGraphTexture m_PreviousProbes = RenderGraphTexture.CreateInput("Previous SDF Diffuse Probes", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousGeometry = RenderGraphTexture.CreateInput("Previous SDF Diffuse Geometry", GeometryFormat);
         private readonly RenderGraphTexture m_Probes = CreateOutput("SDF Diffuse Probes", ProbeFormat);
@@ -165,6 +184,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Probe Ray Diagnostics", Access = AccessFlags.Write)]
         [TransientResource]
         private readonly RenderGraphTexture m_RayDiagnostics = CreateScratch("SDF Diffuse Ray Diagnostics", GeometryFormat);
+        [RenderGraphResource(Name = "Probe First Hit Diagnostics", Access = AccessFlags.Write)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_FirstHitDiagnostics = CreateScratch("SDF Diffuse First Hit Diagnostics", GeometryFormat);
         [RenderGraphResource(Name = "Adaptive Probe Placement", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_AdaptivePlacement = CreateScratch("Screen Probe Adaptive Placement", GraphicsFormat.R32_SFloat);
@@ -208,6 +230,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_DirectionalProbes;
         private bool m_AdaptiveProbes, m_SpatialFilter;
         private bool m_RecordRayDiagnostics;
+        private bool m_RecordFirstHitDiagnostics;
         private SdfDiffuseTraceMode m_TraceMode;
 
         public SdfDiffuseGatherPass()
@@ -228,6 +251,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_TraceKernel = m_Compute.FindKernel("TraceSdfDiffuseProbes");
+            if (m_Compute.HasKernel("TraceSdfReceiverProbes"))
+                m_ReceiverTraceKernel = m_Compute.FindKernel("TraceSdfReceiverProbes");
+            if (m_Compute.HasKernel("TraceSdfReceiverCachedProbes"))
+                m_ReceiverCachedKernel = m_Compute.FindKernel("TraceSdfReceiverCachedProbes");
+            if (m_Compute.HasKernel("TraceSdfReceiverCachedSunProbes"))
+                m_ReceiverCachedSunKernel = m_Compute.FindKernel("TraceSdfReceiverCachedSunProbes");
             m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
@@ -262,6 +291,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraData = frameData.Get<VividCameraData>();
             var camera = cameraData.camera;
             m_State = null;
+            m_ReceiverVisibilitySource = null;
+            m_ReceiverVisibility = default;
             m_ProbeHistory = m_GeometryHistory = null;
             m_PixelHistory = m_PixelGeometryHistory = null;
             m_SunHistory = null;
@@ -282,8 +313,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HitLighting.Resize(m_ProbeWidth, m_AtlasHeight);
             m_TraceSources.Resize(m_ProbeWidth, m_AtlasHeight);
             m_RecordRayDiagnostics = useSettings && settings.recordRayDiagnostics.value;
+            m_RecordFirstHitDiagnostics = m_RecordRayDiagnostics && settings.recordFirstHitDiagnostics.value;
             m_RayDiagnostics.Resize(m_RecordRayDiagnostics ? m_ProbeWidth * RaysPerProbe : 1,
                 m_RecordRayDiagnostics ? m_AtlasHeight : 1);
+            m_FirstHitDiagnostics.Resize(m_RecordFirstHitDiagnostics ? m_ProbeWidth * RaysPerProbe : 1,
+                m_RecordFirstHitDiagnostics ? 3 * m_AtlasHeight : 1);
             bool motionConnected = m_ScreenMotion != null && !ReferenceEquals(m_ScreenMotion, m_LocalMotion);
             bool pixelTemporal = useSettings && settings.pixelTemporal.value && motionConnected && m_PixelTemporalKernel >= 0;
             m_RawResolved.Resize(pixelTemporal ? m_Width : 1, pixelTemporal ? m_Height : 1);
@@ -324,6 +358,19 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * RaysPerProbe : 1, screenConfigured ? m_AtlasHeight : 1);
             if (!m_UseSdf && !screenConfigured)
                 return;
+
+            if (m_UseSdf && useSettings && settings.correctReceiverSelfHits.value
+                && frameData.Contains<VividSdfReceiverFrameData>() && VividGPUDrivenSystem.HasInstance)
+            {
+                var receiver = frameData.Get<VividSdfReceiverFrameData>();
+                if (receiver.Visibility != null && ReferenceEquals(receiver.Depth, m_Depth)
+                    && ReferenceEquals(receiver.GBuffer0, m_GBuffer0) && ReferenceEquals(receiver.GBuffer1, m_GBuffer1))
+                {
+                    PrepareReceiverEntities(VividGPUDrivenSystem.instance.SceneData);
+                    if (m_ReceiverCount > 0)
+                        m_ReceiverVisibilitySource = receiver.Visibility;
+                }
+            }
 
             m_ViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             var view = cameraData.GetViewMatrix();
@@ -371,6 +418,45 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
         }
 
+        private void PrepareReceiverEntities(VividGPUDrivenSceneData scene)
+        {
+            var sources = scene.InstanceSources;
+            int count = sources.Count;
+            if (count == 0)
+            {
+                m_ReceiverCount = 0;
+                return;
+            }
+
+            bool changed = m_ReceiverCount != count;
+            if (m_ReceiverEntities == null || m_ReceiverEntities.count < count)
+            {
+                int capacity = Mathf.NextPowerOfTwo(count);
+                m_ReceiverEntities?.Dispose();
+                m_ReceiverEntities = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(ulong));
+                m_ReceiverEntityIds = new ulong[capacity];
+                changed = true;
+            }
+            for (int index = 0; index < count; ++index)
+            {
+                ulong entity = EntityId.ToULong(sources[index].PrimitiveEntityId);
+                changed |= m_ReceiverEntityIds[index] != entity;
+                m_ReceiverEntityIds[index] = entity;
+            }
+            if (changed)
+                m_ReceiverEntities.SetData(m_ReceiverEntityIds, 0, 0, count);
+            m_ReceiverCount = count;
+        }
+
+        public void PrepareRenderGraph(ContextContainer frameData)
+        {
+            if (m_ReceiverVisibilitySource != null)
+            {
+                m_ReceiverVisibility = m_ReceiverVisibilitySource.innerHandle;
+                PassRecorder.RegisterImportedTextureForPass(this, m_ReceiverVisibility);
+            }
+        }
+
         public override void Record(ComputePassContext context)
         {
             if (m_State == null || m_ProbeHistory == null || m_GeometryHistory == null
@@ -385,6 +471,15 @@ namespace VividRP.Runtime.RenderPass.Core
             int traceKernel = !m_UseSdf ? m_ScreenGatherKernel : cache != null ? m_CachedTraceKernel : m_TraceKernel;
             if (useSunCache)
                 traceKernel = m_CachedSunTraceKernel;
+            int receiverKernel = useSunCache ? m_ReceiverCachedSunKernel : cache != null ? m_ReceiverCachedKernel : m_ReceiverTraceKernel;
+            bool correctReceiver = m_UseSdf && m_ReceiverVisibility.IsValid() && receiverKernel >= 0;
+            if (correctReceiver)
+            {
+                traceKernel = receiverKernel;
+                cmd.SetComputeTextureParam(m_Compute, traceKernel, ReceiverVisibilityId, m_ReceiverVisibility);
+                cmd.SetComputeBufferParam(m_Compute, traceKernel, ReceiverEntitiesId, m_ReceiverEntities);
+                cmd.SetComputeIntParam(m_Compute, ReceiverCountId, m_ReceiverCount);
+            }
             BindReceiver(cmd, traceKernel);
             BindReceiver(cmd, m_ResolveKernel, bindProbes: false);
             if (m_UseSdf)
@@ -408,14 +503,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_RawResolved.innerHandle.IsValid() && m_CurrentPixelLighting.innerHandle.IsValid()
                 && m_CurrentPixelGeometry.innerHandle.IsValid() && m_PreviousPixelLighting.innerHandle.IsValid()
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
-            hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal;
+            hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
+                && m_State.CorrectReceiverSelfHits == correctReceiver;
             bool useProbeHistory = hasHistory && !pixelTemporal;
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousGeometryId, useProbeHistory ? m_PreviousGeometry.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, TraceSourcesId, m_TraceSources.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, RayDiagnosticsId, m_RayDiagnostics.innerHandle);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, FirstHitDiagnosticsId, m_FirstHitDiagnostics.innerHandle);
             cmd.SetComputeIntParam(m_Compute, RecordRayDiagnosticsId, m_RecordRayDiagnostics ? 1 : 0);
+            cmd.SetComputeIntParam(m_Compute, RecordFirstHitDiagnosticsId, m_RecordFirstHitDiagnostics ? 1 : 0);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, ScreenRaysId, useScreenRays ? m_ScreenRays.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PlacementId, placement);
             cmd.SetComputeTextureParam(m_Compute, m_ResolveKernel, PlacementId, placement);
@@ -489,6 +587,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.AdaptiveProbes = m_AdaptiveProbes;
             m_State.SpatialFilter = m_SpatialFilter;
             m_State.PixelTemporal = pixelTemporal;
+            m_State.CorrectReceiverSelfHits = correctReceiver;
             m_State.ScreenJitterUv = m_ScreenJitterUv;
             m_State.SceneRevision = m_Scene.Revision;
             m_State.Width = m_Width;
@@ -507,6 +606,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_Cameras.Dispose();
+            m_ReceiverEntities?.Dispose();
+            m_ReceiverEntities = null;
             m_Scene?.Dispose();
             m_Scene = null;
             m_Compute = null;

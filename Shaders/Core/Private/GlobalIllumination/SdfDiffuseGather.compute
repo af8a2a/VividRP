@@ -1,6 +1,9 @@
 #pragma kernel TraceSdfDiffuseProbes
 #pragma kernel TraceSdfDiffuseCachedProbes VIVID_SDF_SURFACE_CACHE
 #pragma kernel TraceSdfDiffuseCachedSunProbes VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
+#pragma kernel TraceSdfReceiverProbes VIVID_SDF_RECEIVER
+#pragma kernel TraceSdfReceiverCachedProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE
+#pragma kernel TraceSdfReceiverCachedSunProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 #pragma kernel UpdateSdfSurfaceSunVisibility VIVID_SDF_SURFACE_CACHE VIVID_SDF_SUN_UPDATE
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
@@ -13,6 +16,7 @@
 #include "../../Public/GPUDriven/SdfSurfaceCache.hlsl"
 #include "../../Public/SurfaceSummaryGBuffer.hlsl"
 #include "../../Public/MotionVectorsCommon.hlsl"
+#include "../../Public/GPUDriven/VividVisibilityBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
 static const uint ProbeSpacing = 16u;
@@ -50,6 +54,7 @@ RWTexture2D<float4> _SdfDiffuseHitLighting;
 RWTexture2D<float4> _SdfDiffuseOutput;
 RWTexture2D<float4> _SdfDiffuseTraceSources;
 RWTexture2D<float4> _SdfDiffuseRayDiagnostics;
+RWTexture2D<float4> _SdfDiffuseFirstHitDiagnostics;
 RWTexture2D<float4> _SdfDiffusePixelLightingOutput;
 RWTexture2D<uint> _SdfDiffusePixelGeometryOutput;
 
@@ -75,6 +80,7 @@ uint _SdfDiffuseRealtimeOnly;
 uint _SdfDiffuseOffscreenOnly;
 uint _SdfDiffuseUseScreenRays;
 uint _SdfDiffuseRecordRayDiagnostics;
+uint _SdfDiffuseRecordFirstHitDiagnostics;
 
 float ResolveSunShadowBias(VividMeshSdfField field, VividMeshSdfInstance instance, float3 normalWS)
 {
@@ -256,18 +262,72 @@ bool LoadAdaptiveProbePixel(uint2 tile, out uint2 pixel)
     return encoded != 0u;
 }
 
-bool LoadProbeReceiver(uint2 atlas, uint2 screenSize, out float3 position, out float3 normal)
+bool LoadProbeReceiverPixel(uint2 atlas, uint2 screenSize, out uint2 pixel)
 {
     uint gridHeight = ProbeGridSize(screenSize).y;
     if (atlas.y < gridHeight)
-        return LoadReceiver(ProbeReceiverPixel(atlas, screenSize), position, normal);
+    {
+        pixel = ProbeReceiverPixel(atlas, screenSize);
+        return true;
+    }
+    return LoadAdaptiveProbePixel(atlas - uint2(0, gridHeight), pixel);
+}
 
+bool LoadProbeReceiver(uint2 atlas, uint2 screenSize, out float3 position, out float3 normal)
+{
     uint2 pixel;
-    if (LoadAdaptiveProbePixel(atlas - uint2(0, gridHeight), pixel))
+    if (LoadProbeReceiverPixel(atlas, screenSize, pixel))
         return LoadReceiver(pixel, position, normal);
     position = normal = 0.0;
     return false;
 }
+
+#if defined(VIVID_SDF_RECEIVER)
+Texture2D<uint2> _SdfReceiverVisibility;
+StructuredBuffer<uint2> _SdfReceiverEntities;
+uint _SdfReceiverCount;
+
+bool LoadReceiverTangent(int2 pixel, int2 axis, uint2 visibility, float3 position, out float3 tangent)
+{
+    tangent = 0.0;
+    [unroll]
+    for (int side = -1; side <= 1; side += 2)
+    {
+        int2 neighbor = pixel + side * axis;
+        if (any(neighbor < 0) || any(neighbor >= int2(_SdfDiffuseScreenSize.xy))
+            || any(_SdfReceiverVisibility.Load(int3(neighbor, 0)) != visibility))
+            continue;
+        float depth = _SdfDiffuseDepth.Load(int3(neighbor, 0));
+        float2 uv = (float2(neighbor) + 0.5) * _SdfDiffuseScreenSize.zw;
+        float3 neighborPosition = ComputeWorldSpacePosition(uv, depth, _SdfDiffuseInverseVP);
+        tangent = neighborPosition - position;
+        return true;
+    }
+    return false;
+}
+
+VividMeshSdfReceiver LoadSdfReceiver(uint2 pixel, float3 position)
+{
+    VividMeshSdfReceiver receiver = (VividMeshSdfReceiver)0;
+    uint2 visibility = _SdfReceiverVisibility.Load(int3(pixel, 0));
+    uint index = visibility.x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    if (index >= _SdfReceiverCount)
+        return receiver;
+
+    float3 dx, dy;
+    if (!LoadReceiverTangent(int2(pixel), int2(1, 0), visibility, position, dx)
+        || !LoadReceiverTangent(int2(pixel), int2(0, 1), visibility, position, dy))
+        return receiver;
+    float3 normal = SafeNormalize(cross(dx, dy));
+    if (dot(normal, normal) < 0.5)
+        return receiver;
+    float3 towardsCamera = unity_OrthoParams.w != 0.0 ? -_SdfProbeCameraForward.xyz : _WorldSpaceCameraPos - position;
+    receiver.normalWS = dot(normal, towardsCamera) < 0.0 ? -normal : normal;
+    receiver.entityId = _SdfReceiverEntities[index];
+    receiver.positionWS = position;
+    return receiver;
+}
+#endif
 
 float ProbeGeometryWeight(float3 delta, float3 normal, float3 otherNormal, float eyeDepth)
 {
@@ -632,6 +692,34 @@ void StoreRayDiagnostic(uint2 tile, uint ray, uint state, float distance, float3
     }
 }
 
+void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 direction, VividMeshSdfHit hit,
+    uint rejection, bool advancedReceiver = false)
+{
+    uint2 pixel = uint2(tile.x * RaysPerProbe + ray, tile.y * 3u);
+    float4 entity = 0.0;
+    float4 firstHit = 0.0;
+    #if !defined(VIVID_SDF_SCREEN_ONLY)
+        if (hit.instanceIndex != 0xffffffffu)
+        {
+            VividMeshSdfInstance instance = _MeshSdfInstances[hit.instanceIndex];
+            VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+            float4 p = float4(origin, 1.0);
+            float3 grid = float3(dot(instance.worldToLocal0, p), dot(instance.worldToLocal1, p),
+                dot(instance.worldToLocal2, p)) - field.originAndVoxelSize.xyz;
+            float3 extent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
+            float signedVoxels = any(grid < 0.0) || any(grid > extent) ? FLT_MAX
+                : VividMeshSdfSample(field, grid) / field.originAndVoxelSize.w;
+            // Keep every 16-bit word of the entity ID exact in the float readback.
+            entity = float4(hit.entityId.x & 65535u, hit.entityId.x >> 16u,
+                hit.entityId.y & 65535u, hit.entityId.y >> 16u);
+            firstHit = float4(PackProbeNormal(hit.normalWS), hit.signMode, rejection, signedVoxels);
+        }
+    #endif
+    _SdfDiffuseFirstHitDiagnostics[pixel] = entity;
+    _SdfDiffuseFirstHitDiagnostics[pixel + uint2(0u, 1u)] = firstHit;
+    _SdfDiffuseFirstHitDiagnostics[pixel + uint2(0u, 2u)] = float4(direction, advancedReceiver ? 1.0 : 0.0);
+}
+
 void TraceProbe(uint3 id)
 {
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
@@ -640,7 +728,8 @@ void TraceProbe(uint3 id)
         return;
 
     float3 position, normal;
-    if (!LoadProbeReceiver(tile, screenSize, position, normal))
+    uint2 receiverPixel;
+    if (!LoadProbeReceiverPixel(tile, screenSize, receiverPixel) || !LoadReceiver(receiverPixel, position, normal))
     {
         StoreProbe(tile, 0.0, (float3x3)0.0);
         _SdfDiffuseGeometry[tile] = float4(0.0, 0.0, 0.0, -1.0);
@@ -650,7 +739,15 @@ void TraceProbe(uint3 id)
         {
             [unroll]
             for (uint ray = 0u; ray < RaysPerProbe; ++ray)
+            {
                 StoreRayDiagnostic(tile, ray, 0u, 0.0, 0.0);
+                if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                {
+                    VividMeshSdfHit miss = (VividMeshSdfHit)0;
+                    miss.instanceIndex = 0xffffffffu;
+                    StoreFirstHitDiagnostic(tile, ray, 0.0, 0.0, miss, 0u);
+                }
+            }
         }
         #if defined(VIVID_SDF_CACHED_SUN)
             _SdfSunCacheHits[tile] = 0.0;
@@ -660,6 +757,9 @@ void TraceProbe(uint3 id)
 
     float3x3 basis = GetLocalFrame(normal);
     float3 origin = position + normal * _SdfDiffuseRayBias;
+    #if defined(VIVID_SDF_RECEIVER)
+        VividMeshSdfReceiver receiver = LoadSdfReceiver(receiverPixel, position);
+    #endif
     uint seed = ProbeSeed(tile);
     float3 sum = 0.0;
     float3x3 moments = (float3x3)0.0;
@@ -677,6 +777,12 @@ void TraceProbe(uint3 id)
             if (screenHit.a > 0.0)
             {
                 StoreRayDiagnostic(tile, ray, RayScreenHit, screenHit.a, screenHit.rgb);
+                if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                {
+                    VividMeshSdfHit miss = (VividMeshSdfHit)0;
+                    miss.instanceIndex = 0xffffffffu;
+                    StoreFirstHitDiagnostic(tile, ray, origin, ProbeRayDirection(ray, seed, basis), miss, 0u);
+                }
                 sum += screenHit.rgb;
                 if (_SdfDiffuseDirectionalProbes != 0u)
                     moments += ProbeSampleMoments(screenHit.rgb, ProbeRayDirection(ray, seed, basis), normal);
@@ -689,9 +795,18 @@ void TraceProbe(uint3 id)
         #if !defined(VIVID_SDF_SCREEN_ONLY)
         float3 direction = ProbeRayDirection(ray, seed, basis);
         VividMeshSdfHit hit;
-        if (!VividTraceMeshSdfScene(origin, direction, 0.0, _SdfDiffuseMaxDistance, _SdfDiffuseLayerMask, hit))
+        bool advancedReceiver = false;
+        #if defined(VIVID_SDF_RECEIVER)
+            bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
+                _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver);
+        #else
+            bool traced = VividTraceMeshSdfScene(origin, direction, 0.0, _SdfDiffuseMaxDistance, _SdfDiffuseLayerMask, hit);
+        #endif
+        if (!traced)
         {
             StoreRayDiagnostic(tile, ray, screenState | RayMiss, 0.0, 0.0);
+            if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
             continue;
         }
 
@@ -700,6 +815,8 @@ void TraceProbe(uint3 id)
         if (surface.albedoAndValid.a == 0.0 || backface)
         {
             StoreRayDiagnostic(tile, ray, screenState | (backface ? RayBackface : RayMissingSurface), hit.distance, 0.0);
+            if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, backface ? 0u : 6u, advancedReceiver);
             unknown++;
             continue;
         }
@@ -708,13 +825,19 @@ void TraceProbe(uint3 id)
         #if defined(VIVID_SDF_SURFACE_CACHE)
             uint3 cardTexel;
             float surfaceError;
-            if (!VividTrySampleSdfSurface(hit, hitPosition, surface, lightingNormal, cardTexel, surfaceError))
+            uint rejection;
+            if (!VividTrySampleSdfSurface(hit, hitPosition, surface, lightingNormal, cardTexel, surfaceError,
+                _SdfDiffuseRecordFirstHitDiagnostics != 0u, rejection))
             {
                 StoreRayDiagnostic(tile, ray, screenState | RayMissingSurface, hit.distance, 0.0);
+                if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                    StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, rejection, advancedReceiver);
                 unknown++;
                 continue;
             }
         #endif
+        if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
         valid++;
         if (_SdfDiffuseOffscreenOnly != 0u)
         {
@@ -737,6 +860,12 @@ void TraceProbe(uint3 id)
             moments += ProbeSampleMoments(radiance, direction, normal);
         #else
             StoreRayDiagnostic(tile, ray, screenState | RayMiss, 0.0, 0.0);
+            if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
+            {
+                VividMeshSdfHit miss = (VividMeshSdfHit)0;
+                miss.instanceIndex = 0xffffffffu;
+                StoreFirstHitDiagnostic(tile, ray, origin, ProbeRayDirection(ray, seed, basis), miss, 0u);
+            }
         #endif
     }
 
@@ -768,19 +897,31 @@ void GatherScreenDiffuseProbes(uint3 id : SV_DispatchThreadID)
 }
 #elif defined(VIVID_SDF_CACHED_SUN)
 [numthreads(8, 8, 1)]
+#if defined(VIVID_SDF_RECEIVER)
+void TraceSdfReceiverCachedSunProbes(uint3 id : SV_DispatchThreadID)
+#else
 void TraceSdfDiffuseCachedSunProbes(uint3 id : SV_DispatchThreadID)
+#endif
 {
     TraceProbe(id);
 }
 #elif defined(VIVID_SDF_SURFACE_CACHE)
 [numthreads(8, 8, 1)]
+#if defined(VIVID_SDF_RECEIVER)
+void TraceSdfReceiverCachedProbes(uint3 id : SV_DispatchThreadID)
+#else
 void TraceSdfDiffuseCachedProbes(uint3 id : SV_DispatchThreadID)
+#endif
 {
     TraceProbe(id);
 }
 #else
 [numthreads(8, 8, 1)]
+#if defined(VIVID_SDF_RECEIVER)
+void TraceSdfReceiverProbes(uint3 id : SV_DispatchThreadID)
+#else
 void TraceSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
+#endif
 {
     TraceProbe(id);
 }

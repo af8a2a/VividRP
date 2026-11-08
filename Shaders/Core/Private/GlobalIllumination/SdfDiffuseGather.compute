@@ -5,6 +5,7 @@
 #pragma kernel TraceSdfReceiverCachedProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE
 #pragma kernel TraceSdfReceiverCachedSunProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 #pragma kernel UpdateSdfSurfaceSunVisibility VIVID_SDF_SURFACE_CACHE VIVID_SDF_SUN_UPDATE
+#pragma kernel UpdateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
 #pragma kernel ResolveSdfDiffuseGI
@@ -136,6 +137,41 @@ float ResolveSunShadowBias(VividMeshSdfField field, VividMeshSdfInstance instanc
     return min(_SdfDiffuseRayBias, max(0.4 * _SdfDiffuseRayBias, minBias));
 }
 
+#if defined(VIVID_SDF_SUN_UPDATE) || defined(VIVID_SDF_RADIOSITY_UPDATE)
+bool ProjectCardPoint(VividMeshSdfInstance instance, VividMeshSdfField field, float3 local, float3 normalLS,
+    float3 normalWS, out float3 position, out float3 geometryNormal)
+{
+    if (field.signMode == 2u)
+        local += normalLS * (0.5 * field.shellThickness);
+
+    // Invert the linear part of the world-to-local transform without uploading a second transform.
+    float3 r0 = instance.worldToLocal0.xyz;
+    float3 r1 = instance.worldToLocal1.xyz;
+    float3 r2 = instance.worldToLocal2.xyz;
+    float3 c0 = cross(r1, r2);
+    float3 c1 = cross(r2, r0);
+    float3 c2 = cross(r0, r1);
+    float3 delta = local - float3(instance.worldToLocal0.w, instance.worldToLocal1.w, instance.worldToLocal2.w);
+    position = (c0 * delta.x + c1 * delta.y + c2 * delta.z) / dot(r0, c0);
+    geometryNormal = 0.0;
+    if (!all(isfinite(position)))
+        return false;
+
+    // The captured mesh and the SDF isosurface can disagree by a fraction of a voxel.
+    float localUnits = length(float3(dot(r0, normalWS), dot(r1, normalWS), dot(r2, normalWS)));
+    float reach = 1.75 * field.originAndVoxelSize.w / max(localUnits, 1e-6);
+    float3 start = position + normalWS * reach;
+    float distance;
+    float3 gridPosition;
+    if (!VividMeshSdfTraceInstance(field, instance, start, -normalWS, 0.0, 2.0 * reach, distance, gridPosition))
+        return false;
+    float3 gradient = VividMeshSdfGradient(field, gridPosition);
+    geometryNormal = SafeNormalize(gradient.x * r0 + gradient.y * r1 + gradient.z * r2);
+    position = start - normalWS * distance;
+    return dot(geometryNormal, normalWS) >= 0.95;
+}
+#endif
+
 #if defined(VIVID_SDF_SUN_UPDATE)
 StructuredBuffer<uint> _SdfSunInstances;
 RWTexture2D<float> _SdfSunVisibilityOutput;
@@ -171,35 +207,13 @@ float EvaluateCardSunVisibility(uint card, uint2 pixel)
         axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
     VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
     float3 local = surface.cardMinAndFirst.xyz + relative * surface.cardExtent.xyz;
-    if (field.signMode == 2u)
-        local += normalLS * (0.5 * field.shellThickness);
-
-    // Invert the linear part of the world-to-local transform without
-    // carrying a second transform in every Mesh SDF instance.
-    float3 c0 = cross(r1, r2);
-    float3 c1 = cross(r2, r0);
-    float3 c2 = cross(r0, r1);
-    float3 delta = local - float3(instance.worldToLocal0.w, instance.worldToLocal1.w, instance.worldToLocal2.w);
-    float3 position = (c0 * delta.x + c1 * delta.y + c2 * delta.z) / dot(r0, c0);
-    if (!all(isfinite(position)))
-        return -1.0;
-
-    // The captured mesh and the SDF isosurface can disagree by a fraction
-    // of a voxel. Start from the SDF surface used by the precise hit path.
-    float localUnits = length(float3(dot(r0, normalWS), dot(r1, normalWS), dot(r2, normalWS)));
-    float reach = 1.75 * field.originAndVoxelSize.w / max(localUnits, 1e-6);
-    float3 start = position + normalWS * reach;
-    float distance;
-    float3 gridPosition;
-    if (!VividMeshSdfTraceInstance(field, instance, start, -normalWS, 0.0, 2.0 * reach, distance, gridPosition))
-        return -1.0;
-    float3 gradient = VividMeshSdfGradient(field, gridPosition);
-    float3 geometryNormal = SafeNormalize(gradient.x * r0 + gradient.y * r1 + gradient.z * r2);
-    if (dot(geometryNormal, normalWS) < 0.95 || dot(geometryNormal, sun) <= 0.0)
+    float3 position, geometryNormal;
+    if (!ProjectCardPoint(instance, field, local, normalLS, normalWS, position, geometryNormal)
+        || dot(geometryNormal, sun) <= 0.0)
         return -1.0;
 
     float bias = ResolveSunShadowBias(field, instance, geometryNormal);
-    float3 origin = start - normalWS * distance + geometryNormal * bias;
+    float3 origin = position + geometryNormal * bias;
     return VividOccludeMeshSdfScene(origin, sun, -_SdfDiffuseLightPositionRange.w, _SdfDiffuseLightLayerMask) ? 0.0 : 1.0;
 }
 
@@ -223,7 +237,7 @@ float LoadCachedSunVisibility(DiffuseSurface surface, uint3 cardTexel, float sur
 {
     uint card = ((uint)surface.cardExtent.w - 1u) * 6u + cardTexel.z;
     uint2 pixel = cardTexel.xy;
-    if (cardTexel.z == VividSdfLocalCardSlot || card >= _SdfSunReadyCards || any(pixel == 0u) || any(pixel + 1u >= uint2(_SdfSunLayout.xy))
+    if (cardTexel.z >= VividSdfBaseCardCount || card >= _SdfSunReadyCards || any(pixel == 0u) || any(pixel + 1u >= uint2(_SdfSunLayout.xy))
         || dot(hit.normalWS, lightingNormal) < 0.95
         || dot(hit.normalWS, _SdfDiffuseLightPositionRange.xyz) <= 0.0)
         return -1.0;
@@ -477,13 +491,18 @@ uint ProbeSeed(uint2 tile)
     return HashProbe(tile.x + tile.y * 65537u + _SdfDiffuseFrame * 0x9e3779b9u);
 }
 
-float3 ProbeRayDirection(uint ray, uint seed, float3x3 basis)
+float3 CosineRayDirection(uint ray, uint rayCount, uint seed, float3x3 basis)
 {
-    float u = (float(ray) + float(seed >> 16u) / 65536.0) / float(ProbeRayCount());
+    float u = (float(ray) + float(seed >> 16u) / 65536.0) / float(rayCount);
     float phi = TWO_PI * frac(float(seed & 65535u) / 65536.0 + float(ray) * 0.61803398875);
     float s, c;
     sincos(phi, s, c);
     return mul(float3(sqrt(u) * c, sqrt(u) * s, sqrt(1.0 - u)), basis);
+}
+
+float3 ProbeRayDirection(uint ray, uint seed, float3x3 basis)
+{
+    return CosineRayDirection(ray, ProbeRayCount(), seed, basis);
 }
 
 float2 ScreenUv(float4 clip)
@@ -694,6 +713,157 @@ float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, Dif
     return radiance + saturate(surface.albedoAndValid.rgb) * max(_SdfDiffuseLightColorShadow.rgb, 0.0)
         * (INV_PI * nDotL * attenuation * shadow);
 }
+
+#if defined(VIVID_SDF_SURFACE_CACHE)
+// Keep the atlas dimensions in sync with SdfDiffuseGatherPass.
+static const uint RadiosityCardSize = 8u;
+static const uint RadiosityColumns = 16u;
+static const uint RadiosityRays = 16u;
+StructuredBuffer<uint> _SdfRadiosityWork;
+Texture2D<float4> _SdfRadiosityInput;
+uint _SdfRadiosityLayout; // Number of published cards, or zero until a sweep is complete.
+
+uint2 RadiosityAtlasPixel(uint card, uint2 pixel)
+{
+    return uint2(card % RadiosityColumns, card / RadiosityColumns) * RadiosityCardSize + pixel;
+}
+
+uint2 RadiosityCardPixel(uint2 pixel, uint2 size)
+{
+    return min((2u * pixel + 1u) * size / (2u * RadiosityCardSize), size - 1u);
+}
+
+float3 LoadCardIndirect(DiffuseSurface surface, VividMeshSdfHit hit, uint3 cardTexel)
+{
+    [branch]
+    if (_SdfRadiosityLayout == 0u)
+        return 0.0;
+    uint first = _SdfRadiosityWork[(uint)surface.cardExtent.w];
+    if (first >= _SdfRadiosityLayout || cardTexel.z >= _SdfRadiosityLayout - first)
+        return 0.0;
+
+    uint card = first + cardTexel.z;
+    uint slice, axis;
+    float3 boundsMin, extent;
+    VividGetSdfCardProjection(surface, cardTexel.z, slice, axis, boundsMin, extent);
+    uint2 size;
+    uint slices;
+    _SdfSurfaceAlbedoDepth.GetDimensions(size.x, size.y, slices);
+    float depth = _SdfSurfaceAlbedoDepth.Load(int4(cardTexel.xy, slice, 0)).a;
+    float3 normal = SafeNormalize(_SdfSurfaceNormalCoverage.Load(int4(cardTexel.xy, slice, 0)).xyz * 2.0 - 1.0);
+    VividMeshSdfField field = _MeshSdfFields[_MeshSdfInstances[hit.instanceIndex].fieldIndex];
+    float depthTolerance = max(1.5 * field.originAndVoxelSize.w, extent[axis] / 512.0);
+    float2 p = (float2(cardTexel.xy) + 0.5) * (RadiosityCardSize / float2(size)) - 0.5;
+    int2 lower = int2(floor(p));
+    float2 fraction = frac(p);
+    float3 sum = 0.0;
+    float total = 0.0;
+    [unroll]
+    for (uint tap = 0u; tap < 4u; tap++)
+    {
+        uint2 offset = uint2(tap & 1u, tap >> 1u);
+        uint2 cell = uint2(clamp(lower + int2(offset), 0, int(RadiosityCardSize) - 1));
+        float4 sample = _SdfRadiosityInput.Load(int3(RadiosityAtlasPixel(card, cell), 0));
+        if (sample.a == 0.0 || abs(sample.a - 1.0 - depth) * extent[axis] > depthTolerance)
+            continue;
+        uint2 representative = RadiosityCardPixel(cell, size);
+        float3 sampleNormal = SafeNormalize(_SdfSurfaceNormalCoverage.Load(int4(representative, slice, 0)).xyz * 2.0 - 1.0);
+        if (dot(normal, sampleNormal) < 0.9)
+            continue;
+        float2 w = lerp(1.0 - fraction, fraction, float2(offset));
+        float weight = w.x * w.y;
+        sum += sample.rgb * weight;
+        total += weight;
+    }
+
+    // Cached irradiance divided by pi. Apply the hit material only once, and keep
+    // the feedback contractive even for ideal white cards.
+    return min(saturate(surface.albedoAndValid.rgb), 0.95) * (sum / max(total, 1e-5));
+}
+#endif
+
+#if defined(VIVID_SDF_RADIOSITY_UPDATE)
+RWTexture2D<float4> _SdfRadiosityOutput;
+uint _SdfRadiosityFirstCard;
+
+float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
+{
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver, incomplete);
+    if (incomplete)
+        return 0.0;
+    if (!traced)
+        return HasSkyTexture() && ResolveSdfSkyMiss(origin, direction, false, 0u) == RaySkyVisible
+            ? clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0) : 0.0;
+
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    if (surface.albedoAndValid.a == 0.0 || dot(hit.normalWS, direction) >= 0.0)
+        return 0.0;
+    float3 position = origin + direction * hit.distance;
+    float3 normal;
+    uint3 texel;
+    float error;
+    if (!VividTrySampleSdfSurface(hit, position, surface, normal, texel, error))
+        return 0.0;
+    return TraceHitLighting(position, normal, hit, surface, -1.0) + LoadCardIndirect(surface, hit, texel);
+}
+
+float4 GatherCardIndirect(uint card, uint2 cell)
+{
+    uint work = _SdfRadiosityWork[0] + 2u * card;
+    uint instanceIndex = _SdfRadiosityWork[work];
+    uint slot = _SdfRadiosityWork[work + 1u];
+    VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+    if ((instance.layerMask & _SdfDiffuseLayerMask) == 0u)
+        return 0.0;
+
+    uint slice, axis;
+    float3 boundsMin, extent;
+    VividGetSdfCardProjection(_SdfDiffuseSurfaces[instanceIndex], slot, slice, axis, boundsMin, extent);
+    uint2 size;
+    uint slices;
+    _SdfSurfaceAlbedoDepth.GetDimensions(size.x, size.y, slices);
+    uint2 pixel = RadiosityCardPixel(cell, size);
+    float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(pixel, slice, 0));
+    if (packedNormal.a == 0.0)
+        return 0.0;
+    float3 normalLS = SafeNormalize(packedNormal.xyz * 2.0 - 1.0);
+    float3 normalWS = SafeNormalize(normalLS.x * instance.worldToLocal0.xyz
+        + normalLS.y * instance.worldToLocal1.xyz + normalLS.z * instance.worldToLocal2.xyz);
+    float depth = _SdfSurfaceAlbedoDepth.Load(int4(pixel, slice, 0)).a;
+    float2 uv = (float2(pixel) + 0.5) / float2(size);
+    float3 relative = axis == 0u ? float3(depth, uv) : axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
+    float3 local = boundsMin + extent * relative;
+    VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+    VividMeshSdfReceiver receiver;
+    receiver.entityId = instance.entityId;
+    if (!ProjectCardPoint(instance, field, local, normalLS, normalWS, receiver.positionWS, receiver.normalWS))
+        return 0.0;
+
+    float3 origin = receiver.positionWS + receiver.normalWS * ResolveSunShadowBias(field, instance, receiver.normalWS);
+    float3x3 basis = GetLocalFrame(normalWS);
+    uint seed = HashProbe(card * (RadiosityCardSize * RadiosityCardSize) + cell.y * RadiosityCardSize + cell.x);
+    float3 sum = 0.0;
+    [loop]
+    for (uint ray = 0u; ray < RadiosityRays; ray++)
+    {
+        float3 direction = CosineRayDirection(ray, RadiosityRays, seed, basis);
+        if (dot(receiver.normalWS, direction) > 0.0)
+            sum += TraceCardRadiance(origin, direction, receiver);
+    }
+    // Keep zero for uncovered cells and preserve covered black as a valid sample.
+    return float4(clamp(sum / RadiosityRays, 0.0, 65000.0), 1.0 + depth);
+}
+
+[numthreads(8, 8, 1)]
+void UpdateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
+{
+    uint card = _SdfRadiosityFirstCard + id.z;
+    _SdfRadiosityOutput[RadiosityAtlasPixel(card, id.xy)] = GatherCardIndirect(card, id.xy);
+}
+#endif
 
 uint2 ProbePlaneStride()
 {
@@ -998,6 +1168,9 @@ void TraceProbe(uint3 id)
             cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
         #endif
         float3 radiance = TraceHitLighting(hitPosition, lightingNormal, hit, surface, cachedVisibility);
+        #if defined(VIVID_SDF_SURFACE_CACHE)
+            radiance += LoadCardIndirect(surface, hit, cardTexel);
+        #endif
         if (_SdfRestirEnabled != 0u)
         {
             RestirSample sample;

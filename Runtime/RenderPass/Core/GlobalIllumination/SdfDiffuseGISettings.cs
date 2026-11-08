@@ -31,6 +31,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Update instance card visibility for the directional sun in bounded batches. Unresolved card texels trace shadows at the hit.")]
         public BoolParameter cacheSunVisibility = new(false);
 
+        [Tooltip("Additional diffuse bounce orders propagated through the Surface Cache. Zero uses direct light and emission at SDF hits.")]
+        public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 3);
+
         [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
         public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
 

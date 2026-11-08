@@ -36,6 +36,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private const GraphicsFormat SunVisibilityFormat = GraphicsFormat.R16_SFloat;
         private const int SunAtlasTexelLimit = 4 * 1024 * 1024;
         private const int SunUpdateTexelBudget = 16 * 1024;
+        private const int RadiosityCardSize = 8; // One compute group per card.
+        private const int RadiosityColumns = 16;
+        private const int RadiosityCardLimit = 4096;
+        private const int RadiosityCardsPerFrame = 16;
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
@@ -62,6 +66,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SunVisibilityId = Shader.PropertyToID("_SdfSunVisibility");
         private static readonly int SunVisibilityOutputId = Shader.PropertyToID("_SdfSunVisibilityOutput");
         private static readonly int SunCacheHitsId = Shader.PropertyToID("_SdfSunCacheHits");
+        private static readonly ProfilingSampler RadiositySampler = new("Surface Cache Radiosity");
+        private static readonly CameraHistoryId RadiosityAId = CameraHistoryId.Create("SdfRadiosityA");
+        private static readonly CameraHistoryId RadiosityBId = CameraHistoryId.Create("SdfRadiosityB");
+        private static readonly int RadiosityWorkId = Shader.PropertyToID("_SdfRadiosityWork");
+        private static readonly int RadiosityLayoutId = Shader.PropertyToID("_SdfRadiosityLayout");
+        private static readonly int RadiosityFirstCardId = Shader.PropertyToID("_SdfRadiosityFirstCard");
+        private static readonly int RadiosityInputId = Shader.PropertyToID("_SdfRadiosityInput");
+        private static readonly int RadiosityOutputId = Shader.PropertyToID("_SdfRadiosityOutput");
         private static readonly int HzbId = Shader.PropertyToID("_SdfScreenHzb");
         private static readonly int MotionId = Shader.PropertyToID("_SdfScreenMotion");
         private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
@@ -194,6 +206,8 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool SunConfigured;
             internal ulong SunCardVersion;
             internal int SunReadyCards;
+            internal ulong RadiosityCardVersion;
+            internal int RadiosityTargetOrders, RadiosityOrder, RadiosityCursor, GatherRadiosityOrder;
 
             public override void Dispose() { }
         }
@@ -244,6 +258,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_ScreenRadianceDesc = CreateOutput("Screen Diffuse Source Radiance", ProbeFormat);
         private readonly RenderGraphTexture m_ScreenGeometryDesc = CreateOutput("Screen Diffuse Source Geometry", GraphicsFormat.R32G32_SFloat);
         private readonly RenderGraphTexture m_SunHistoryDesc = CreateOutput("Surface Cache Sun Visibility", SunVisibilityFormat);
+        private readonly RenderGraphTexture m_RadiosityDesc = CreateOutput("Surface Cache Radiosity", ProbeFormat);
         [RenderGraphResource(Name = "Screen Ray Samples", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_ScreenRays = CreateOutput("Diffuse GI Screen Rays", ProbeFormat);
         private VividMeshSdfGpuScene m_Scene;
@@ -252,6 +267,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private CameraHistoryTexture m_RestirHistory;
         private CameraHistoryTexture m_PixelHistory, m_PixelGeometryHistory;
         private CameraHistoryTexture m_SunHistory;
+        private CameraHistoryTexture m_RadiosityReadHistory, m_RadiosityWriteHistory;
+        private TextureHandle m_RadiosityInput, m_RadiosityOutput;
+        private int m_RadiosityKernel = -1;
+        private int m_RadiosityTargetOrders, m_RadiosityOrder, m_RadiosityCursor, m_RadiosityUpdateCards;
+        private ulong m_RadiosityCardVersion;
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection;
         private TextureHandle m_CardAlbedoDepth, m_CardNormalCoverage;
@@ -313,6 +333,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReceiverCachedKernel = m_Compute.FindKernel("TraceSdfReceiverCachedProbes");
             if (m_Compute.HasKernel("TraceSdfReceiverCachedSunProbes"))
                 m_ReceiverCachedSunKernel = m_Compute.FindKernel("TraceSdfReceiverCachedSunProbes");
+            if (m_Compute.HasKernel("UpdateSdfSurfaceRadiosity")
+                && SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample))
+                m_RadiosityKernel = m_Compute.FindKernel("UpdateSdfSurfaceRadiosity");
             m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
@@ -368,6 +391,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelHistory = m_PixelGeometryHistory = null;
             m_SunHistory = null;
             m_SunAtlas = default;
+            m_RadiosityReadHistory = m_RadiosityWriteHistory = null;
+            m_RadiosityInput = m_RadiosityOutput = default;
+            m_RadiosityTargetOrders = m_RadiosityOrder = m_RadiosityCursor = m_RadiosityUpdateCards = 0;
+            m_RadiosityCardVersion = 0;
             m_SkyTexture = default;
             m_SkyTraceDistance = 0f;
             m_SkyContentHash = 0;
@@ -490,6 +517,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_UseSdf && cache != null && settings.cacheSunVisibility.value
                 && m_SunUpdateKernel >= 0 && m_LightPositionRange.w < 0f && m_LightColorShadow.w > 0f)
                 PrepareSunCache(camera, cache);
+            if (m_UseSdf && cache != null && m_RadiosityKernel >= 0 && settings.surfaceCacheBounceOrders.value > 0)
+                PrepareRadiosity(camera, cache, settings.surfaceCacheBounceOrders.value);
             if (screenConfigured || pixelTemporal)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
@@ -520,6 +549,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.RestirPixelIntegration == m_RestirPixelIntegration
                 && m_State.SunConfigured == (m_SunHistory != null)
                 && (m_SunHistory == null || m_State.SunCardVersion == m_SunCardVersion)
+                && m_State.GatherRadiosityOrder == m_RadiosityOrder
+                && m_State.RadiosityCardVersion == m_RadiosityCardVersion
                 && m_State.Width == m_Width && m_State.Height == m_Height
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
@@ -690,6 +721,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 if (useSunCache)
                     RecordSunCache(cmd, traceKernel);
+                if (cache != null)
+                    RecordRadiosity(cmd, traceKernel, cache, black);
                 if (useScreenRays)
                     RecordScreenTrace(cmd, groupsX, groupsY, placement);
                 using (new ProfilingScope(cmd, GatherSampler))
@@ -762,6 +795,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.SunConfigured = m_SunHistory != null;
             m_State.SunReadyCards = useSunCache ? m_SunReadyCards : 0;
             m_State.SunCardVersion = m_SunCardVersion;
+            m_State.RadiosityCardVersion = m_RadiosityCardVersion;
+            m_State.RadiosityTargetOrders = m_RadiosityTargetOrders;
+            m_State.GatherRadiosityOrder = m_RadiosityOrder;
+            int cursor = m_RadiosityCursor + m_RadiosityUpdateCards;
+            bool finishedSweep = m_RadiosityUpdateCards > 0 && cursor == m_Scene.RadiosityCardCount;
+            m_State.RadiosityCursor = finishedSweep ? 0 : cursor;
+            m_State.RadiosityOrder = m_RadiosityOrder + (finishedSweep ? 1 : 0);
             m_State.LightPositionRange = m_LightPositionRange;
             m_State.LightColorShadow = m_LightColorShadow;
         }
@@ -777,6 +817,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
             m_ScreenTraceKernel = m_ScreenGatherKernel = -1;
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
+            m_RadiosityKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
@@ -851,6 +892,79 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_Compute, traceKernel, SunVisibilityId, m_SunAtlas);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, SunCacheHitsId, m_SunCacheHits.innerHandle);
             m_SunHistory.MarkWritten();
+        }
+
+        private void PrepareRadiosity(Camera camera, VividSdfSurfaceCache cache, int targetOrders)
+        {
+            var history = camera.GetVividCameraHistory();
+            int maxDimension = SystemInfo.maxTextureSize;
+            if (!history.IsFrameActive || maxDimension < RadiosityColumns * RadiosityCardSize)
+                return;
+
+            int limit = Mathf.Min(RadiosityCardLimit, maxDimension / RadiosityCardSize * RadiosityColumns);
+            m_Scene.PrepareRadiosityCards(limit);
+            int cards = m_Scene.RadiosityCardCount;
+            if (cards == 0)
+                return;
+
+            m_RadiosityDesc.Resize(RadiosityColumns * RadiosityCardSize,
+                CoreUtils.DivRoundUp(cards, RadiosityColumns) * RadiosityCardSize);
+            var descriptor = CameraHistoryRenderGraphBridge.CreateDescriptor(m_RadiosityDesc.desc);
+            var atlasA = history.GetOrCreateTexture(RadiosityAId, 1, descriptor);
+            var atlasB = history.GetOrCreateTexture(RadiosityBId, 1, descriptor);
+            m_RadiosityTargetOrders = targetOrders;
+            m_RadiosityCardVersion = cache.CardVersion;
+            bool stable = atlasA.IsValid(0) && atlasB.IsValid(0)
+                && m_State.RadiosityTargetOrders == targetOrders && m_State.SceneRevision == m_Scene.Revision
+                && ReferenceEquals(m_State.Cache, cache) && m_State.RadiosityCardVersion == m_RadiosityCardVersion
+                && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
+                && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
+                && m_State.SkyTraceDistance == m_SkyTraceDistance && m_State.SkyContentHash == m_SkyContentHash
+                && m_State.SkyTextureParams.Equals(m_SkyTextureParams) && m_State.SkyTextureTint.Equals(m_SkyTextureTint)
+                && m_State.LightPositionRange.Equals(m_LightPositionRange) && m_State.LightColorShadow.Equals(m_LightColorShadow);
+            m_RadiosityOrder = stable ? m_State.RadiosityOrder : 0;
+            m_RadiosityCursor = stable ? m_State.RadiosityCursor : 0;
+            bool writeA = (m_RadiosityOrder & 1) == 0;
+            m_RadiosityReadHistory = writeA ? atlasB : atlasA;
+            m_RadiosityWriteHistory = writeA ? atlasA : atlasB;
+            if (m_RadiosityOrder > 0)
+                m_RadiosityInput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityReadHistory, 0, AccessFlags.Read);
+            if (m_RadiosityOrder < targetOrders)
+            {
+                m_RadiosityOutput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityWriteHistory, 0, AccessFlags.Write);
+                m_RadiosityUpdateCards = m_RadiosityOutput.IsValid() ? Mathf.Min(cards - m_RadiosityCursor, RadiosityCardsPerFrame) : 0;
+            }
+        }
+
+        private void RecordRadiosity(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black)
+        {
+            bool published = m_RadiosityInput.IsValid();
+            var input = published ? m_RadiosityInput : black;
+            var work = m_RadiosityTargetOrders > 0 ? m_Scene.RadiosityWork : m_Scene.LeafInstances;
+            cmd.SetComputeIntParam(m_Compute, RadiosityLayoutId, published ? m_Scene.RadiosityCardCount : 0);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, RadiosityInputId, input);
+            cmd.SetComputeBufferParam(m_Compute, traceKernel, RadiosityWorkId, work);
+            if (m_RadiosityUpdateCards > 0)
+            {
+                using var scope = new ProfilingScope(cmd, RadiositySampler);
+                int kernel = m_RadiosityKernel;
+                m_Scene.Bind(cmd, m_Compute, kernel);
+                cmd.SetComputeBufferParam(m_Compute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeBufferParam(m_Compute, kernel, LocalCardTableId, cache.LocalCardTable);
+                cmd.SetComputeBufferParam(m_Compute, kernel, RadiosityWorkId, work);
+                cmd.SetComputeTextureParam(m_Compute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_Compute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeTextureParam(m_Compute, kernel, SkyTextureId, m_SkyTexture);
+                cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityInputId, input);
+                cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityOutputId, m_RadiosityOutput);
+                cmd.SetComputeIntParam(m_Compute, RadiosityFirstCardId, m_RadiosityCursor);
+                cmd.DispatchCompute(m_Compute, kernel, 1, 1, m_RadiosityUpdateCards);
+            }
+
+            // The atlases are single-slot histories. Carry validity through read-only
+            // frames as well; the order and cursor gate all reads of unfinished sweeps.
+            m_RadiosityReadHistory?.MarkWritten();
+            m_RadiosityWriteHistory?.MarkWritten();
         }
 
         private void PrepareScreenHistory(ContextContainer frameData, Camera camera, VividTemporalData temporal)

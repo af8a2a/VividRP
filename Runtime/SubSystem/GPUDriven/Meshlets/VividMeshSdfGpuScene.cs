@@ -139,6 +139,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private GraphicsBuffer m_DiffuseSurfaceBuffer;
         private GraphicsBuffer m_SurfaceLightingInstanceBuffer;
         private readonly List<uint> m_NextSurfaceLightingInstances;
+        private readonly List<uint> m_RadiosityWork = new();
+        private GraphicsBuffer m_RadiosityWorkBuffer;
+        private VividSdfSurfaceCache m_RadiosityCache;
+        private uint m_RadiosityRevision;
+        private ulong m_RadiosityCardVersion;
+        private int m_RadiosityCardLimit;
         private List<DiffuseSurface> m_DiffuseSurfaces;
         private List<DiffuseSurface> m_NextDiffuseSurfaces;
         private readonly Shader m_DiffuseShader;
@@ -155,6 +161,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal GraphicsBuffer DiffuseSurfaces => m_DiffuseSurfaceBuffer;
         internal GraphicsBuffer SurfaceLightingInstances => m_SurfaceLightingInstanceBuffer;
         internal int SurfaceLightingInstanceCount { get; private set; }
+        internal GraphicsBuffer RadiosityWork => m_RadiosityWorkBuffer;
+        internal int RadiosityCardCount { get; private set; }
         internal VividSdfSurfaceCache SurfaceCache { get; set; }
 
         internal VividMeshSdfGpuScene() { }
@@ -229,6 +237,46 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextInstances.Clear();
             NodeCount = m_Nodes.Count;
             return true;
+        }
+
+        internal void PrepareRadiosityCards(int limit)
+        {
+            var cache = SurfaceCache;
+            ulong cardVersion = cache.CardVersion;
+            if (ReferenceEquals(cache, m_RadiosityCache) && Revision == m_RadiosityRevision
+                && cardVersion == m_RadiosityCardVersion && limit == m_RadiosityCardLimit)
+                return;
+
+            // The header maps runtime lighting instances to the first card in the
+            // compact work list. Each work item stores an SDF instance and its card slot.
+            int count = SurfaceLightingInstanceCount;
+            m_RadiosityWork.Clear();
+            m_RadiosityWork.Add((uint)(count + 1));
+            for (int i = 0; i < count; i++)
+                m_RadiosityWork.Add(uint.MaxValue);
+
+            int cards = 0;
+            for (int i = 0; i < count && cards < limit; i++)
+            {
+                uint instance = m_NextSurfaceLightingInstances[i];
+                int first = (int)m_DiffuseSurfaces[(int)instance].CardMinAndFirst.w - 1;
+                int slots = Mathf.Min(limit - cards, VividSdfSurfaceCache.CardsPerMesh + cache.GetLocalCardCount(first));
+                m_RadiosityWork[i + 1] = (uint)cards;
+                for (int slot = 0; slot < slots; slot++)
+                {
+                    m_RadiosityWork.Add(instance);
+                    m_RadiosityWork.Add((uint)slot);
+                }
+                cards += slots;
+            }
+
+            if (cards != 0)
+                Upload(ref m_RadiosityWorkBuffer, m_RadiosityWork, "Mesh SDF Radiosity Card Work");
+            RadiosityCardCount = cards;
+            m_RadiosityCache = cache;
+            m_RadiosityRevision = Revision;
+            m_RadiosityCardVersion = cardVersion;
+            m_RadiosityCardLimit = limit;
         }
 
         private void CollectSources(VividMeshletRendererDatabase database)
@@ -573,6 +621,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_LeafInstanceBuffer?.Dispose();
             m_DiffuseSurfaceBuffer?.Dispose();
             m_SurfaceLightingInstanceBuffer?.Dispose();
+            m_RadiosityWorkBuffer?.Dispose();
+            m_RadiosityWorkBuffer = null;
+            m_RadiosityCache = null;
+            RadiosityCardCount = 0;
             m_SurfaceLightingInstanceBuffer = null;
             m_DiffuseSurfaceBuffer = null;
             SurfaceLightingInstanceCount = 0;

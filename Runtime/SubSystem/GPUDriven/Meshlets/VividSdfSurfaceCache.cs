@@ -36,6 +36,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private Dictionary<(Mesh, Material), int> m_Indices;
         private RTHandle m_AlbedoDepthHandle, m_NormalCoverageHandle;
         private GraphicsBuffer m_LocalCardTable;
+        private int[] m_LocalCardCounts;
 
         internal RTHandle AlbedoDepthHandle => m_AlbedoDepthHandle ??= RTHandles.Alloc(m_AlbedoDepth);
         internal RTHandle NormalCoverageHandle => m_NormalCoverageHandle ??= RTHandles.Alloc(m_NormalCoverage);
@@ -46,6 +47,11 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             && m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh + 1;
         private int LocalCardCount => m_LocalCards is { Length: > 0 } ? m_LocalCards.Length : HasLegacyLocalCard ? 1 : 0;
         internal GraphicsBuffer LocalCardTable => m_LocalCardTable ??= CreateLocalCardTable();
+        internal int GetLocalCardCount(int firstCard)
+        {
+            _ = LocalCardTable;
+            return m_LocalCardCounts[firstCard / CardsPerMesh];
+        }
         internal bool IsUsable => m_Entries != null && m_Entries.Length != 0
             && m_AlbedoDepth != null && m_NormalCoverage != null
             && m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh + LocalCardCount
@@ -84,18 +90,19 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             // One float4 range per entry, followed by two float4s per local card.
             var table = new Vector4[entries + 2 * count];
             var offsets = new int[entries];
+            var counts = new int[entries];
             for (int i = 0; i < count; i++)
             {
                 var card = ReadLocalCard(i);
                 if ((uint)card.EntryIndex >= (uint)entries || (uint)card.Face >= CardsPerMesh
                     || !IsValidLocalCardBounds(card.Bounds))
                     throw new InvalidOperationException("Invalid baked SDF local card.");
-                offsets[card.EntryIndex] += 2;
+                counts[card.EntryIndex]++;
             }
             int row = entries;
             for (int i = 0; i < entries; i++)
             {
-                int end = row + offsets[i];
+                int end = row + 2 * counts[i];
                 table[i] = new Vector4(row, end, 0f, 0f);
                 offsets[i] = row;
                 row = end;
@@ -116,6 +123,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             try
             {
                 buffer.SetData(table);
+                m_LocalCardCounts = counts;
                 return buffer;
             }
             catch
@@ -132,6 +140,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_AlbedoDepthHandle = m_NormalCoverageHandle = null;
             m_LocalCardTable?.Dispose();
             m_LocalCardTable = null;
+            m_LocalCardCounts = null;
         }
 
         internal bool TryGetCards(Mesh mesh, Material material, out Bounds bounds, out int firstCard)

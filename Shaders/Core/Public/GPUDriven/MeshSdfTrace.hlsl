@@ -376,7 +376,7 @@ bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float m
             bool exhausted;
             bool traced = VividMeshSdfTraceInstance(field, instance, originWS, directionWS, minDistance, hit.distance,
                 distance, positionInGrid, exhausted);
-            incomplete |= exhausted;
+            incomplete = incomplete || exhausted;
             if (!traced)
                 continue;
             #if defined(VIVID_SDF_RECEIVER)
@@ -387,7 +387,7 @@ bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float m
                     advancedReceiver = true;
                     traced = VividMeshSdfTraceInstance(field, instance, originWS, directionWS, nextDistance, hit.distance,
                         distance, positionInGrid, exhausted);
-                    incomplete |= exhausted;
+                    incomplete = incomplete || exhausted;
                     if (!traced)
                         continue;
                 }

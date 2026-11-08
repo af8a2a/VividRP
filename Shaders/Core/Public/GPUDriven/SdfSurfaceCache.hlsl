@@ -27,7 +27,7 @@ static const uint VividSdfCardDepthRejected = 5u;
 // Ranges indexed by the base card owner, followed by packed local-card pairs.
 StructuredBuffer<float4> _SdfLocalCardTable;
 
-static const uint VividSdfLocalCardSlot = 6u;
+static const uint VividSdfBaseCardCount = 6u;
 
 struct VividSdfCardSample
 {
@@ -132,7 +132,7 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
             float3 relativeLocal = (local - minAndSlice.xyz) / extentAndFace.xyz;
             if (facing >= 0.3 && all(relativeLocal >= 0.0) && all(relativeLocal <= 1.0))
                 VividSampleSdfCard(hit, relativeLocal, axis, facing, extentAndFace[axis],
-                    (uint)minAndSlice.w, VividSdfLocalCardSlot, size, tolerance, diagnose, rejection, best);
+                    (uint)minAndSlice.w, VividSdfBaseCardCount + (row - rows.x) / 2u, size, tolerance, diagnose, rejection, best);
         }
     }
 
@@ -160,6 +160,26 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
     uint3 cardTexel;
     float surfaceError;
     return VividTrySampleSdfSurface(hit, positionWS, surface, normalWS, cardTexel, surfaceError);
+}
+
+void VividGetSdfCardProjection(DiffuseSurface surface, uint slot, out uint slice, out uint axis,
+    out float3 boundsMin, out float3 extent)
+{
+    uint first = (uint)surface.cardMinAndFirst.w - 1u;
+    boundsMin = surface.cardMinAndFirst.xyz;
+    extent = surface.cardExtent.xyz;
+    slice = first + slot;
+    axis = slot >> 1u;
+    if (slot >= VividSdfBaseCardCount)
+    {
+        uint row = (uint)_SdfLocalCardTable[first / VividSdfBaseCardCount].x + 2u * (slot - VividSdfBaseCardCount);
+        float4 minAndSlice = _SdfLocalCardTable[row];
+        float4 extentAndFace = _SdfLocalCardTable[row + 1u];
+        boundsMin = minAndSlice.xyz;
+        extent = extentAndFace.xyz;
+        slice = (uint)minAndSlice.w;
+        axis = (uint)extentAndFace.w >> 1u;
+    }
 }
 #endif
 

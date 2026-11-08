@@ -243,7 +243,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_CachedSunTraceKernel = -1, m_SunUpdateKernel = -1;
         private int m_PlacementKernel = -1, m_FilterKernel = -1, m_HitFilterKernel = -1;
         private int m_RestirTemporalKernel = -1, m_RestirSpatialKernel = -1;
-        private int m_PixelTemporalKernel = -1;
+        private int m_PixelTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private int m_AtlasHeight;
         private Vector4 m_ProbeCameraForward;
@@ -286,7 +286,11 @@ namespace VividRP.Runtime.RenderPass.Core
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
                 && m_Compute.HasKernel("TemporalSdfDiffuseGI"))
+            {
                 m_PixelTemporalKernel = m_Compute.FindKernel("TemporalSdfDiffuseGI");
+                if (m_Compute.HasKernel("TemporalSdfRestirDiffuseGI"))
+                    m_RestirPixelTemporalKernel = m_Compute.FindKernel("TemporalSdfRestirDiffuseGI");
+            }
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
                 && m_Compute.HasKernel("PlaceSdfAdaptiveProbes"))
                 m_PlacementKernel = m_Compute.FindKernel("PlaceSdfAdaptiveProbes");
@@ -696,7 +700,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
-            m_PixelTemporalKernel = -1;
+            m_PixelTemporalKernel = m_RestirPixelTemporalKernel = -1;
         }
 
         internal static (int columns, int cards) ResolveSunAtlasLayout(Vector2Int size, int instanceCount, int maxDimension)
@@ -831,7 +835,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory)
         {
             using var scope = new ProfilingScope(cmd, PixelTemporalSampler);
-            int kernel = m_PixelTemporalKernel;
+            int kernel = m_RestirGather && m_RestirPixelTemporalKernel >= 0
+                ? m_RestirPixelTemporalKernel : m_PixelTemporalKernel;
             BindReceiver(cmd, kernel, bindProbes: false);
             cmd.SetComputeIntParam(m_Compute, HasHistoryId, hasHistory ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);

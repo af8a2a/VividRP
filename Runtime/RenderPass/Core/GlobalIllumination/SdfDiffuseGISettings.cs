@@ -34,6 +34,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Additional diffuse bounce orders propagated through the Surface Cache. Zero uses direct light and emission at SDF hits.")]
         public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 3);
 
+        [Tooltip("Add published card indirect lighting to screen hits that match the same Mesh SDF surface.")]
+        public BoolParameter screenHitCardLighting = new(true);
+
         [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
         public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
 

@@ -539,6 +539,11 @@ void IntegrateRestirLighting(uint3 id)
                 LoadProbeReceiverPixel(tile, size, samplePixel);
                 float2 offset = float2(samplePixel) - float2(id.xy);
                 weight *= rcp(1.0 + 0.10 * dot(offset, offset));
+                total += weight;
+                float4 distant = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+                float coveredWeight = weight * distant.a;
+                if (coveredWeight <= 0.0)
+                    continue;
 
                 RestirReservoir reservoir = LoadRestir(_SdfRestirSpatial, tile, grid.x);
                 float3 sourceNormal = UnpackProbeNormal(geometry.w);
@@ -547,21 +552,20 @@ void IntegrateRestirLighting(uint3 id)
                 float cosine = saturate(dot(normal, direction));
                 // Limit the interpolation gain for a sample grazing the source receiver.
                 cosine = min(cosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
-                float4 distant = _SdfDiffuseProbeInput.Load(int3(tile, 0));
                 float3 lighting = min(reservoir.sample.radiance * (reservoir.inversePdf * cosine) + distant.rgb, 65000.0);
-                result += weight * float4(lighting, distant.a);
-                total += weight;
+                result += coveredWeight * float4(lighting, 1.0);
 
                 // Weighted log-luminance variance keeps HDR outliers in a useful FP16 range.
                 float value = log2(1.0 + RestirLuminance(lighting));
                 float delta = value - mean;
-                mean += (weight / total) * delta;
-                m2 += weight * delta * (value - mean);
+                mean += (coveredWeight / result.a) * delta;
+                m2 += coveredWeight * delta * (value - mean);
             }
         }
-        float invWeight = rcp(max(total, 1e-5));
-        result *= invWeight;
-        variance = max(0.0, m2 * invWeight);
+        float invCoveredWeight = rcp(max(result.a, 1e-5));
+        result.rgb *= invCoveredWeight;
+        variance = max(0.0, m2 * invCoveredWeight);
+        result.a /= max(total, 1e-5);
     }
     _SdfDiffuseOutput[id.xy] = result;
     _SdfRestirVarianceOutput[id.xy] = variance;

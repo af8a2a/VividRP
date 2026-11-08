@@ -165,6 +165,17 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal int RadiosityCardCount { get; private set; }
         internal VividSdfSurfaceCache SurfaceCache { get; set; }
 
+        internal void CopyInstanceIndices(Dictionary<ulong, uint> destination)
+        {
+            destination.Clear();
+            for (int index = 0; index < m_Instances.Count; index++)
+            {
+                ulong entity = m_Instances[index].EntityId;
+                if (!destination.TryAdd(entity, (uint)index))
+                    destination[entity] = uint.MaxValue;
+            }
+        }
+
         internal VividMeshSdfGpuScene() { }
 
         internal VividMeshSdfGpuScene(Shader diffuseShader)

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -105,6 +107,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReceiverVisibilityId = Shader.PropertyToID("_SdfReceiverVisibility");
         private static readonly int ReceiverEntitiesId = Shader.PropertyToID("_SdfReceiverEntities");
         private static readonly int ReceiverCountId = Shader.PropertyToID("_SdfReceiverCount");
+        private static readonly int CorrectReceiverId = Shader.PropertyToID("_SdfCorrectReceiverSelfHits");
+        private static readonly int ScreenCardLightingId = Shader.PropertyToID("_SdfScreenCardLighting");
         private static readonly int RecordRayDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRecordRayDiagnostics");
         private static readonly int RecordFirstHitDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRecordFirstHitDiagnostics");
         private static readonly int CurrentResolvedId = Shader.PropertyToID("_SdfDiffuseCurrentResolved");
@@ -210,6 +214,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal ulong RestirCardVersion;
             internal bool PixelTemporal;
             internal bool CorrectReceiverSelfHits;
+            internal bool ScreenCardLighting;
             internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
@@ -237,7 +242,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_ReceiverVisibilitySource;
         private TextureHandle m_ReceiverVisibility;
         private GraphicsBuffer m_ReceiverEntities;
-        private ulong[] m_ReceiverEntityIds;
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ReceiverSource
+        {
+            public uint EntityLow, EntityHigh, SdfInstance, Padding;
+        }
+
+        private ReceiverSource[] m_ReceiverSources;
+        private readonly Dictionary<ulong, uint> m_SdfInstancesByEntity = new();
+        private uint m_ReceiverLookupRevision = uint.MaxValue;
+        private bool m_CorrectReceiverSelfHits, m_ScreenCardLightingRequested;
         private int m_ReceiverCount;
         private int m_ReceiverTraceKernel = -1, m_ReceiverCachedKernel = -1, m_ReceiverCachedSunKernel = -1;
         private readonly RenderGraphTexture m_PreviousProbes = RenderGraphTexture.CreateInput("Previous SDF Diffuse Probes", ProbeFormat);
@@ -424,6 +438,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State = null;
             m_ReceiverVisibilitySource = null;
             m_ReceiverVisibility = default;
+            m_CorrectReceiverSelfHits = m_ScreenCardLightingRequested = false;
             m_ProbeHistory = m_GeometryHistory = null;
             m_RestirHistory = null;
             m_PixelHistory = m_PixelGeometryHistory = null;
@@ -492,6 +507,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(m_ScreenHzb, m_LocalHzb);
             if (!m_UseSdf && !screenConfigured)
                 return;
+            m_CorrectReceiverSelfHits = m_UseSdf && useSettings && settings.correctReceiverSelfHits.value;
+            m_ScreenCardLightingRequested = m_UseSdf && screenConfigured && useSettings && cache != null
+                && settings.screenHitCardLighting.value && settings.surfaceCacheBounceOrders.value > 0;
 
             bool canRestir = useSettings && settings.restirGather.value && m_RestirTemporalKernel >= 0
                 && m_UseSdf && !m_OffscreenOnly;
@@ -514,8 +532,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FirstHitDiagnostics.Resize(m_RecordFirstHitDiagnostics ? m_ProbeWidth * rayCount : 1,
                 m_RecordFirstHitDiagnostics ? 3 * m_AtlasHeight : 1);
             m_AdaptivePlacement.Resize(m_AdaptiveProbes ? m_ProbeWidth : 1, m_AdaptiveProbes ? m_ProbeHeight : 1);
-            // Dense screen rays carry the exact hit pixel in W instead of travel distance.
-            m_ScreenRays.desc.ColorFormat = screenConfigured && m_RestirPixelIntegration ? GeometryFormat : ProbeFormat;
             m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * rayCount : 1, screenConfigured ? m_AtlasHeight : 1);
             bool rawResolved = pixelTemporal || m_RestirPixelIntegration;
             m_RawResolved.Resize(rawResolved ? m_Width : 1, rawResolved ? m_Height : 1);
@@ -534,7 +550,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PreviousRestir, m_CurrentRestir, m_CurrentRestir.desc, out m_RestirHistory);
             }
 
-            if (m_UseSdf && useSettings && settings.correctReceiverSelfHits.value
+            if ((m_CorrectReceiverSelfHits || m_ScreenCardLightingRequested)
                 && frameData.Contains<VividSdfReceiverFrameData>() && VividGPUDrivenSystem.HasInstance)
             {
                 var receiver = frameData.Get<VividSdfReceiverFrameData>();
@@ -571,6 +587,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 PrepareSunCache(camera, cache);
             if (m_UseSdf && cache != null && m_RadiosityKernel >= 0 && settings.surfaceCacheBounceOrders.value > 0)
                 PrepareRadiosity(camera, cache, settings.surfaceCacheBounceOrders.value);
+            // Dense reservoirs and card lighting need the exact raster hit pixel.
+            bool storeScreenPixel = screenConfigured && (m_RestirPixelIntegration
+                || (m_ScreenCardLightingRequested && m_ReceiverVisibilitySource != null && m_RadiosityInput.IsValid()));
+            m_ScreenRays.desc.ColorFormat = storeScreenPixel ? GeometryFormat : ProbeFormat;
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
             if (useSettings && m_NearOcclusionKernel >= 0 && !m_OffscreenOnly
@@ -644,24 +664,43 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            bool changed = m_ReceiverCount != count;
+            bool lookupChanged = m_ReceiverLookupRevision != m_Scene.Revision;
+            if (lookupChanged)
+                m_Scene.CopyInstanceIndices(m_SdfInstancesByEntity);
+
+            bool rebuild = lookupChanged || m_ReceiverCount != count;
             if (m_ReceiverEntities == null || m_ReceiverEntities.count < count)
             {
                 int capacity = Mathf.NextPowerOfTwo(count);
+                var sourcesBuffer = new ReceiverSource[capacity];
+                var entitiesBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, 4 * sizeof(uint));
                 m_ReceiverEntities?.Dispose();
-                m_ReceiverEntities = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(ulong));
-                m_ReceiverEntityIds = new ulong[capacity];
-                changed = true;
+                m_ReceiverEntities = entitiesBuffer;
+                m_ReceiverSources = sourcesBuffer;
+                rebuild = true;
             }
+            bool changed = rebuild;
             for (int index = 0; index < count; ++index)
             {
                 ulong entity = EntityId.ToULong(sources[index].PrimitiveEntityId);
-                changed |= m_ReceiverEntityIds[index] != entity;
-                m_ReceiverEntityIds[index] = entity;
+                ref var source = ref m_ReceiverSources[index];
+                uint low = (uint)entity;
+                uint high = (uint)(entity >> 32);
+                if (!rebuild && source.EntityLow == low && source.EntityHigh == high)
+                    continue;
+                source.EntityLow = low;
+                source.EntityHigh = high;
+                source.SdfInstance = m_SdfInstancesByEntity.TryGetValue(entity, out uint instance) ? instance : uint.MaxValue;
+                changed = true;
             }
             if (changed)
-                m_ReceiverEntities.SetData(m_ReceiverEntityIds, 0, 0, count);
+            {
+                // A failed upload must be retried even if the CPU mirror already matches.
+                m_ReceiverCount = 0;
+                m_ReceiverEntities.SetData(m_ReceiverSources, 0, 0, count);
+            }
             m_ReceiverCount = count;
+            m_ReceiverLookupRevision = m_Scene.Revision;
         }
 
         public void PrepareRenderGraph(ContextContainer frameData)
@@ -683,19 +722,25 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cmd = context.cmd;
             var cache = m_UseSdf ? m_Scene.SurfaceCache : null;
+            bool useScreenRays = m_HasScreenHistory && m_ScreenRays.innerHandle.IsValid()
+                && m_ScreenHzb.innerHandle.IsValid() && m_ScreenMotion.innerHandle.IsValid();
             bool useSunCache = m_SunAtlas.IsValid() && m_SunCacheHits.innerHandle.IsValid();
             int traceKernel = !m_UseSdf ? m_ScreenGatherKernel : cache != null ? m_CachedTraceKernel : m_TraceKernel;
             if (useSunCache)
                 traceKernel = m_CachedSunTraceKernel;
             int receiverKernel = useSunCache ? m_ReceiverCachedSunKernel : cache != null ? m_ReceiverCachedKernel : m_ReceiverTraceKernel;
-            bool correctReceiver = m_UseSdf && m_ReceiverVisibility.IsValid() && receiverKernel >= 0;
-            if (correctReceiver)
+            bool hasReceiverSource = m_UseSdf && m_ReceiverVisibility.IsValid() && receiverKernel >= 0;
+            bool correctReceiver = hasReceiverSource && m_CorrectReceiverSelfHits;
+            bool screenCardLighting = hasReceiverSource && useScreenRays && m_ScreenCardLightingRequested && m_RadiosityInput.IsValid();
+            if (correctReceiver || screenCardLighting)
             {
                 traceKernel = receiverKernel;
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, ReceiverVisibilityId, m_ReceiverVisibility);
                 cmd.SetComputeBufferParam(m_Compute, traceKernel, ReceiverEntitiesId, m_ReceiverEntities);
                 cmd.SetComputeIntParam(m_Compute, ReceiverCountId, m_ReceiverCount);
             }
+            cmd.SetComputeIntParam(m_Compute, CorrectReceiverId, correctReceiver ? 1 : 0);
+            cmd.SetComputeIntParam(m_Compute, ScreenCardLightingId, screenCardLighting ? 1 : 0);
             BindReceiver(cmd, traceKernel);
             if (m_HitDistanceFilter || m_RestirGather)
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, ProbeId, m_FilteredProbes.innerHandle);
@@ -724,14 +769,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_SpatialRestir.innerHandle.IsValid()
                 || !m_HitSamples.innerHandle.IsValid())
                 return;
-            bool useScreenRays = m_HasScreenHistory && m_ScreenRays.innerHandle.IsValid()
-                && m_ScreenHzb.innerHandle.IsValid() && m_ScreenMotion.innerHandle.IsValid();
             bool pixelTemporal = m_PixelHistory != null && m_PixelGeometryHistory != null && m_ScreenMotion.innerHandle.IsValid()
                 && m_RawResolved.innerHandle.IsValid() && m_CurrentPixelLighting.innerHandle.IsValid()
                 && m_CurrentPixelGeometry.innerHandle.IsValid() && m_PreviousPixelLighting.innerHandle.IsValid()
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
-                && m_State.CorrectReceiverSelfHits == correctReceiver;
+                && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting;
             bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather;
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousGeometryId, useProbeHistory ? m_PreviousGeometry.innerHandle : black);
@@ -843,6 +886,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.RestirCardVersion = m_RestirCardVersion;
             m_State.PixelTemporal = pixelTemporal;
             m_State.CorrectReceiverSelfHits = correctReceiver;
+            m_State.ScreenCardLighting = screenCardLighting;
             m_State.ScreenJitterUv = m_ScreenJitterUv;
             m_State.SceneRevision = m_Scene.Revision;
             m_State.Width = m_Width;
@@ -878,6 +922,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Cameras.Dispose();
             m_ReceiverEntities?.Dispose();
             m_ReceiverEntities = null;
+            m_ReceiverSources = null;
+            m_SdfInstancesByEntity.Clear();
+            m_ReceiverLookupRevision = uint.MaxValue;
             m_Scene?.Dispose();
             m_Scene = null;
             m_Compute = null;

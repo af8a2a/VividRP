@@ -61,6 +61,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Gather first-order directional lighting in the screen probes and evaluate it at the receiver normal.")]
         public BoolParameter directionalScreenProbes = new(false);
 
+        [Tooltip("Cache incoming radiance and hit distance per direction before filtering 16 px directional screen probes.")]
+        public BoolParameter screenProbeDirectionalCache = new(false);
+
+        [Tooltip("Guide directional screen probe rays with reprojected radiance, mixed with cosine sampling.")]
+        public BoolParameter screenProbeSamplingGuide = new(true);
+
         [Tooltip("Trace one additional probe per tile where the uniform probes do not represent nearby geometry.")]
         public BoolParameter adaptiveScreenProbes = new(false);
 

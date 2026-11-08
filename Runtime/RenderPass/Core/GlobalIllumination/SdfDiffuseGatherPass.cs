@@ -50,6 +50,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const float FarCellSize = 2.5f;
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
+        private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalRadianceHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
         private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistory");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
@@ -60,6 +61,17 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler TotalSampler = new("Diffuse GI Total");
         private static readonly ProfilingSampler PlacementSampler = new("Screen Probe Adaptive Placement");
         private static readonly ProfilingSampler FilterSampler = new("Screen Probe Spatial Filter");
+        private static readonly ProfilingSampler DirectionalGuideSampler = new("Screen Probe Directional Guide");
+        private static readonly ProfilingSampler DirectionalCacheSampler = new("Screen Probe Directional Accumulation");
+        private static readonly ProfilingSampler DirectionalFilterSampler = new("Screen Probe Directional Filter and Integration");
+        private static readonly int DirectionalCacheEnabledId = Shader.PropertyToID("_SdfDirectionalCacheEnabled");
+        private static readonly int DirectionalGuideEnabledId = Shader.PropertyToID("_SdfDirectionalGuideEnabled");
+        private static readonly int DirectionalHasHistoryId = Shader.PropertyToID("_SdfDirectionalHasHistory");
+        private static readonly int DirectionalGuideId = Shader.PropertyToID("_SdfDirectionalGuide");
+        private static readonly int DirectionalGuideOutputId = Shader.PropertyToID("_SdfDirectionalGuideOutput");
+        private static readonly int DirectionalRaysId = Shader.PropertyToID("_SdfDirectionalRays");
+        private static readonly int DirectionalPreviousId = Shader.PropertyToID("_SdfDirectionalPrevious");
+        private static readonly int DirectionalCurrentId = Shader.PropertyToID("_SdfDirectionalCurrent");
         private static readonly ProfilingSampler RestirTemporalSampler = new("ReSTIR Gather Temporal");
         private static readonly ProfilingSampler RestirSpatialSampler = new("ReSTIR Gather Spatial");
         private static readonly ProfilingSampler RestirDenoiseSampler = new("ReSTIR Variance Bilateral");
@@ -215,6 +227,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool PixelTemporal;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
+            internal bool DirectionalCache, DirectionalGuide;
             internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
@@ -255,6 +268,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ReceiverCount;
         private int m_ReceiverTraceKernel = -1, m_ReceiverCachedKernel = -1, m_ReceiverCachedSunKernel = -1;
         private readonly RenderGraphTexture m_PreviousProbes = RenderGraphTexture.CreateInput("Previous SDF Diffuse Probes", ProbeFormat);
+        private readonly RenderGraphTexture m_PreviousDirectional = RenderGraphTexture.CreateInput("Previous Screen Probe Directional Radiance", ProbeFormat);
+        private readonly RenderGraphTexture m_CurrentDirectional = CreateScratch("Screen Probe Directional Radiance", ProbeFormat);
+        [RenderGraphResource(Name = "Directional Probe Guide", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_DirectionalGuideTexture = CreateScratch("Screen Probe Directional Guide", ProbeFormat);
+        [RenderGraphResource(Name = "Directional Probe Rays", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_DirectionalRayTexture = CreateScratch("Screen Probe Directional Rays", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousGeometry = RenderGraphTexture.CreateInput("Previous SDF Diffuse Geometry", GeometryFormat);
         private readonly RenderGraphTexture m_Probes = CreateOutput("SDF Diffuse Probes", ProbeFormat);
         private readonly RenderGraphTexture m_Geometry = CreateOutput("SDF Diffuse Geometry", GeometryFormat);
@@ -300,6 +321,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private VividMeshSdfGpuScene m_Scene;
         private ComputeShader m_Compute;
         private CameraHistoryTexture m_ProbeHistory, m_GeometryHistory;
+        private CameraHistoryTexture m_DirectionalHistory;
+        private int m_DirectionalGuideKernel = -1, m_DirectionalCacheKernel = -1, m_DirectionalIntegrateKernel = -1;
+        private bool m_DirectionalCache, m_DirectionalGuide, m_DirectionalHistoryValid;
         private CameraHistoryTexture m_RestirHistory;
         private CameraHistoryTexture m_PixelHistory, m_PixelGeometryHistory;
         private CameraHistoryTexture m_SunHistory;
@@ -404,6 +428,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_FilterKernel = m_Compute.FindKernel("FilterSdfDiffuseProbes");
             if (m_Compute.HasKernel("FilterSdfDirectionalHits"))
                 m_HitFilterKernel = m_Compute.FindKernel("FilterSdfDirectionalHits");
+            if (m_Compute.HasKernel("PrepareSdfDirectionalGuide") && m_Compute.HasKernel("AccumulateSdfDirectionalRadiance")
+                && m_Compute.HasKernel("IntegrateSdfDirectionalRadiance"))
+            {
+                m_DirectionalGuideKernel = m_Compute.FindKernel("PrepareSdfDirectionalGuide");
+                m_DirectionalCacheKernel = m_Compute.FindKernel("AccumulateSdfDirectionalRadiance");
+                m_DirectionalIntegrateKernel = m_Compute.FindKernel("IntegrateSdfDirectionalRadiance");
+            }
             if (m_Compute.HasKernel("ResampleSdfRestirTemporal") && m_Compute.HasKernel("ResampleSdfRestirSpatial"))
             {
                 m_RestirTemporalKernel = m_Compute.FindKernel("ResampleSdfRestirTemporal");
@@ -440,6 +471,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReceiverVisibility = default;
             m_CorrectReceiverSelfHits = m_ScreenCardLightingRequested = false;
             m_ProbeHistory = m_GeometryHistory = null;
+            m_DirectionalHistory = null;
+            m_DirectionalHistoryValid = false;
             m_RestirHistory = null;
             m_PixelHistory = m_PixelGeometryHistory = null;
             m_SunHistory = null;
@@ -524,6 +557,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ProbeWidth = CoreUtils.DivRoundUp(m_Width, spacing);
             m_ProbeHeight = CoreUtils.DivRoundUp(m_Height, spacing);
             m_AtlasHeight = m_ProbeHeight * (m_AdaptiveProbes ? 2 : 1);
+            m_DirectionalCache = useSettings && m_DirectionalProbes && !m_RestirGather && !m_OffscreenOnly
+                && m_DirectionalCacheKernel >= 0 && settings.screenProbeDirectionalCache.value
+                && RaysPerProbe * m_ProbeWidth <= SystemInfo.maxTextureSize && 2 * m_AtlasHeight <= SystemInfo.maxTextureSize;
+            m_DirectionalGuide = m_DirectionalCache && settings.screenProbeSamplingGuide.value;
+            m_HitDistanceFilter &= !m_DirectionalCache;
+            int directionalWidth = m_DirectionalCache ? RaysPerProbe * m_ProbeWidth : 1;
+            m_DirectionalGuideTexture.Resize(directionalWidth, m_DirectionalCache ? m_AtlasHeight : 1);
+            m_DirectionalRayTexture.Resize(directionalWidth, m_DirectionalCache ? 2 * m_AtlasHeight : 1);
             int rayCount = m_RestirPixelIntegration ? 1 : RaysPerProbe;
             m_HitLighting.Resize(m_ProbeWidth, m_AtlasHeight);
             m_TraceSources.Resize(m_ProbeWidth, m_AtlasHeight);
@@ -609,17 +650,24 @@ namespace VividRP.Runtime.RenderPass.Core
                 PreparePixelHistory(camera);
             int atlasWidth = m_ProbeWidth * (m_DirectionalProbes ? DirectionalProbePlanes : 1);
             m_Probes.Resize(m_RestirPixelIntegration ? 1 : atlasWidth, m_RestirPixelIntegration ? 1 : m_AtlasHeight);
-            bool needsProbeScratch = m_SpatialFilter || m_RestirGather;
+            bool needsProbeScratch = m_SpatialFilter || m_RestirGather || m_DirectionalCache;
             m_FilteredProbes.Resize(needsProbeScratch ? atlasWidth : 1, needsProbeScratch ? m_AtlasHeight : 1);
             m_Geometry.Resize(m_ProbeWidth, m_AtlasHeight);
-            bool probesValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
+            bool probesValid = m_DirectionalCache || CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
                 m_PreviousProbes, m_Probes, m_Probes.desc, out m_ProbeHistory);
             bool geometryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, GeometryHistoryId,
                 m_PreviousGeometry, m_Geometry, m_Geometry.desc, out m_GeometryHistory);
+            if (m_DirectionalCache)
+            {
+                m_CurrentDirectional.Resize(directionalWidth, 2 * m_AtlasHeight);
+                m_DirectionalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalHistoryId,
+                    m_PreviousDirectional, m_CurrentDirectional, m_CurrentDirectional.desc, out m_DirectionalHistory);
+            }
             m_HasHistory = probesValid && geometryValid && m_State.SceneRevision == m_Scene.Revision
                 && ReferenceEquals(m_State.Cache, m_Scene.SurfaceCache)
                 && m_State.OffscreenOnly == m_OffscreenOnly && m_State.TraceMode == m_TraceMode
                 && m_State.DirectionalProbes == m_DirectionalProbes
+                && m_State.DirectionalCache == m_DirectionalCache && m_State.DirectionalGuide == m_DirectionalGuide
                 && m_State.AdaptiveProbes == m_AdaptiveProbes && m_State.SpatialFilter == m_SpatialFilter
                 && m_State.HitDistanceFilter == m_HitDistanceFilter
                 && m_State.RestirGather == m_RestirGather && m_State.RestirCardVersion == m_RestirCardVersion
@@ -714,8 +762,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(ComputePassContext context)
         {
-            if (m_State == null || m_ProbeHistory == null || m_GeometryHistory == null
-                || !m_Probes.innerHandle.IsValid() || !m_Geometry.innerHandle.IsValid()
+            if (m_State == null || m_GeometryHistory == null || !m_Geometry.innerHandle.IsValid()
+                || (!m_DirectionalCache && (m_ProbeHistory == null || !m_Probes.innerHandle.IsValid()))
                 || !m_Output.innerHandle.IsValid() || !m_HitLighting.innerHandle.IsValid() || !m_TraceSources.innerHandle.IsValid()
                 || !m_Depth.innerHandle.IsValid() || !m_GBuffer0.innerHandle.IsValid() || !m_GBuffer1.innerHandle.IsValid())
                 return;
@@ -742,8 +790,13 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Compute, CorrectReceiverId, correctReceiver ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, ScreenCardLightingId, screenCardLighting ? 1 : 0);
             BindReceiver(cmd, traceKernel);
-            if (m_HitDistanceFilter || m_RestirGather)
-                cmd.SetComputeTextureParam(m_Compute, traceKernel, ProbeId, m_FilteredProbes.innerHandle);
+            TextureHandle probeTarget = m_Probes.innerHandle;
+            if (m_DirectionalCache)
+                probeTarget = m_DirectionalRayTexture.innerHandle;
+            else if (m_HitDistanceFilter || m_RestirGather)
+                probeTarget = m_FilteredProbes.innerHandle;
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, ProbeId, probeTarget);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, GeometryId, m_Geometry.innerHandle);
             if (m_UseSdf)
             {
                 m_Scene.Bind(cmd, m_Compute, traceKernel);
@@ -759,11 +812,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_Compute, traceKernel, CardNormalCoverageId, m_CardNormalCoverage);
                 cmd.SetComputeBufferParam(m_Compute, traceKernel, LocalCardTableId, cache.LocalCardTable);
             }
-            bool hasHistory = m_HasHistory && m_PreviousProbes.innerHandle.IsValid() && m_PreviousGeometry.innerHandle.IsValid();
+            bool hasHistory = m_HasHistory && m_PreviousGeometry.innerHandle.IsValid()
+                && (m_DirectionalCache || m_PreviousProbes.innerHandle.IsValid());
             var black = context.renderGraphContext.defaultResources.blackTexture;
             var placement = m_AdaptiveProbes ? m_AdaptivePlacement.innerHandle : black;
             if ((m_AdaptiveProbes && !placement.IsValid())
-                || ((m_SpatialFilter || m_RestirGather) && !m_FilteredProbes.innerHandle.IsValid())
+                || ((m_SpatialFilter || m_RestirGather || m_DirectionalCache) && !m_FilteredProbes.innerHandle.IsValid())
+                || (m_DirectionalCache && (m_DirectionalHistory == null || !m_CurrentDirectional.innerHandle.IsValid()
+                    || !m_DirectionalGuideTexture.innerHandle.IsValid() || !m_DirectionalRayTexture.innerHandle.IsValid()))
                 || (m_RestirGather && (m_RestirHistory == null || !m_CurrentRestir.innerHandle.IsValid()))
                 || (m_RestirPixelIntegration && (!m_RestirVariance.innerHandle.IsValid() || !m_RawResolved.innerHandle.IsValid()))
                 || !m_SpatialRestir.innerHandle.IsValid()
@@ -775,7 +831,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
                 && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting;
-            bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather;
+            bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather && !m_DirectionalCache;
+            bool useDirectionalHistory = m_DirectionalCache && hasHistory && m_DirectionalHistoryValid
+                && m_PreviousDirectional.innerHandle.IsValid();
+            cmd.SetComputeIntParam(m_Compute, DirectionalCacheEnabledId, m_DirectionalCache ? 1 : 0);
+            cmd.SetComputeIntParam(m_Compute, DirectionalGuideEnabledId, m_DirectionalGuide ? 1 : 0);
+            cmd.SetComputeTextureParam(m_Compute, traceKernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousGeometryId, useProbeHistory ? m_PreviousGeometry.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
@@ -816,7 +877,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_AdaptiveProbes)
                 {
                     using var scope = new ProfilingScope(cmd, PlacementSampler);
-                    BindReceiver(cmd, m_PlacementKernel, bindProbes: false);
+                    BindReceiver(cmd, m_PlacementKernel);
                     cmd.SetComputeTextureParam(m_Compute, m_PlacementKernel, PlacementOutputId, placement);
                     cmd.DispatchCompute(m_Compute, m_PlacementKernel, groupsX, CoreUtils.DivRoundUp(m_ProbeHeight, GroupSize), 1);
                 }
@@ -827,11 +888,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordRadiosity(cmd, traceKernel, cache, black);
                     RecordFarCache(cmd, traceKernel, cache, black);
                 }
+                if (m_DirectionalCache)
+                    RecordDirectionalGuide(cmd, placement, black, useDirectionalHistory, groupsX, groupsY);
                 if (useScreenRays)
-                    RecordScreenTrace(cmd, groupsX, groupsY, placement);
+                    RecordScreenTrace(cmd, groupsX, groupsY, placement, black);
                 using (new ProfilingScope(cmd, GatherSampler))
                     cmd.DispatchCompute(m_Compute, traceKernel, groupsX, groupsY, 1);
-                if (m_RestirGather)
+                if (m_DirectionalCache)
+                    RecordDirectionalCache(cmd, black, useDirectionalHistory, groupsX, groupsY);
+                else if (m_RestirGather)
                     RecordRestir(cmd, black, useScreenRays ? m_ScreenHzb.innerHandle : black, hasHistory && m_RestirHistory.IsValid()
                         && m_PreviousRestir.innerHandle.IsValid(), groupsX, groupsY);
                 else if (m_HitDistanceFilter)
@@ -870,14 +935,17 @@ namespace VividRP.Runtime.RenderPass.Core
             EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
                 m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
 #endif
-            m_ProbeHistory.MarkWritten();
+            m_ProbeHistory?.MarkWritten();
             m_GeometryHistory.MarkWritten();
+            m_DirectionalHistory?.MarkWritten();
             m_State.ViewProjection = m_ViewProjection;
             m_State.Cache = m_Scene.SurfaceCache;
             m_State.OffscreenOnly = m_OffscreenOnly;
             m_State.TraceMode = m_TraceMode;
             m_State.HasScreenRays = useScreenRays;
             m_State.DirectionalProbes = m_DirectionalProbes;
+            m_State.DirectionalCache = m_DirectionalCache;
+            m_State.DirectionalGuide = m_DirectionalGuide;
             m_State.AdaptiveProbes = m_AdaptiveProbes;
             m_State.SpatialFilter = m_SpatialFilter;
             m_State.HitDistanceFilter = m_HitDistanceFilter;
@@ -1179,7 +1247,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
             int kernel = m_NearOcclusionKernel;
-            BindReceiver(cmd, kernel, bindProbes: false);
+            BindReceiver(cmd, kernel);
             cmd.SetComputeVectorParam(m_Compute, NearOcclusionId, m_NearOcclusion);
             cmd.SetComputeTextureParam(m_Compute, kernel, OutputId, m_Output.innerHandle);
             cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
@@ -1248,10 +1316,10 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using var scope = new ProfilingScope(cmd, ResolveSampler);
             int kernel = m_ResolveKernel;
-            BindReceiver(cmd, kernel, bindProbes: false);
+            BindReceiver(cmd, kernel);
             cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
-            bool useScratch = m_RestirPixelIntegration || (m_SpatialFilter && !m_HitDistanceFilter && !m_RestirGather);
+            bool useScratch = m_DirectionalCache || m_RestirPixelIntegration || (m_SpatialFilter && !m_HitDistanceFilter && !m_RestirGather);
             cmd.SetComputeTextureParam(m_Compute, kernel, ProbeInputId,
                 useScratch ? m_FilteredProbes.innerHandle : m_Probes.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, RestirSpatialId, m_SpatialRestir.innerHandle);
@@ -1265,7 +1333,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using var scope = new ProfilingScope(cmd, RestirDenoiseSampler);
             int kernel = m_RestirDenoiseKernel;
-            BindReceiver(cmd, kernel, bindProbes: false);
+            BindReceiver(cmd, kernel);
             cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);
             cmd.SetComputeTextureParam(m_Compute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, RestirFilterInputId,
@@ -1291,7 +1359,7 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, PixelTemporalSampler);
             int kernel = m_RestirGather && m_RestirPixelTemporalKernel >= 0
                 ? m_RestirPixelTemporalKernel : m_PixelTemporalKernel;
-            BindReceiver(cmd, kernel, bindProbes: false);
+            BindReceiver(cmd, kernel);
             cmd.SetComputeIntParam(m_Compute, HasHistoryId, hasHistory ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);
             cmd.SetComputeMatrixParam(m_Compute, PreviousInverseVpId, m_State.ViewProjection.inverse);
@@ -1308,12 +1376,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelGeometryHistory.MarkWritten();
         }
 
-        private void RecordScreenTrace(ComputeCommandBuffer cmd, int groupsX, int groupsY, TextureHandle placement)
+        private void RecordScreenTrace(ComputeCommandBuffer cmd, int groupsX, int groupsY, TextureHandle placement, TextureHandle black)
         {
             using var scope = new ProfilingScope(cmd, ScreenTraceSampler);
             int kernel = m_ScreenTraceKernel;
-            BindReceiver(cmd, kernel, bindProbes: false);
+            BindReceiver(cmd, kernel);
             cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
             cmd.SetComputeTextureParam(m_Compute, kernel, HzbId, m_ScreenHzb.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, MotionId, m_ScreenMotion.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, ScreenRadianceId, m_PreviousScreenRadiance);
@@ -1324,16 +1393,48 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
         }
 
-        private void BindReceiver(ComputeCommandBuffer cmd, int kernel, bool bindProbes = true)
+        private void RecordDirectionalGuide(ComputeCommandBuffer cmd, TextureHandle placement, TextureHandle black,
+            bool hasHistory, int groupsX, int groupsY)
+        {
+            using var scope = new ProfilingScope(cmd, DirectionalGuideSampler);
+            int kernel = m_DirectionalGuideKernel;
+            BindReceiver(cmd, kernel);
+            cmd.SetComputeIntParam(m_Compute, DirectionalHasHistoryId, hasHistory ? 1 : 0);
+            cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_Compute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+            cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalPreviousId, hasHistory ? m_PreviousDirectional.innerHandle : black);
+            cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalGuideOutputId, m_DirectionalGuideTexture.innerHandle);
+            cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+        }
+
+        private void RecordDirectionalCache(ComputeCommandBuffer cmd, TextureHandle black, bool hasHistory, int groupsX, int groupsY)
+        {
+            int kernel = m_DirectionalCacheKernel;
+            using (new ProfilingScope(cmd, DirectionalCacheSampler))
+            {
+                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalPreviousId, hasHistory ? m_PreviousDirectional.innerHandle : black);
+                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalGuideId, m_DirectionalGuideTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalRaysId, m_DirectionalRayTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalCurrentId, m_CurrentDirectional.innerHandle);
+                cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_ProbeWidth * RaysPerProbe, GroupSize), groupsY, 1);
+            }
+            using (new ProfilingScope(cmd, DirectionalFilterSampler))
+            {
+                kernel = m_DirectionalIntegrateKernel;
+                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalCurrentId, m_CurrentDirectional.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, FilteredProbesId, m_FilteredProbes.innerHandle);
+                cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+            }
+        }
+
+        private void BindReceiver(ComputeCommandBuffer cmd, int kernel)
         {
             cmd.SetComputeTextureParam(m_Compute, kernel, DepthId, m_Depth.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
-            if (bindProbes)
-            {
-                cmd.SetComputeTextureParam(m_Compute, kernel, ProbeId, m_Probes.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
-            }
         }
 
         private void ReadLight()

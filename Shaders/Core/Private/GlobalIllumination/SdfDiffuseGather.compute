@@ -15,6 +15,7 @@
 #pragma kernel ResampleSdfRestirSpatial
 #pragma kernel TemporalSdfDiffuseGI
 #pragma kernel TemporalSdfRestirDiffuseGI VIVID_SDF_RESTIR_PIXEL_HISTORY
+#pragma kernel DenoiseSdfRestir
 
 #include "../../Public/Input.hlsl"
 #include "../../Public/GPUDriven/SdfSurfaceCache.hlsl"
@@ -24,6 +25,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
 static const uint ProbeSpacing = 16u;
+static const uint RestirPixelSpacing = 2u;
 static const uint RaysPerProbe = 8u;
 static const float ProbeMomentScale = 0.25;
 static const uint RayScreenHit = 1u;
@@ -81,6 +83,7 @@ uint _SdfDiffuseFrame;
 uint _SdfDiffuseHasHistory;
 uint _SdfDiffuseDirectionalProbes;
 uint _SdfDiffuseAdaptiveProbes;
+uint _SdfRestirDense;
 uint _SdfDiffuseSpatialFilter;
 uint _SdfDiffuseHitFilterEnabled;
 uint _SdfDiffuseRealtimeOnly;
@@ -258,7 +261,13 @@ uint2 ProbeReceiverPixel(uint2 tile, uint2 screenSize)
 
 uint2 ProbeGridSize(uint2 screenSize)
 {
-    return (screenSize + ProbeSpacing - 1u) / ProbeSpacing;
+    uint spacing = _SdfRestirDense != 0u ? RestirPixelSpacing : ProbeSpacing;
+    return (screenSize + spacing - 1u) / spacing;
+}
+
+uint ProbeRayCount()
+{
+    return _SdfRestirDense != 0u ? 1u : RaysPerProbe;
 }
 
 bool LoadAdaptiveProbePixel(uint2 tile, out uint2 pixel)
@@ -271,6 +280,12 @@ bool LoadAdaptiveProbePixel(uint2 tile, out uint2 pixel)
 
 bool LoadProbeReceiverPixel(uint2 atlas, uint2 screenSize, out uint2 pixel)
 {
+    if (_SdfRestirDense != 0u)
+    {
+        uint2 jitter = uint2(_SdfDiffuseFrame & 1u, (_SdfDiffuseFrame >> 1u) & 1u);
+        pixel = min(atlas * RestirPixelSpacing + jitter, screenSize - 1u);
+        return true;
+    }
     uint gridHeight = ProbeGridSize(screenSize).y;
     if (atlas.y < gridHeight)
     {
@@ -392,7 +407,7 @@ uint ProbeSeed(uint2 tile)
 
 float3 ProbeRayDirection(uint ray, uint seed, float3x3 basis)
 {
-    float u = (float(ray) + float(seed >> 16u) / 65536.0) / float(RaysPerProbe);
+    float u = (float(ray) + float(seed >> 16u) / 65536.0) / float(ProbeRayCount());
     float phi = TWO_PI * frac(float(seed & 65535u) / 65536.0 + float(ray) * 0.61803398875);
     float s, c;
     sincos(phi, s, c);
@@ -691,7 +706,7 @@ float4 AccumulateProbe(float4 current, float3 position, float3 normal, inout flo
 
 void StoreTraceSample(uint2 tile, uint ray, uint state, float distance, float3 radiance, float3 direction = 0.0)
 {
-    uint2 address = uint2(tile.x * RaysPerProbe + ray, tile.y);
+    uint2 address = uint2(tile.x * ProbeRayCount() + ray, tile.y);
     if (_SdfDiffuseHitFilterEnabled != 0u)
     {
         uint packed = 0u;
@@ -716,7 +731,7 @@ void StoreTraceSample(uint2 tile, uint ray, uint state, float distance, float3 r
 void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 direction, VividMeshSdfHit hit,
     uint rejection, bool advancedReceiver = false)
 {
-    uint2 pixel = uint2(tile.x * RaysPerProbe + ray, tile.y * 3u);
+    uint2 pixel = uint2(tile.x * ProbeRayCount() + ray, tile.y * 3u);
     float4 entity = 0.0;
     float4 firstHit = 0.0;
     #if !defined(VIVID_SDF_SCREEN_ONLY)
@@ -743,10 +758,17 @@ void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 directi
 
 #include "SdfDiffuseReSTIR.hlsl"
 
+[numthreads(8, 8, 1)]
+void DenoiseSdfRestir(uint3 id : SV_DispatchThreadID)
+{
+    FilterRestirLighting(id);
+}
+
 void TraceProbe(uint3 id)
 {
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
     uint2 tile = id.xy;
+    uint rayCount = ProbeRayCount();
     if (any(tile >= ProbeGridSize(screenSize) * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
         return;
 
@@ -763,7 +785,7 @@ void TraceProbe(uint3 id)
         if (_SdfDiffuseRecordRayDiagnostics != 0u)
         {
             [unroll]
-            for (uint ray = 0u; ray < RaysPerProbe; ++ray)
+            for (uint ray = 0u; ray < rayCount; ++ray)
             {
                 StoreTraceSample(tile, ray, 0u, 0.0, 0.0);
                 if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
@@ -795,7 +817,7 @@ void TraceProbe(uint3 id)
     RestirReservoir reservoir = (RestirReservoir)0;
     float reservoirWeightSum = 0.0;
     [loop]
-    for (uint ray = 0u; ray < RaysPerProbe; ray++)
+    for (uint ray = 0u; ray < rayCount; ray++)
     {
         uint screenState = 0u;
         if (_SdfDiffuseUseScreenRays != 0u)
@@ -911,15 +933,15 @@ void TraceProbe(uint3 id)
     // A miss contributes black in this local one-bounce estimator.
     #if defined(VIVID_SDF_SURFACE_CACHE) || defined(VIVID_SDF_SCREEN_ONLY)
         // Keep the baked fallback where cards cover few of the gather rays.
-        float confidence = float(valid) / float(RaysPerProbe);
+        float confidence = float(valid) / float(rayCount);
     #else
-        float confidence = valid > 0u ? 1.0 - float(unknown) / float(RaysPerProbe) : 0.0;
+        float confidence = valid > 0u ? 1.0 - float(unknown) / float(rayCount) : 0.0;
     #endif
-    float4 current = float4(min(sum / float(RaysPerProbe), 65000.0), confidence);
-    moments /= float(RaysPerProbe);
+    float4 current = float4(min(sum / float(rayCount), 65000.0), confidence);
+    moments /= float(rayCount);
     if (_SdfRestirEnabled != 0u)
     {
-        reservoir.count = RaysPerProbe;
+        reservoir.count = rayCount;
         // Use the same packed receiver normal as the resampling passes.
         float3 storedNormal = UnpackProbeNormal(PackProbeNormal(normal));
         RestirFinalize(reservoir, reservoirWeightSum, position + storedNormal * _SdfDiffuseRayBias, storedNormal);
@@ -929,10 +951,10 @@ void TraceProbe(uint3 id)
         current = AccumulateProbe(current, position, normal, moments);
     StoreProbe(tile, current, moments);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
-    _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / RaysPerProbe);
-    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits, RaysPerProbe - valid) / RaysPerProbe, 1.0);
+    _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1u, valid), 65000.0), float(valid) / rayCount);
+    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits, rayCount - valid) / rayCount, 1.0);
     #if defined(VIVID_SDF_CACHED_SUN)
-        _SdfSunCacheHits[tile] = float4(float(cachedSunHits) / RaysPerProbe, 0.0, 0.0, 1.0);
+        _SdfSunCacheHits[tile] = float4(float(cachedSunHits) / rayCount, 0.0, 0.0, 1.0);
     #endif
 }
 
@@ -1183,6 +1205,11 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
 [numthreads(8, 8, 1)]
 void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
 {
+    if (_SdfRestirDense != 0u)
+    {
+        IntegrateRestirLighting(id);
+        return;
+    }
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
     if (any(id.xy >= screenSize))
         return;
@@ -1369,5 +1396,6 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     _SdfDiffusePixelGeometryOutput[id.xy] = packed;
     if (receiver && _SdfDiffuseRealtimeOnly != 0u)
         result.a = 1.0;
-    _SdfDiffuseOutput[id.xy] = result;
+    if (_SdfRestirDense == 0u)
+        _SdfDiffuseOutput[id.xy] = result;
 }

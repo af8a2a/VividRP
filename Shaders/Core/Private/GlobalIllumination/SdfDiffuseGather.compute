@@ -911,7 +911,7 @@ void TraceProbe(uint3 id)
             sample.normal = hit.normalWS;
             sample.radiance = radiance;
             // Target and the original proposal both contain the receiver cosine.
-            RestirUpdate(reservoir, reservoirWeightSum, sample, RestirLuminance(radiance), 0u, 0u,
+            RestirUpdate(reservoir, reservoirWeightSum, sample, RestirLuminance(radiance), 0u,
                 RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));
         }
         StoreTraceSample(tile, ray, screenState | RaySdfHit, hit.distance, radiance, direction);
@@ -941,7 +941,9 @@ void TraceProbe(uint3 id)
     moments /= float(rayCount);
     if (_SdfRestirEnabled != 0u)
     {
-        reservoir.count = rayCount;
+        // Misses and shaded black hits are known zero contributions. Rejected geometry
+        // and missing cards have no evaluated contribution and are handled by coverage.
+        reservoir.count = rayCount - unknown;
         // Use the same packed receiver normal as the resampling passes.
         float3 storedNormal = UnpackProbeNormal(PackProbeNormal(normal));
         RestirFinalize(reservoir, reservoirWeightSum, position + storedNormal * _SdfDiffuseRayBias, storedNormal);

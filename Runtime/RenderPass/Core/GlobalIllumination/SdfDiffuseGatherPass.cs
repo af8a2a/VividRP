@@ -252,6 +252,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool DirectionalCache, DirectionalGuide;
             internal float MeshDetailDistance;
             internal bool GlobalClipmapUsed;
+            internal Vector4 NearOcclusion;
             internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
@@ -594,6 +595,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalCache = useSettings && m_DirectionalProbes && !m_RestirGather && !m_OffscreenOnly
                 && m_DirectionalCacheKernel >= 0 && settings.screenProbeDirectionalCache.value
                 && RaysPerProbe * m_ProbeWidth <= SystemInfo.maxTextureSize && 2 * m_AtlasHeight <= SystemInfo.maxTextureSize;
+            if (useSettings && m_NearOcclusionKernel >= 0 && !m_OffscreenOnly
+                && float.IsFinite(settings.nearOcclusionStrength.value) && float.IsFinite(settings.nearOcclusionRadius.value))
+            {
+                float strength = settings.nearOcclusionStrength.value;
+                bool directional = strength > 0f && settings.directionalNearOcclusion.value;
+                m_NearOcclusion = new Vector4(settings.nearOcclusionRadius.value, strength, directional ? 1f : 0f, 0f);
+                m_DirectionalProbes |= directional && !m_RestirPixelIntegration;
+            }
             m_DirectionalGuide = m_DirectionalCache && settings.screenProbeSamplingGuide.value;
             m_HitDistanceFilter &= !m_DirectionalCache;
             int directionalWidth = m_DirectionalCache ? RaysPerProbe * m_ProbeWidth : 1;
@@ -672,9 +681,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenRays.desc.ColorFormat = storeScreenPixel ? GeometryFormat : ProbeFormat;
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
-            if (useSettings && m_NearOcclusionKernel >= 0 && !m_OffscreenOnly
-                && float.IsFinite(settings.nearOcclusionStrength.value) && float.IsFinite(settings.nearOcclusionRadius.value))
-                m_NearOcclusion = new Vector4(settings.nearOcclusionRadius.value, settings.nearOcclusionStrength.value, 0f, 0f);
             if (screenConfigured || pixelTemporal)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
@@ -689,7 +695,9 @@ namespace VividRP.Runtime.RenderPass.Core
             int atlasWidth = m_ProbeWidth * (m_DirectionalProbes ? DirectionalProbePlanes : 1);
             m_Probes.Resize(m_RestirPixelIntegration ? 1 : atlasWidth, m_RestirPixelIntegration ? 1 : m_AtlasHeight);
             bool needsProbeScratch = m_SpatialFilter || m_RestirGather || m_DirectionalCache;
-            m_FilteredProbes.Resize(needsProbeScratch ? atlasWidth : 1, needsProbeScratch ? m_AtlasHeight : 1);
+            // The dense path keeps the exact far or sky direction alongside its radiance.
+            int scratchWidth = m_RestirPixelIntegration && m_NearOcclusion.z > 0f ? 2 * m_ProbeWidth : atlasWidth;
+            m_FilteredProbes.Resize(needsProbeScratch ? scratchWidth : 1, needsProbeScratch ? m_AtlasHeight : 1);
             m_Geometry.Resize(m_ProbeWidth, m_AtlasHeight);
             bool probesValid = m_DirectionalCache || CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
                 m_PreviousProbes, m_Probes, m_Probes.desc, out m_ProbeHistory);
@@ -705,6 +713,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && ReferenceEquals(m_State.Cache, m_Scene.SurfaceCache)
                 && m_State.OffscreenOnly == m_OffscreenOnly && m_State.TraceMode == m_TraceMode
                 && m_State.DirectionalProbes == m_DirectionalProbes
+                && ((m_State.NearOcclusion.z == 0f && m_NearOcclusion.z == 0f) || m_State.NearOcclusion.Equals(m_NearOcclusion))
                 && m_State.DirectionalCache == m_DirectionalCache && m_State.DirectionalGuide == m_DirectionalGuide
                 && m_State.AdaptiveProbes == m_AdaptiveProbes && m_State.SpatialFilter == m_SpatialFilter
                 && m_State.HitDistanceFilter == m_HitDistanceFilter
@@ -933,6 +942,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Compute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
             cmd.SetComputeMatrixParam(m_Compute, ViewProjectionId, m_ViewProjection);
             cmd.SetComputeIntParam(m_Compute, UseScreenRaysId, useScreenRays ? 1 : 0);
+            cmd.SetComputeVectorParam(m_Compute, NearOcclusionId, m_NearOcclusion);
             int groupsX = CoreUtils.DivRoundUp(m_ProbeWidth, GroupSize);
             int groupsY = CoreUtils.DivRoundUp(m_AtlasHeight, GroupSize);
             using (new ProfilingScope(cmd, TotalSampler))
@@ -989,7 +999,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordPixelTemporal(cmd, hasHistory && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid());
                 if (m_RestirPixelIntegration)
                     RecordRestirDenoise(cmd, pixelTemporal);
-                if (m_NearOcclusion.y > 0f)
+                if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
                     RecordNearOcclusion(cmd);
             }
             if (m_SkyTextureParams.w > 0.5f)
@@ -1007,6 +1017,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.TraceMode = m_TraceMode;
             m_State.HasScreenRays = useScreenRays;
             m_State.DirectionalProbes = m_DirectionalProbes;
+            m_State.NearOcclusion = m_NearOcclusion;
             m_State.DirectionalCache = m_DirectionalCache;
             m_State.DirectionalGuide = m_DirectionalGuide;
             m_State.AdaptiveProbes = m_AdaptiveProbes;
@@ -1344,7 +1355,6 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
             int kernel = m_NearOcclusionKernel;
             BindReceiver(cmd, kernel);
-            cmd.SetComputeVectorParam(m_Compute, NearOcclusionId, m_NearOcclusion);
             cmd.SetComputeTextureParam(m_Compute, kernel, OutputId, m_Output.innerHandle);
             cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
                 CoreUtils.DivRoundUp(m_Height, GroupSize), 1);

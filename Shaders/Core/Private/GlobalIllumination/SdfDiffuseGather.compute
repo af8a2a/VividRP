@@ -100,6 +100,7 @@ float _SdfMeshDetailDistance;
 uint _SdfUseGlobalClipmap;
 float4 _SdfFarWindow;
 float _SdfDiffuseRayBias;
+float4 _SdfNearOcclusion; // Radius, strength, and whether to integrate directional visibility.
 uint _SdfDiffuseLayerMask;
 uint _SdfDiffuseLightLayerMask;
 uint _SdfDiffuseFrame;
@@ -1157,6 +1158,17 @@ uint2 ProbePlaneStride()
     return uint2((uint(_SdfDiffuseScreenSize.x) + ProbeSpacing - 1u) / ProbeSpacing, 0u);
 }
 
+uint2 DistantProbeDirectionAddress(uint2 tile)
+{
+    return tile + uint2(ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy)).x, 0u);
+}
+
+void StoreDistantProbeDirection(uint2 tile, float3 direction)
+{
+    if (_SdfRestirDense != 0u && _SdfNearOcclusion.z > 0.0)
+        _SdfDiffuseProbes[DistantProbeDirectionAddress(tile)] = float4(direction, any(direction != 0.0) ? 1.0 : 0.0);
+}
+
 float3x3 ProbeSampleMoments(float3 radiance, float3 direction, float3 normal)
 {
     // Differentiate the cosine response in the tangent plane. Limit inverse-PDF
@@ -1289,16 +1301,6 @@ void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 directi
     _SdfDiffuseFirstHitDiagnostics[pixel + uint2(0u, 2u)] = float4(direction, advancedReceiver ? 1.0 : 0.0);
 }
 
-#include "SdfDiffuseReSTIR.hlsl"
-
-[numthreads(8, 8, 1)]
-void DenoiseSdfRestir(uint3 id : SV_DispatchThreadID)
-{
-    FilterRestirLighting(id);
-}
-
-float4 _SdfNearOcclusion;
-
 float3 LoadContactDelta(int2 pixel, float3 origin)
 {
     if (any(pixel < 0) || any(pixel >= int2(_SdfDiffuseScreenSize.xy)))
@@ -1319,6 +1321,66 @@ float3 ContactTangent(int2 pixel, int2 axis, float3 position)
     return (b == 0.0 || (a > 0.0 && a < b)) ? ahead : behind;
 }
 
+float4 EvaluateNearDiffuseVisibility(uint2 receiverPixel, float3 position, float3 shadingNormal, bool directional)
+{
+    float radius = _SdfNearOcclusion.x;
+    int2 pixel = int2(receiverPixel);
+    float3 dx = ContactTangent(pixel, int2(1, 0), position);
+    float3 dy = ContactTangent(pixel, int2(0, 1), position);
+    float3 geometricNormal = SafeNormalize(cross(dx, dy));
+    float agreement = dot(geometricNormal, shadingNormal);
+    float3 normal = shadingNormal;
+    if (abs(agreement) > 0.25 && max(dot(dx, dx), dot(dy, dy)) < radius * radius * 0.25)
+        normal = geometricNormal * (agreement < 0.0 ? -1.0 : 1.0);
+
+    float eyeW = mul(_SdfDiffuseVP, float4(position, 1.0)).w;
+    float pixelRadius = clamp(0.5 * radius * _SdfDiffuseScreenSize.y * length(_SdfDiffuseVP[1].xyz)
+        / max(eyeW, 1e-3), 1.0, 32.0);
+    const float2 directions[8] = { float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1),
+        float2(0.7071, 0.7071), float2(-0.7071, 0.7071), float2(0.7071, -0.7071), float2(-0.7071, -0.7071) };
+    float occlusion = 0.0;
+    float3 blocked = 0.0;
+    [unroll]
+    for (uint ray = 0u; ray < 8u; ray++)
+    {
+        float horizon = 0.0;
+        float3 blocker = 0.0;
+        [unroll]
+        for (uint tap = 1u; tap <= 2u; tap++)
+        {
+            float2 offset = directions[ray] * pixelRadius * (tap * 0.45);
+            float3 delta = LoadContactDelta(pixel + int2(round(offset)), position);
+            float distance = length(delta);
+            float elevation = (dot(delta, normal) - 0.015) / max(distance, 1e-5);
+            float occluder = saturate(elevation) * saturate(1.0 - distance / radius);
+            if (directional && occluder > horizon)
+                blocker = delta / max(distance, 1e-5);
+            horizon = max(horizon, occluder);
+        }
+        occlusion += horizon;
+        blocked += horizon * blocker;
+    }
+    float visibility = 1.0 - _SdfNearOcclusion.y * saturate(0.25 * occlusion);
+    float3 towardOpen = -0.25 * _SdfNearOcclusion.y * (blocked - shadingNormal * dot(blocked, shadingNormal));
+    // A bounded tangent term keeps directional visibility in [0, 1].
+    // Its cosine-weighted hemisphere mean is zero about the material normal.
+    towardOpen *= min(1.0, min(visibility, 1.0 - visibility) / max(length(towardOpen), 1e-5));
+    return float4(towardOpen, visibility);
+}
+
+float NearDiffuseDirectionVisibility(float4 visibility, float3 direction)
+{
+    return saturate(visibility.w + dot(visibility.xyz, direction));
+}
+
+#include "SdfDiffuseReSTIR.hlsl"
+
+[numthreads(8, 8, 1)]
+void DenoiseSdfRestir(uint3 id : SV_DispatchThreadID)
+{
+    FilterRestirLighting(id);
+}
+
 [numthreads(8, 8, 1)]
 void ApplySdfNearOcclusion(uint3 id : SV_DispatchThreadID)
 {
@@ -1329,38 +1391,8 @@ void ApplySdfNearOcclusion(uint3 id : SV_DispatchThreadID)
     if (lighting.a <= 0.0 || !LoadReceiver(id.xy, position, normal))
         return;
 
-    float radius = _SdfNearOcclusion.x;
-    int2 pixel = int2(id.xy);
-    float3 dx = ContactTangent(pixel, int2(1, 0), position);
-    float3 dy = ContactTangent(pixel, int2(0, 1), position);
-    float3 geometricNormal = SafeNormalize(cross(dx, dy));
-    float agreement = dot(geometricNormal, normal);
-    if (abs(agreement) > 0.25 && max(dot(dx, dx), dot(dy, dy)) < radius * radius * 0.25)
-        normal = geometricNormal * (agreement < 0.0 ? -1.0 : 1.0);
-
-    float eyeW = mul(_SdfDiffuseVP, float4(position, 1.0)).w;
-    float pixelRadius = clamp(0.5 * radius * _SdfDiffuseScreenSize.y * length(_SdfDiffuseVP[1].xyz)
-        / max(eyeW, 1e-3), 1.0, 32.0);
-    const float2 directions[8] = { float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1),
-        float2(0.7071, 0.7071), float2(-0.7071, 0.7071), float2(0.7071, -0.7071), float2(-0.7071, -0.7071) };
-    float occlusion = 0.0;
-    [unroll]
-    for (uint ray = 0u; ray < 8u; ray++)
-    {
-        float horizon = 0.0;
-        [unroll]
-        for (uint tap = 1u; tap <= 2u; tap++)
-        {
-            float2 offset = directions[ray] * pixelRadius * (tap * 0.45);
-            float3 delta = LoadContactDelta(pixel + int2(round(offset)), position);
-            float distance = length(delta);
-            float elevation = (dot(delta, normal) - 0.015) / max(distance, 1e-5);
-            horizon = max(horizon, saturate(elevation) * saturate(1.0 - distance / radius));
-        }
-        occlusion += horizon;
-    }
-    // Apply after temporal accumulation so contact visibility is never fed back.
-    lighting.rgb *= 1.0 - _SdfNearOcclusion.y * saturate(0.25 * occlusion);
+    // The legacy scalar mode applies only to realtime lighting after temporal accumulation.
+    lighting.rgb *= EvaluateNearDiffuseVisibility(id.xy, position, normal, false).w;
     _SdfDiffuseOutput[id.xy] = lighting;
 }
 
@@ -1443,6 +1475,7 @@ void TraceProbe(uint3 id)
             StoreInitialRestir(tile, (RestirReservoir)0);
         if (_SdfDirectionalCacheEnabled == 0u)
             StoreProbe(tile, 0.0, (float3x3)0.0);
+        StoreDistantProbeDirection(tile, 0.0);
         _SdfDiffuseGeometry[tile] = float4(0.0, 0.0, 0.0, -1.0);
         _SdfDiffuseHitLighting[tile] = 0.0;
         _SdfDiffuseTraceSources[tile] = 0.0;
@@ -1487,6 +1520,7 @@ void TraceProbe(uint3 id)
     RestirReservoir reservoir = (RestirReservoir)0;
     float reservoirWeightSum = 0.0;
     float3 distant = 0.0;
+    float3 distantDirection = 0.0;
     #if defined(VIVID_SDF_SCREEN_ONLY)
         const bool useSky = false;
     #else
@@ -1596,6 +1630,7 @@ void TraceProbe(uint3 id)
             {
                 sum += inverseRelativePdf * radiance;
                 distant += radiance;
+                distantDirection = direction;
                 if (_SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
                     moments += ProbeSampleMoments(radiance, direction, normal);
                 valid++;
@@ -1674,6 +1709,7 @@ void TraceProbe(uint3 id)
         if (farSegment)
         {
             distant += radiance;
+            distantDirection = direction;
             farHits++;
             if (cacheCoverage > 0.0)
                 rayState |= RayFarCache;
@@ -1727,6 +1763,7 @@ void TraceProbe(uint3 id)
         current = AccumulateProbe(current, position, normal, moments);
     if (_SdfDirectionalCacheEnabled == 0u)
         StoreProbe(tile, current, moments);
+    StoreDistantProbeDirection(tile, distantDirection);
     _SdfDiffuseGeometry[tile] = float4(position, PackProbeNormal(normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / normalization, 65000.0), confidence);
     // Sky and the far cache occupy the residual of the three source fractions.
@@ -1953,6 +1990,7 @@ void FilterSdfDirectionalHits(uint3 group : SV_GroupID, uint3 lane : SV_GroupThr
 }
 
 void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal, float eyeDepth,
+    float3 bentNormal, float visibility,
     inout float4 result, inout float totalWeight)
 {
     float4 geometry = _SdfDiffuseGeometry[tile];
@@ -1972,10 +2010,23 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
     {
         uint2 stride = ProbePlaneStride();
         float3 tangent = (normal - probeNormal * agreement) / ProbeMomentScale;
-        probe.rgb = clamp(probe.rgb + tangent.x * _SdfDiffuseProbeInput.Load(int3(tile + stride, 0)).rgb
-            + tangent.y * _SdfDiffuseProbeInput.Load(int3(tile + 2u * stride, 0)).rgb
-            + tangent.z * _SdfDiffuseProbeInput.Load(int3(tile + 3u * stride, 0)).rgb, 0.0, 65000.0);
+        float3 momentX = _SdfDiffuseProbeInput.Load(int3(tile + stride, 0)).rgb;
+        float3 momentY = _SdfDiffuseProbeInput.Load(int3(tile + 2u * stride, 0)).rgb;
+        float3 momentZ = _SdfDiffuseProbeInput.Load(int3(tile + 3u * stride, 0)).rgb;
+        float3 unoccluded = clamp(probe.rgb + tangent.x * momentX + tangent.y * momentY + tangent.z * momentZ, 0.0, 65000.0);
+        if (visibility < 1.0)
+        {
+            float3 bentTangent = (bentNormal - probeNormal * dot(probeNormal, bentNormal)) / ProbeMomentScale;
+            // The first-order probe reconstruction approximates the visible lobe.
+            // Keep its energy bounded by the unoccluded material response.
+            float3 bentIrradiance = probe.rgb + bentTangent.x * momentX + bentTangent.y * momentY + bentTangent.z * momentZ;
+            probe.rgb = min(unoccluded, max(0.0, bentIrradiance) * visibility);
+        }
+        else
+            probe.rgb = unoccluded;
     }
+    else
+        probe.rgb *= visibility;
     result += float4(probe.rgb * probe.a, probe.a) * weight;
     totalWeight += weight;
 }
@@ -1996,6 +2047,14 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     float4 result = 0.0;
     if (LoadReceiver(id.xy, position, normal))
     {
+        float visibility = 1.0;
+        float3 bentNormal = normal;
+        if (_SdfNearOcclusion.z > 0.0)
+        {
+            float4 contact = EvaluateNearDiffuseVisibility(id.xy, position, normal, true);
+            visibility = contact.w;
+            bentNormal = SafeNormalize(normal + contact.xyz / max(visibility, 1e-5));
+        }
         float2 grid = (float2(id.xy) + 0.5) / ProbeSpacing - 0.5;
         int2 low = int2(floor(grid));
         float2 fraction = frac(grid);
@@ -2009,7 +2068,8 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             int2 offset = int2(i & 1u, i >> 1u);
             uint2 tile = uint2(clamp(low + offset, 0, last));
             float2 weights = lerp(1.0 - fraction, fraction, float2(offset));
-            AddProbeToResolve(tile, weights.x * weights.y, position, normal, eyeDepth, result, totalWeight);
+            AddProbeToResolve(tile, weights.x * weights.y, position, normal, eyeDepth,
+                bentNormal, visibility, result, totalWeight);
             if (_SdfDiffuseAdaptiveProbes != 0u && all(int2(tile) == low + offset))
             {
                 uint2 pixel;
@@ -2017,7 +2077,7 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                 {
                     float2 adaptiveWeights = saturate(1.0 - abs(float2(pixel) - float2(id.xy)) / ProbeSpacing);
                     AddProbeToResolve(tile + uint2(0, probeGrid.y), adaptiveWeights.x * adaptiveWeights.y,
-                        position, normal, eyeDepth, result, totalWeight);
+                        position, normal, eyeDepth, bentNormal, visibility, result, totalWeight);
                 }
             }
         }

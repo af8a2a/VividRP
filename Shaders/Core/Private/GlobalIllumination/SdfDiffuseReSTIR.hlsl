@@ -510,6 +510,10 @@ void IntegrateRestirLighting(uint3 id)
     float3 position, normal;
     if (LoadReceiver(id.xy, position, normal))
     {
+        bool directionalContact = _SdfNearOcclusion.z > 0.0;
+        float4 contact = float4(0.0, 0.0, 0.0, 1.0);
+        if (directionalContact)
+            contact = EvaluateNearDiffuseVisibility(id.xy, position, normal, true);
         uint2 grid = ProbeGridSize(size);
         uint2 center = id.xy / RestirPixelSpacing;
         uint2 centerSample;
@@ -549,10 +553,34 @@ void IntegrateRestirLighting(uint3 id)
                 float3 sourceNormal = UnpackProbeNormal(geometry.w);
                 float3 origin = geometry.xyz + sourceNormal * _SdfDiffuseRayBias;
                 float3 direction = SafeNormalize(reservoir.sample.position - origin);
-                float cosine = saturate(dot(normal, direction));
+                float3 receiverDirection = direction;
+                float hitDistance = 0.0;
+                if (directionalContact)
+                {
+                    float3 receiverDelta = reservoir.sample.position - (position + normal * _SdfDiffuseRayBias);
+                    hitDistance = length(receiverDelta);
+                    receiverDirection = receiverDelta / max(hitDistance, 1e-5);
+                }
+                float cosine = saturate(dot(normal, receiverDirection));
                 // Limit the interpolation gain for a sample grazing the source receiver.
                 cosine = min(cosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
-                float3 lighting = min(reservoir.sample.radiance * (reservoir.inversePdf * cosine) + distant.rgb, 65000.0);
+                float3 localLighting = reservoir.sample.radiance * (reservoir.inversePdf * cosine);
+                if (directionalContact)
+                {
+                    // Close first hits already account for geometry along the ray.
+                    float visibility = NearDiffuseDirectionVisibility(contact, receiverDirection);
+                    localLighting *= lerp(1.0, visibility, saturate(hitDistance / _SdfNearOcclusion.x));
+
+                    float4 distantDirection = _SdfDiffuseProbeInput.Load(int3(DistantProbeDirectionAddress(tile), 0));
+                    if (distantDirection.w > 0.0)
+                    {
+                        float3 incoming = SafeNormalize(distantDirection.xyz);
+                        // Distant samples were drawn from the probe's cosine PDF.
+                        float materialWeight = min(2.0, saturate(dot(normal, incoming)) / max(dot(sourceNormal, incoming), 1e-4));
+                        distant.rgb *= materialWeight * NearDiffuseDirectionVisibility(contact, incoming);
+                    }
+                }
+                float3 lighting = min(localLighting + distant.rgb, 65000.0);
                 result += coveredWeight * float4(lighting, 1.0);
 
                 // Weighted log-luminance variance keeps HDR outliers in a useful FP16 range.

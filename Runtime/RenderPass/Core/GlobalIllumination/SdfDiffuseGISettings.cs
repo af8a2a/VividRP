@@ -61,6 +61,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Strength of current-frame contact occlusion on realtime diffuse GI.")]
         public ClampedFloatParameter nearOcclusionStrength = new(0f, 0f, 1f);
 
+        [Tooltip("Apply directional near-field visibility during diffuse integration. Uses the receiver shading normal and keeps GI coverage separate.")]
+        public BoolParameter directionalNearOcclusion = new(true);
+
         [Tooltip("World-space radius of realtime diffuse contact occlusion.")]
         public ClampedFloatParameter nearOcclusionRadius = new(0.35f, 0.05f, 1f);
 

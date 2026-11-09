@@ -271,8 +271,35 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/GlobalSdf.compute")]
         public ComputeShader GlobalSdfCompute;
 
-        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfDiffuseGather.compute")]
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfScreenProbeTracing.compute")]
+        public ComputeShader SdfScreenProbeTracingCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute")]
         public ComputeShader SdfDiffuseGatherCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute")]
+        public ComputeShader SdfScreenProbeImportanceSamplingCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute")]
+        public ComputeShader SdfScreenProbeFilteringCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGatherTemporal.compute")]
+        public ComputeShader SdfScreenProbeGatherTemporalCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfReSTIRGather.compute")]
+        public ComputeShader SdfReSTIRGatherCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLighting.compute")]
+        public ComputeShader SdfSceneDirectLightingCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfRadiosity.compute")]
+        public ComputeShader SdfRadiosityCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfRadianceCacheUpdate.compute")]
+        public ComputeShader SdfRadianceCacheUpdateCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfShortRangeAO.compute")]
+        public ComputeShader SdfShortRangeAOCompute;
 
         [VividResourcePath("Shaders/Core/Private/Debug/ReflectionProbeAtlasDebug")]
         public Shader ReflectionProbeAtlasDebugShader;

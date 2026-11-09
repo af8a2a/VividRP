@@ -1,0 +1,19 @@
+#pragma kernel ApplySdfNearOcclusion
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfShortRangeAOCommon.hlsl"
+
+[numthreads(8, 8, 1)]
+void ApplySdfNearOcclusion(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_SdfDiffuseScreenSize.xy)))
+        return;
+    float4 lighting = _SdfDiffuseOutput[id.xy];
+    float3 position, normal;
+    if (lighting.a <= 0.0 || !LoadReceiver(id.xy, position, normal))
+        return;
+
+    // The legacy scalar mode applies only to realtime lighting after temporal accumulation.
+    lighting.rgb *= EvaluateNearDiffuseVisibility(id.xy, position, normal, false).w;
+    _SdfDiffuseOutput[id.xy] = lighting;
+}

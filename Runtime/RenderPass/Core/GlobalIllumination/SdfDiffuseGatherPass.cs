@@ -37,7 +37,7 @@ namespace VividRP.Runtime.RenderPass.Core
 #if UNITY_EDITOR
         internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
 #endif
-        private const int ProbeSpacing = 16; // Keep in sync with SdfDiffuseGather.compute.
+        private const int ProbeSpacing = 16; // Keep in sync with SdfScreenProbeCommon.hlsl.
         private const int RestirPixelSpacing = 2;
         private const int RaysPerProbe = 8;
         private const int DirectionalProbePlanes = 4; // RGB baseline and three world-space tangent moments.
@@ -52,7 +52,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int RadiosityColumns = 16;
         private const int RadiosityCardLimit = 4096;
         private const int RadiosityCardsPerFrame = 16;
-        // Keep the grid and directional resolution in sync with SdfDiffuseGather.compute.
+        // Keep the grid and directional resolution in sync with SdfRadianceCacheCommon.hlsl.
         private const int FarGridSize = 16;
         private const int FarDirectionCount = 64;
         private const int FarProbeCount = FarGridSize * FarGridSize * FarGridSize;
@@ -368,7 +368,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Screen Ray Samples", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_ScreenRays = CreateOutput("Diffuse GI Screen Rays", ProbeFormat);
         private VividMeshSdfGpuScene m_Scene;
-        private ComputeShader m_Compute;
+        private ComputeShader m_TraceCompute;
+        private ComputeShader m_GatherCompute;
+        private ComputeShader m_ImportanceSamplingCompute;
+        private ComputeShader m_FilterCompute;
+        private ComputeShader m_GatherTemporalCompute;
+        private ComputeShader m_RestirCompute;
+        private ComputeShader m_SunCompute;
+        private ComputeShader m_RadiosityCompute;
+        private ComputeShader m_FarCompute;
+        private ComputeShader m_NearOcclusionCompute;
         private CameraHistoryTexture m_ProbeHistory, m_GeometryHistory;
         private CameraHistoryTexture m_DirectionalHistory;
         private int m_DirectionalGuideKernel = -1, m_DirectionalCacheKernel = -1, m_DirectionalIntegrateKernel = -1;
@@ -401,7 +410,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_OpenPbrResolveKernel = -1;
         private int m_FarKernel = -1, m_NearOcclusionKernel = -1;
         private HistoryState m_State;
-        private Matrix4x4 m_ViewProjection;
+        private Matrix4x4 m_ViewProjection, m_InverseViewProjection;
         private TextureHandle m_CardAlbedoDepth, m_CardNormalCoverage;
         private TextureHandle m_SkyTexture;
         private TextureHandle m_PreviousScreenRadiance, m_PreviousScreenGeometry;
@@ -445,83 +454,95 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenRays.desc.ClearBuffer = false;
         }
 
+        private static bool HasKernel(ComputeShader shader, string name) => shader != null && shader.HasKernel(name);
+
         public override void Create()
         {
-            m_Compute = PipelineResourceManager.Get<VividRPCoreResources>()?.SdfDiffuseGatherCompute;
-            if (m_Compute == null || !SystemInfo.supportsComputeShaders
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            m_TraceCompute = resources?.SdfScreenProbeTracingCompute;
+            m_GatherCompute = resources?.SdfDiffuseGatherCompute;
+            m_ImportanceSamplingCompute = resources?.SdfScreenProbeImportanceSamplingCompute;
+            m_FilterCompute = resources?.SdfScreenProbeFilteringCompute;
+            m_GatherTemporalCompute = resources?.SdfScreenProbeGatherTemporalCompute;
+            m_RestirCompute = resources?.SdfReSTIRGatherCompute;
+            m_SunCompute = resources?.SdfSceneDirectLightingCompute;
+            m_RadiosityCompute = resources?.SdfRadiosityCompute;
+            m_FarCompute = resources?.SdfRadianceCacheUpdateCompute;
+            m_NearOcclusionCompute = resources?.SdfShortRangeAOCompute;
+            if (m_TraceCompute == null || !SystemInfo.supportsComputeShaders
                 || !SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
                 || !SystemInfo.IsFormatSupported(GeometryFormat, GraphicsFormatUsage.LoadStore)
-                || !m_Compute.HasKernel("TraceSdfDiffuseProbes") || !m_Compute.HasKernel("ResolveSdfDiffuseGI"))
+                || !HasKernel(m_TraceCompute, "TraceSdfDiffuseProbes") || !HasKernel(m_GatherCompute, "ResolveSdfDiffuseGI"))
                 return;
 
-            m_TraceKernel = m_Compute.FindKernel("TraceSdfDiffuseProbes");
-            if (m_Compute.HasKernel("TraceSdfReceiverProbes"))
-                m_ReceiverTraceKernel = m_Compute.FindKernel("TraceSdfReceiverProbes");
-            if (m_Compute.HasKernel("TraceSdfReceiverCachedProbes"))
-                m_ReceiverCachedKernel = m_Compute.FindKernel("TraceSdfReceiverCachedProbes");
-            if (m_Compute.HasKernel("TraceSdfReceiverCachedSunProbes"))
-                m_ReceiverCachedSunKernel = m_Compute.FindKernel("TraceSdfReceiverCachedSunProbes");
-            if (m_Compute.HasKernel("UpdateSdfSurfaceRadiosity")
+            m_TraceKernel = m_TraceCompute.FindKernel("TraceSdfDiffuseProbes");
+            if (HasKernel(m_TraceCompute, "TraceSdfReceiverProbes"))
+                m_ReceiverTraceKernel = m_TraceCompute.FindKernel("TraceSdfReceiverProbes");
+            if (HasKernel(m_TraceCompute, "TraceSdfReceiverCachedProbes"))
+                m_ReceiverCachedKernel = m_TraceCompute.FindKernel("TraceSdfReceiverCachedProbes");
+            if (HasKernel(m_TraceCompute, "TraceSdfReceiverCachedSunProbes"))
+                m_ReceiverCachedSunKernel = m_TraceCompute.FindKernel("TraceSdfReceiverCachedSunProbes");
+            if (HasKernel(m_RadiosityCompute, "UpdateSdfSurfaceRadiosity")
                 && SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample))
-                m_RadiosityKernel = m_Compute.FindKernel("UpdateSdfSurfaceRadiosity");
+                m_RadiosityKernel = m_RadiosityCompute.FindKernel("UpdateSdfSurfaceRadiosity");
             if (SystemInfo.IsFormatSupported(GeometryFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
-                && m_Compute.HasKernel("UpdateSdfFarRadiance"))
-                m_FarKernel = m_Compute.FindKernel("UpdateSdfFarRadiance");
+                && HasKernel(m_FarCompute, "UpdateSdfFarRadiance"))
+                m_FarKernel = m_FarCompute.FindKernel("UpdateSdfFarRadiance");
             if (SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
-                && m_Compute.HasKernel("ApplySdfNearOcclusion"))
-                m_NearOcclusionKernel = m_Compute.FindKernel("ApplySdfNearOcclusion");
-            m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
-            if (m_Compute.HasKernel("ResolveSdfRestirOpenPBR"))
+                && HasKernel(m_NearOcclusionCompute, "ApplySdfNearOcclusion"))
+                m_NearOcclusionKernel = m_NearOcclusionCompute.FindKernel("ApplySdfNearOcclusion");
+            m_ResolveKernel = m_GatherCompute.FindKernel("ResolveSdfDiffuseGI");
+            if (HasKernel(m_GatherCompute, "ResolveSdfRestirOpenPBR"))
             {
-                int kernel = m_Compute.FindKernel("ResolveSdfRestirOpenPBR");
-                if (m_Compute.IsSupported(kernel))
+                int kernel = m_GatherCompute.FindKernel("ResolveSdfRestirOpenPBR");
+                if (m_GatherCompute.IsSupported(kernel))
                     m_OpenPbrResolveKernel = kernel;
             }
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
-                && m_Compute.HasKernel("TemporalSdfDiffuseGI"))
+                && HasKernel(m_GatherTemporalCompute, "TemporalSdfDiffuseGI"))
             {
-                m_PixelTemporalKernel = m_Compute.FindKernel("TemporalSdfDiffuseGI");
-                if (m_Compute.HasKernel("TemporalSdfRestirDiffuseGI"))
-                    m_RestirPixelTemporalKernel = m_Compute.FindKernel("TemporalSdfRestirDiffuseGI");
+                m_PixelTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfDiffuseGI");
+                if (HasKernel(m_GatherTemporalCompute, "TemporalSdfRestirDiffuseGI"))
+                    m_RestirPixelTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfRestirDiffuseGI");
             }
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
-                && m_Compute.HasKernel("PlaceSdfAdaptiveProbes"))
-                m_PlacementKernel = m_Compute.FindKernel("PlaceSdfAdaptiveProbes");
-            if (m_Compute.HasKernel("FilterSdfDiffuseProbes"))
-                m_FilterKernel = m_Compute.FindKernel("FilterSdfDiffuseProbes");
-            if (m_Compute.HasKernel("FilterSdfDirectionalHits"))
-                m_HitFilterKernel = m_Compute.FindKernel("FilterSdfDirectionalHits");
-            if (m_Compute.HasKernel("PrepareSdfDirectionalGuide") && m_Compute.HasKernel("AccumulateSdfDirectionalRadiance")
-                && m_Compute.HasKernel("IntegrateSdfDirectionalRadiance"))
+                && HasKernel(m_GatherCompute, "PlaceSdfAdaptiveProbes"))
+                m_PlacementKernel = m_GatherCompute.FindKernel("PlaceSdfAdaptiveProbes");
+            if (HasKernel(m_FilterCompute, "FilterSdfDiffuseProbes"))
+                m_FilterKernel = m_FilterCompute.FindKernel("FilterSdfDiffuseProbes");
+            if (HasKernel(m_FilterCompute, "FilterSdfDirectionalHits"))
+                m_HitFilterKernel = m_FilterCompute.FindKernel("FilterSdfDirectionalHits");
+            if (HasKernel(m_ImportanceSamplingCompute, "PrepareSdfDirectionalGuide") && HasKernel(m_FilterCompute, "AccumulateSdfDirectionalRadiance")
+                && HasKernel(m_FilterCompute, "IntegrateSdfDirectionalRadiance"))
             {
-                m_DirectionalGuideKernel = m_Compute.FindKernel("PrepareSdfDirectionalGuide");
-                m_DirectionalCacheKernel = m_Compute.FindKernel("AccumulateSdfDirectionalRadiance");
-                m_DirectionalIntegrateKernel = m_Compute.FindKernel("IntegrateSdfDirectionalRadiance");
+                m_DirectionalGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfDirectionalGuide");
+                m_DirectionalCacheKernel = m_FilterCompute.FindKernel("AccumulateSdfDirectionalRadiance");
+                m_DirectionalIntegrateKernel = m_FilterCompute.FindKernel("IntegrateSdfDirectionalRadiance");
             }
-            if (m_Compute.HasKernel("ResampleSdfRestirTemporal") && m_Compute.HasKernel("ResampleSdfRestirSpatial"))
+            if (HasKernel(m_RestirCompute, "ResampleSdfRestirTemporal") && HasKernel(m_RestirCompute, "ResampleSdfRestirSpatial"))
             {
-                m_RestirTemporalKernel = m_Compute.FindKernel("ResampleSdfRestirTemporal");
-                m_RestirSpatialKernel = m_Compute.FindKernel("ResampleSdfRestirSpatial");
+                m_RestirTemporalKernel = m_RestirCompute.FindKernel("ResampleSdfRestirTemporal");
+                m_RestirSpatialKernel = m_RestirCompute.FindKernel("ResampleSdfRestirSpatial");
             }
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
-                && m_Compute.HasKernel("DenoiseSdfRestir"))
-                m_RestirDenoiseKernel = m_Compute.FindKernel("DenoiseSdfRestir");
-            if (SystemInfo.supports2DArrayTextures && m_Compute.HasKernel("TraceSdfDiffuseCachedProbes"))
-                m_CachedTraceKernel = m_Compute.FindKernel("TraceSdfDiffuseCachedProbes");
+                && HasKernel(m_RestirCompute, "DenoiseSdfRestir"))
+                m_RestirDenoiseKernel = m_RestirCompute.FindKernel("DenoiseSdfRestir");
+            if (SystemInfo.supports2DArrayTextures && HasKernel(m_TraceCompute, "TraceSdfDiffuseCachedProbes"))
+                m_CachedTraceKernel = m_TraceCompute.FindKernel("TraceSdfDiffuseCachedProbes");
             if (m_CachedTraceKernel >= 0
                 && SystemInfo.IsFormatSupported(SunVisibilityFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
-                && m_Compute.HasKernel("UpdateSdfSurfaceSunVisibility") && m_Compute.HasKernel("TraceSdfDiffuseCachedSunProbes"))
+                && HasKernel(m_SunCompute, "UpdateSdfSurfaceSunVisibility") && HasKernel(m_TraceCompute, "TraceSdfDiffuseCachedSunProbes"))
             {
-                m_SunUpdateKernel = m_Compute.FindKernel("UpdateSdfSurfaceSunVisibility");
-                m_CachedSunTraceKernel = m_Compute.FindKernel("TraceSdfDiffuseCachedSunProbes");
+                m_SunUpdateKernel = m_SunCompute.FindKernel("UpdateSdfSurfaceSunVisibility");
+                m_CachedSunTraceKernel = m_TraceCompute.FindKernel("TraceSdfDiffuseCachedSunProbes");
             }
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_SFloat, GraphicsFormatUsage.LoadStore)
-                && m_Compute.HasKernel("TraceDiffuseScreenRays") && m_Compute.HasKernel("GatherScreenDiffuseProbes"))
+                && HasKernel(m_TraceCompute, "TraceDiffuseScreenRays") && HasKernel(m_TraceCompute, "GatherScreenDiffuseProbes"))
             {
-                m_ScreenTraceKernel = m_Compute.FindKernel("TraceDiffuseScreenRays");
-                m_ScreenGatherKernel = m_Compute.FindKernel("GatherScreenDiffuseProbes");
+                m_ScreenTraceKernel = m_TraceCompute.FindKernel("TraceDiffuseScreenRays");
+                m_ScreenGatherKernel = m_TraceCompute.FindKernel("GatherScreenDiffuseProbes");
             }
             m_Scene = new VividMeshSdfGpuScene(Shader.Find("VividRP/Material/StandardLit"));
         }
@@ -892,36 +913,33 @@ namespace VividRP.Runtime.RenderPass.Core
             if (correctReceiver || screenCardLighting)
             {
                 traceKernel = receiverKernel;
-                cmd.SetComputeTextureParam(m_Compute, traceKernel, ReceiverVisibilityId, m_ReceiverVisibility);
-                cmd.SetComputeBufferParam(m_Compute, traceKernel, ReceiverEntitiesId, m_ReceiverEntities);
-                cmd.SetComputeIntParam(m_Compute, ReceiverCountId, m_ReceiverCount);
+                cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ReceiverVisibilityId, m_ReceiverVisibility);
+                cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, ReceiverEntitiesId, m_ReceiverEntities);
+                cmd.SetComputeIntParam(m_TraceCompute, ReceiverCountId, m_ReceiverCount);
             }
-            cmd.SetComputeIntParam(m_Compute, CorrectReceiverId, correctReceiver ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, ScreenCardLightingId, screenCardLighting ? 1 : 0);
-            BindReceiver(cmd, traceKernel);
+            cmd.SetComputeIntParam(m_TraceCompute, CorrectReceiverId, correctReceiver ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, ScreenCardLightingId, screenCardLighting ? 1 : 0);
+            BindReceiver(cmd, m_TraceCompute, traceKernel);
             TextureHandle probeTarget = m_Probes.innerHandle;
             if (m_DirectionalCache)
                 probeTarget = m_DirectionalRayTexture.innerHandle;
             else if (m_HitDistanceFilter || m_RestirGather)
                 probeTarget = m_FilteredProbes.innerHandle;
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, ProbeId, probeTarget);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, GeometryId, m_Geometry.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ProbeId, probeTarget);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, GeometryId, m_Geometry.innerHandle);
             bool useGlobalClipmap = m_UseSdf && m_GlobalClipmap?.Recorded == true;
             if (m_UseSdf)
             {
-                m_Scene.Bind(cmd, m_Compute, traceKernel);
+                m_Scene.Bind(cmd, m_TraceCompute, traceKernel);
                 BindSegmentedTracing(cmd, traceKernel, useGlobalClipmap);
-                cmd.SetComputeBufferParam(m_Compute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
-                cmd.SetComputeTextureParam(m_Compute, traceKernel, SkyTextureId, m_SkyTexture);
-                cmd.SetComputeVectorParam(m_Compute, SkyTextureParamsId, m_SkyTextureParams);
-                cmd.SetComputeVectorParam(m_Compute, SkyTextureTintId, m_SkyTextureTint);
-                cmd.SetComputeFloatParam(m_Compute, SkyTraceDistanceId, m_SkyTraceDistance);
+                cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                BindOccludedSky(cmd, m_TraceCompute, traceKernel);
             }
             if (cache != null)
             {
-                cmd.SetComputeTextureParam(m_Compute, traceKernel, CardAlbedoDepthId, m_CardAlbedoDepth);
-                cmd.SetComputeTextureParam(m_Compute, traceKernel, CardNormalCoverageId, m_CardNormalCoverage);
-                cmd.SetComputeBufferParam(m_Compute, traceKernel, LocalCardTableId, cache.LocalCardTable);
+                cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, LocalCardTableId, cache.LocalCardTable);
             }
             bool hasHistory = m_HasHistory && m_PreviousGeometry.innerHandle.IsValid()
                 && (m_DirectionalCache || m_PreviousProbes.innerHandle.IsValid());
@@ -949,54 +967,54 @@ namespace VividRP.Runtime.RenderPass.Core
             bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather && !m_DirectionalCache;
             bool useDirectionalHistory = m_DirectionalCache && hasHistory && m_DirectionalHistoryValid
                 && m_PreviousDirectional.innerHandle.IsValid();
-            cmd.SetComputeIntParam(m_Compute, DirectionalCacheEnabledId, m_DirectionalCache ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, DirectionalGuideEnabledId,
-                m_DirectionalHierarchicalGuide ? 2 : m_DirectionalGuide ? 1 : 0);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, PreviousGeometryId, useProbeHistory ? m_PreviousGeometry.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, TraceSourcesId, m_TraceSources.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, RayDiagnosticsId, m_RayDiagnostics.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, FirstHitDiagnosticsId, m_FirstHitDiagnostics.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, HitSamplesId, m_HitSamples.innerHandle);
-            cmd.SetComputeIntParam(m_Compute, HitFilterEnabledId, m_HitDistanceFilter ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, RestirEnabledId, m_RestirGather ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, RestirDenseId, m_RestirPixelIntegration ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, RestirOpenPbrDiffuseId, m_RestirOpenPbrDiffuse ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, RecordRayDiagnosticsId, m_RecordRayDiagnostics ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, RecordFirstHitDiagnosticsId, m_RecordFirstHitDiagnostics ? 1 : 0);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, ScreenRaysId, useScreenRays ? m_ScreenRays.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, PlacementId, placement);
-            cmd.SetComputeMatrixParam(m_Compute, InverseViewProjectionId, m_ViewProjection.inverse);
-            cmd.SetComputeMatrixParam(m_Compute, PreviousViewProjectionId, m_State.ViewProjection);
-            cmd.SetComputeVectorParam(m_Compute, ScreenSizeId, new Vector4(m_Width, m_Height, 1f / m_Width, 1f / m_Height));
-            cmd.SetComputeVectorParam(m_Compute, LightPositionRangeId, m_LightPositionRange);
-            cmd.SetComputeVectorParam(m_Compute, LightColorShadowId, m_LightColorShadow);
-            cmd.SetComputeIntParam(m_Compute, LightLayerMaskId, m_LightLayerMask);
-            cmd.SetComputeFloatParam(m_Compute, MaxDistanceId, m_TraceDistance);
-            cmd.SetComputeFloatParam(m_Compute, RayBiasId, m_Bias);
-            cmd.SetComputeIntParam(m_Compute, LayerMaskId, m_LayerMask);
-            cmd.SetComputeIntParam(m_Compute, FrameId, unchecked((int)m_State.Frame++));
-            cmd.SetComputeIntParam(m_Compute, HasHistoryId, useProbeHistory ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, AdaptiveProbesId, m_AdaptiveProbes ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, SpatialFilterId, m_SpatialFilter || m_RestirGather ? 1 : 0);
-            cmd.SetComputeVectorParam(m_Compute, ProbeCameraForwardId, m_ProbeCameraForward);
-            cmd.SetComputeIntParam(m_Compute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
-            cmd.SetComputeMatrixParam(m_Compute, ViewProjectionId, m_ViewProjection);
-            cmd.SetComputeIntParam(m_Compute, UseScreenRaysId, useScreenRays ? 1 : 0);
-            cmd.SetComputeVectorParam(m_Compute, NearOcclusionId, m_NearOcclusion);
+            BindDirectionalGuideMode(cmd, m_TraceCompute);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, PreviousGeometryId, useProbeHistory ? m_PreviousGeometry.innerHandle : black);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, TraceSourcesId, m_TraceSources.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, RayDiagnosticsId, m_RayDiagnostics.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, FirstHitDiagnosticsId, m_FirstHitDiagnostics.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, HitSamplesId, m_HitSamples.innerHandle);
+            cmd.SetComputeIntParam(m_TraceCompute, HitFilterEnabledId, m_HitDistanceFilter ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, RestirEnabledId, m_RestirGather ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, RestirOpenPbrDiffuseId, m_RestirOpenPbrDiffuse ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, RecordRayDiagnosticsId, m_RecordRayDiagnostics ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, RecordFirstHitDiagnosticsId, m_RecordFirstHitDiagnostics ? 1 : 0);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ScreenRaysId, useScreenRays ? m_ScreenRays.innerHandle : black);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, PlacementId, placement);
+            cmd.SetComputeMatrixParam(m_TraceCompute, PreviousViewProjectionId, m_State.ViewProjection);
+            m_InverseViewProjection = m_ViewProjection.inverse;
+            BindProbeFrame(cmd, m_TraceCompute);
+            BindSdfTraceConstants(cmd, m_TraceCompute);
+            BindSunLighting(cmd, m_TraceCompute);
+            int frame = unchecked((int)m_State.Frame++);
+            cmd.SetComputeIntParam(m_TraceCompute, FrameId, frame);
+            cmd.SetComputeIntParam(m_TraceCompute, HasHistoryId, useProbeHistory ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, SpatialFilterId, m_SpatialFilter || m_RestirGather ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
+            cmd.SetComputeMatrixParam(m_TraceCompute, ViewProjectionId, m_ViewProjection);
+            cmd.SetComputeIntParam(m_TraceCompute, UseScreenRaysId, useScreenRays ? 1 : 0);
+            cmd.SetComputeVectorParam(m_TraceCompute, NearOcclusionId, m_NearOcclusion);
             int groupsX = CoreUtils.DivRoundUp(m_ProbeWidth, GroupSize);
             int groupsY = CoreUtils.DivRoundUp(m_AtlasHeight, GroupSize);
             using (new ProfilingScope(cmd, TotalSampler))
             {
+                BindProbeFrame(cmd, m_GatherCompute);
+                cmd.SetComputeMatrixParam(m_GatherCompute, ViewProjectionId, m_ViewProjection);
+                cmd.SetComputeIntParam(m_GatherCompute, FrameId, frame);
+                cmd.SetComputeIntParam(m_GatherCompute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherCompute, SpatialFilterId, m_SpatialFilter || m_RestirGather ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherCompute, RestirOpenPbrDiffuseId, m_RestirOpenPbrDiffuse ? 1 : 0);
+                cmd.SetComputeVectorParam(m_GatherCompute, NearOcclusionId, m_NearOcclusion);
+                cmd.SetComputeFloatParam(m_GatherCompute, RayBiasId, m_Bias);
                 if (m_AdaptiveProbes)
                 {
                     using var scope = new ProfilingScope(cmd, PlacementSampler);
-                    BindReceiver(cmd, m_PlacementKernel);
-                    cmd.SetComputeTextureParam(m_Compute, m_PlacementKernel, PlacementOutputId, placement);
-                    cmd.DispatchCompute(m_Compute, m_PlacementKernel, groupsX, CoreUtils.DivRoundUp(m_ProbeHeight, GroupSize), 1);
+                    BindReceiver(cmd, m_GatherCompute, m_PlacementKernel);
+                    cmd.SetComputeTextureParam(m_GatherCompute, m_PlacementKernel, PlacementOutputId, placement);
+                    cmd.DispatchCompute(m_GatherCompute, m_PlacementKernel, groupsX, CoreUtils.DivRoundUp(m_ProbeHeight, GroupSize), 1);
                 }
                 if (useSunCache)
                     RecordSunCache(cmd, traceKernel);
@@ -1006,37 +1024,50 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordFarCache(cmd, traceKernel, cache, black);
                 }
                 if (m_DirectionalCache)
-                    RecordDirectionalGuide(cmd, placement, black, useDirectionalHistory, groupsX, groupsY);
+                    RecordDirectionalGuide(cmd, placement, black, useDirectionalHistory, frame, groupsX, groupsY);
                 if (useScreenRays)
                     RecordScreenTrace(cmd, groupsX, groupsY, placement, black);
                 using (new ProfilingScope(cmd, GatherSampler))
-                    cmd.DispatchCompute(m_Compute, traceKernel, groupsX, groupsY, 1);
+                    cmd.DispatchCompute(m_TraceCompute, traceKernel, groupsX, groupsY, 1);
+                if (m_DirectionalCache || m_HitDistanceFilter || (m_SpatialFilter && !m_RestirGather))
+                {
+                    BindProbeFrame(cmd, m_FilterCompute);
+                    cmd.SetComputeIntParam(m_FilterCompute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
+                    cmd.SetComputeIntParam(m_FilterCompute, SpatialFilterId, m_SpatialFilter ? 1 : 0);
+                    if (m_HitDistanceFilter)
+                    {
+                        cmd.SetComputeIntParam(m_FilterCompute, HasHistoryId, useProbeHistory ? 1 : 0);
+                        cmd.SetComputeMatrixParam(m_FilterCompute, PreviousViewProjectionId, m_State.ViewProjection);
+                        cmd.SetComputeFloatParam(m_FilterCompute, MaxDistanceId, m_TraceDistance);
+                        cmd.SetComputeFloatParam(m_FilterCompute, RayBiasId, m_Bias);
+                    }
+                }
                 if (m_DirectionalCache)
                     RecordDirectionalCache(cmd, black, useDirectionalHistory, groupsX, groupsY);
                 else if (m_RestirGather)
                     RecordRestir(cmd, black, useScreenRays ? m_ScreenHzb.innerHandle : black, hasHistory && m_RestirHistory.IsValid()
-                        && m_PreviousRestir.innerHandle.IsValid(), groupsX, groupsY);
+                        && m_PreviousRestir.innerHandle.IsValid(), useScreenRays, frame, groupsX, groupsY);
                 else if (m_HitDistanceFilter)
                 {
                     using var scope = new ProfilingScope(cmd, FilterSampler);
-                    cmd.SetComputeTextureParam(m_Compute, m_HitFilterKernel, GeometryId, m_Geometry.innerHandle);
-                    cmd.SetComputeTextureParam(m_Compute, m_HitFilterKernel, ProbeInputId, m_FilteredProbes.innerHandle);
-                    cmd.SetComputeTextureParam(m_Compute, m_HitFilterKernel, HitSamplesInputId, m_HitSamples.innerHandle);
-                    cmd.SetComputeTextureParam(m_Compute, m_HitFilterKernel, ProbeId, m_Probes.innerHandle);
-                    cmd.SetComputeTextureParam(m_Compute, m_HitFilterKernel, PreviousProbeId,
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_HitFilterKernel, GeometryId, m_Geometry.innerHandle);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_HitFilterKernel, ProbeInputId, m_FilteredProbes.innerHandle);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_HitFilterKernel, HitSamplesInputId, m_HitSamples.innerHandle);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_HitFilterKernel, ProbeId, m_Probes.innerHandle);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_HitFilterKernel, PreviousProbeId,
                         useProbeHistory ? m_PreviousProbes.innerHandle : black);
-                    cmd.SetComputeTextureParam(m_Compute, m_HitFilterKernel, PreviousGeometryId,
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_HitFilterKernel, PreviousGeometryId,
                         useProbeHistory ? m_PreviousGeometry.innerHandle : black);
                     // One thread-group row covers one probe, with one lane per ray.
-                    cmd.DispatchCompute(m_Compute, m_HitFilterKernel, groupsX, m_AtlasHeight, 1);
+                    cmd.DispatchCompute(m_FilterCompute, m_HitFilterKernel, groupsX, m_AtlasHeight, 1);
                 }
                 else if (m_SpatialFilter)
                 {
                     using var scope = new ProfilingScope(cmd, FilterSampler);
-                    cmd.SetComputeTextureParam(m_Compute, m_FilterKernel, GeometryId, m_Geometry.innerHandle);
-                    cmd.SetComputeTextureParam(m_Compute, m_FilterKernel, ProbeInputId, m_Probes.innerHandle);
-                    cmd.SetComputeTextureParam(m_Compute, m_FilterKernel, FilteredProbesId, m_FilteredProbes.innerHandle);
-                    cmd.DispatchCompute(m_Compute, m_FilterKernel, groupsX, groupsY, 1);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, GeometryId, m_Geometry.innerHandle);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, ProbeInputId, m_Probes.innerHandle);
+                    cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, FilteredProbesId, m_FilteredProbes.innerHandle);
+                    cmd.DispatchCompute(m_FilterCompute, m_FilterKernel, groupsX, groupsY, 1);
                 }
                 RecordResolve(cmd, placement, pixelTemporal);
                 if (pixelTemporal)
@@ -1119,7 +1150,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReceiverLookupRevision = uint.MaxValue;
             m_Scene?.Dispose();
             m_Scene = null;
-            m_Compute = null;
+            m_TraceCompute = m_GatherCompute = m_ImportanceSamplingCompute = m_FilterCompute = m_GatherTemporalCompute = null;
+            m_RestirCompute = m_SunCompute = m_RadiosityCompute = m_FarCompute = m_NearOcclusionCompute = null;
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
             m_ScreenTraceKernel = m_ScreenGatherKernel = -1;
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
@@ -1179,26 +1211,29 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void RecordSunCache(ComputeCommandBuffer cmd, int traceKernel)
         {
-            cmd.SetComputeVectorParam(m_Compute, SunLayoutId, m_SunLayout);
+            cmd.SetComputeVectorParam(m_TraceCompute, SunLayoutId, m_SunLayout);
             if (m_SunUpdateCards > 0)
             {
                 using var scope = new ProfilingScope(cmd, SunUpdateSampler);
                 int kernel = m_SunUpdateKernel;
-                m_Scene.Bind(cmd, m_Compute, kernel);
-                cmd.SetComputeBufferParam(m_Compute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
-                cmd.SetComputeBufferParam(m_Compute, kernel, SunInstancesId, m_Scene.SurfaceLightingInstances);
-                cmd.SetComputeTextureParam(m_Compute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
-                cmd.SetComputeTextureParam(m_Compute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
-                cmd.SetComputeTextureParam(m_Compute, kernel, SunVisibilityOutputId, m_SunAtlas);
-                cmd.SetComputeIntParam(m_Compute, SunFirstCardId, m_SunReadyCards);
-                cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_SunCardSize.x, GroupSize),
+                BindSdfTraceConstants(cmd, m_SunCompute);
+                BindSunLighting(cmd, m_SunCompute);
+                cmd.SetComputeVectorParam(m_SunCompute, SunLayoutId, m_SunLayout);
+                m_Scene.Bind(cmd, m_SunCompute, kernel);
+                cmd.SetComputeBufferParam(m_SunCompute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeBufferParam(m_SunCompute, kernel, SunInstancesId, m_Scene.SurfaceLightingInstances);
+                cmd.SetComputeTextureParam(m_SunCompute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_SunCompute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeTextureParam(m_SunCompute, kernel, SunVisibilityOutputId, m_SunAtlas);
+                cmd.SetComputeIntParam(m_SunCompute, SunFirstCardId, m_SunReadyCards);
+                cmd.DispatchCompute(m_SunCompute, kernel, CoreUtils.DivRoundUp(m_SunCardSize.x, GroupSize),
                     CoreUtils.DivRoundUp(m_SunCardSize.y, GroupSize), m_SunUpdateCards);
                 m_SunReadyCards += m_SunUpdateCards;
             }
 
-            cmd.SetComputeIntParam(m_Compute, SunReadyCardsId, m_SunReadyCards);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, SunVisibilityId, m_SunAtlas);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, SunCacheHitsId, m_SunCacheHits.innerHandle);
+            cmd.SetComputeIntParam(m_TraceCompute, SunReadyCardsId, m_SunReadyCards);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, SunVisibilityId, m_SunAtlas);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, SunCacheHitsId, m_SunCacheHits.innerHandle);
             m_SunHistory.MarkWritten();
         }
 
@@ -1249,24 +1284,27 @@ namespace VividRP.Runtime.RenderPass.Core
             bool published = m_RadiosityInput.IsValid();
             var input = published ? m_RadiosityInput : black;
             var work = m_RadiosityTargetOrders > 0 ? m_Scene.RadiosityWork : m_Scene.LeafInstances;
-            cmd.SetComputeIntParam(m_Compute, RadiosityLayoutId, published ? m_Scene.RadiosityCardCount : 0);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, RadiosityInputId, input);
-            cmd.SetComputeBufferParam(m_Compute, traceKernel, RadiosityWorkId, work);
+            cmd.SetComputeIntParam(m_TraceCompute, RadiosityLayoutId, published ? m_Scene.RadiosityCardCount : 0);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, RadiosityInputId, input);
+            cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, RadiosityWorkId, work);
             if (m_RadiosityUpdateCards > 0)
             {
                 using var scope = new ProfilingScope(cmd, RadiositySampler);
                 int kernel = m_RadiosityKernel;
-                m_Scene.Bind(cmd, m_Compute, kernel);
-                cmd.SetComputeBufferParam(m_Compute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
-                cmd.SetComputeBufferParam(m_Compute, kernel, LocalCardTableId, cache.LocalCardTable);
-                cmd.SetComputeBufferParam(m_Compute, kernel, RadiosityWorkId, work);
-                cmd.SetComputeTextureParam(m_Compute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
-                cmd.SetComputeTextureParam(m_Compute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
-                cmd.SetComputeTextureParam(m_Compute, kernel, SkyTextureId, m_SkyTexture);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityInputId, input);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityOutputId, m_RadiosityOutput);
-                cmd.SetComputeIntParam(m_Compute, RadiosityFirstCardId, m_RadiosityCursor);
-                cmd.DispatchCompute(m_Compute, kernel, 1, 1, m_RadiosityUpdateCards);
+                BindSdfTraceConstants(cmd, m_RadiosityCompute);
+                BindSunLighting(cmd, m_RadiosityCompute);
+                BindOccludedSky(cmd, m_RadiosityCompute, kernel);
+                cmd.SetComputeIntParam(m_RadiosityCompute, RadiosityLayoutId, published ? m_Scene.RadiosityCardCount : 0);
+                m_Scene.Bind(cmd, m_RadiosityCompute, kernel);
+                cmd.SetComputeBufferParam(m_RadiosityCompute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeBufferParam(m_RadiosityCompute, kernel, LocalCardTableId, cache.LocalCardTable);
+                cmd.SetComputeBufferParam(m_RadiosityCompute, kernel, RadiosityWorkId, work);
+                cmd.SetComputeTextureParam(m_RadiosityCompute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_RadiosityCompute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeTextureParam(m_RadiosityCompute, kernel, RadiosityInputId, input);
+                cmd.SetComputeTextureParam(m_RadiosityCompute, kernel, RadiosityOutputId, m_RadiosityOutput);
+                cmd.SetComputeIntParam(m_RadiosityCompute, RadiosityFirstCardId, m_RadiosityCursor);
+                cmd.DispatchCompute(m_RadiosityCompute, kernel, 1, 1, m_RadiosityUpdateCards);
             }
 
             // The atlases are single-slot histories. Carry validity through read-only
@@ -1330,41 +1368,45 @@ namespace VividRP.Runtime.RenderPass.Core
         private void RecordFarCache(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black)
         {
             bool ready = m_FarAtlas.IsValid() && m_FarHitIds.IsValid();
-            cmd.SetComputeFloatParam(m_Compute, FarDistanceId, ready ? m_FarDistance : 0f);
-            cmd.SetComputeTextureParam(m_Compute, traceKernel, FarRadianceId, ready ? m_FarAtlas : black);
+            cmd.SetComputeFloatParam(m_TraceCompute, FarDistanceId, ready ? m_FarDistance : 0f);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, FarRadianceId, ready ? m_FarAtlas : black);
             if (ready)
-                cmd.SetComputeBufferParam(m_Compute, traceKernel, FarHitIdsId, m_FarHitIds);
+                cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, FarHitIdsId, m_FarHitIds);
             else
-                cmd.SetComputeBufferParam(m_Compute, traceKernel, FarHitIdsId, m_Scene.LeafInstances);
+                cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, FarHitIdsId, m_Scene.LeafInstances);
             if (!ready)
                 return;
-            cmd.SetComputeVectorParam(m_Compute, FarWindowId, new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f));
+            cmd.SetComputeVectorParam(m_TraceCompute, FarWindowId, new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f));
 
             if (m_FarClear || m_FarUpdateCount > 0)
             {
                 using var scope = new ProfilingScope(cmd, FarCacheSampler);
                 int kernel = m_FarKernel;
-                m_Scene.Bind(cmd, m_Compute, kernel);
-                cmd.SetComputeBufferParam(m_Compute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
-                cmd.SetComputeBufferParam(m_Compute, kernel, LocalCardTableId, cache.LocalCardTable);
-                cmd.SetComputeTextureParam(m_Compute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
-                cmd.SetComputeTextureParam(m_Compute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
-                cmd.SetComputeBufferParam(m_Compute, kernel, RadiosityWorkId,
+                BindSdfTraceConstants(cmd, m_FarCompute);
+                BindSunLighting(cmd, m_FarCompute);
+                cmd.SetComputeFloatParam(m_FarCompute, FarDistanceId, m_FarDistance);
+                cmd.SetComputeIntParam(m_FarCompute, RadiosityLayoutId, m_RadiosityInput.IsValid() ? m_Scene.RadiosityCardCount : 0);
+                m_Scene.Bind(cmd, m_FarCompute, kernel);
+                cmd.SetComputeBufferParam(m_FarCompute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeBufferParam(m_FarCompute, kernel, LocalCardTableId, cache.LocalCardTable);
+                cmd.SetComputeTextureParam(m_FarCompute, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(m_FarCompute, kernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeBufferParam(m_FarCompute, kernel, RadiosityWorkId,
                     m_RadiosityTargetOrders > 0 ? m_Scene.RadiosityWork : m_Scene.LeafInstances);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RadiosityInputId,
+                cmd.SetComputeTextureParam(m_FarCompute, kernel, RadiosityInputId,
                     m_RadiosityInput.IsValid() ? m_RadiosityInput : black);
-                cmd.SetComputeTextureParam(m_Compute, kernel, FarOutputId, m_FarAtlas);
-                cmd.SetComputeBufferParam(m_Compute, kernel, FarHitIdsOutputId, m_FarHitIds);
+                cmd.SetComputeTextureParam(m_FarCompute, kernel, FarOutputId, m_FarAtlas);
+                cmd.SetComputeBufferParam(m_FarCompute, kernel, FarHitIdsOutputId, m_FarHitIds);
                 if (m_FarClear)
                 {
-                    cmd.SetComputeIntParam(m_Compute, FarClearId, 1);
-                    cmd.DispatchCompute(m_Compute, kernel, FarProbeCount / FarDirectionCount, 1, 1);
+                    cmd.SetComputeIntParam(m_FarCompute, FarClearId, 1);
+                    cmd.DispatchCompute(m_FarCompute, kernel, FarProbeCount / FarDirectionCount, 1, 1);
                 }
-                cmd.SetComputeIntParam(m_Compute, FarClearId, 0);
+                cmd.SetComputeIntParam(m_FarCompute, FarClearId, 0);
                 if (m_FarUpdateCount > 0)
                 {
-                    cmd.SetComputeVectorArrayParam(m_Compute, FarUpdatesId, m_FarUpdates);
-                    cmd.DispatchCompute(m_Compute, kernel, m_FarUpdateCount, 1, 1);
+                    cmd.SetComputeVectorArrayParam(m_FarCompute, FarUpdatesId, m_FarUpdates);
+                    cmd.DispatchCompute(m_FarCompute, kernel, m_FarUpdateCount, 1, 1);
                     for (int i = 0; i < m_FarUpdateCount; i++)
                     {
                         var p = m_FarUpdates[i];
@@ -1379,33 +1421,36 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindSegmentedTracing(ComputeCommandBuffer cmd, int kernel, bool useGlobalClipmap)
         {
-            cmd.SetComputeFloatParam(m_Compute, MeshDetailDistanceId, m_MeshDetailDistance);
-            cmd.SetComputeFloatParam(m_Compute, FarDistanceId, 0f);
-            cmd.SetComputeIntParam(m_Compute, UseGlobalClipmapId, useGlobalClipmap ? 1 : 0);
+            cmd.SetComputeFloatParam(m_TraceCompute, MeshDetailDistanceId, m_MeshDetailDistance);
+            cmd.SetComputeFloatParam(m_TraceCompute, FarDistanceId, 0f);
+            cmd.SetComputeIntParam(m_TraceCompute, UseGlobalClipmapId, useGlobalClipmap ? 1 : 0);
             var fallback = m_GlobalFallback.innerHandle;
-            cmd.SetComputeTextureParam(m_Compute, kernel, GlobalNearId, useGlobalClipmap ? m_GlobalNear : fallback);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GlobalMiddleId, useGlobalClipmap ? m_GlobalMiddle : fallback);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GlobalFarId, useGlobalClipmap ? m_GlobalFar : fallback);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, GlobalNearId, useGlobalClipmap ? m_GlobalNear : fallback);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, GlobalMiddleId, useGlobalClipmap ? m_GlobalMiddle : fallback);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, GlobalFarId, useGlobalClipmap ? m_GlobalFar : fallback);
             if (!useGlobalClipmap)
             {
-                cmd.SetComputeBufferParam(m_Compute, kernel, GlobalPagesId, m_Scene.LeafInstances);
-                cmd.SetComputeBufferParam(m_Compute, kernel, GlobalThinBricksId, m_Scene.LeafInstances);
+                cmd.SetComputeBufferParam(m_TraceCompute, kernel, GlobalPagesId, m_Scene.LeafInstances);
+                cmd.SetComputeBufferParam(m_TraceCompute, kernel, GlobalThinBricksId, m_Scene.LeafInstances);
                 return;
             }
-            cmd.SetComputeBufferParam(m_Compute, kernel, GlobalPagesId, m_GlobalPages);
-            cmd.SetComputeBufferParam(m_Compute, kernel, GlobalThinBricksId, m_GlobalThinBricks);
-            cmd.SetComputeIntParam(m_Compute, GlobalLayerMaskId, m_GlobalClipmap.LayerMask);
-            cmd.SetComputeVectorArrayParam(m_Compute, GlobalLevelsId, m_GlobalClipmap.Levels);
-            cmd.SetComputeVectorArrayParam(m_Compute, GlobalScrollId, m_GlobalClipmap.Scroll);
+            cmd.SetComputeBufferParam(m_TraceCompute, kernel, GlobalPagesId, m_GlobalPages);
+            cmd.SetComputeBufferParam(m_TraceCompute, kernel, GlobalThinBricksId, m_GlobalThinBricks);
+            cmd.SetComputeIntParam(m_TraceCompute, GlobalLayerMaskId, m_GlobalClipmap.LayerMask);
+            cmd.SetComputeVectorArrayParam(m_TraceCompute, GlobalLevelsId, m_GlobalClipmap.Levels);
+            cmd.SetComputeVectorArrayParam(m_TraceCompute, GlobalScrollId, m_GlobalClipmap.Scroll);
         }
 
         private void RecordNearOcclusion(ComputeCommandBuffer cmd)
         {
             using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
             int kernel = m_NearOcclusionKernel;
-            BindReceiver(cmd, kernel);
-            cmd.SetComputeTextureParam(m_Compute, kernel, OutputId, m_Output.innerHandle);
-            cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
+            BindProbeFrame(cmd, m_NearOcclusionCompute);
+            cmd.SetComputeMatrixParam(m_NearOcclusionCompute, ViewProjectionId, m_ViewProjection);
+            cmd.SetComputeVectorParam(m_NearOcclusionCompute, NearOcclusionId, m_NearOcclusion);
+            BindReceiver(cmd, m_NearOcclusionCompute, kernel);
+            cmd.SetComputeTextureParam(m_NearOcclusionCompute, kernel, OutputId, m_Output.innerHandle);
+            cmd.DispatchCompute(m_NearOcclusionCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
                 CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
 
@@ -1433,36 +1478,43 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindRestirReuse(ComputeCommandBuffer cmd, int kernel, TextureHandle hzb)
         {
-            m_Scene.Bind(cmd, m_Compute, kernel);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, DepthId, m_Depth.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, HzbId, hzb);
+            m_Scene.Bind(cmd, m_RestirCompute, kernel);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, GeometryId, m_Geometry.innerHandle);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, DepthId, m_Depth.innerHandle);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, HzbId, hzb);
         }
 
         private void RecordRestir(ComputeCommandBuffer cmd, TextureHandle black, TextureHandle hzb, bool hasHistory,
-            int groupsX, int groupsY)
+            bool useScreenRays, int frame, int groupsX, int groupsY)
         {
             int kernel = m_RestirTemporalKernel;
+            BindProbeFrame(cmd, m_RestirCompute);
+            BindSdfTraceConstants(cmd, m_RestirCompute);
+            cmd.SetComputeMatrixParam(m_RestirCompute, ViewProjectionId, m_ViewProjection);
+            cmd.SetComputeMatrixParam(m_RestirCompute, PreviousViewProjectionId, m_State.ViewProjection);
+            cmd.SetComputeIntParam(m_RestirCompute, FrameId, frame);
+            cmd.SetComputeIntParam(m_RestirCompute, UseScreenRaysId, useScreenRays ? 1 : 0);
+            cmd.SetComputeIntParam(m_RestirCompute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
             using (new ProfilingScope(cmd, RestirTemporalSampler))
             {
                 BindRestirReuse(cmd, kernel, hzb);
-                cmd.SetComputeIntParam(m_Compute, RestirHasHistoryId, hasHistory ? 1 : 0);
-                cmd.SetComputeTextureParam(m_Compute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
-                cmd.SetComputeTextureParam(m_Compute, kernel, HitSamplesInputId, m_HitSamples.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RestirPreviousId, hasHistory ? m_PreviousRestir.innerHandle : black);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RestirOutputId, m_CurrentRestir.innerHandle);
-                cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+                cmd.SetComputeIntParam(m_RestirCompute, RestirHasHistoryId, hasHistory ? 1 : 0);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, HitSamplesInputId, m_HitSamples.innerHandle);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirPreviousId, hasHistory ? m_PreviousRestir.innerHandle : black);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirOutputId, m_CurrentRestir.innerHandle);
+                cmd.DispatchCompute(m_RestirCompute, kernel, groupsX, groupsY, 1);
             }
             kernel = m_RestirSpatialKernel;
             using (new ProfilingScope(cmd, RestirSpatialSampler))
             {
                 BindRestirReuse(cmd, kernel, hzb);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RestirTemporalId, m_CurrentRestir.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, ProbeInputId, m_FilteredProbes.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, ProbeId, m_Probes.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, RestirOutputId, m_SpatialRestir.innerHandle);
-                cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirTemporalId, m_CurrentRestir.innerHandle);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, ProbeInputId, m_FilteredProbes.innerHandle);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, ProbeId, m_Probes.innerHandle);
+                cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirOutputId, m_SpatialRestir.innerHandle);
+                cmd.DispatchCompute(m_RestirCompute, kernel, groupsX, groupsY, 1);
             }
             m_RestirHistory.MarkWritten();
         }
@@ -1480,36 +1532,36 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using var scope = new ProfilingScope(cmd, ResolveSampler);
             int kernel = m_RestirOpenPbrDiffuse ? m_OpenPbrResolveKernel : m_ResolveKernel;
-            BindReceiver(cmd, kernel);
+            BindReceiver(cmd, m_GatherCompute, kernel);
             if (m_RestirOpenPbrDiffuse)
             {
-                cmd.SetComputeTextureParam(m_Compute, kernel, OpenPbrParametersId, m_OpenPbrParameters.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, OpenPbrAux0Id, m_OpenPbrAux0.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, OpenPbrAux1Id, m_OpenPbrAux1.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrParametersId, m_OpenPbrParameters.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrAux0Id, m_OpenPbrAux0.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrAux1Id, m_OpenPbrAux1.innerHandle);
             }
-            cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_GatherCompute, kernel, GeometryId, m_Geometry.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherCompute, kernel, PlacementId, placement);
             bool useScratch = m_DirectionalCache || m_RestirPixelIntegration || (m_SpatialFilter && !m_HitDistanceFilter && !m_RestirGather);
-            cmd.SetComputeTextureParam(m_Compute, kernel, ProbeInputId,
+            cmd.SetComputeTextureParam(m_GatherCompute, kernel, ProbeInputId,
                 useScratch ? m_FilteredProbes.innerHandle : m_Probes.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, RestirSpatialId, m_SpatialRestir.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, RestirVarianceOutputId, m_RestirVariance.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, OutputId,
+            cmd.SetComputeTextureParam(m_GatherCompute, kernel, RestirSpatialId, m_SpatialRestir.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherCompute, kernel, RestirVarianceOutputId, m_RestirVariance.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherCompute, kernel, OutputId,
                 pixelTemporal || m_RestirPixelIntegration ? m_RawResolved.innerHandle : m_Output.innerHandle);
-            cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+            cmd.DispatchCompute(m_GatherCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
 
         private void RecordRestirDenoise(ComputeCommandBuffer cmd, bool pixelTemporal)
         {
             using var scope = new ProfilingScope(cmd, RestirDenoiseSampler);
             int kernel = m_RestirDenoiseKernel;
-            BindReceiver(cmd, kernel);
-            cmd.SetComputeTextureParam(m_Compute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, RestirFilterInputId,
+            BindReceiver(cmd, m_RestirCompute, kernel);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirFilterInputId,
                 pixelTemporal ? m_CurrentPixelLighting.innerHandle : m_RawResolved.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, RestirVarianceId, m_RestirVariance.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, OutputId, m_Output.innerHandle);
-            cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirVarianceId, m_RestirVariance.innerHandle);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, OutputId, m_Output.innerHandle);
+            cmd.DispatchCompute(m_RestirCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
 
         private void PreparePixelHistory(Camera camera)
@@ -1528,18 +1580,20 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, PixelTemporalSampler);
             int kernel = m_RestirGather && m_RestirPixelTemporalKernel >= 0
                 ? m_RestirPixelTemporalKernel : m_PixelTemporalKernel;
-            BindReceiver(cmd, kernel);
-            cmd.SetComputeIntParam(m_Compute, HasHistoryId, hasHistory ? 1 : 0);
-            cmd.SetComputeMatrixParam(m_Compute, PreviousInverseVpId, m_State.ViewProjection.inverse);
-            cmd.SetComputeVectorParam(m_Compute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
-            cmd.SetComputeTextureParam(m_Compute, kernel, MotionId, m_ScreenMotion.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PreviousPixelLightingId, m_PreviousPixelLighting.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PreviousPixelGeometryId, m_PreviousPixelGeometry.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PixelLightingOutputId, m_CurrentPixelLighting.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PixelGeometryOutputId, m_CurrentPixelGeometry.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, OutputId, m_Output.innerHandle);
-            cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+            BindReceiver(cmd, m_GatherTemporalCompute, kernel);
+            BindProbeFrame(cmd, m_GatherTemporalCompute);
+            cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousViewProjectionId, m_State.ViewProjection);
+            cmd.SetComputeIntParam(m_GatherTemporalCompute, HasHistoryId, hasHistory ? 1 : 0);
+            cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousInverseVpId, m_State.ViewProjection.inverse);
+            cmd.SetComputeVectorParam(m_GatherTemporalCompute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, MotionId, m_ScreenMotion.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousPixelLightingId, m_PreviousPixelLighting.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousPixelGeometryId, m_PreviousPixelGeometry.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PixelLightingOutputId, m_CurrentPixelLighting.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PixelGeometryOutputId, m_CurrentPixelGeometry.innerHandle);
+            cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, OutputId, m_Output.innerHandle);
+            cmd.DispatchCompute(m_GatherTemporalCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
             m_PixelHistory.MarkWritten();
             m_PixelGeometryHistory.MarkWritten();
         }
@@ -1548,34 +1602,41 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using var scope = new ProfilingScope(cmd, ScreenTraceSampler);
             int kernel = m_ScreenTraceKernel;
-            BindReceiver(cmd, kernel);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
-            cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, kernel, HzbId, m_ScreenHzb.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, MotionId, m_ScreenMotion.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, ScreenRadianceId, m_PreviousScreenRadiance);
-            cmd.SetComputeTextureParam(m_Compute, kernel, ScreenGeometryId, m_PreviousScreenGeometry);
-            cmd.SetComputeTextureParam(m_Compute, kernel, ScreenRaysOutputId, m_ScreenRays.innerHandle);
-            cmd.SetComputeMatrixParam(m_Compute, PreviousInverseVpId, m_State.ViewProjection.inverse);
-            cmd.SetComputeVectorParam(m_Compute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
-            cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+            BindReceiver(cmd, m_TraceCompute, kernel);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, HzbId, m_ScreenHzb.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, MotionId, m_ScreenMotion.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRadianceId, m_PreviousScreenRadiance);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenGeometryId, m_PreviousScreenGeometry);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRaysOutputId, m_ScreenRays.innerHandle);
+            cmd.SetComputeMatrixParam(m_TraceCompute, PreviousInverseVpId, m_State.ViewProjection.inverse);
+            cmd.SetComputeVectorParam(m_TraceCompute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
+            cmd.DispatchCompute(m_TraceCompute, kernel, groupsX, groupsY, 1);
         }
 
         private void RecordDirectionalGuide(ComputeCommandBuffer cmd, TextureHandle placement, TextureHandle black,
-            bool hasHistory, int groupsX, int groupsY)
+            bool hasHistory, int frame, int groupsX, int groupsY)
         {
             using var scope = new ProfilingScope(cmd, DirectionalGuideSampler);
             int kernel = m_DirectionalGuideKernel;
-            BindReceiver(cmd, kernel);
-            cmd.SetComputeIntParam(m_Compute, DirectionalHasHistoryId, hasHistory ? 1 : 0);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
-            cmd.SetComputeTextureParam(m_Compute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
-            cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalPreviousId, hasHistory ? m_PreviousDirectional.innerHandle : black);
+            BindReceiver(cmd, m_ImportanceSamplingCompute, kernel);
+            BindProbeFrame(cmd, m_ImportanceSamplingCompute);
+            BindDirectionalGuideMode(cmd, m_ImportanceSamplingCompute);
+            cmd.SetComputeIntParam(m_ImportanceSamplingCompute, FrameId, frame);
+            cmd.SetComputeMatrixParam(m_ImportanceSamplingCompute, PreviousViewProjectionId, m_State.ViewProjection);
+            cmd.SetComputeIntParam(m_ImportanceSamplingCompute, DirectionalHasHistoryId, hasHistory ? 1 : 0);
+            cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+            cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, DirectionalPreviousId, hasHistory ? m_PreviousDirectional.innerHandle : black);
             bool worldGuide = m_DirectionalHierarchicalGuide && m_FarAtlas.IsValid() && m_FarHitIds.IsValid();
-            cmd.SetComputeIntParam(m_Compute, DirectionalWorldGuideId, worldGuide ? 1 : 0);
-            cmd.SetComputeTextureParam(m_Compute, kernel, FarRadianceId, worldGuide ? m_FarAtlas : black);
-            cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalGuideOutputId, m_DirectionalGuideTexture.innerHandle);
-            cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+            if (worldGuide)
+                cmd.SetComputeVectorParam(m_ImportanceSamplingCompute, FarWindowId,
+                    new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f));
+            cmd.SetComputeIntParam(m_ImportanceSamplingCompute, DirectionalWorldGuideId, worldGuide ? 1 : 0);
+            cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, FarRadianceId, worldGuide ? m_FarAtlas : black);
+            cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, DirectionalGuideOutputId, m_DirectionalGuideTexture.innerHandle);
+            cmd.DispatchCompute(m_ImportanceSamplingCompute, kernel, groupsX, groupsY, 1);
         }
 
         private void RecordDirectionalCache(ComputeCommandBuffer cmd, TextureHandle black, bool hasHistory, int groupsX, int groupsY)
@@ -1583,29 +1644,67 @@ namespace VividRP.Runtime.RenderPass.Core
             int kernel = m_DirectionalCacheKernel;
             using (new ProfilingScope(cmd, DirectionalCacheSampler))
             {
-                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
-                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalPreviousId, hasHistory ? m_PreviousDirectional.innerHandle : black);
-                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalGuideId, m_DirectionalGuideTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalRaysId, m_DirectionalRayTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalCurrentId, m_CurrentDirectional.innerHandle);
-                cmd.DispatchCompute(m_Compute, kernel, CoreUtils.DivRoundUp(m_ProbeWidth * RaysPerProbe, GroupSize), groupsY, 1);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, GeometryId, m_Geometry.innerHandle);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, DirectionalPreviousId, hasHistory ? m_PreviousDirectional.innerHandle : black);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, DirectionalGuideId, m_DirectionalGuideTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, DirectionalRaysId, m_DirectionalRayTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, DirectionalCurrentId, m_CurrentDirectional.innerHandle);
+                cmd.DispatchCompute(m_FilterCompute, kernel, CoreUtils.DivRoundUp(m_ProbeWidth * RaysPerProbe, GroupSize), groupsY, 1);
             }
             using (new ProfilingScope(cmd, DirectionalFilterSampler))
             {
                 kernel = m_DirectionalIntegrateKernel;
-                cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, DirectionalCurrentId, m_CurrentDirectional.innerHandle);
-                cmd.SetComputeTextureParam(m_Compute, kernel, FilteredProbesId, m_FilteredProbes.innerHandle);
-                cmd.DispatchCompute(m_Compute, kernel, groupsX, groupsY, 1);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, GeometryId, m_Geometry.innerHandle);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, DirectionalCurrentId, m_CurrentDirectional.innerHandle);
+                cmd.SetComputeTextureParam(m_FilterCompute, kernel, FilteredProbesId, m_FilteredProbes.innerHandle);
+                cmd.DispatchCompute(m_FilterCompute, kernel, groupsX, groupsY, 1);
             }
         }
 
-        private void BindReceiver(ComputeCommandBuffer cmd, int kernel)
+        private void BindProbeFrame(ComputeCommandBuffer cmd, ComputeShader shader)
         {
-            cmd.SetComputeTextureParam(m_Compute, kernel, DepthId, m_Depth.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
-            cmd.SetComputeTextureParam(m_Compute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeMatrixParam(shader, InverseViewProjectionId, m_InverseViewProjection);
+            cmd.SetComputeVectorParam(shader, ScreenSizeId, new Vector4(m_Width, m_Height, 1f / m_Width, 1f / m_Height));
+            cmd.SetComputeIntParam(shader, RestirDenseId, m_RestirPixelIntegration ? 1 : 0);
+            cmd.SetComputeIntParam(shader, AdaptiveProbesId, m_AdaptiveProbes ? 1 : 0);
+            cmd.SetComputeVectorParam(shader, ProbeCameraForwardId, m_ProbeCameraForward);
+        }
+
+        private void BindSdfTraceConstants(ComputeCommandBuffer cmd, ComputeShader shader)
+        {
+            cmd.SetComputeFloatParam(shader, MaxDistanceId, m_TraceDistance);
+            cmd.SetComputeFloatParam(shader, RayBiasId, m_Bias);
+            cmd.SetComputeIntParam(shader, LayerMaskId, m_LayerMask);
+        }
+
+        private void BindSunLighting(ComputeCommandBuffer cmd, ComputeShader shader)
+        {
+            cmd.SetComputeVectorParam(shader, LightPositionRangeId, m_LightPositionRange);
+            cmd.SetComputeVectorParam(shader, LightColorShadowId, m_LightColorShadow);
+            cmd.SetComputeIntParam(shader, LightLayerMaskId, m_LightLayerMask);
+        }
+
+        private void BindDirectionalGuideMode(ComputeCommandBuffer cmd, ComputeShader shader)
+        {
+            cmd.SetComputeIntParam(shader, DirectionalCacheEnabledId, m_DirectionalCache ? 1 : 0);
+            cmd.SetComputeIntParam(shader, DirectionalGuideEnabledId,
+                m_DirectionalHierarchicalGuide ? 2 : m_DirectionalGuide ? 1 : 0);
+        }
+
+        private void BindOccludedSky(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
+        {
+            cmd.SetComputeTextureParam(shader, kernel, SkyTextureId, m_SkyTexture);
+            cmd.SetComputeVectorParam(shader, SkyTextureParamsId, m_SkyTextureParams);
+            cmd.SetComputeVectorParam(shader, SkyTextureTintId, m_SkyTextureTint);
+            cmd.SetComputeFloatParam(shader, SkyTraceDistanceId, m_SkyTraceDistance);
+        }
+
+        private void BindReceiver(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
+        {
+            cmd.SetComputeTextureParam(shader, kernel, DepthId, m_Depth.innerHandle);
+            cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
+            cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
         }
 
         private void ReadLight()

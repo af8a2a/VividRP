@@ -1,0 +1,59 @@
+#pragma kernel UpdateSdfSurfaceSunVisibility VIVID_SDF_SURFACE_CACHE VIVID_SDF_SUN_UPDATE
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfSurfaceCacheLighting.hlsl"
+
+#if defined(VIVID_SDF_SUN_UPDATE)
+StructuredBuffer<uint> _SdfSunInstances;
+RWTexture2D<float> _SdfSunVisibilityOutput;
+uint _SdfSunFirstCard;
+
+float EvaluateCardSunVisibility(uint card, uint2 pixel)
+{
+    uint face = card % 6u;
+    uint instanceIndex = _SdfSunInstances[card / 6u];
+    VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+    if ((instance.layerMask & _SdfDiffuseLightLayerMask) == 0u)
+        return -1.0;
+
+    DiffuseSurface surface = _SdfDiffuseSurfaces[instanceIndex];
+    uint slice = (uint)surface.cardMinAndFirst.w - 1u + face;
+    float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(pixel, slice, 0));
+    if (packedNormal.a == 0.0)
+        return -1.0;
+
+    float3 normalLS = SafeNormalize(packedNormal.xyz * 2.0 - 1.0);
+    float3 r0 = instance.worldToLocal0.xyz;
+    float3 r1 = instance.worldToLocal1.xyz;
+    float3 r2 = instance.worldToLocal2.xyz;
+    float3 normalWS = SafeNormalize(normalLS.x * r0 + normalLS.y * r1 + normalLS.z * r2);
+    float3 sun = _SdfDiffuseLightPositionRange.xyz;
+    if (dot(normalWS, sun) <= 0.0)
+        return -1.0;
+
+    float depth = _SdfSurfaceAlbedoDepth.Load(int4(pixel, slice, 0)).a;
+    float2 uv = (float2(pixel) + 0.5) / _SdfSunLayout.xy;
+    uint axis = face >> 1u;
+    float3 relative = axis == 0u ? float3(depth, uv) :
+        axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
+    VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+    float3 local = surface.cardMinAndFirst.xyz + relative * surface.cardExtent.xyz;
+    float3 position, geometryNormal;
+    if (!ProjectCardPoint(instance, field, local, normalLS, normalWS, position, geometryNormal)
+        || dot(geometryNormal, sun) <= 0.0)
+        return -1.0;
+
+    float bias = ResolveSunShadowBias(field, instance, geometryNormal);
+    float3 origin = position + geometryNormal * bias;
+    return VividOccludeMeshSdfScene(origin, sun, -_SdfDiffuseLightPositionRange.w, _SdfDiffuseLightLayerMask) ? 0.0 : 1.0;
+}
+
+[numthreads(8, 8, 1)]
+void UpdateSdfSurfaceSunVisibility(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_SdfSunLayout.xy)))
+        return;
+    uint card = _SdfSunFirstCard + id.z;
+    _SdfSunVisibilityOutput[VividSdfSunAtlasPixel(card, id.xy)] = EvaluateCardSunVisibility(card, id.xy);
+}
+#endif

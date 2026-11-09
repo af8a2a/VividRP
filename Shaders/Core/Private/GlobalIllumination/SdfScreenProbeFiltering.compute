@@ -1,0 +1,377 @@
+#pragma kernel FilterSdfDiffuseProbes
+#pragma kernel FilterSdfDirectionalHits
+
+#pragma kernel AccumulateSdfDirectionalRadiance
+#pragma kernel IntegrateSdfDirectionalRadiance
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfScreenProbeHistory.hlsl"
+#include "SdfDiffuseDirectionalCache.hlsl"
+
+static const uint DirectionalHistoryFrames = 3u;
+
+Texture2D<float4> _SdfDirectionalPrevious;
+
+Texture2D<float4> _SdfDirectionalRays;
+
+RWTexture2D<float4> _SdfDirectionalCurrent;
+
+float FilterNeighborWeight(uint2 tile, float4 center, float3 normal, float eyeDepth)
+{
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    if (geometry.w < 0.0)
+        return 0.0;
+    float weight = ProbeGeometryWeight(geometry.xyz - center.xyz, normal, UnpackProbeNormal(geometry.w), eyeDepth);
+    return weight * _SdfDiffuseProbeInput.Load(int3(tile, 0)).a;
+}
+
+static const int2 ProbeFilterOffsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+
+float SelectFilterNeighbor(int2 neighbor, uint2 grid, float4 center, float3 normal, float eyeDepth, out uint2 selected)
+{
+    selected = uint2(neighbor);
+    if (any(neighbor < 0) || any(neighbor >= int2(grid)))
+        return 0.0;
+    float weight = FilterNeighborWeight(selected, center, normal, eyeDepth);
+    if (_SdfDiffuseAdaptiveProbes != 0u)
+    {
+        uint2 adaptive = selected + uint2(0, grid.y);
+        float alternateWeight = FilterNeighborWeight(adaptive, center, normal, eyeDepth);
+        if (alternateWeight > weight)
+        {
+            weight = alternateWeight;
+            selected = adaptive;
+        }
+    }
+    return weight * 0.65;
+}
+
+void FilterProbeLighting(uint2 tile, uint2 grid, float4 center, float4 geometry, float3 normal,
+    float4 compatibility, uint planes, out float3 lighting[4])
+{
+    uint2 stride = uint2(grid.x, 0u);
+    [loop]
+    for (uint plane = 0u; plane < planes; ++plane)
+        lighting[plane] = _SdfDiffuseProbeInput.Load(int3(tile + plane * stride, 0)).rgb;
+
+    float total = 1.0;
+    if (geometry.w >= 0.0 && center.a > 0.0)
+    {
+        float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
+        int2 uniformTile = int2(tile.x, tile.y % grid.y);
+        [loop]
+        for (uint i = 0u; i < 4u; ++i)
+        {
+            uint2 selected;
+            float weight = SelectFilterNeighbor(uniformTile + ProbeFilterOffsets[i], grid, geometry, normal, eyeDepth, selected);
+            weight *= compatibility[i];
+            if (weight <= 0.0)
+                continue;
+            total += weight;
+            [loop]
+            for (uint plane = 0u; plane < planes; ++plane)
+                lighting[plane] += _SdfDiffuseProbeInput.Load(int3(selected + plane * stride, 0)).rgb * weight;
+        }
+    }
+
+    [loop]
+    for (uint plane = 0u; plane < planes; ++plane)
+        lighting[plane] /= total;
+}
+
+[numthreads(8, 8, 1)]
+void FilterSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+        return;
+
+    float4 center = _SdfDiffuseProbeInput.Load(int3(id.xy, 0));
+    float4 geometry = _SdfDiffuseGeometry[id.xy];
+    float3 normal = geometry.w >= 0.0 ? UnpackProbeNormal(geometry.w) : 0.0;
+    uint planes = _SdfDiffuseDirectionalProbes != 0u ? 4u : 1u;
+    float3 lighting[4];
+    FilterProbeLighting(id.xy, grid, center, geometry, normal, 1.0, planes, lighting);
+    uint2 stride = uint2(grid.x, 0u);
+    [loop]
+    for (uint plane = 0u; plane < planes; ++plane)
+        _SdfDiffuseFilteredProbes[id.xy + plane * stride] = float4(lighting[plane], plane == 0u ? center.a : 0.0);
+}
+
+float3 DecodeHitDirection(uint packed)
+{
+    return VividDecodeSurfaceSummaryNormal(float2(packed & 63u, (packed >> 6u) & 63u) / 63.0);
+}
+
+float HitDistanceRejection(uint2 tile, float3 origin, float3 direction, float distance)
+{
+    float bestAlignment = 0.92;
+    float3 bestHit = 0.0;
+    [loop]
+    for (uint ray = 0u; ray < RaysPerProbe; ++ray)
+    {
+        uint packed = uint(_SdfDiffuseHitSamplesInput.Load(int3(tile.x * RaysPerProbe + ray, tile.y, 0)));
+        if (packed == 0u)
+            continue;
+        float3 neighborDirection = DecodeHitDirection(packed);
+        float alignment = dot(direction, neighborDirection);
+        if (alignment > bestAlignment)
+        {
+            bestAlignment = alignment;
+            bestHit = neighborDirection * (float(packed >> 12u) * (_SdfDiffuseMaxDistance / 4095.0));
+        }
+    }
+    if (bestAlignment <= 0.92)
+        return 0.0;
+
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    float3 offset = geometry.xyz + UnpackProbeNormal(geometry.w) * _SdfDiffuseRayBias - origin;
+    float3 hit = offset + bestHit;
+    float tolerance = max(0.12, 0.15 * distance) + 0.25 * length(offset);
+    float separation = abs(dot(hit, direction) - distance);
+    return smoothstep(0.92, 0.99, bestAlignment) * smoothstep(tolerance, 2.0 * tolerance, separation);
+}
+
+groupshared float4 ProbeHitRejection[8][RaysPerProbe];
+
+[numthreads(8, 8, 1)]
+void FilterSdfDirectionalHits(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+{
+    uint2 tile = uint2(group.x * 8u + lane.y, group.y);
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    bool inBounds = tile.x < grid.x;
+    float4 center = 0.0;
+    float4 geometry = 0.0;
+    float3 normal = 0.0;
+    float4 rejection = 0.0;
+    if (inBounds)
+    {
+        center = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+        geometry = _SdfDiffuseGeometry[tile];
+        if (center.a > 0.0 && geometry.w >= 0.0)
+        {
+            normal = UnpackProbeNormal(geometry.w);
+            uint packed = uint(_SdfDiffuseHitSamplesInput.Load(int3(tile.x * RaysPerProbe + lane.x, tile.y, 0)));
+            if (packed != 0u)
+            {
+                float3 direction = DecodeHitDirection(packed);
+                float distance = float(packed >> 12u) * (_SdfDiffuseMaxDistance / 4095.0);
+                float3 origin = geometry.xyz + normal * _SdfDiffuseRayBias;
+                float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
+                int2 uniformTile = int2(tile.x, tile.y % grid.y);
+                [unroll]
+                for (uint i = 0u; i < 4u; ++i)
+                {
+                    uint2 selected;
+                    float weight = SelectFilterNeighbor(uniformTile + ProbeFilterOffsets[i], grid, geometry, normal, eyeDepth, selected);
+                    if (weight > 0.0)
+                        rejection[i] = HitDistanceRejection(selected, origin, direction, distance);
+                }
+            }
+        }
+    }
+
+    ProbeHitRejection[lane.y][lane.x] = rejection;
+    GroupMemoryBarrierWithGroupSync();
+    if (!inBounds || lane.x != 0u)
+        return;
+
+    [unroll]
+    for (uint ray = 1u; ray < RaysPerProbe; ++ray)
+        rejection += ProbeHitRejection[lane.y][ray];
+
+    // Only aligned rays provide evidence of a discontinuity. Keep the original
+    // spatial weight where sparse samples cannot establish a correspondence.
+    float4 compatibility = 1.0 - 0.75 * saturate(0.5 * rejection);
+    uint planes = _SdfDiffuseDirectionalProbes != 0u ? 4u : 1u;
+    float3 lighting[4];
+    FilterProbeLighting(tile, grid, center, geometry, normal, compatibility, planes, lighting);
+    float3x3 moments = (float3x3)0.0;
+    if (planes > 1u)
+        moments = float3x3(lighting[1], lighting[2], lighting[3]);
+    center.rgb = lighting[0];
+    center = AccumulateProbe(center, geometry.xyz, normal, moments);
+    StoreProbe(tile, center, moments);
+}
+
+float DirectionalHitWeight(float4 center, float4 other, float3 delta)
+{
+    if (center.x == 0.0 || other.x == 0.0 || (center.x < 0.0) != (other.x < 0.0))
+        return 0.0;
+    float3 direction = VividDecodeSurfaceSummaryNormal(center.zw);
+    float3 otherDirection = VividDecodeSurfaceSummaryNormal(other.zw);
+    if (center.x < 0.0)
+        return saturate((dot(direction, otherDirection) - 0.85) / 0.15);
+
+    float3 hit = delta + otherDirection * other.x;
+    float distance = length(hit);
+    float tolerance = clamp(0.18 * min(center.x, distance), 0.04, 0.4);
+    return saturate(1.0 - abs(center.x - distance) / tolerance)
+        * saturate((dot(direction, hit / max(distance, 1e-5)) - 0.92) / 0.08);
+}
+
+[numthreads(8, 8, 1)]
+void AccumulateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = DirectionalGrid();
+    if (id.x >= grid.x * DirectionalBinCount || id.y >= grid.y * (1u + _SdfDiffuseAdaptiveProbes))
+        return;
+    uint2 tile = uint2(id.x / DirectionalBinCount, id.y);
+    uint bin = id.x % DirectionalBinCount;
+    uint2 metadataOffset = DirectionalMetadataOffset(grid);
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    float4 lighting = 0.0;
+    float4 metadata = 0.0;
+    if (geometry.w >= 0.0)
+    {
+        float drawWeight = 0.0;
+        float coveredWeight = 0.0;
+        [unroll]
+        for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
+        {
+            uint2 address = DirectionalAddress(tile, ray);
+            float4 info = _SdfDirectionalRays.Load(int3(address + metadataOffset, 0));
+            if (uint(info.x) != bin)
+                continue;
+            float4 sample = _SdfDirectionalRays.Load(int3(address, 0));
+            drawWeight += info.y;
+            if (sample.a == 0.0)
+                continue;
+            lighting.rgb += sample.rgb * info.y;
+            coveredWeight += info.y;
+            if (metadata.x == 0.0 || (sample.a > 0.0 && (metadata.x < 0.0 || sample.a < metadata.x)))
+                metadata = float4(sample.a, 0.0, info.zw);
+        }
+        // Store conditional radiance and covered cosine mass separately.
+        // Metadata Y stores negative draw weight and positive age for reused bins.
+        lighting = float4(lighting.rgb / max(coveredWeight, 1e-5), coveredWeight / max(drawWeight, 1e-5));
+        metadata.y = -drawWeight;
+        float2 previous = _SdfDirectionalGuide.Load(int3(id.xy, 0)).yz;
+        if (all(previous > 0.0))
+        {
+            uint2 previousTile = uint2(previous) - 1u;
+            float4 previousGeometry = _SdfDiffusePreviousGeometry.Load(int3(previousTile, 0));
+            float3x3 basis = GetLocalFrame(UnpackProbeNormal(geometry.w));
+            float3x3 previousBasis = GetLocalFrame(UnpackProbeNormal(previousGeometry.w));
+            uint oldBin = DirectionalBin(DirectionalBinDirection(bin, 0.5, basis), previousBasis);
+            uint2 address = DirectionalAddress(previousTile, oldBin);
+            float4 oldMetadata = _SdfDirectionalPrevious.Load(int3(address + metadataOffset, 0));
+            float4 oldLighting = _SdfDirectionalPrevious.Load(int3(address, 0));
+            float3 delta = previousGeometry.xyz - geometry.xyz;
+            if (drawWeight == 0.0 && oldLighting.a > 0.0 && oldMetadata.y < DirectionalHistoryFrames
+                && length(delta) < clamp(0.12 * abs(oldMetadata.x), 0.015, 0.15))
+            {
+                float3 direction = VividDecodeSurfaceSummaryNormal(oldMetadata.zw);
+                float3 hit = delta + oldMetadata.x * direction;
+                float distance = length(hit);
+                if (oldMetadata.x > 0.0)
+                    direction = hit / max(distance, 1e-5);
+                if (dot(direction, basis[2]) > 0.0 && DirectionalBin(direction, basis) == bin)
+                {
+                    lighting = oldLighting;
+                    metadata = float4(oldMetadata.x > 0.0 ? distance : -1.0, max(0.0, oldMetadata.y) + 1.0,
+                        VividEncodeSurfaceSummaryNormal(direction));
+                }
+            }
+            else if (lighting.a > 0.0 && oldLighting.a > 0.0)
+            {
+                float weight = 0.65 * oldLighting.a * DirectionalHitWeight(metadata, oldMetadata, delta);
+                lighting.rgb = lerp(lighting.rgb, oldLighting.rgb, weight);
+            }
+        }
+    }
+    _SdfDirectionalCurrent[id.xy] = lighting;
+    _SdfDirectionalCurrent[id.xy + metadataOffset] = metadata;
+}
+
+float DirectionalNeighborWeight(uint2 tile, float4 center, float3 normal, float eyeDepth)
+{
+    float4 other = _SdfDiffuseGeometry[tile];
+    return other.w < 0.0 ? 0.0 : ProbeGeometryWeight(other.xyz - center.xyz, normal, UnpackProbeNormal(other.w), eyeDepth);
+}
+
+static const int2 DirectionalNeighborOffsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+
+[numthreads(8, 8, 1)]
+void IntegrateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = DirectionalGrid();
+    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+        return;
+    float4 center = _SdfDiffuseGeometry[id.xy];
+    float4 integrated = 0.0;
+    float3x3 moments = (float3x3)0.0;
+    if (center.w >= 0.0)
+    {
+        float3 normal = UnpackProbeNormal(center.w);
+        float3x3 basis = GetLocalFrame(normal);
+        uint2 metadataOffset = DirectionalMetadataOffset(grid);
+        uint2 neighbors[4];
+        float neighborWeights[4];
+        [unroll]
+        for (uint tap = 0u; tap < 4u; ++tap)
+        {
+            int2 tile = int2(id.x, id.y % grid.y) + DirectionalNeighborOffsets[tap];
+            neighbors[tap] = 0u;
+            neighborWeights[tap] = 0.0;
+            if (_SdfDiffuseSpatialFilter == 0u || any(tile < 0) || any(tile >= int2(grid)))
+                continue;
+            float eyeDepth = dot(float4(center.xyz, 1.0), _SdfProbeCameraForward);
+            uint2 selected = uint2(tile);
+            float weight = DirectionalNeighborWeight(selected, center, normal, eyeDepth);
+            if (_SdfDiffuseAdaptiveProbes != 0u)
+            {
+                uint2 adaptive = selected + uint2(0u, grid.y);
+                float alternate = DirectionalNeighborWeight(adaptive, center, normal, eyeDepth);
+                if (alternate > weight)
+                {
+                    weight = alternate;
+                    selected = adaptive;
+                }
+            }
+            neighbors[tap] = selected;
+            neighborWeights[tap] = 0.65 * weight;
+        }
+
+        [loop]
+        for (uint bin = 0u; bin < DirectionalBinCount; ++bin)
+        {
+            uint2 address = DirectionalAddress(id.xy, bin);
+            float4 metadata = _SdfDirectionalCurrent[address + metadataOffset];
+            float drawWeight = max(0.0, -metadata.y);
+            float4 lighting = _SdfDirectionalCurrent[address];
+            float coveredWeight = drawWeight * lighting.a;
+            if (coveredWeight <= 0.0)
+                continue;
+            float3 direction = DirectionalBinDirection(bin, 0.5, basis);
+            float3 sum = lighting.rgb;
+            float total = 1.0;
+            [unroll]
+            for (uint tap = 0u; tap < 4u; ++tap)
+            {
+                if (neighborWeights[tap] <= 0.0)
+                    continue;
+                uint2 neighbor = neighbors[tap];
+                float4 geometry = _SdfDiffuseGeometry[neighbor];
+                float3x3 neighborBasis = GetLocalFrame(UnpackProbeNormal(geometry.w));
+                uint2 other = DirectionalAddress(neighbor, DirectionalBin(direction, neighborBasis));
+                float4 neighborLight = _SdfDirectionalCurrent[other];
+                float4 neighborMetadata = _SdfDirectionalCurrent[other + metadataOffset];
+                float weight = neighborWeights[tap] * neighborLight.a * DirectionalHitWeight(metadata, neighborMetadata, geometry.xyz - center.xyz);
+                sum += weight * neighborLight.rgb;
+                total += weight;
+            }
+            float3 covered = coveredWeight * sum / total;
+            integrated += float4(covered, coveredWeight);
+            moments += ProbeSampleMoments(covered, direction, normal);
+        }
+    }
+    float inverseCovered = rcp(max(integrated.a, 1e-5));
+    uint2 stride = uint2(grid.x, 0u);
+    // The strata partition the cosine domain, so draw weights sum to eight.
+    _SdfDiffuseFilteredProbes[id.xy] = float4(min(integrated.rgb * inverseCovered, 65000.0),
+        integrated.a / float(DirectionalBinCount));
+    _SdfDiffuseFilteredProbes[id.xy + stride] = float4(clamp(moments[0] * inverseCovered, -65000.0, 65000.0), 0.0);
+    _SdfDiffuseFilteredProbes[id.xy + 2u * stride] = float4(clamp(moments[1] * inverseCovered, -65000.0, 65000.0), 0.0);
+    _SdfDiffuseFilteredProbes[id.xy + 3u * stride] = float4(clamp(moments[2] * inverseCovered, -65000.0, 65000.0), 0.0);
+}

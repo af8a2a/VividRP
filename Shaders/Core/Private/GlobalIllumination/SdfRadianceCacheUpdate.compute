@@ -1,0 +1,52 @@
+#pragma kernel UpdateSdfFarRadiance VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfSurfaceCacheLighting.hlsl"
+#include "SdfRadianceCacheCommon.hlsl"
+
+#if defined(VIVID_SDF_FAR_UPDATE)
+RWTexture2D<float4> _SdfFarOutput;
+RWStructuredBuffer<uint> _SdfFarHitIdsOutput;
+float4 _SdfFarUpdates[64];
+uint _SdfFarClear;
+
+float4 TraceFarProbe(float3 origin, float3 direction, out uint instance)
+{
+    instance = 0u;
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfFarTraceDistance - _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, (VividMeshSdfReceiver)0, hit, advancedReceiver, incomplete);
+    if (!traced || incomplete || hit.distance < 0.5 * FarCellSize || dot(hit.normalWS, direction) >= -0.05)
+        return 0.0;
+
+    float3 position = origin + direction * hit.distance;
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    float3 normal;
+    uint3 texel;
+    float error;
+    if (surface.albedoAndValid.a == 0.0 || !VividTrySampleSdfSurface(hit, position, surface, normal, texel, error))
+        return 0.0;
+    float3 radiance = TraceHitLighting(position, normal, hit, surface, -1.0) + LoadCardIndirect(surface, hit, texel);
+    instance = hit.instanceIndex + 1u;
+    return float4(clamp(radiance, 0.0, 65000.0), hit.distance);
+}
+
+[numthreads(8, 8, 1)]
+void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    if (_SdfFarClear != 0u)
+    {
+        uint slot = group.x * FarDirections + lane;
+        _SdfFarOutput[uint2(slot % (FarGridSize * FarGridSize), slot / (FarGridSize * FarGridSize) + FarGridSize * FarDirections)] = 0.0;
+        return;
+    }
+    int3 cell = int3(_SdfFarUpdates[group.x].xyz);
+    uint2 address = FarAtlasAddress(cell, lane);
+    uint instance;
+    _SdfFarOutput[address] = TraceFarProbe(FarProbePosition(cell), FarProbeDirection(lane), instance);
+    _SdfFarHitIdsOutput[FarHitIndex(address)] = instance;
+    if (lane == 0u)
+        _SdfFarOutput[FarAtlasAddress(cell, FarDirections)] = float4(float3(cell), 1.0);
+}
+#endif

@@ -1,0 +1,89 @@
+#pragma kernel UpdateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfScreenProbeReceiver.hlsl"
+#include "SdfSurfaceCacheLighting.hlsl"
+
+#if defined(VIVID_SDF_RADIOSITY_UPDATE)
+RWTexture2D<float4> _SdfRadiosityOutput;
+uint _SdfRadiosityFirstCard;
+
+float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
+{
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver, incomplete);
+    if (incomplete)
+        return 0.0;
+    if (!traced)
+        return HasSkyTexture() && ResolveSdfSkyMiss(origin, direction, _SdfDiffuseMaxDistance, false, 0u,
+            (VividMeshSdfReceiver)0) == RaySkyVisible
+            ? clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0) : 0.0;
+
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    if (surface.albedoAndValid.a == 0.0 || dot(hit.normalWS, direction) >= 0.0)
+        return 0.0;
+    float3 position = origin + direction * hit.distance;
+    float3 normal;
+    uint3 texel;
+    float error;
+    if (!VividTrySampleSdfSurface(hit, position, surface, normal, texel, error))
+        return 0.0;
+    return TraceHitLighting(position, normal, hit, surface, -1.0) + LoadCardIndirect(surface, hit, texel);
+}
+
+float4 GatherCardIndirect(uint card, uint2 cell)
+{
+    uint work = _SdfRadiosityWork[0] + 2u * card;
+    uint instanceIndex = _SdfRadiosityWork[work];
+    uint slot = _SdfRadiosityWork[work + 1u];
+    VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+    if ((instance.layerMask & _SdfDiffuseLayerMask) == 0u)
+        return 0.0;
+
+    uint slice, axis;
+    float3 boundsMin, extent;
+    VividGetSdfCardProjection(_SdfDiffuseSurfaces[instanceIndex], slot, slice, axis, boundsMin, extent);
+    uint2 size;
+    uint slices;
+    _SdfSurfaceAlbedoDepth.GetDimensions(size.x, size.y, slices);
+    uint2 pixel = RadiosityCardPixel(cell, size);
+    float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(pixel, slice, 0));
+    if (packedNormal.a == 0.0)
+        return 0.0;
+    float3 normalLS = SafeNormalize(packedNormal.xyz * 2.0 - 1.0);
+    float3 normalWS = SafeNormalize(normalLS.x * instance.worldToLocal0.xyz
+        + normalLS.y * instance.worldToLocal1.xyz + normalLS.z * instance.worldToLocal2.xyz);
+    float depth = _SdfSurfaceAlbedoDepth.Load(int4(pixel, slice, 0)).a;
+    float2 uv = (float2(pixel) + 0.5) / float2(size);
+    float3 relative = axis == 0u ? float3(depth, uv) : axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
+    float3 local = boundsMin + extent * relative;
+    VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+    VividMeshSdfReceiver receiver;
+    receiver.entityId = instance.entityId;
+    if (!ProjectCardPoint(instance, field, local, normalLS, normalWS, receiver.positionWS, receiver.normalWS))
+        return 0.0;
+
+    float3 origin = receiver.positionWS + receiver.normalWS * ResolveSunShadowBias(field, instance, receiver.normalWS);
+    float3x3 basis = GetLocalFrame(normalWS);
+    uint seed = HashProbe(card * (RadiosityCardSize * RadiosityCardSize) + cell.y * RadiosityCardSize + cell.x);
+    float3 sum = 0.0;
+    [loop]
+    for (uint ray = 0u; ray < RadiosityRays; ray++)
+    {
+        float3 direction = CosineRayDirection(ray, RadiosityRays, seed, basis);
+        if (dot(receiver.normalWS, direction) > 0.0)
+            sum += TraceCardRadiance(origin, direction, receiver);
+    }
+    // Keep zero for uncovered cells and preserve covered black as a valid sample.
+    return float4(clamp(sum / RadiosityRays, 0.0, 65000.0), 1.0 + depth);
+}
+
+[numthreads(8, 8, 1)]
+void UpdateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
+{
+    uint card = _SdfRadiosityFirstCard + id.z;
+    _SdfRadiosityOutput[RadiosityAtlasPixel(card, id.xy)] = GatherCardIndirect(card, id.xy);
+}
+#endif

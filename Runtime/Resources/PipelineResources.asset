@@ -133,8 +133,26 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 607475cf82417d740964e503423c2041, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingEnvironmentSampling.compute
     ResourceObject: {fileID: 7200000, guid: bcb75d6339176b94d809ad625c5695b7, type: 3}
-  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfDiffuseGather.compute
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfRadianceCacheUpdate.compute
+    ResourceObject: {fileID: 7200000, guid: af8c6ee437c3ce7488857c6b3ded5641, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfRadiosity.compute
+    ResourceObject: {fileID: 7200000, guid: 38e30122484e0fa448ec69013e48db80, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfReSTIRGather.compute
+    ResourceObject: {fileID: 7200000, guid: 8a0c588f863474c438a284827f6efda2, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLighting.compute
+    ResourceObject: {fileID: 7200000, guid: d40e99fb239b62d4e8d7686894121bb8, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute
+    ResourceObject: {fileID: 7200000, guid: 42a6406dbb1af514a81bf806b002bca1, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute
     ResourceObject: {fileID: 7200000, guid: 004ebd29711688f4ba75b6fe3acb6a8d, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGatherTemporal.compute
+    ResourceObject: {fileID: 7200000, guid: 94a5ff9fd53bc744b94c87b43ed604c2, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+    ResourceObject: {fileID: 7200000, guid: 711fb0f146475f347b967c79b8eb0f6c, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeTracing.compute
+    ResourceObject: {fileID: 7200000, guid: 8b18b2e4cd399994a9494e46d958cc83, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfShortRangeAO.compute
+    ResourceObject: {fileID: 7200000, guid: 6dc6c044c8bd5fb4e976c3653d161eda, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ReGIRGridBuild.compute

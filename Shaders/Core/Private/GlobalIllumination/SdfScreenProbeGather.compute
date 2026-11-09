@@ -1,0 +1,322 @@
+#pragma kernel ResolveSdfDiffuseGI
+#pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
+#pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
+#pragma kernel PlaceSdfAdaptiveProbes
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfShortRangeAOCommon.hlsl"
+#include "SdfDiffuseReSTIR.hlsl"
+
+[numthreads(8, 8, 1)]
+void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
+{
+    uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
+    uint2 grid = ProbeGridSize(screenSize);
+    if (any(id.xy >= grid))
+        return;
+
+    uint encoded = 0u;
+    float worstCoverage = 0.22;
+    [loop]
+    for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex)
+    {
+        uint2 offset = uint2(sampleIndex & 1u, sampleIndex >> 1u) * 8u + 4u;
+        uint2 pixel = id.xy * ProbeSpacing + offset;
+        float3 position, normal;
+        if (any(pixel >= screenSize) || !LoadReceiver(pixel, position, normal))
+            continue;
+
+        float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+        int2 low = int2(id.xy) + int2(sampleIndex & 1u, sampleIndex >> 1u) - 1;
+        float coverage = 0.0;
+        [unroll]
+        for (uint neighbor = 0u; neighbor < 4u; ++neighbor)
+        {
+            uint2 tile = uint2(clamp(low + int2(neighbor & 1u, neighbor >> 1u), 0, int2(grid) - 1));
+            float3 otherPosition, otherNormal;
+            if (LoadReceiver(ProbeReceiverPixel(tile, screenSize), otherPosition, otherNormal))
+                coverage = max(coverage, ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth));
+        }
+        coverage = floor(coverage * 8.0) / 8.0;
+        if (coverage < worstCoverage)
+        {
+            worstCoverage = coverage;
+            encoded = 1u + offset.x + offset.y * ProbeSpacing;
+        }
+    }
+    _SdfAdaptivePlacementOutput[id.xy] = float(encoded);
+}
+
+#if defined(VIVID_SDF_RESTIR_OPENPBR)
+bool TryPrepareRestirOpenPbr(uint2 pixel, float3 position, float3 normal,
+    out OpenPBR_PreparedBsdf prepared, out float3 inverseDiffuseColor)
+{
+    prepared = (OpenPBR_PreparedBsdf)0;
+    inverseDiffuseColor = 0.0;
+    VividSurfaceSummaryData summary = (VividSurfaceSummaryData)0;
+    summary.deferredExportHeader = VividDecodeDeferredExportHeader(_SdfDiffuseGBuffer0.Load(int3(pixel, 0)).a);
+    if (summary.deferredExportHeader != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+        return false;
+    summary.normalWS = normal;
+    summary.perceptualRoughness = saturate(_SdfDiffuseGBuffer1.Load(int3(pixel, 0)).z);
+    VividOpenPBROpaqueInputs inputs;
+    OpenPBR_ResolvedInputs resolved;
+    if (!VividTryUnpackOpenPBROpaqueGBuffer(summary, _SdfOpenPbrParameters.Load(int3(pixel, 0)),
+        _SdfOpenPbrAux0.Load(int3(pixel, 0)), _SdfOpenPbrAux1.Load(int3(pixel, 0)), inputs)
+        || !VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
+        return false;
+
+    float3 view = SafeNormalize(GetWorldSpaceViewDir(position));
+    if (dot(normal, view) <= 0.0)
+        return false;
+    prepared = VividPrepareOpenPBROpaque(resolved, view);
+    inverseDiffuseColor = rcp(max(VividOpenPBROpaqueDiffuseColor(inputs), 1e-8));
+    return true;
+}
+
+float3 RestirOpenPbrDiffuse(OpenPBR_PreparedBsdf prepared, float3 direction,
+    float cosine, float limitedCosine, float3 inverseDiffuseColor)
+{
+    if (cosine <= 0.0)
+        return 0.0;
+    // The existing cosine proposal and reservoir inverse PDF use a Lambert
+    // response with pi factored out. Vendor eval already includes NdotL.
+    return openpbr_eval(prepared, direction).diffuse
+        * (PI * (limitedCosine / cosine)) * inverseDiffuseColor;
+}
+#endif
+
+void IntegrateRestirLighting(uint3 id)
+{
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(id.xy >= size))
+        return;
+
+    float4 result = 0.0;
+    float variance = 0.0;
+    float3 position, normal;
+    if (LoadReceiver(id.xy, position, normal))
+    {
+        bool openPbr = false;
+        #if defined(VIVID_SDF_RESTIR_OPENPBR)
+            OpenPBR_PreparedBsdf prepared;
+            float3 inverseDiffuseColor;
+            openPbr = TryPrepareRestirOpenPbr(id.xy, position, normal, prepared, inverseDiffuseColor);
+        #endif
+        bool directionalContact = _SdfNearOcclusion.z > 0.0;
+        float4 contact = float4(0.0, 0.0, 0.0, 1.0);
+        if (directionalContact)
+            contact = EvaluateNearDiffuseVisibility(id.xy, position, normal, true);
+        uint2 grid = ProbeGridSize(size);
+        uint2 center = id.xy / RestirPixelSpacing;
+        uint2 centerSample;
+        LoadProbeReceiverPixel(center, size, centerSample);
+        int2 start = int2(center) - 1 - int2(id.x < centerSample.x, id.y < centerSample.y);
+        float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+        float radius = clamp(0.035 * eyeDepth, 0.08, 0.45);
+        float total = 0.0;
+        float mean = 0.0;
+        float m2 = 0.0;
+        [loop]
+        for (int y = 0; y < 4; ++y)
+        {
+            [loop]
+            for (int x = 0; x < 4; ++x)
+            {
+                int2 adjacent = start + int2(x, y);
+                if (any(adjacent < 0) || any(adjacent >= int2(grid)))
+                    continue;
+                uint2 tile = uint2(adjacent);
+                float4 geometry = _SdfDiffuseGeometry[tile];
+                float weight = RestirReceiverWeight(geometry, position, normal, eyeDepth, radius);
+                if (weight <= 0.0)
+                    continue;
+
+                uint2 samplePixel;
+                LoadProbeReceiverPixel(tile, size, samplePixel);
+                float2 offset = float2(samplePixel) - float2(id.xy);
+                weight *= rcp(1.0 + 0.10 * dot(offset, offset));
+                total += weight;
+                float4 distant = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+                float coveredWeight = weight * distant.a;
+                if (coveredWeight <= 0.0)
+                    continue;
+
+                RestirReservoir reservoir = LoadRestir(_SdfRestirSpatial, tile, grid.x);
+                float3 sourceNormal = UnpackProbeNormal(geometry.w);
+                float3 origin = geometry.xyz + sourceNormal * _SdfDiffuseRayBias;
+                float3 direction = SafeNormalize(reservoir.sample.position - origin);
+                float3 receiverDirection = direction;
+                float hitDistance = 0.0;
+                if (directionalContact || openPbr)
+                {
+                    float3 receiverDelta = reservoir.sample.position - (position + normal * _SdfDiffuseRayBias);
+                    hitDistance = length(receiverDelta);
+                    receiverDirection = receiverDelta / max(hitDistance, 1e-5);
+                }
+                float receiverCosine = saturate(dot(normal, receiverDirection));
+                // Limit the interpolation gain for a sample grazing the source receiver.
+                float cosine = min(receiverCosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
+                float3 localLighting = reservoir.sample.radiance * (reservoir.inversePdf * cosine);
+                #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                    if (openPbr && reservoir.inversePdf > 0.0)
+                    {
+                        localLighting = (reservoir.sample.radiance * reservoir.inversePdf)
+                            * RestirOpenPbrDiffuse(prepared, receiverDirection, receiverCosine, cosine, inverseDiffuseColor);
+                    }
+                #endif
+                if (directionalContact)
+                {
+                    // Close first hits already account for geometry along the ray.
+                    float visibility = NearDiffuseDirectionVisibility(contact, receiverDirection);
+                    localLighting *= lerp(1.0, visibility, saturate(hitDistance / _SdfNearOcclusion.x));
+
+                }
+                if (directionalContact || openPbr)
+                {
+                    float4 distantDirection = _SdfDiffuseProbeInput.Load(int3(DistantProbeDirectionAddress(tile), 0));
+                    if (distantDirection.w > 0.0)
+                    {
+                        float3 incoming = SafeNormalize(distantDirection.xyz);
+                        // Distant samples were drawn from the probe's cosine PDF.
+                        float incomingCosine = saturate(dot(normal, incoming));
+                        float sourceCosine = max(dot(sourceNormal, incoming), 1e-4);
+                        float limitedCosine = min(incomingCosine, 2.0 * sourceCosine);
+                        float3 response = (limitedCosine / sourceCosine).xxx;
+                        #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                            if (openPbr)
+                                response = RestirOpenPbrDiffuse(prepared, incoming, incomingCosine,
+                                    limitedCosine, inverseDiffuseColor) / sourceCosine;
+                        #endif
+                        distant.rgb *= response;
+                        if (directionalContact)
+                            distant.rgb *= NearDiffuseDirectionVisibility(contact, incoming);
+                    }
+                }
+                float3 lighting = min(localLighting + distant.rgb, 65000.0);
+                result += coveredWeight * float4(lighting, 1.0);
+
+                // Weighted log-luminance variance keeps HDR outliers in a useful FP16 range.
+                float value = log2(1.0 + RestirLuminance(lighting));
+                float delta = value - mean;
+                mean += (coveredWeight / result.a) * delta;
+                m2 += coveredWeight * delta * (value - mean);
+            }
+        }
+        float invCoveredWeight = rcp(max(result.a, 1e-5));
+        result.rgb *= invCoveredWeight;
+        variance = max(0.0, m2 * invCoveredWeight);
+        result.a /= max(total, 1e-5);
+        // Keep the two filter domains separate; Denoise restores unsigned coverage.
+        if (openPbr)
+            result.a = -result.a;
+    }
+    _SdfDiffuseOutput[id.xy] = result;
+    _SdfRestirVarianceOutput[id.xy] = variance;
+}
+
+void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal, float eyeDepth,
+    float3 bentNormal, float visibility,
+    inout float4 result, inout float totalWeight)
+{
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    if (geometry.w < 0.0)
+        return;
+    float3 probeNormal = UnpackProbeNormal(geometry.w);
+    float agreement = dot(probeNormal, normal);
+    if (_SdfDiffuseAdaptiveProbes != 0u || _SdfDiffuseSpatialFilter != 0u)
+        weight *= ProbeGeometryWeight(geometry.xyz - position, normal, probeNormal, eyeDepth);
+    else if (abs(dot(geometry.xyz - position, normal)) > 0.1 || agreement < 0.85)
+        return;
+    if (weight <= 0.0)
+        return;
+
+    float4 probe = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+    if (_SdfDiffuseDirectionalProbes != 0u && probe.a > 0.0)
+    {
+        uint2 stride = ProbePlaneStride();
+        float3 tangent = (normal - probeNormal * agreement) / ProbeMomentScale;
+        float3 momentX = _SdfDiffuseProbeInput.Load(int3(tile + stride, 0)).rgb;
+        float3 momentY = _SdfDiffuseProbeInput.Load(int3(tile + 2u * stride, 0)).rgb;
+        float3 momentZ = _SdfDiffuseProbeInput.Load(int3(tile + 3u * stride, 0)).rgb;
+        float3 unoccluded = clamp(probe.rgb + tangent.x * momentX + tangent.y * momentY + tangent.z * momentZ, 0.0, 65000.0);
+        if (visibility < 1.0)
+        {
+            float3 bentTangent = (bentNormal - probeNormal * dot(probeNormal, bentNormal)) / ProbeMomentScale;
+            // The first-order probe reconstruction approximates the visible lobe.
+            // Keep its energy bounded by the unoccluded material response.
+            float3 bentIrradiance = probe.rgb + bentTangent.x * momentX + bentTangent.y * momentY + bentTangent.z * momentZ;
+            probe.rgb = min(unoccluded, max(0.0, bentIrradiance) * visibility);
+        }
+        else
+            probe.rgb = unoccluded;
+    }
+    else
+        probe.rgb *= visibility;
+    result += float4(probe.rgb * probe.a, probe.a) * weight;
+    totalWeight += weight;
+}
+
+#if defined(VIVID_SDF_RESTIR_OPENPBR)
+[numthreads(8, 8, 1)]
+void ResolveSdfRestirOpenPBR(uint3 id : SV_DispatchThreadID)
+{
+    IntegrateRestirLighting(id);
+}
+#else
+[numthreads(8, 8, 1)]
+void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
+{
+    if (_SdfRestirDense != 0u)
+    {
+        IntegrateRestirLighting(id);
+        return;
+    }
+    uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(id.xy >= screenSize))
+        return;
+
+    float3 position, normal;
+    float4 result = 0.0;
+    if (LoadReceiver(id.xy, position, normal))
+    {
+        float visibility = 1.0;
+        float3 bentNormal = normal;
+        if (_SdfNearOcclusion.z > 0.0)
+        {
+            float4 contact = EvaluateNearDiffuseVisibility(id.xy, position, normal, true);
+            visibility = contact.w;
+            bentNormal = SafeNormalize(normal + contact.xyz / max(visibility, 1e-5));
+        }
+        float2 grid = (float2(id.xy) + 0.5) / ProbeSpacing - 0.5;
+        int2 low = int2(floor(grid));
+        float2 fraction = frac(grid);
+        uint2 probeGrid = ProbeGridSize(screenSize);
+        int2 last = int2(probeGrid) - 1;
+        float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+        float totalWeight = 0.0;
+        [unroll]
+        for (uint i = 0u; i < 4u; i++)
+        {
+            int2 offset = int2(i & 1u, i >> 1u);
+            uint2 tile = uint2(clamp(low + offset, 0, last));
+            float2 weights = lerp(1.0 - fraction, fraction, float2(offset));
+            AddProbeToResolve(tile, weights.x * weights.y, position, normal, eyeDepth,
+                bentNormal, visibility, result, totalWeight);
+            if (_SdfDiffuseAdaptiveProbes != 0u && all(int2(tile) == low + offset))
+            {
+                uint2 pixel;
+                if (LoadAdaptiveProbePixel(tile, pixel))
+                {
+                    float2 adaptiveWeights = saturate(1.0 - abs(float2(pixel) - float2(id.xy)) / ProbeSpacing);
+                    AddProbeToResolve(tile + uint2(0, probeGrid.y), adaptiveWeights.x * adaptiveWeights.y,
+                        position, normal, eyeDepth, bentNormal, visibility, result, totalWeight);
+                }
+            }
+        }
+        result.rgb /= max(result.a, 1e-5);
+        result.a /= max(totalWeight, 1e-5);
+    }
+    _SdfDiffuseOutput[id.xy] = result;
+}
+#endif

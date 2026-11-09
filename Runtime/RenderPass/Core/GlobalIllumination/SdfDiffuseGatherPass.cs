@@ -534,14 +534,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 && HasKernel(m_FilterCompute, "ScreenProbeTemporallyAccumulateTraceRadianceCS")
                 && HasKernel(m_FilterCompute, "ScreenProbeFilterGatherTracesCS")
                 && HasKernel(m_FilterCompute, "ScreenProbeConvertToIrradianceCS")
-                && HasKernel(m_GatherCompute, "ResolveSdfProbeIrradiance"))
+                && HasKernel(m_GatherCompute, "ScreenProbeIntegrateCS"))
             {
                 m_DirectionalGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfDirectionalGuide");
                 m_DirectionalCompositeKernel = m_FilterCompute.FindKernel("ScreenProbeCompositeTracesWithScatterCS");
                 m_DirectionalTemporalKernel = m_FilterCompute.FindKernel("ScreenProbeTemporallyAccumulateTraceRadianceCS");
                 m_DirectionalFilterKernel = m_FilterCompute.FindKernel("ScreenProbeFilterGatherTracesCS");
                 m_DirectionalIntegrateKernel = m_FilterCompute.FindKernel("ScreenProbeConvertToIrradianceCS");
-                m_DirectionalResolveKernel = m_GatherCompute.FindKernel("ResolveSdfProbeIrradiance");
+                m_DirectionalResolveKernel = m_GatherCompute.FindKernel("ScreenProbeIntegrateCS");
             }
             if (HasKernel(m_RestirCompute, "ResampleSdfRestirTemporal") && HasKernel(m_RestirCompute, "ResampleSdfRestirSpatial"))
             {

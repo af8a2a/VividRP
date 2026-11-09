@@ -1,5 +1,5 @@
 #pragma kernel ResolveSdfDiffuseGI
-#pragma kernel ResolveSdfProbeIrradiance VIVID_SDF_PROBE_IRRADIANCE
+#pragma kernel ScreenProbeIntegrateCS VIVID_SDF_PROBE_IRRADIANCE
 #pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
 #pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
 #pragma kernel PlaceSdfAdaptiveProbes
@@ -219,13 +219,11 @@ void IntegrateRestirLighting(uint3 id)
     _SdfRestirVarianceOutput[id.xy] = variance;
 }
 
+#if !defined(VIVID_SDF_PROBE_IRRADIANCE)
 struct SdfProbeResolve
 {
     float4 lighting;
     float weight;
-#if defined(VIVID_SDF_PROBE_IRRADIANCE)
-    SdfProbeIrradiance irradiance;
-#endif
 };
 
 void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal, float eyeDepth,
@@ -243,22 +241,6 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
     if (weight <= 0.0)
         return;
 
-    #if defined(VIVID_SDF_PROBE_IRRADIANCE)
-    uint2 stride = ProbePlaneStride();
-    float4 last = _SdfDiffuseProbeInput.Load(int3(tile + 6u * stride, 0));
-    float covered = weight * last.a;
-    if (covered > 0.0)
-    {
-        resolve.irradiance.r0 += covered * _SdfDiffuseProbeInput.Load(int3(tile, 0));
-        resolve.irradiance.g0 += covered * _SdfDiffuseProbeInput.Load(int3(tile + stride, 0));
-        resolve.irradiance.b0 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 2u * stride, 0));
-        resolve.irradiance.r1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 3u * stride, 0));
-        resolve.irradiance.g1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 4u * stride, 0));
-        resolve.irradiance.b1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 5u * stride, 0));
-        resolve.irradiance.c += covered * last.rgb;
-        resolve.lighting.a += covered;
-    }
-    #else
     float4 probe = _SdfDiffuseProbeInput.Load(int3(tile, 0));
     if (_SdfDiffuseDirectionalProbes != 0u && probe.a > 0.0)
     {
@@ -282,9 +264,9 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
     else
         probe.rgb *= visibility;
     resolve.lighting += float4(probe.rgb * probe.a, probe.a) * weight;
-    #endif
     resolve.weight += weight;
 }
+#endif
 
 #if defined(VIVID_SDF_RESTIR_OPENPBR)
 [numthreads(8, 8, 1)]
@@ -292,21 +274,15 @@ void ResolveSdfRestirOpenPBR(uint3 id : SV_DispatchThreadID)
 {
     IntegrateRestirLighting(id);
 }
-#else
+#elif !defined(VIVID_SDF_PROBE_IRRADIANCE)
 [numthreads(8, 8, 1)]
-#if defined(VIVID_SDF_PROBE_IRRADIANCE)
-void ResolveSdfProbeIrradiance(uint3 id : SV_DispatchThreadID)
-#else
 void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
-#endif
 {
-    #if !defined(VIVID_SDF_PROBE_IRRADIANCE)
     if (_SdfRestirDense != 0u)
     {
         IntegrateRestirLighting(id);
         return;
     }
-    #endif
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
     if (any(id.xy >= screenSize))
         return;
@@ -349,19 +325,132 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                 }
             }
         }
-        #if defined(VIVID_SDF_PROBE_IRRADIANCE)
-        float3 irradiance = max(0.0, EvaluateSdfProbeIrradiance(resolve.irradiance, normal));
-        if (visibility < 1.0)
-        {
-            float3 bent = max(0.0, EvaluateSdfProbeIrradiance(resolve.irradiance, bentNormal));
-            irradiance = min(irradiance, bent * visibility);
-        }
-        resolve.lighting.rgb = irradiance;
-        #endif
         result = resolve.lighting;
         result.rgb = min(result.rgb / max(result.a, 1e-5), 65000.0);
         result.a /= max(resolve.weight, 1e-5);
     }
     _SdfDiffuseOutput[id.xy] = result;
+}
+#endif
+
+#if defined(VIVID_SDF_PROBE_IRRADIANCE)
+static const float MinProbeInterpolationWeight = 0.01;
+static const float MinProbeInterpolationFallbackWeight = 0.0001;
+
+float ScreenProbeBilateralWeight(uint2 tile, float3 position, float3 normal, float eyeDepth)
+{
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    if (geometry.w < 0.0)
+        return 0.0;
+
+    float3 probeNormal = UnpackProbeNormal(geometry.w);
+    float3 delta = geometry.xyz - position;
+    float plane = max(abs(dot(delta, normal)), abs(dot(delta, probeNormal)));
+    float tolerance = clamp(0.008 * eyeDepth, 0.045, 0.12);
+    // Use depth-relative plane falloff so coplanar samples at grazing angles
+    // can still contribute. Bound the plane and normal support at thin edges.
+    return exp2(-200.0 * plane / eyeDepth) * saturate(1.0 - plane / tolerance)
+        * smoothstep(0.88, 0.99, dot(normal, probeNormal));
+}
+
+void AccumulateScreenProbeIrradiance(uint2 tile, uint2 stride, float weight,
+    inout SdfProbeIrradiance sh, inout float coveredWeight)
+{
+    float4 tail = _SdfDiffuseProbeInput.Load(int3(tile + 6u * stride, 0));
+    float covered = weight * tail.a;
+    if (covered <= 0.0)
+        return;
+
+    sh.r0 += covered * _SdfDiffuseProbeInput.Load(int3(tile, 0));
+    sh.g0 += covered * _SdfDiffuseProbeInput.Load(int3(tile + stride, 0));
+    sh.b0 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 2u * stride, 0));
+    sh.r1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 3u * stride, 0));
+    sh.g1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 4u * stride, 0));
+    sh.b1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 5u * stride, 0));
+    sh.c += covered * tail.rgb;
+    coveredWeight += covered;
+}
+
+float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, float3 normal)
+{
+    uint2 grid = ProbeGridSize(size);
+    int2 lower = int2(floor((float2(pixel) - float(ProbeSpacing / 2u)) / float(ProbeSpacing)));
+    uint2 first = uint2(clamp(lower, 0, max(int2(grid) - 2, 0)));
+    uint2 last = min(first + 1u, grid - 1u);
+    float2 firstPixel = float2(ProbeReceiverPixel(first, size));
+    float2 lastPixel = float2(ProbeReceiverPixel(last, size));
+    // Expand the bilinear footprint by one pixel around the actual probe centers.
+    float2 fraction = saturate((float2(pixel) - firstPixel + 1.0) / (lastPixel - firstPixel + 2.0));
+    float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
+    float totalWeight = 0.0;
+    float coveredWeight = 0.0;
+    SdfProbeIrradiance sh = (SdfProbeIrradiance)0;
+    uint2 stride = uint2(grid.x, 0u);
+
+    [unroll]
+    for (uint i = 0u; i < 4u; ++i)
+    {
+        uint2 corner = uint2(i & 1u, i >> 1u);
+        uint2 tile = first + corner;
+        if (any(tile > last))
+            continue;
+        float2 spatial = lerp(1.0 - fraction, fraction, float2(corner));
+        if (first.x == last.x)
+            spatial.x = 1.0;
+        if (first.y == last.y)
+            spatial.y = 1.0;
+        float weight = spatial.x * spatial.y * ScreenProbeBilateralWeight(tile, position, normal, eyeDepth);
+        if (_SdfDiffuseAdaptiveProbes != 0u && weight < MinProbeInterpolationWeight)
+        {
+            uint2 samplePixel;
+            if (LoadAdaptiveProbePixel(tile, samplePixel))
+            {
+                uint2 adaptive = tile + uint2(0u, grid.y);
+                float2 footprint = saturate(1.0 - abs(float2(samplePixel) - float2(pixel)) / float(ProbeSpacing));
+                float candidate = footprint.x * footprint.y * ScreenProbeBilateralWeight(adaptive, position, normal, eyeDepth);
+                if (candidate > weight)
+                {
+                    tile = adaptive;
+                    weight = candidate;
+                }
+            }
+        }
+        if (weight > 0.0)
+        {
+            totalWeight += weight;
+            AccumulateScreenProbeIrradiance(tile, stride, weight, sh, coveredWeight);
+        }
+    }
+
+    if (totalWeight < MinProbeInterpolationFallbackWeight || coveredWeight <= 0.0)
+        return 0.0;
+
+    float3 irradiance = max(0.0, EvaluateSdfProbeIrradiance(sh, normal));
+    if (_SdfNearOcclusion.z > 0.0)
+    {
+        float4 contact = EvaluateNearDiffuseVisibility(pixel, position, normal, true);
+        float3 bentNormal = SafeNormalize(normal + contact.xyz / max(contact.w, 1e-5));
+        float3 bent = max(0.0, EvaluateSdfProbeIrradiance(sh, bentNormal));
+        irradiance = min(irradiance, bent * contact.w);
+    }
+
+    // Weak geometric support fades to the existing baked GI fallback.
+    // Covered black still contributes its full share of the coverage.
+    float coverage = saturate(coveredWeight / max(totalWeight, MinProbeInterpolationWeight));
+    return float4(min(irradiance / coveredWeight, 65000.0), coverage);
+}
+
+[numthreads(8, 8, 1)]
+void ScreenProbeIntegrateCS(uint3 id : SV_DispatchThreadID)
+{
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(id.xy >= size))
+        return;
+
+    float3 position, normal;
+    float4 lighting = 0.0;
+    if (LoadReceiver(id.xy, position, normal))
+        lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal);
+    _SdfDiffuseOutput[id.xy] = lighting;
 }
 #endif

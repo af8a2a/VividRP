@@ -191,6 +191,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HasHistoryId = Shader.PropertyToID("_SdfDiffuseHasHistory");
         private static readonly int DirectionalProbesId = Shader.PropertyToID("_SdfDiffuseDirectionalProbes");
         private static readonly int AdaptiveProbesId = Shader.PropertyToID("_SdfDiffuseAdaptiveProbes");
+        private static readonly int IntegrationJitterId = Shader.PropertyToID("_SdfScreenProbeIntegrationJitter");
         private static readonly int SpatialFilterId = Shader.PropertyToID("_SdfDiffuseSpatialFilter");
         private static readonly int ProbeCameraForwardId = Shader.PropertyToID("_SdfProbeCameraForward");
         private static readonly int PlacementId = Shader.PropertyToID("_SdfAdaptivePlacement");
@@ -1572,6 +1573,8 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, ResolveSampler);
             int kernel = m_DirectionalCache ? m_DirectionalResolveKernel
                 : m_RestirOpenPbrDiffuse ? m_OpenPbrResolveKernel : m_ResolveKernel;
+            if (m_DirectionalCache)
+                cmd.SetComputeIntParam(m_GatherCompute, IntegrationJitterId, pixelTemporal ? 1 : 0);
             BindReceiver(cmd, m_GatherCompute, kernel);
             if (m_RestirOpenPbrDiffuse)
             {

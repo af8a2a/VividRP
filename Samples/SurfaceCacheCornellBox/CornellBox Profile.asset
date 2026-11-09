@@ -222,8 +222,8 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 2
   segmentedSdfTracing:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1
   meshSdfDetailDistance:
     m_OverrideState: 0
     m_Value: 2
@@ -242,6 +242,9 @@ MonoBehaviour:
   nearOcclusionStrength:
     m_OverrideState: 0
     m_Value: 0
+  directionalNearOcclusion:
+    m_OverrideState: 0
+    m_Value: 1
   nearOcclusionRadius:
     m_OverrideState: 0
     m_Value: 0.35
@@ -254,6 +257,9 @@ MonoBehaviour:
   screenProbeSamplingGuide:
     m_OverrideState: 0
     m_Value: 1
+  screenProbeHierarchicalGuide:
+    m_OverrideState: 0
+    m_Value: 0
   adaptiveScreenProbes:
     m_OverrideState: 1
     m_Value: 1
@@ -268,7 +274,10 @@ MonoBehaviour:
     m_Value: 1
   restirPixelIntegration:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
+  restirOpenPbrDiffuse:
+    m_OverrideState: 1
+    m_Value: 1
   pixelTemporal:
     m_OverrideState: 1
     m_Value: 1

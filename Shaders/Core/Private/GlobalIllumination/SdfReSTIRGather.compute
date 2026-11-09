@@ -394,11 +394,18 @@ void FilterRestirLighting(uint3 id)
     float3 position, normal;
     if (strength > 0.0 && result.a > 0.0 && LoadReceiver(id.xy, position, normal))
     {
-        int radius = 1 + int(round(7.0 * strength));
+        int radius = 1 + int(round(11.0 * strength));
+        int diagonalRadius = max(1, int(round(0.707107 * radius)));
+        int innerRadius = max(1, (radius + 1) / 3);
+        float3 normalizedRadius = float3(radius, diagonalRadius, innerRadius) / radius;
+        float spatialFalloff = lerp(1.25, 0.8, strength);
+        float3 spatialWeights = exp2(-spatialFalloff * normalizedRadius * normalizedRadius * float3(1.0, 2.0, 1.0));
         float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
         float centerLuminance = log2(1.0 + RestirLuminance(result.rgb));
-        // With high uncertainty, do not let a bright center reject otherwise compatible taps.
-        float lumaScale = rcp(max(0.25, 3.0 * sigma + 0.75 * bootstrap));
+        // Resolved lighting is less noisy after accumulation. Tighten the luma range there
+        // so the wider ring preserves persistent illumination changes on the same plane.
+        float historyScale = rsqrt(1.0 + 0.2 * max(0.0, age - 1.0));
+        float lumaScale = rcp(max(0.25, 3.0 * sigma * historyScale + 0.75 * bootstrap));
         float centerWeight = lerp(1.0, 0.5, strength);
         float3 sum = result.rgb * centerWeight;
         float total = centerWeight;
@@ -408,7 +415,9 @@ void FilterRestirLighting(uint3 id)
         [loop]
         for (int i = 0; i < tapCount; ++i)
         {
-            int2 offset = offsets[i & 7] * (i < 8 ? radius : radius / 2);
+            int ring = i / 4;
+            int tapRadius = ring == 0 ? radius : ring == 1 ? diagonalRadius : innerRadius;
+            int2 offset = offsets[i & 7] * tapRadius;
             int2 tap = int2(id.xy) + offset;
             if (any(tap < 0) || any(tap >= int2(size)))
                 continue;
@@ -421,12 +430,18 @@ void FilterRestirLighting(uint3 id)
             float weight = ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth);
             if (weight <= 0.0)
                 continue;
-            float3 lighting = _SdfRestirFilterInput.Load(int3(tap, 0)).rgb;
-            float difference = (log2(1.0 + RestirLuminance(lighting)) - centerLuminance) * lumaScale;
-            float2 normalizedOffset = float2(offset) / radius;
-            float spatialWeight = exp2(-1.25 * dot(normalizedOffset, normalizedOffset));
-            weight *= confidence * spatialWeight / (1.0 + difference * difference);
-            sum += lighting * weight;
+            float4 lighting = _SdfRestirFilterInput.Load(int3(tap, 0));
+            if (_SdfRestirFilterHistoryMode == 2u)
+            {
+                float2 tapHistory = UnpackRestirPixelHistory(lighting.a);
+                // Prefer coverage that has already converged on the tap's surface.
+                if (tapHistory.x > 1.0)
+                    confidence = tapHistory.y;
+                confidence *= lerp(0.5, 1.0, saturate((tapHistory.x + 1.0) / max(age, 1.0)));
+            }
+            float difference = (log2(1.0 + RestirLuminance(lighting.rgb)) - centerLuminance) * lumaScale;
+            weight *= confidence * spatialWeights[ring] / (1.0 + difference * difference);
+            sum += lighting.rgb * weight;
             total += weight;
         }
         result.rgb = sum / total;

@@ -679,9 +679,9 @@ void FilterRestirLighting(uint3 id)
     result.rgb = _SdfRestirFilterInput.Load(int3(id.xy, 0)).rgb;
     float variance = _SdfRestirVariance.Load(int3(id.xy, 0));
     float3 position, normal;
-    if ((variance > 0.015 || _SdfDiffuseRealtimeOnly != 0u) && LoadReceiver(id.xy, position, normal))
+    if (variance > 0.015 && LoadReceiver(id.xy, position, normal))
     {
-        if (result.a > 0.0 && variance > 0.015)
+        if (result.a > 0.0)
         {
             int step = variance > 0.5 ? 4 : variance > 0.10 ? 2 : 1;
             float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
@@ -717,8 +717,6 @@ void FilterRestirLighting(uint3 id)
             }
             result.rgb = sum / total;
         }
-        if (_SdfDiffuseRealtimeOnly != 0u)
-            result.a = 1.0;
     }
     _SdfDiffuseOutput[id.xy] = result;
 }

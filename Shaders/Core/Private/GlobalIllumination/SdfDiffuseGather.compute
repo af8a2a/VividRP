@@ -121,7 +121,6 @@ uint _SdfRestirDense;
 uint _SdfRestirOpenPbrDiffuse;
 uint _SdfDiffuseSpatialFilter;
 uint _SdfDiffuseHitFilterEnabled;
-uint _SdfDiffuseRealtimeOnly;
 uint _SdfDiffuseOffscreenOnly;
 uint _SdfDiffuseUseScreenRays;
 uint _SdfScreenCardLighting;
@@ -2101,17 +2100,40 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         }
         result.rgb /= max(result.a, 1e-5);
         result.a /= max(totalWeight, 1e-5);
-        if (_SdfDiffuseRealtimeOnly != 0u)
-            result.a = 1.0;
     }
     _SdfDiffuseOutput[id.xy] = result;
 }
 #endif
 
+#if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+static const uint ScreenProbeNoHistory = 0u;
+static const uint ScreenProbeHistoryAccepted = 1u;
+static const uint ScreenProbeHistoryCoverageLimited = 2u;
+
+float PackScreenProbePixelHistory(float age, float coverage, uint historyStatus)
+{
+    if (age == 0.0)
+        return 0.0;
+
+    // A normal, finite FP16 encoding preserves the payload through the history RT.
+    // Bits after the exponent offset are coverage (8), age (5), and status (2).
+    uint coverageBits = max(1u, uint(round(saturate(coverage) * 255.0)));
+    uint ageBits = uint(round((age - 1.0) * (31.0 / 7.0)));
+    return f16tof32(0x0400u + (historyStatus << 13u) + (ageBits << 8u) + coverageBits);
+}
+
+float2 UnpackScreenProbePixelHistory(float packed)
+{
+    uint bits = f32tof16(packed) - 0x0400u;
+    return float2(1.0 + ((bits >> 8u) & 31u) * (7.0 / 31.0), (bits & 255u) * (1.0 / 255.0));
+}
+#endif
+
 bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
-    out float4 history, out float foregroundWeight)
+    out float4 history, out float historyCoverage, out float foregroundWeight)
 {
     history = 0.0;
+    historyCoverage = 0.0;
     foregroundWeight = 0.0;
     float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
@@ -2167,14 +2189,30 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
             continue;
 
         float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+        #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
         if (abs(sample.a) > 0.0 && (sample.a < 0.0) == openPbr)
         {
             sample.a = abs(sample.a);
             history += sample * weight;
             totalWeight += weight;
         }
+        #else
+        if (sample.a > 0.0)
+        {
+            float2 ageAndCoverage = UnpackScreenProbePixelHistory(sample.a);
+            float coveredWeight = weight * ageAndCoverage.y;
+            history += float4(sample.rgb, ageAndCoverage.x) * coveredWeight;
+            historyCoverage += coveredWeight;
+            totalWeight += weight;
+        }
+        #endif
     }
+    #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
     history /= max(totalWeight, 1e-5);
+    #else
+    history /= max(historyCoverage, 1e-5);
+    historyCoverage /= max(totalWeight, 1e-5);
+    #endif
     return totalWeight >= 0.35;
 }
 
@@ -2220,6 +2258,9 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     bool receiver = LoadReceiver(id.xy, position, normal);
     float age = 0.0;
     uint packed = 0u;
+    #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+        uint historyStatus = ScreenProbeNoHistory;
+    #endif
     if (receiver)
     {
         #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
@@ -2233,8 +2274,10 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             #endif
             age = 1.0;
             float4 history;
+            float historyCoverage;
             float foregroundWeight;
-            if (_SdfDiffuseHasHistory != 0u && ReadPixelHistory(id.xy, position, normal, openPbr, history, foregroundWeight))
+            if (_SdfDiffuseHasHistory != 0u
+                && ReadPixelHistory(id.xy, position, normal, openPbr, history, historyCoverage, foregroundWeight))
             {
                 float3 bounded = ClampPixelHistory(id.xy, position, normal, result.rgb, history.rgb, openPbr);
                 float confidence = 1.0;
@@ -2245,18 +2288,35 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                     float excess = brightness - RestirLuminance(bounded);
                     if (foregroundWeight > 0.0 && excess > max(0.05, 0.1 * brightness))
                         confidence = foregroundWeight >= 0.125 ? 0.0 : 1.0 - 2.0 * foregroundWeight;
+                #else
+                    // Keep normal accumulation on equally covered receivers.
+                    // A coverage jump lowers trust despite a valid geometric reprojection.
+                    confidence = min(result.a, historyCoverage) / max(result.a, historyCoverage);
+                    historyStatus = confidence < 0.8 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
                 #endif
                 age = lerp(1.0, min(history.a + 1.0, 8.0), confidence);
                 float3 rectified = lerp(history.rgb, bounded, lerp(1.0, 0.20, confidence));
-                result.rgb = lerp(rectified, result.rgb, rcp(age));
+                float currentWeight = rcp(age);
+                #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+                    result.rgb = lerp(rectified, result.rgb, currentWeight);
+                #else
+                    // Accumulate numerator and coverage together so an unstable
+                    // coverage estimate cannot bypass temporal filtering.
+                    float3 covered = lerp(rectified * historyCoverage, result.rgb * result.a, currentWeight);
+                    result.a = lerp(historyCoverage, result.a, currentWeight);
+                    result.rgb = covered / result.a;
+                #endif
             }
         }
     }
 
-    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, openPbr ? -age : age);
+    #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+        float historyAlpha = openPbr ? -age : age;
+    #else
+        float historyAlpha = PackScreenProbePixelHistory(age, result.a, historyStatus);
+    #endif
+    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, historyAlpha);
     _SdfDiffusePixelGeometryOutput[id.xy] = packed;
-    if (receiver && _SdfDiffuseRealtimeOnly != 0u)
-        result.a = 1.0;
     if (_SdfRestirDense == 0u)
         _SdfDiffuseOutput[id.xy] = result;
 }

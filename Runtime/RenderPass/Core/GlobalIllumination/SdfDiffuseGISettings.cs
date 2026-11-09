@@ -73,7 +73,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Cache incoming radiance and hit distance per direction before filtering 16 px directional screen probes.")]
         public BoolParameter screenProbeDirectionalCache = new(false);
 
-        [Tooltip("Guide directional screen probe rays with reprojected radiance, mixed with cosine sampling.")]
+        [Tooltip("Use reprojected radiance to subdivide bright directions while retaining cosine coverage across the hemisphere.")]
         public BoolParameter screenProbeSamplingGuide = new(true);
 
         [Tooltip("Trace one additional probe per tile where the uniform probes do not represent nearby geometry.")]
@@ -106,7 +106,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Include first-hit instance, ray origin sign and card rejection data in ray diagnostics.")]
         public BoolParameter recordFirstHitDiagnostics = new(false);
 
-        [Tooltip("Use the realtime result even when no surface lighting was resolved. Useful for GI comparisons.")]
+        [Tooltip("Show the covered realtime diffuse contribution with baked and ambient diffuse fallback suppressed.")]
         public BoolParameter realtimeOnly = new(false);
 
         [Tooltip("Diagnostic view that retains only bounce from hits outside the camera frustum.")]

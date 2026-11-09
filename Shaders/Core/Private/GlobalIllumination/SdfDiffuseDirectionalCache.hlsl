@@ -10,6 +10,8 @@ uint _SdfDirectionalCacheEnabled;
 uint _SdfDirectionalGuideEnabled;
 uint _SdfDirectionalHasHistory;
 Texture2D<float4> _SdfDirectionalPrevious;
+// X is the base bin, YZ the previous tile plus one, W the subdivision code.
+// W is zero for a full bin, -1/-2 for its azimuth halves, or a merged bin plus one.
 Texture2D<float4> _SdfDirectionalGuide;
 Texture2D<float4> _SdfDirectionalRays;
 RWTexture2D<float4> _SdfDirectionalGuideOutput;
@@ -66,27 +68,28 @@ float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, ou
     if (_SdfDirectionalCacheEnabled == 0u)
         return ProbeRayDirection(ray, seed, basis);
 
-    if (_SdfDirectionalGuideEnabled != 0u)
-    {
-        // Stratify the mixture CDF. Both screen and SDF traces call this same sampler.
-        float u = (float(ray) + DirectionalRandom(seed ^ 0x47a6d32bu)) / float(DirectionalBinCount);
-        float low = 0.0;
-        [loop]
-        for (uint candidate = 0u; candidate < DirectionalBinCount; ++candidate)
-        {
-            float high = _SdfDirectionalGuide.Load(int3(DirectionalAddress(tile, candidate), 0)).x;
-            if (u < high || candidate == DirectionalBinCount - 1u)
-            {
-                bin = candidate;
-                inverseRelativePdf = rcp(float(DirectionalBinCount) * max(high - low, 1e-5));
-                break;
-            }
-            low = high;
-        }
-    }
-
     uint sampleSeed = seed ^ (0xb5297a4du * (ray + 1u));
     float2 sampleUv = float2(DirectionalRandom(sampleSeed), DirectionalRandom(sampleSeed ^ 0x68e31da4u));
+    if (_SdfDirectionalGuideEnabled != 0u)
+    {
+        // One draw per disjoint stratum. Its inverse relative PDF is eight
+        // times its cosine mass. Screen and SDF tracing share these descriptors.
+        float4 stratum = _SdfDirectionalGuide.Load(int3(DirectionalAddress(tile, ray), 0));
+        bin = uint(stratum.x);
+        int subdivision = int(stratum.w);
+        if (subdivision < 0)
+        {
+            sampleUv.y = 0.5 * (sampleUv.y + float(-subdivision - 1));
+            inverseRelativePdf = 0.5;
+        }
+        else if (subdivision > 0)
+        {
+            if (sampleUv.x >= 0.5)
+                bin = uint(subdivision - 1);
+            sampleUv.x = frac(2.0 * sampleUv.x);
+            inverseRelativePdf = 2.0;
+        }
+    }
     return DirectionalBinDirection(bin, clamp(sampleUv, 1e-5, 1.0 - 1e-5), basis);
 }
 
@@ -164,29 +167,70 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    float weights[DirectionalBinCount];
-    float total = 0.0;
-    [unroll]
-    for (uint bin = 0u; bin < DirectionalBinCount; ++bin)
+    uint brightest = DirectionalBinCount;
+    uint merge = DirectionalBinCount;
+    uint mergeNeighbor = DirectionalBinCount;
+    if (hasPrevious && _SdfDirectionalGuideEnabled != 0u)
     {
-        float weight = 0.0;
-        if (hasPrevious && _SdfDirectionalGuideEnabled != 0u)
+        float importance[DirectionalBinCount];
+        float total = 0.0;
+        float peak = 0.0;
+        [unroll]
+        for (uint bin = 0u; bin < DirectionalBinCount; ++bin)
         {
             uint oldBin = DirectionalBin(DirectionalBinDirection(bin, 0.5, basis), previousBasis);
             float4 previous = _SdfDirectionalPrevious.Load(int3(DirectionalAddress(previousTile, oldBin), 0));
-            weight = sqrt(max(0.0, dot(previous.rgb, float3(0.2126, 0.7152, 0.0722)) * previous.a));
+            // Diffuse BRDF times cosine has equal integral in each base cell.
+            // Multiply that measure by reprojected, coverage-weighted luminance.
+            float weight = max(0.0, dot(previous.rgb, float3(0.2126, 0.7152, 0.0722)) * previous.a);
+            importance[bin] = weight;
+            total += weight;
+            if (weight > peak)
+            {
+                peak = weight;
+                brightest = bin;
+            }
         }
-        weights[bin] = weight;
-        total += weight;
+
+        // With eight rays, refine one bright cell by merging two adjacent
+        // dim cells in the same radial band. The union retains full support.
+        if (peak > 0.25 * total)
+        {
+            float cheapest = 0.5 * peak;
+            [unroll]
+            for (uint bin = 0u; bin < DirectionalBinCount; ++bin)
+            {
+                uint neighbor = (bin & 4u) | ((bin + 1u) & 3u);
+                float pair = importance[bin] + importance[neighbor];
+                if (pair < cheapest)
+                {
+                    cheapest = pair;
+                    merge = bin;
+                    mergeNeighbor = neighbor;
+                }
+            }
+        }
     }
-    float cdf = 0.0;
+
+    float2 history = hasPrevious ? float2(previousTile + 1u) : 0.0;
     [unroll]
-    for (uint bin = 0u; bin < DirectionalBinCount; ++bin)
+    for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
     {
-        // Reserve half the proposal mass for cosine exploration.
-        cdf += total > 0.0 ? 0.5 / DirectionalBinCount + 0.5 * weights[bin] / total : rcp(float(DirectionalBinCount));
-        _SdfDirectionalGuideOutput[DirectionalAddress(id.xy, bin)] =
-            float4(bin + 1u == DirectionalBinCount ? 1.0 : cdf, hasPrevious ? float2(previousTile + 1u) : 0.0, 0.0);
+        uint bin = ray;
+        int subdivision = 0;
+        if (merge < DirectionalBinCount)
+        {
+            if (ray == brightest)
+                subdivision = -1;
+            else if (ray == mergeNeighbor)
+            {
+                bin = brightest;
+                subdivision = -2;
+            }
+            else if (ray == merge)
+                subdivision = int(mergeNeighbor + 1u);
+        }
+        _SdfDirectionalGuideOutput[DirectionalAddress(id.xy, ray)] = float4(bin, history, subdivision);
     }
 }
 
@@ -220,9 +264,8 @@ void AccumulateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
     float4 metadata = 0.0;
     if (geometry.w >= 0.0)
     {
-        float samples = 0.0;
-        float resolved = 0.0;
-        float proposalWeight = 0.0;
+        float drawWeight = 0.0;
+        float coveredWeight = 0.0;
         [unroll]
         for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
         {
@@ -231,19 +274,18 @@ void AccumulateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
             if (uint(info.x) != bin)
                 continue;
             float4 sample = _SdfDirectionalRays.Load(int3(address, 0));
-            samples++;
-            proposalWeight += info.y;
+            drawWeight += info.y;
             if (sample.a == 0.0)
                 continue;
-            lighting.rgb += sample.rgb;
-            resolved++;
+            lighting.rgb += sample.rgb * info.y;
+            coveredWeight += info.y;
             if (metadata.x == 0.0 || (sample.a > 0.0 && (metadata.x < 0.0 || sample.a < metadata.x)))
                 metadata = float4(sample.a, 0.0, info.zw);
         }
-        // Within a bin every draw has the same PDF, so its radiance is a conditional mean.
-        // Metadata Y stores negative proposal mass for current draws and positive age for reused bins.
-        lighting = float4(lighting.rgb / max(resolved, 1.0), resolved / max(samples, 1.0));
-        metadata.y = -proposalWeight;
+        // Store conditional radiance and covered cosine mass separately.
+        // Metadata Y stores negative draw weight and positive age for reused bins.
+        lighting = float4(lighting.rgb / max(coveredWeight, 1e-5), coveredWeight / max(drawWeight, 1e-5));
+        metadata.y = -drawWeight;
         float2 previous = _SdfDirectionalGuide.Load(int3(id.xy, 0)).yz;
         if (all(previous > 0.0))
         {
@@ -256,7 +298,7 @@ void AccumulateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
             float4 oldMetadata = _SdfDirectionalPrevious.Load(int3(address + metadataOffset, 0));
             float4 oldLighting = _SdfDirectionalPrevious.Load(int3(address, 0));
             float3 delta = previousGeometry.xyz - geometry.xyz;
-            if (samples == 0.0 && oldLighting.a > 0.0 && oldMetadata.y < DirectionalHistoryFrames
+            if (drawWeight == 0.0 && oldLighting.a > 0.0 && oldMetadata.y < DirectionalHistoryFrames
                 && length(delta) < clamp(0.12 * abs(oldMetadata.x), 0.015, 0.15))
             {
                 float3 direction = VividDecodeSurfaceSummaryNormal(oldMetadata.zw);
@@ -298,7 +340,6 @@ void IntegrateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
         return;
     float4 center = _SdfDiffuseGeometry[id.xy];
     float4 integrated = 0.0;
-    float proposalWeight = 0.0;
     float3x3 moments = (float3x3)0.0;
     if (center.w >= 0.0)
     {
@@ -338,7 +379,6 @@ void IntegrateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
             uint2 address = DirectionalAddress(id.xy, bin);
             float4 metadata = _SdfDirectionalCurrent[address + metadataOffset];
             float drawWeight = max(0.0, -metadata.y);
-            proposalWeight += drawWeight;
             float4 lighting = _SdfDirectionalCurrent[address];
             float coveredWeight = drawWeight * lighting.a;
             if (coveredWeight <= 0.0)
@@ -368,10 +408,9 @@ void IntegrateSdfDirectionalRadiance(uint3 id : SV_DispatchThreadID)
     }
     float inverseCovered = rcp(max(integrated.a, 1e-5));
     uint2 stride = uint2(grid.x, 0u);
-    // Normalize by the realized proposal mass so a constant fully resolved field
-    // retains full coverage even when the number of draws per bin varies.
+    // The strata partition the cosine domain, so draw weights sum to eight.
     _SdfDiffuseFilteredProbes[id.xy] = float4(min(integrated.rgb * inverseCovered, 65000.0),
-        integrated.a / max(proposalWeight, 1e-5));
+        integrated.a / float(DirectionalBinCount));
     _SdfDiffuseFilteredProbes[id.xy + stride] = float4(clamp(moments[0] * inverseCovered, -65000.0, 65000.0), 0.0);
     _SdfDiffuseFilteredProbes[id.xy + 2u * stride] = float4(clamp(moments[1] * inverseCovered, -65000.0, 65000.0), 0.0);
     _SdfDiffuseFilteredProbes[id.xy + 3u * stride] = float4(clamp(moments[2] * inverseCovered, -65000.0, 65000.0), 0.0);

@@ -20,12 +20,14 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal RenderGraphTexture Output;
         internal bool SkyHandled;
+        internal bool RealtimeOnly;
         internal SdfDiffuseGatherPass OpenPbrSource;
 
         public override void Reset()
         {
             Output = null;
             SkyHandled = false;
+            RealtimeOnly = false;
             OpenPbrSource = null;
         }
     }
@@ -60,7 +62,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
         private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalRadianceHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
-        private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistory");
+        private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistoryWithCoverage");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenRadianceHistory");
         private static readonly CameraHistoryId ScreenGeometryHistoryId = CameraHistoryId.Create("SdfDiffuseScreenGeometryHistory");
@@ -201,7 +203,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RestirVarianceId = Shader.PropertyToID("_SdfRestirVariance");
         private static readonly int RestirVarianceOutputId = Shader.PropertyToID("_SdfRestirVarianceOutput");
         private static readonly int RestirFilterInputId = Shader.PropertyToID("_SdfRestirFilterInput");
-        private static readonly int RealtimeOnlyId = Shader.PropertyToID("_SdfDiffuseRealtimeOnly");
         private static readonly int OffscreenOnlyId = Shader.PropertyToID("_SdfDiffuseOffscreenOnly");
         private static readonly int ViewProjectionId = Shader.PropertyToID("_SdfDiffuseVP");
         private static readonly int CardAlbedoDepthId = Shader.PropertyToID("_SdfSurfaceAlbedoDepth");
@@ -978,7 +979,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Compute, AdaptiveProbesId, m_AdaptiveProbes ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, SpatialFilterId, m_SpatialFilter || m_RestirGather ? 1 : 0);
             cmd.SetComputeVectorParam(m_Compute, ProbeCameraForwardId, m_ProbeCameraForward);
-            cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly && !pixelTemporal ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
             cmd.SetComputeMatrixParam(m_Compute, ViewProjectionId, m_ViewProjection);
             cmd.SetComputeIntParam(m_Compute, UseScreenRaysId, useScreenRays ? 1 : 0);
@@ -1045,6 +1045,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
             diffuse.Output = m_Output;
             diffuse.SkyHandled = m_SkyTextureParams.w > 0.5f;
+            diffuse.RealtimeOnly = m_RealtimeOnly;
             diffuse.OpenPbrSource = m_RestirOpenPbrDiffuse ? this : null;
 #if UNITY_EDITOR
             EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
@@ -1499,7 +1500,6 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, RestirDenoiseSampler);
             int kernel = m_RestirDenoiseKernel;
             BindReceiver(cmd, kernel);
-            cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);
             cmd.SetComputeTextureParam(m_Compute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, RestirFilterInputId,
                 pixelTemporal ? m_CurrentPixelLighting.innerHandle : m_RawResolved.innerHandle);
@@ -1526,7 +1526,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 ? m_RestirPixelTemporalKernel : m_PixelTemporalKernel;
             BindReceiver(cmd, kernel);
             cmd.SetComputeIntParam(m_Compute, HasHistoryId, hasHistory ? 1 : 0);
-            cmd.SetComputeIntParam(m_Compute, RealtimeOnlyId, m_RealtimeOnly ? 1 : 0);
             cmd.SetComputeMatrixParam(m_Compute, PreviousInverseVpId, m_State.ViewProjection.inverse);
             cmd.SetComputeVectorParam(m_Compute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
             cmd.SetComputeTextureParam(m_Compute, kernel, MotionId, m_ScreenMotion.innerHandle);

@@ -29,6 +29,7 @@ uint _VividOpenPBRLutsReady;
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
 Texture2D<float4> _RealtimeDiffuseGI;
 uint _RealtimeDiffuseGIEnabled;
+uint _RealtimeDiffuseGIOnly;
 uint _RealtimeOpenPbrDiffuse;
 #endif
 
@@ -36,7 +37,11 @@ float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord)
 {
     #if defined(VIVID_REALTIME_DIFFUSE_GI)
         if (_RealtimeDiffuseGIEnabled != 0u)
-            return _RealtimeDiffuseGI.Load(int3(pixelCoord, 0));
+        {
+            float4 gi = _RealtimeDiffuseGI.Load(int3(pixelCoord, 0));
+            // Compose the covered energy over black when fallback is suppressed.
+            return _RealtimeDiffuseGIOnly != 0u ? float4(gi.rgb * gi.a, 1.0) : gi;
+        }
     #endif
     return 0.0;
 }

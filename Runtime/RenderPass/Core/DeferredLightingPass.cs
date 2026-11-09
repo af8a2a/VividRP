@@ -34,6 +34,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
         private static readonly int RealtimeDiffuseGIId = Shader.PropertyToID("_RealtimeDiffuseGI");
         private static readonly int RealtimeDiffuseGIEnabledId = Shader.PropertyToID("_RealtimeDiffuseGIEnabled");
+        private static readonly int RealtimeDiffuseGIOnlyId = Shader.PropertyToID("_RealtimeDiffuseGIOnly");
         private static readonly int RealtimeOpenPbrDiffuseId = Shader.PropertyToID("_RealtimeOpenPbrDiffuse");
         private static readonly int RealtimeDiffuseSkyHandledId = Shader.PropertyToID("_RealtimeDiffuseSkyHandled");
         private static readonly int SdfScreenSourceRadianceId = Shader.PropertyToID("_SdfScreenSourceRadiance");
@@ -639,15 +640,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 hasRealtimeGI ? m_RealtimeDiffuseGI.innerHandle : rgDefaultResource.blackTexture);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIEnabledId, hasRealtimeGI ? 1 : 0);
             bool skyHandled = false;
+            bool realtimeOnly = false;
             bool openPbrDiffuse = false;
             if (hasRealtimeGI && context.TryGet<VividSdfDiffuseFrameData>(out var diffuse)
                 && ReferenceEquals(diffuse.Output, m_RealtimeDiffuseGI))
             {
                 skyHandled = diffuse.SkyHandled;
+                realtimeOnly = diffuse.RealtimeOnly;
                 openPbrDiffuse = diffuse.OpenPbrSource?.MatchesOpenPbrReceiver(
                     m_DepthTexture, m_GBuffer0, m_GBuffer1, m_GBuffer4, m_LayerAux0, m_LayerAux1) == true;
             }
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseSkyHandledId, skyHandled ? 1 : 0);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIOnlyId, realtimeOnly ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeOpenPbrDiffuseId, openPbrDiffuse ? 1 : 0);
             bool slabLutReady = m_SlabLutTexture != null && m_SlabLutTexture.innerHandle.IsValid();
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, VividSlabLut.TextureId,

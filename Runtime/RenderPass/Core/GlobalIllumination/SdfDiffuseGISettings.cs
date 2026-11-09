@@ -76,6 +76,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Use reprojected radiance to subdivide bright directions while retaining cosine coverage across the hemisphere.")]
         public BoolParameter screenProbeSamplingGuide = new(true);
 
+        [Tooltip("Refine a hierarchy of octahedral directions. Use Far Radiance Cache, when enabled, if screen probe history is unavailable.")]
+        public BoolParameter screenProbeHierarchicalGuide = new(false);
+
         [Tooltip("Trace one additional probe per tile where the uniform probes do not represent nearby geometry.")]
         public BoolParameter adaptiveScreenProbes = new(false);
 

@@ -547,6 +547,44 @@ float2 ScreenUv(float4 clip)
     return uv;
 }
 
+// The last atlas plane holds exact world-cell keys, so toroidal reuse
+// never exposes an evicted probe. Keep the layout in sync with the pass.
+static const uint FarGridSize = 16u;
+static const uint FarOctSize = 8u;
+static const uint FarDirections = FarOctSize * FarOctSize;
+static const float FarCellSize = 2.5;
+Texture2D<float4> _SdfFarRadiance;
+
+uint2 FarAtlasAddress(int3 cell, uint bin)
+{
+    uint3 slot = uint3(cell) & (FarGridSize - 1u);
+    return uint2(slot.x + FarGridSize * slot.z, slot.y + FarGridSize * bin);
+}
+
+float3 FarProbePosition(int3 cell)
+{
+    return (float3(cell) + 0.5) * FarCellSize;
+}
+
+float3 FarProbeDirection(uint bin)
+{
+    return VividDecodeSurfaceSummaryNormal((float2(bin % FarOctSize, bin / FarOctSize) + 0.5) / FarOctSize);
+}
+
+bool HasFarProbe(int3 cell)
+{
+    if (any(uint3(cell - int3(_SdfFarWindow.xyz)) >= FarGridSize))
+        return false;
+    float4 key = _SdfFarRadiance.Load(int3(FarAtlasAddress(cell, FarDirections), 0));
+    return key.w != 0.0 && all(key.xyz == float3(cell));
+}
+
+uint FarDirectionBin(float3 direction)
+{
+    uint2 oct = min(uint2(saturate(VividEncodeSurfaceSummaryNormal(direction)) * FarOctSize), FarOctSize - 1u);
+    return oct.x + FarOctSize * oct.y;
+}
+
 #include "SdfDiffuseDirectionalCache.hlsl"
 
 bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thickness, out float3 radiance)
@@ -990,30 +1028,7 @@ void UpdateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
 #endif
 
 #if defined(VIVID_SDF_SURFACE_CACHE)
-// Keep in sync with SdfDiffuseGatherPass. The last atlas plane holds exact
-// world-cell keys, so toroidal reuse never exposes an evicted probe.
-static const uint FarGridSize = 16u;
-static const uint FarOctSize = 8u;
-static const uint FarDirections = FarOctSize * FarOctSize;
-static const float FarCellSize = 2.5;
-Texture2D<float4> _SdfFarRadiance;
 StructuredBuffer<uint> _SdfFarHitIds;
-
-uint2 FarAtlasAddress(int3 cell, uint bin)
-{
-    uint3 slot = uint3(cell) & (FarGridSize - 1u);
-    return uint2(slot.x + FarGridSize * slot.z, slot.y + FarGridSize * bin);
-}
-
-float3 FarProbePosition(int3 cell)
-{
-    return (float3(cell) + 0.5) * FarCellSize;
-}
-
-float3 FarProbeDirection(uint bin)
-{
-    return VividDecodeSurfaceSummaryNormal((float2(bin % FarOctSize, bin / FarOctSize) + 0.5) / FarOctSize);
-}
 
 bool TryLoadFarRadiance(float3 origin, float3 direction, out float3 radiance, out float distance)
 {
@@ -1021,14 +1036,10 @@ bool TryLoadFarRadiance(float3 origin, float3 direction, out float3 radiance, ou
     distance = 0.0;
     float3 start = origin + _SdfDiffuseMaxDistance * direction;
     int3 cell = int3(floor(start / FarCellSize));
-    if (any(uint3(cell - int3(_SdfFarWindow.xyz)) >= FarGridSize))
-        return false;
-    float4 key = _SdfFarRadiance.Load(int3(FarAtlasAddress(cell, FarDirections), 0));
-    if (key.w == 0.0 || any(key.xyz != float3(cell)))
+    if (!HasFarProbe(cell))
         return false;
 
-    uint2 oct = min(uint2(saturate(VividEncodeSurfaceSummaryNormal(direction)) * FarOctSize), FarOctSize - 1u);
-    uint bin = oct.x + FarOctSize * oct.y;
+    uint bin = FarDirectionBin(direction);
     float4 cached = _SdfFarRadiance.Load(int3(FarAtlasAddress(cell, bin), 0));
     if (cached.a <= 0.0)
         return false;

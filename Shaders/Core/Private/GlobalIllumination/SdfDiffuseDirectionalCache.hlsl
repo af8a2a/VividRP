@@ -8,10 +8,12 @@ static const uint DirectionalHistoryFrames = 3u;
 
 uint _SdfDirectionalCacheEnabled;
 uint _SdfDirectionalGuideEnabled;
+uint _SdfDirectionalWorldGuide;
 uint _SdfDirectionalHasHistory;
 Texture2D<float4> _SdfDirectionalPrevious;
-// X is the base bin, YZ the previous tile plus one, W the subdivision code.
-// W is zero for a full bin, -1/-2 for its azimuth halves, or a merged bin plus one.
+// YZ holds the previous tile plus one. In the original guide X is the bin,
+// and W selects the full bin, an azimuth half (-1/-2), or a merged bin (+1).
+// Hierarchical rays pack the octahedral rectangle in X and its guide source in W.
 Texture2D<float4> _SdfDirectionalGuide;
 Texture2D<float4> _SdfDirectionalRays;
 RWTexture2D<float4> _SdfDirectionalGuideOutput;
@@ -61,6 +63,34 @@ float3x3 DiffuseProbeFrame(float3 normal)
     return GetLocalFrame(_SdfDirectionalCacheEnabled != 0u ? UnpackProbeNormal(PackProbeNormal(normal)) : normal);
 }
 
+float3 DirectionalOctDirection(float2 uv, float3x3 basis)
+{
+    // The square quadrants unfold the four upper octahedron faces. The
+    // concentric disk warp makes area in this chart equal cosine mass.
+    float2 p = 2.0 * uv - 1.0;
+    bool horizontal = abs(p.x) > abs(p.y);
+    float r = horizontal ? p.x : p.y;
+    float slope = r == 0.0 ? 0.0 : (horizontal ? p.y : p.x) / r;
+    float phi = (TWO_PI / 8.0) * (horizontal ? slope : 2.0 - slope);
+    float s, c;
+    sincos(phi, s, c);
+    return mul(float3(r * c, r * s, sqrt(saturate(1.0 - r * r))), basis);
+}
+
+static const uint DirectionalOctSize = 4u;
+static const int DirectionalOctScreen = -3;
+static const int DirectionalOctWorld = -4;
+
+uint PackDirectionalOctRect(uint4 rect)
+{
+    return rect.x | (rect.y << 2u) | ((rect.z - 1u) << 4u) | ((rect.w - 1u) << 5u);
+}
+
+uint4 UnpackDirectionalOctRect(uint code)
+{
+    return uint4(code & 3u, (code >> 2u) & 3u, 1u << ((code >> 4u) & 1u), 1u << ((code >> 5u) & 1u));
+}
+
 float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, out uint bin, out float inverseRelativePdf)
 {
     bin = ray;
@@ -77,6 +107,15 @@ float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, ou
         float4 stratum = _SdfDirectionalGuide.Load(int3(DirectionalAddress(tile, ray), 0));
         bin = uint(stratum.x);
         int subdivision = int(stratum.w);
+        if (subdivision <= DirectionalOctScreen)
+        {
+            uint4 rect = UnpackDirectionalOctRect(bin);
+            float2 uv = (float2(rect.xy) + float2(rect.zw) * clamp(sampleUv, 1e-5, 1.0 - 1e-5)) / DirectionalOctSize;
+            float3 direction = DirectionalOctDirection(uv, basis);
+            bin = DirectionalBin(direction, basis);
+            inverseRelativePdf = 0.5 * float(rect.z * rect.w);
+            return direction;
+        }
         if (subdivision < 0)
         {
             sampleUv.y = 0.5 * (sampleUv.y + float(-subdivision - 1));
@@ -124,6 +163,157 @@ bool DirectionalHistoryCandidate(uint2 candidate, float3 position, float3 normal
     return true;
 }
 
+bool FindDirectionalWorldProbe(float3 position, float3 normal, out int3 cell)
+{
+    cell = 0;
+    if (_SdfDirectionalWorldGuide == 0u)
+        return false;
+
+    int3 lower = int3(floor(position / FarCellSize - 0.5));
+    float bestDistanceSq = FarCellSize * FarCellSize;
+    bool valid = false;
+    [loop]
+    for (uint tap = 0u; tap < 8u; ++tap)
+    {
+        int3 candidate = lower + int3(tap & 1u, (tap >> 1u) & 1u, tap >> 2u);
+        float3 delta = FarProbePosition(candidate) - position;
+        float distanceSq = dot(delta, delta);
+        if (distanceSq >= bestDistanceSq || dot(delta, normal) < -0.05 || !HasFarProbe(candidate))
+            continue;
+        bestDistanceSq = distanceSq;
+        cell = candidate;
+        valid = true;
+    }
+    return valid;
+}
+
+float DirectionalWorldImportance(int3 cell, float3 offset, float3 direction)
+{
+    uint bin = FarDirectionBin(direction);
+    float4 cached = _SdfFarRadiance.Load(int3(FarAtlasAddress(cell, bin), 0));
+    if (cached.a <= 0.0)
+        return 0.0;
+
+    // Use the cache only to steer the proposal. A nearby cell can see a
+    // different surface, so downweight endpoints that do not reproject.
+    float3 delta = offset + cached.a * FarProbeDirection(bin);
+    float travel = length(delta);
+    float agreement = dot(delta, direction) / max(travel, 1e-5);
+    float confidence = travel > 0.1 ? smoothstep(0.8, 0.97, agreement) : 0.0;
+    return confidence * max(0.0, dot(cached.rgb, float3(0.2126, 0.7152, 0.0722)));
+}
+
+float DirectionalOctRegionImportance(float importance[16], uint4 rect)
+{
+    uint i = rect.x + DirectionalOctSize * rect.y;
+    float weight = importance[i];
+    if (rect.z == 2u)
+        weight += importance[i + 1u];
+    if (rect.w == 2u)
+    {
+        weight += importance[i + DirectionalOctSize];
+        if (rect.z == 2u)
+            weight += importance[i + DirectionalOctSize + 1u];
+    }
+    return weight;
+}
+
+bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3x3 basis,
+    bool hasPrevious, uint2 previousTile, float3x3 previousBasis)
+{
+    int3 worldCell = 0;
+    if (!hasPrevious && !FindDirectionalWorldProbe(position, normal, worldCell))
+        return false;
+
+    float3 offset = FarProbePosition(worldCell) - position;
+    float importance[16];
+    float total = 0.0;
+    float peak = 0.0;
+    [loop]
+    for (uint i = 0u; i < 16u; ++i)
+    {
+        float2 uv = (float2(i & 3u, i >> 2u) + 0.5) / DirectionalOctSize;
+        float3 direction = DirectionalOctDirection(uv, basis);
+        float weight;
+        if (hasPrevious)
+        {
+            uint oldBin = DirectionalBin(direction, previousBasis);
+            float4 previous = _SdfDirectionalPrevious.Load(int3(DirectionalAddress(previousTile, oldBin), 0));
+            weight = max(0.0, dot(previous.rgb, float3(0.2126, 0.7152, 0.0722)) * previous.a);
+        }
+        else
+            weight = DirectionalWorldImportance(worldCell, offset, direction);
+        importance[i] = weight;
+        total += weight;
+        peak = max(peak, weight);
+    }
+    float exploration = total / 16.0;
+    // Broad distributions gain little from trading away cosine strata.
+    // World history is sparse, so require an evident directional peak there too.
+    if (peak <= (hasPrevious ? 3.0 : 2.0) * exploration)
+        return false;
+
+    // Start with four upper octahedron faces. Spend each additional ray
+    // subdividing the leaf with the most BRDF times radiance mass. Keep a
+    // uniform term in that priority and every leaf in the final partition.
+    uint4 rects[DirectionalBinCount];
+    float scores[DirectionalBinCount];
+    [unroll]
+    for (uint face = 0u; face < 4u; ++face)
+    {
+        uint4 rect = uint4(2u * (face & 1u), 2u * (face >> 1u), 2u, 2u);
+        rects[face] = rect;
+        scores[face] = DirectionalOctRegionImportance(importance, rect) + 4.0 * exploration;
+    }
+    [loop]
+    for (uint ray = 4u; ray < DirectionalBinCount; ++ray)
+    {
+        uint best = 0u;
+        float priority = -1.0;
+        [loop]
+        for (uint i = 0u; i < ray; ++i)
+        {
+            if (rects[i].z * rects[i].w > 1u && scores[i] > priority)
+            {
+                best = i;
+                priority = scores[i];
+            }
+        }
+        uint4 a = rects[best];
+        // Split the long axis. For a square, choose the split that best
+        // separates the directional importance of its two children.
+        bool horizontal = a.z > a.w;
+        if (a.z == a.w)
+        {
+            float x = DirectionalOctRegionImportance(importance, uint4(a.xy, 1u, 2u));
+            float y = DirectionalOctRegionImportance(importance, uint4(a.xy, 2u, 1u));
+            float center = 0.5 * priority - 2.0 * exploration;
+            horizontal = abs(x - center) >= abs(y - center);
+        }
+        uint4 b = a;
+        if (horizontal)
+        {
+            a.z = b.z = 1u;
+            b.x++;
+        }
+        else
+        {
+            a.w = b.w = 1u;
+            b.y++;
+        }
+        rects[best] = a;
+        rects[ray] = b;
+        scores[best] = DirectionalOctRegionImportance(importance, a) + float(a.z * a.w) * exploration;
+        scores[ray] = priority - scores[best];
+    }
+    float2 history = hasPrevious ? float2(previousTile + 1u) : 0.0;
+    int source = hasPrevious ? DirectionalOctScreen : DirectionalOctWorld;
+    [unroll]
+    for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
+        _SdfDirectionalGuideOutput[DirectionalAddress(tile, ray)] = float4(PackDirectionalOctRect(rects[ray]), history, source);
+    return true;
+}
+
 [numthreads(8, 8, 1)]
 void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
 {
@@ -136,7 +326,10 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
     bool hasPrevious = false;
     float3x3 basis = (float3x3)0.0;
     float3x3 previousBasis = (float3x3)0.0;
-    if (_SdfDirectionalHasHistory != 0u && LoadProbeReceiver(id.xy, uint2(_SdfDiffuseScreenSize.xy), position, normal))
+    bool hierarchical = _SdfDirectionalGuideEnabled == 2u;
+    bool receiver = (_SdfDirectionalHasHistory != 0u || (hierarchical && _SdfDirectionalWorldGuide != 0u))
+        && LoadProbeReceiver(id.xy, uint2(_SdfDiffuseScreenSize.xy), position, normal);
+    if (receiver && _SdfDirectionalHasHistory != 0u)
     {
         float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
         float2 uv = ScreenUv(clip);
@@ -167,10 +360,18 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
         }
     }
 
+    if (hierarchical && receiver)
+    {
+        if (!hasPrevious)
+            basis = DiffuseProbeFrame(normal);
+        if (BuildDirectionalOctGuide(id.xy, position, normal, basis, hasPrevious, previousTile, previousBasis))
+            return;
+    }
+
     uint brightest = DirectionalBinCount;
     uint merge = DirectionalBinCount;
     uint mergeNeighbor = DirectionalBinCount;
-    if (hasPrevious && _SdfDirectionalGuideEnabled != 0u)
+    if (hasPrevious && _SdfDirectionalGuideEnabled == 1u)
     {
         float importance[DirectionalBinCount];
         float total = 0.0;

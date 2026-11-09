@@ -67,6 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
         private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistoryWithCoverage");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
+        private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenRadianceHistory");
         private static readonly CameraHistoryId ScreenGeometryHistoryId = CameraHistoryId.Create("SdfDiffuseScreenGeometryHistory");
         private static readonly ProfilingSampler ScreenTraceSampler = new("Diffuse GI Screen Trace");
@@ -213,6 +214,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OpenPbrAux1Id = Shader.PropertyToID("_SdfOpenPbrAux1");
         private static readonly int RestirSpatialId = Shader.PropertyToID("_SdfRestirSpatial");
         private static readonly int RestirVarianceId = Shader.PropertyToID("_SdfRestirVariance");
+        private static readonly int RestirPreviousVarianceId = Shader.PropertyToID("_SdfRestirPreviousVariance");
+        private static readonly int RestirVarianceHistoryOutputId = Shader.PropertyToID("_SdfRestirVarianceHistoryOutput");
+        private static readonly int RestirFilterHistoryModeId = Shader.PropertyToID("_SdfRestirFilterHistoryMode");
         private static readonly int RestirVarianceOutputId = Shader.PropertyToID("_SdfRestirVarianceOutput");
         private static readonly int RestirFilterInputId = Shader.PropertyToID("_SdfRestirFilterInput");
         private static readonly int OffscreenOnlyId = Shader.PropertyToID("_SdfDiffuseOffscreenOnly");
@@ -359,6 +363,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "ReSTIR Resolve Variance", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_RestirVariance = CreateScratch("ReSTIR Resolve Variance", GraphicsFormat.R16_SFloat);
+        private readonly RenderGraphTexture m_PreviousRestirVariance = RenderGraphTexture.CreateInput("Previous ReSTIR Variance", GraphicsFormat.R16_SFloat);
+        private readonly RenderGraphTexture m_CurrentRestirVariance = CreateOutput("ReSTIR Variance History", GraphicsFormat.R16_SFloat);
         [RenderGraphResource(Name = "Probe Ray Diagnostics", Access = AccessFlags.Write)]
         [TransientResource]
         private readonly RenderGraphTexture m_RayDiagnostics = CreateScratch("SDF Diffuse Ray Diagnostics", GeometryFormat);
@@ -401,6 +407,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_DirectionalCache, m_DirectionalGuide, m_DirectionalHistoryValid, m_DirectionalGuideHistoryValid;
         private bool m_DirectionalHierarchicalGuide;
         private CameraHistoryTexture m_RestirHistory;
+        private CameraHistoryTexture m_RestirVarianceHistory;
         private CameraHistoryTexture m_PixelHistory, m_PixelGeometryHistory;
         private CameraHistoryTexture m_SunHistory;
         private CameraHistoryTexture m_RadiosityReadHistory, m_RadiosityWriteHistory;
@@ -445,6 +452,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_RestirTemporalKernel = -1, m_RestirSpatialKernel = -1;
         private int m_RestirDenoiseKernel = -1;
         private int m_PixelTemporalKernel = -1, m_ScreenProbeTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
+        private int m_RestirVarianceTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private int m_AtlasHeight;
         private Vector4 m_ProbeCameraForward;
@@ -524,6 +532,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ScreenProbeTemporalKernel = m_GatherTemporalCompute.FindKernel("ScreenProbeTemporalReprojectionCS");
                 if (HasKernel(m_GatherTemporalCompute, "TemporalSdfRestirDiffuseGI"))
                     m_RestirPixelTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfRestirDiffuseGI");
+                if (HasKernel(m_GatherTemporalCompute, "TemporalSdfRestirVariance"))
+                    m_RestirVarianceTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfRestirVariance");
             }
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
                 && HasKernel(m_GatherCompute, "PlaceSdfAdaptiveProbes"))
@@ -584,7 +594,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ProbeHistory = m_GeometryHistory = null;
             m_DirectionalHistory = m_DirectionalGuideHistory = null;
             m_DirectionalHistoryValid = m_DirectionalGuideHistoryValid = false;
-            m_RestirHistory = null;
+            m_RestirHistory = m_RestirVarianceHistory = null;
             m_PixelHistory = m_PixelGeometryHistory = null;
             m_SunHistory = null;
             m_SunAtlas = default;
@@ -994,6 +1004,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_RawResolved.innerHandle.IsValid() && m_CurrentPixelLighting.innerHandle.IsValid()
                 && m_CurrentPixelGeometry.innerHandle.IsValid() && m_PreviousPixelLighting.innerHandle.IsValid()
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
+            bool restirVarianceTemporal = pixelTemporal && m_RestirVarianceHistory != null
+                && m_PreviousRestirVariance.innerHandle.IsValid() && m_CurrentRestirVariance.innerHandle.IsValid();
             m_RestirOpenPbrDiffuse &= m_OpenPbrParameters?.innerHandle.IsValid() == true
                 && m_OpenPbrAux0?.innerHandle.IsValid() == true && m_OpenPbrAux1?.innerHandle.IsValid() == true;
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
@@ -1109,9 +1121,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 RecordResolve(cmd, placement, pixelTemporal);
                 if (pixelTemporal)
-                    RecordPixelTemporal(cmd, hasHistory && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid());
+                    RecordPixelTemporal(cmd, hasHistory && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
                 if (m_RestirPixelIntegration)
-                    RecordRestirDenoise(cmd, pixelTemporal);
+                    RecordRestirDenoise(cmd, pixelTemporal, restirVarianceTemporal);
                 if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
                     RecordNearOcclusion(cmd);
             }
@@ -1202,6 +1214,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
             m_PixelTemporalKernel = m_ScreenProbeTemporalKernel = m_RestirPixelTemporalKernel = -1;
+            m_RestirVarianceTemporalKernel = -1;
         }
 
         internal static (int columns, int cards) ResolveSunAtlasLayout(Vector2Int size, int instanceCount, int maxDimension)
@@ -1594,7 +1607,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_GatherCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
 
-        private void RecordRestirDenoise(ComputeCommandBuffer cmd, bool pixelTemporal)
+        private void RecordRestirDenoise(ComputeCommandBuffer cmd, bool pixelTemporal, bool restirVarianceTemporal)
         {
             using var scope = new ProfilingScope(cmd, RestirDenoiseSampler);
             int kernel = m_RestirDenoiseKernel;
@@ -1602,7 +1615,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_RestirCompute, kernel, CurrentResolvedId, m_RawResolved.innerHandle);
             cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirFilterInputId,
                 pixelTemporal ? m_CurrentPixelLighting.innerHandle : m_RawResolved.innerHandle);
-            cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirVarianceId, m_RestirVariance.innerHandle);
+            cmd.SetComputeTextureParam(m_RestirCompute, kernel, RestirVarianceId,
+                restirVarianceTemporal ? m_CurrentRestirVariance.innerHandle : m_RestirVariance.innerHandle);
+            cmd.SetComputeIntParam(m_RestirCompute, RestirFilterHistoryModeId, restirVarianceTemporal ? 2 : pixelTemporal ? 1 : 0);
             cmd.SetComputeTextureParam(m_RestirCompute, kernel, OutputId, m_Output.innerHandle);
             cmd.DispatchCompute(m_RestirCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
@@ -1616,16 +1631,31 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RestirPixelIntegration ? AccessFlags.ReadWrite : AccessFlags.Write);
             CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelGeometryHistoryId,
                 m_PreviousPixelGeometry, m_CurrentPixelGeometry, m_CurrentPixelGeometry.desc, out m_PixelGeometryHistory, AccessFlags.Write);
+            if (m_RestirPixelIntegration && m_RestirVarianceTemporalKernel >= 0)
+            {
+                m_CurrentRestirVariance.Resize(m_Width, m_Height);
+                CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, RestirVarianceHistoryId,
+                    m_PreviousRestirVariance, m_CurrentRestirVariance, m_CurrentRestirVariance.desc, out m_RestirVarianceHistory);
+            }
         }
 
-        private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory)
+        private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory, bool restirVarianceTemporal)
         {
             using var scope = new ProfilingScope(cmd, PixelTemporalSampler);
             int kernel = m_PixelTemporalKernel;
             if (m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0)
                 kernel = m_ScreenProbeTemporalKernel;
+            else if (restirVarianceTemporal)
+                kernel = m_RestirVarianceTemporalKernel;
             else if (m_RestirGather && m_RestirPixelTemporalKernel >= 0)
                 kernel = m_RestirPixelTemporalKernel;
+            if (restirVarianceTemporal)
+            {
+                hasHistory &= m_RestirVarianceHistory.IsValid();
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, RestirVarianceId, m_RestirVariance.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, RestirPreviousVarianceId, m_PreviousRestirVariance.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, RestirVarianceHistoryOutputId, m_CurrentRestirVariance.innerHandle);
+            }
             BindReceiver(cmd, m_GatherTemporalCompute, kernel);
             BindProbeFrame(cmd, m_GatherTemporalCompute);
             cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousViewProjectionId, m_State.ViewProjection);
@@ -1642,6 +1672,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_GatherTemporalCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
             m_PixelHistory.MarkWritten();
             m_PixelGeometryHistory.MarkWritten();
+            if (restirVarianceTemporal)
+                m_RestirVarianceHistory.MarkWritten();
         }
 
         private void RecordScreenTrace(ComputeCommandBuffer cmd, int groupsX, int groupsY, TextureHandle placement, TextureHandle black)

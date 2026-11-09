@@ -1,9 +1,15 @@
 #pragma kernel TemporalSdfDiffuseGI
 #pragma kernel ScreenProbeTemporalReprojectionCS VIVID_SDF_SCREEN_PROBE_TEMPORAL
 #pragma kernel TemporalSdfRestirDiffuseGI VIVID_SDF_RESTIR_PIXEL_HISTORY
+#pragma kernel TemporalSdfRestirVariance VIVID_SDF_RESTIR_PIXEL_HISTORY VIVID_SDF_RESTIR_VARIANCE_HISTORY
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
+
+#if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+Texture2D<float> _SdfRestirPreviousVariance;
+RWTexture2D<float> _SdfRestirVarianceHistoryOutput;
+#endif
 
 #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
 static const uint ScreenProbeNoHistory = 0u;
@@ -31,11 +37,12 @@ float2 UnpackScreenProbePixelHistory(float packed)
 
 #if !defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
 bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
-    out float4 history, out float historyCoverage, out float foregroundWeight)
+    out float4 history, out float historyCoverage, out float foregroundWeight, out float historyVariance)
 {
     history = 0.0;
     historyCoverage = 0.0;
     foregroundWeight = 0.0;
+    historyVariance = 0.0;
     float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
         return false;
@@ -93,9 +100,17 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
         #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
         if (abs(sample.a) > 0.0 && (sample.a < 0.0) == openPbr)
         {
-            sample.a = abs(sample.a);
-            history += sample * weight;
             totalWeight += weight;
+            #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+                float2 ageAndCoverage = UnpackRestirPixelHistory(sample.a);
+                float covered = weight * ageAndCoverage.y;
+                history += covered * float4(sample.rgb, ageAndCoverage.x);
+                historyCoverage += covered;
+                historyVariance += covered * _SdfRestirPreviousVariance.Load(int3(tap, 0));
+            #else
+                sample.a = abs(sample.a);
+                history += sample * weight;
+            #endif
         }
         #else
         if (sample.a > 0.0)
@@ -108,11 +123,12 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
         }
         #endif
     }
-    #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
-    history /= max(totalWeight, 1e-5);
+    #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY) && !defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+        history /= max(totalWeight, 1e-5);
     #else
-    history /= max(historyCoverage, 1e-5);
-    historyCoverage /= max(totalWeight, 1e-5);
+        history /= max(historyCoverage, 1e-5);
+        historyVariance /= max(historyCoverage, 1e-5);
+        historyCoverage /= max(totalWeight, 1e-5);
     #endif
     return totalWeight >= 0.35;
 }
@@ -144,7 +160,9 @@ float3 ClampPixelHistory(uint2 pixel, float3 position, float3 normal, float3 cur
 }
 
 [numthreads(8, 8, 1)]
-#if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+#if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+void TemporalSdfRestirVariance(uint3 id : SV_DispatchThreadID)
+#elif defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
 void TemporalSdfRestirDiffuseGI(uint3 id : SV_DispatchThreadID)
 #else
 void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
@@ -159,6 +177,9 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     bool receiver = LoadReceiver(id.xy, position, normal);
     float age = 0.0;
     uint packed = 0u;
+    #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+        float variance = 0.0;
+    #endif
     #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
         uint historyStatus = ScreenProbeNoHistory;
     #endif
@@ -174,11 +195,15 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                 packed = f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0))) | (uint(PackProbeNormal(normal)) << 16u);
             #endif
             age = 1.0;
+            #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+                variance = _SdfRestirVariance.Load(int3(id.xy, 0));
+            #endif
             float4 history;
             float historyCoverage;
             float foregroundWeight;
+            float historyVariance;
             if (_SdfDiffuseHasHistory != 0u
-                && ReadPixelHistory(id.xy, position, normal, openPbr, history, historyCoverage, foregroundWeight))
+                && ReadPixelHistory(id.xy, position, normal, openPbr, history, historyCoverage, foregroundWeight, historyVariance))
             {
                 float3 bounded = ClampPixelHistory(id.xy, position, normal, result.rgb, history.rgb, openPbr);
                 float confidence = 1.0;
@@ -189,6 +214,10 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                     float excess = brightness - RestirLuminance(bounded);
                     if (foregroundWeight > 0.0 && excess > max(0.05, 0.1 * brightness))
                         confidence = foregroundWeight >= 0.125 ? 0.0 : 1.0 - 2.0 * foregroundWeight;
+                    #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+                        if (foregroundWeight >= 0.25)
+                            confidence = 0.0;
+                    #endif
                 #else
                     // Keep normal accumulation on equally covered receivers.
                     // A coverage jump lowers trust despite a valid geometric reprojection.
@@ -198,7 +227,24 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                 age = lerp(1.0, min(history.a + 1.0, 8.0), confidence);
                 float3 rectified = lerp(history.rgb, bounded, lerp(1.0, 0.20, confidence));
                 float currentWeight = rcp(age);
-                #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+                #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+                    // A shared bright path can give the current reservoirs low spatial variance.
+                    // Also measure the change from the accepted temporal estimate in log luminance.
+                    if (confidence > 0.0)
+                    {
+                        float coverage = abs(result.a);
+                        float currentLuminance = RestirLuminance(result.rgb) * coverage;
+                        float previousLuminance = RestirLuminance(history.rgb) * historyCoverage;
+                        float change = log2(1.0 + currentLuminance) - log2(1.0 + previousLuminance);
+                        float observedVariance = max(variance, min(change * change, 4.0));
+                        float historyWeight = (1.0 - currentWeight) * confidence;
+                        variance = lerp(observedVariance, historyVariance, historyWeight);
+                        // Deferred lighting consumes covered radiance. Accumulate both factors together.
+                        float3 covered = lerp(rectified * historyCoverage, result.rgb * coverage, currentWeight);
+                        result.a = lerp(historyCoverage, coverage, currentWeight);
+                        result.rgb = covered / max(result.a, 1e-5);
+                    }
+                #elif defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
                     result.rgb = lerp(rectified, result.rgb, currentWeight);
                 #else
                     // Accumulate numerator and coverage together so an unstable
@@ -211,13 +257,18 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
+    #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+        float historyAlpha = PackRestirPixelHistory(age, abs(result.a), openPbr);
+    #elif defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
         float historyAlpha = openPbr ? -age : age;
     #else
         float historyAlpha = PackScreenProbePixelHistory(age, result.a, historyStatus);
     #endif
     _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, historyAlpha);
     _SdfDiffusePixelGeometryOutput[id.xy] = packed;
+    #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+        _SdfRestirVarianceHistoryOutput[id.xy] = variance;
+    #endif
     if (_SdfRestirDense == 0u)
         _SdfDiffuseOutput[id.xy] = result;
 }

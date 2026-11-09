@@ -32,6 +32,28 @@ float RestirLuminance(float3 radiance)
     return dot(radiance, float3(0.2126, 0.7152, 0.0722));
 }
 
+float PackRestirPixelHistory(float age, float coverage, bool openPbr)
+{
+    if (age <= 0.0)
+        return 0.0;
+
+    // Keep the material domain in the sign. The finite FP16 payload stores age and coverage.
+    uint ageBits = uint(round(saturate((age - 1.0) / 7.0) * 31.0));
+    uint coverageBits = max(1u, uint(round(saturate(coverage) * 511.0)));
+    float packed = f16tof32(0x0400u + (ageBits << 9u) + coverageBits);
+    return openPbr ? -packed : packed;
+}
+
+float2 UnpackRestirPixelHistory(float packed)
+{
+    uint bits = f32tof16(abs(packed));
+    if (bits < 0x0400u)
+        return 0.0;
+
+    bits -= 0x0400u;
+    return float2(1.0 + (bits >> 9u) * (7.0 / 31.0), (bits & 511u) * (1.0 / 511.0));
+}
+
 float RestirRandom(uint seed)
 {
     return float(HashProbe(seed) >> 8u) * (1.0 / 16777216.0);

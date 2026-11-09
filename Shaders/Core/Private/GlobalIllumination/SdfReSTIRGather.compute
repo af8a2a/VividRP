@@ -366,6 +366,8 @@ void ResampleSdfRestirSpatial(uint3 id : SV_DispatchThreadID, uint3 lane : SV_Gr
 }
 #endif
 
+uint _SdfRestirFilterHistoryMode; // 0: raw, 1: age, 2: packed age and coverage.
+
 void FilterRestirLighting(uint3 id)
 {
     uint2 size = uint2(_SdfDiffuseScreenSize.xy);
@@ -375,47 +377,59 @@ void FilterRestirLighting(uint3 id)
     float4 result = _SdfDiffuseCurrentResolved.Load(int3(id.xy, 0));
     bool openPbr = result.a < 0.0;
     result.a = abs(result.a);
-    result.rgb = _SdfRestirFilterInput.Load(int3(id.xy, 0)).rgb;
-    float variance = _SdfRestirVariance.Load(int3(id.xy, 0));
-    float3 position, normal;
-    if (variance > 0.015 && LoadReceiver(id.xy, position, normal))
+    float4 source = _SdfRestirFilterInput.Load(int3(id.xy, 0));
+    result.rgb = source.rgb;
+    float age = abs(source.a);
+    if (_SdfRestirFilterHistoryMode == 2u)
     {
-        if (result.a > 0.0)
+        float2 ageAndCoverage = UnpackRestirPixelHistory(source.a);
+        age = ageAndCoverage.x;
+        if (age > 1.0)
+            result.a = ageAndCoverage.y;
+    }
+    float variance = _SdfRestirVariance.Load(int3(id.xy, 0));
+    float sigma = sqrt(max(variance, 0.0));
+    float bootstrap = _SdfRestirFilterHistoryMode != 0u ? saturate((4.0 - age) / 3.0) : 0.0;
+    float strength = saturate(1.25 * (sigma - 0.10) + 0.65 * bootstrap);
+    float3 position, normal;
+    if (strength > 0.0 && result.a > 0.0 && LoadReceiver(id.xy, position, normal))
+    {
+        int radius = 1 + int(round(7.0 * strength));
+        float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+        float centerLuminance = log2(1.0 + RestirLuminance(result.rgb));
+        // With high uncertainty, do not let a bright center reject otherwise compatible taps.
+        float lumaScale = rcp(max(0.25, 3.0 * sigma + 0.75 * bootstrap));
+        float centerWeight = lerp(1.0, 0.5, strength);
+        float3 sum = result.rgb * centerWeight;
+        float total = centerWeight;
+        const int2 offsets[8] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1),
+            int2(-1, -1), int2(1, -1), int2(-1, 1), int2(1, 1) };
+        int tapCount = radius >= 2 ? 12 : 8;
+        [loop]
+        for (int i = 0; i < tapCount; ++i)
         {
-            int step = variance > 0.5 ? 4 : variance > 0.10 ? 2 : 1;
-            float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
-            float centerLuminance = log2(1.0 + RestirLuminance(result.rgb));
-            float lumaScale = rcp(max(0.12, 2.0 * sqrt(variance)));
-            float3 sum = result.rgb;
-            float total = 1.0;
-            [loop]
-            for (int y = -1; y <= 1; ++y)
-            {
-                [loop]
-                for (int x = -1; x <= 1; ++x)
-                {
-                    int2 offset = int2(x, y);
-                    int2 tap = int2(id.xy) + offset * step;
-                    if (all(offset == 0) || any(tap < 0) || any(tap >= int2(size)))
-                        continue;
-                    float signedConfidence = _SdfDiffuseCurrentResolved.Load(int3(tap, 0)).a;
-                    float confidence = abs(signedConfidence);
-                    float3 otherPosition, otherNormal;
-                    if (confidence <= 0.0 || (signedConfidence < 0.0) != openPbr
-                        || !LoadReceiver(uint2(tap), otherPosition, otherNormal))
-                        continue;
-                    float weight = ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth);
-                    if (weight <= 0.0)
-                        continue;
-                    float3 lighting = _SdfRestirFilterInput.Load(int3(tap, 0)).rgb;
-                    float difference = abs(log2(1.0 + RestirLuminance(lighting)) - centerLuminance);
-                    weight *= confidence * exp2(-difference * lumaScale) / (1.0 + dot(float2(offset), float2(offset)));
-                    sum += lighting * weight;
-                    total += weight;
-                }
-            }
-            result.rgb = sum / total;
+            int2 offset = offsets[i & 7] * (i < 8 ? radius : radius / 2);
+            int2 tap = int2(id.xy) + offset;
+            if (any(tap < 0) || any(tap >= int2(size)))
+                continue;
+            float signedConfidence = _SdfDiffuseCurrentResolved.Load(int3(tap, 0)).a;
+            float confidence = abs(signedConfidence);
+            float3 otherPosition, otherNormal;
+            if (confidence <= 0.0 || (signedConfidence < 0.0) != openPbr
+                || !LoadReceiver(uint2(tap), otherPosition, otherNormal))
+                continue;
+            float weight = ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth);
+            if (weight <= 0.0)
+                continue;
+            float3 lighting = _SdfRestirFilterInput.Load(int3(tap, 0)).rgb;
+            float difference = (log2(1.0 + RestirLuminance(lighting)) - centerLuminance) * lumaScale;
+            float2 normalizedOffset = float2(offset) / radius;
+            float spatialWeight = exp2(-1.25 * dot(normalizedOffset, normalizedOffset));
+            weight *= confidence * spatialWeight / (1.0 + difference * difference);
+            sum += lighting * weight;
+            total += weight;
         }
+        result.rgb = sum / total;
     }
     _SdfDiffuseOutput[id.xy] = result;
 }

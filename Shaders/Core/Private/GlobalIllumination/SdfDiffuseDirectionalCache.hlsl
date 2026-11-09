@@ -70,8 +70,38 @@ float3 DirectionalOctDirection(float2 uv, float3x3 basis)
 }
 
 static const uint DirectionalOctSize = 4u;
+static const uint DirectionalGatherBinCount = DirectionalOctSize * DirectionalOctSize;
 static const int DirectionalOctScreen = -3;
 static const int DirectionalOctWorld = -4;
+
+uint2 DirectionalGatherAddress(uint2 tile, uint bin)
+{
+    return uint2(tile.x * DirectionalGatherBinCount + bin, tile.y);
+}
+
+float3 DirectionalGatherDirection(uint bin, float3x3 basis)
+{
+    return DirectionalOctDirection((float2(bin % DirectionalOctSize, bin / DirectionalOctSize) + 0.5)
+        / DirectionalOctSize, basis);
+}
+
+uint DirectionalGatherBin(float3 direction, float3x3 basis)
+{
+    // Invert the concentric disk warp used by DirectionalOctDirection.
+    float2 p = mul(basis, direction).xy;
+    float radius = length(p);
+    if (radius < 1e-5)
+        return DirectionalOctSize * (DirectionalOctSize / 2u) + DirectionalOctSize / 2u;
+    bool horizontal = abs(p.x) > abs(p.y);
+    float dominant = horizontal ? p.x : p.y;
+    float secondary = horizontal ? p.y : p.x;
+    float signDominant = dominant >= 0.0 ? 1.0 : -1.0;
+    float a = radius * signDominant;
+    float b = a * atan2(secondary * signDominant, abs(dominant)) * (8.0 / TWO_PI);
+    float2 uv = 0.5 + 0.5 * (horizontal ? float2(a, b) : float2(b, a));
+    uint2 cell = min(uint2(saturate(uv) * DirectionalOctSize), DirectionalOctSize - 1u);
+    return cell.x + cell.y * DirectionalOctSize;
+}
 
 uint4 UnpackDirectionalOctRect(uint code)
 {

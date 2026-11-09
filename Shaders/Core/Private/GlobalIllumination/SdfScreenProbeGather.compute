@@ -1,4 +1,5 @@
 #pragma kernel ResolveSdfDiffuseGI
+#pragma kernel ResolveSdfProbeIrradiance VIVID_SDF_PROBE_IRRADIANCE
 #pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
 #pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
 #pragma kernel PlaceSdfAdaptiveProbes
@@ -6,6 +7,9 @@
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfShortRangeAOCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
+#if defined(VIVID_SDF_PROBE_IRRADIANCE)
+#include "SdfScreenProbeIrradiance.hlsl"
+#endif
 
 [numthreads(8, 8, 1)]
 void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
@@ -215,9 +219,17 @@ void IntegrateRestirLighting(uint3 id)
     _SdfRestirVarianceOutput[id.xy] = variance;
 }
 
+struct SdfProbeResolve
+{
+    float4 lighting;
+    float weight;
+#if defined(VIVID_SDF_PROBE_IRRADIANCE)
+    SdfProbeIrradiance irradiance;
+#endif
+};
+
 void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal, float eyeDepth,
-    float3 bentNormal, float visibility,
-    inout float4 result, inout float totalWeight)
+    float3 bentNormal, float visibility, inout SdfProbeResolve resolve)
 {
     float4 geometry = _SdfDiffuseGeometry[tile];
     if (geometry.w < 0.0)
@@ -231,6 +243,22 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
     if (weight <= 0.0)
         return;
 
+    #if defined(VIVID_SDF_PROBE_IRRADIANCE)
+    uint2 stride = ProbePlaneStride();
+    float4 last = _SdfDiffuseProbeInput.Load(int3(tile + 6u * stride, 0));
+    float covered = weight * last.a;
+    if (covered > 0.0)
+    {
+        resolve.irradiance.r0 += covered * _SdfDiffuseProbeInput.Load(int3(tile, 0));
+        resolve.irradiance.g0 += covered * _SdfDiffuseProbeInput.Load(int3(tile + stride, 0));
+        resolve.irradiance.b0 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 2u * stride, 0));
+        resolve.irradiance.r1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 3u * stride, 0));
+        resolve.irradiance.g1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 4u * stride, 0));
+        resolve.irradiance.b1 += covered * _SdfDiffuseProbeInput.Load(int3(tile + 5u * stride, 0));
+        resolve.irradiance.c += covered * last.rgb;
+        resolve.lighting.a += covered;
+    }
+    #else
     float4 probe = _SdfDiffuseProbeInput.Load(int3(tile, 0));
     if (_SdfDiffuseDirectionalProbes != 0u && probe.a > 0.0)
     {
@@ -253,8 +281,9 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
     }
     else
         probe.rgb *= visibility;
-    result += float4(probe.rgb * probe.a, probe.a) * weight;
-    totalWeight += weight;
+    resolve.lighting += float4(probe.rgb * probe.a, probe.a) * weight;
+    #endif
+    resolve.weight += weight;
 }
 
 #if defined(VIVID_SDF_RESTIR_OPENPBR)
@@ -265,13 +294,19 @@ void ResolveSdfRestirOpenPBR(uint3 id : SV_DispatchThreadID)
 }
 #else
 [numthreads(8, 8, 1)]
+#if defined(VIVID_SDF_PROBE_IRRADIANCE)
+void ResolveSdfProbeIrradiance(uint3 id : SV_DispatchThreadID)
+#else
 void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
+#endif
 {
+    #if !defined(VIVID_SDF_PROBE_IRRADIANCE)
     if (_SdfRestirDense != 0u)
     {
         IntegrateRestirLighting(id);
         return;
     }
+    #endif
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
     if (any(id.xy >= screenSize))
         return;
@@ -294,7 +329,7 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         uint2 probeGrid = ProbeGridSize(screenSize);
         int2 last = int2(probeGrid) - 1;
         float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
-        float totalWeight = 0.0;
+        SdfProbeResolve resolve = (SdfProbeResolve)0;
         [unroll]
         for (uint i = 0u; i < 4u; i++)
         {
@@ -302,7 +337,7 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             uint2 tile = uint2(clamp(low + offset, 0, last));
             float2 weights = lerp(1.0 - fraction, fraction, float2(offset));
             AddProbeToResolve(tile, weights.x * weights.y, position, normal, eyeDepth,
-                bentNormal, visibility, result, totalWeight);
+                bentNormal, visibility, resolve);
             if (_SdfDiffuseAdaptiveProbes != 0u && all(int2(tile) == low + offset))
             {
                 uint2 pixel;
@@ -310,12 +345,22 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
                 {
                     float2 adaptiveWeights = saturate(1.0 - abs(float2(pixel) - float2(id.xy)) / ProbeSpacing);
                     AddProbeToResolve(tile + uint2(0, probeGrid.y), adaptiveWeights.x * adaptiveWeights.y,
-                        position, normal, eyeDepth, bentNormal, visibility, result, totalWeight);
+                        position, normal, eyeDepth, bentNormal, visibility, resolve);
                 }
             }
         }
-        result.rgb /= max(result.a, 1e-5);
-        result.a /= max(totalWeight, 1e-5);
+        #if defined(VIVID_SDF_PROBE_IRRADIANCE)
+        float3 irradiance = max(0.0, EvaluateSdfProbeIrradiance(resolve.irradiance, normal));
+        if (visibility < 1.0)
+        {
+            float3 bent = max(0.0, EvaluateSdfProbeIrradiance(resolve.irradiance, bentNormal));
+            irradiance = min(irradiance, bent * visibility);
+        }
+        resolve.lighting.rgb = irradiance;
+        #endif
+        result = resolve.lighting;
+        result.rgb = min(result.rgb / max(result.a, 1e-5), 65000.0);
+        result.a /= max(resolve.weight, 1e-5);
     }
     _SdfDiffuseOutput[id.xy] = result;
 }

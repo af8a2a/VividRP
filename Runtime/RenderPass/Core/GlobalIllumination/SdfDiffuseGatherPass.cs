@@ -443,7 +443,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_PlacementKernel = -1, m_FilterKernel = -1, m_HitFilterKernel = -1;
         private int m_RestirTemporalKernel = -1, m_RestirSpatialKernel = -1;
         private int m_RestirDenoiseKernel = -1;
-        private int m_PixelTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
+        private int m_PixelTemporalKernel = -1, m_ScreenProbeTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private int m_AtlasHeight;
         private Vector4 m_ProbeCameraForward;
@@ -519,6 +519,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && HasKernel(m_GatherTemporalCompute, "TemporalSdfDiffuseGI"))
             {
                 m_PixelTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfDiffuseGI");
+                if (HasKernel(m_GatherTemporalCompute, "ScreenProbeTemporalReprojectionCS"))
+                    m_ScreenProbeTemporalKernel = m_GatherTemporalCompute.FindKernel("ScreenProbeTemporalReprojectionCS");
                 if (HasKernel(m_GatherTemporalCompute, "TemporalSdfRestirDiffuseGI"))
                     m_RestirPixelTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfRestirDiffuseGI");
             }
@@ -1198,7 +1200,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
-            m_PixelTemporalKernel = m_RestirPixelTemporalKernel = -1;
+            m_PixelTemporalKernel = m_ScreenProbeTemporalKernel = m_RestirPixelTemporalKernel = -1;
         }
 
         internal static (int columns, int cards) ResolveSunAtlasLayout(Vector2Int size, int instanceCount, int maxDimension)
@@ -1616,8 +1618,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory)
         {
             using var scope = new ProfilingScope(cmd, PixelTemporalSampler);
-            int kernel = m_RestirGather && m_RestirPixelTemporalKernel >= 0
-                ? m_RestirPixelTemporalKernel : m_PixelTemporalKernel;
+            int kernel = m_PixelTemporalKernel;
+            if (m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0)
+                kernel = m_ScreenProbeTemporalKernel;
+            else if (m_RestirGather && m_RestirPixelTemporalKernel >= 0)
+                kernel = m_RestirPixelTemporalKernel;
             BindReceiver(cmd, m_GatherTemporalCompute, kernel);
             BindProbeFrame(cmd, m_GatherTemporalCompute);
             cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousViewProjectionId, m_State.ViewProjection);

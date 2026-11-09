@@ -59,17 +59,23 @@ void VividAccumulateOpenPBROpaqueLight(OpenPBR_DiffuseSpecular light,
 
 VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     VividOpenPBROpaqueInputs inputs, OpenPBR_DiffuseSpecular albedo,
-    VividLightingLoopContext lightLoop, float3 positionWS, float3 viewDirectionWS, float ao, float4 realtimeDiffuseGI)
+    VividLightingLoopContext lightLoop, float3 positionWS, float3 viewDirectionWS, float ao,
+    float4 realtimeDiffuseGI, bool realtimeOpenPbrDiffuse)
 {
     VividSimpleSlabDeferredLighting result = (VividSimpleSlabDeferredLighting)0;
-    float3 irradiance = realtimeDiffuseGI.rgb;
+    // Dense ReSTIR has already integrated the directional BRDF. Its filter
+    // domain only factors out the receiver's base diffuse color.
+    float3 diffuse = realtimeDiffuseGI.rgb;
+    if (realtimeOpenPbrDiffuse)
+        diffuse *= VividOpenPBROpaqueDiffuseColor(inputs);
     if (realtimeDiffuseGI.a < 1.0f)
     {
         bool allowAmbientFallback = VividAllowUnoccludedSkyFallback();
         float3 fallback = VividHasProbeVolumeGI()
             ? SampleVividProbeVolume(positionWS, inputs.normalWS, viewDirectionWS, 0xFFFFFFFFu, allowAmbientFallback)
             : (allowAmbientFallback ? VividSampleAmbientProbe(inputs.normalWS) : 0.0);
-        irradiance = lerp(fallback, irradiance, realtimeDiffuseGI.a);
+        diffuse = lerp(realtimeOpenPbrDiffuse ? fallback * albedo.diffuse : fallback,
+            diffuse, realtimeDiffuseGI.a);
     }
     float3 reflection = GetSpecularDominantDir(inputs.normalWS,
         reflect(-viewDirectionWS, inputs.normalWS), inputs.specularRoughness,
@@ -78,7 +84,7 @@ VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     // times the complete OpenPBR directional albedo. No Slab FGD/MS is applied.
     float3 radiance = VividSampleSimpleSlabEnvironment(lightLoop, positionWS,
         inputs.normalWS, reflection, inputs.specularRoughness);
-    result.indirectDiffuseLighting = irradiance * albedo.diffuse * ao;
+    result.indirectDiffuseLighting = (realtimeOpenPbrDiffuse ? diffuse : diffuse * albedo.diffuse) * ao;
     result.indirectSpecularLighting = radiance * albedo.specular * ao;
     result.diffuseLighting = result.indirectDiffuseLighting;
     result.specularLighting = result.indirectSpecularLighting;

@@ -14,6 +14,11 @@
 // evaluated in Deferred. Zero base/specular weight is valid, not an empty slot.
 #define VIVID_OPENPBR_OPAQUE_GBUFFER_VERSION 1u
 
+float3 VividOpenPBROpaqueDiffuseColor(VividOpenPBROpaqueInputs inputs)
+{
+    return inputs.baseWeight * inputs.baseColor * (1.0 - inputs.baseMetalness);
+}
+
 bool VividCanStoreOpenPBROpaqueGBuffer(VividOpenPBROpaqueInputs inputs)
 {
     // Reject finite input emission that would overflow the existing HDR target.
@@ -26,7 +31,7 @@ VividSurfaceSummaryData VividBuildOpenPBROpaqueSummary(VividOpenPBROpaqueInputs 
     VividSurfaceSummaryData summary = (VividSurfaceSummaryData)0;
     summary.normalWS = inputs.normalWS;
     summary.perceptualRoughness = inputs.specularRoughness;
-    summary.diffuseAlbedo = inputs.baseWeight * inputs.baseColor * (1.0 - inputs.baseMetalness);
+    summary.diffuseAlbedo = VividOpenPBROpaqueDiffuseColor(inputs);
     float f0 = (inputs.specularIor - 1.0) / (inputs.specularIor + 1.0);
     summary.specularF0 = lerp(f0 * f0 * inputs.specularWeight * inputs.specularColor,
         inputs.baseWeight * inputs.baseColor, inputs.baseMetalness);

@@ -499,6 +499,45 @@ void ResampleSdfRestirSpatial(uint3 id : SV_DispatchThreadID, uint3 lane : SV_Gr
 }
 #endif
 
+#if defined(VIVID_SDF_RESTIR_OPENPBR)
+bool TryPrepareRestirOpenPbr(uint2 pixel, float3 position, float3 normal,
+    out OpenPBR_PreparedBsdf prepared, out float3 inverseDiffuseColor)
+{
+    prepared = (OpenPBR_PreparedBsdf)0;
+    inverseDiffuseColor = 0.0;
+    VividSurfaceSummaryData summary = (VividSurfaceSummaryData)0;
+    summary.deferredExportHeader = VividDecodeDeferredExportHeader(_SdfDiffuseGBuffer0.Load(int3(pixel, 0)).a);
+    if (summary.deferredExportHeader != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+        return false;
+    summary.normalWS = normal;
+    summary.perceptualRoughness = saturate(_SdfDiffuseGBuffer1.Load(int3(pixel, 0)).z);
+    VividOpenPBROpaqueInputs inputs;
+    OpenPBR_ResolvedInputs resolved;
+    if (!VividTryUnpackOpenPBROpaqueGBuffer(summary, _SdfOpenPbrParameters.Load(int3(pixel, 0)),
+        _SdfOpenPbrAux0.Load(int3(pixel, 0)), _SdfOpenPbrAux1.Load(int3(pixel, 0)), inputs)
+        || !VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
+        return false;
+
+    float3 view = SafeNormalize(GetWorldSpaceViewDir(position));
+    if (dot(normal, view) <= 0.0)
+        return false;
+    prepared = VividPrepareOpenPBROpaque(resolved, view);
+    inverseDiffuseColor = rcp(max(VividOpenPBROpaqueDiffuseColor(inputs), 1e-8));
+    return true;
+}
+
+float3 RestirOpenPbrDiffuse(OpenPBR_PreparedBsdf prepared, float3 direction,
+    float cosine, float limitedCosine, float3 inverseDiffuseColor)
+{
+    if (cosine <= 0.0)
+        return 0.0;
+    // The existing cosine proposal and reservoir inverse PDF use a Lambert
+    // response with pi factored out. Vendor eval already includes NdotL.
+    return openpbr_eval(prepared, direction).diffuse
+        * (PI * (limitedCosine / cosine)) * inverseDiffuseColor;
+}
+#endif
+
 void IntegrateRestirLighting(uint3 id)
 {
     uint2 size = uint2(_SdfDiffuseScreenSize.xy);
@@ -510,6 +549,12 @@ void IntegrateRestirLighting(uint3 id)
     float3 position, normal;
     if (LoadReceiver(id.xy, position, normal))
     {
+        bool openPbr = false;
+        #if defined(VIVID_SDF_RESTIR_OPENPBR)
+            OpenPBR_PreparedBsdf prepared;
+            float3 inverseDiffuseColor;
+            openPbr = TryPrepareRestirOpenPbr(id.xy, position, normal, prepared, inverseDiffuseColor);
+        #endif
         bool directionalContact = _SdfNearOcclusion.z > 0.0;
         float4 contact = float4(0.0, 0.0, 0.0, 1.0);
         if (directionalContact)
@@ -555,29 +600,49 @@ void IntegrateRestirLighting(uint3 id)
                 float3 direction = SafeNormalize(reservoir.sample.position - origin);
                 float3 receiverDirection = direction;
                 float hitDistance = 0.0;
-                if (directionalContact)
+                if (directionalContact || openPbr)
                 {
                     float3 receiverDelta = reservoir.sample.position - (position + normal * _SdfDiffuseRayBias);
                     hitDistance = length(receiverDelta);
                     receiverDirection = receiverDelta / max(hitDistance, 1e-5);
                 }
-                float cosine = saturate(dot(normal, receiverDirection));
+                float receiverCosine = saturate(dot(normal, receiverDirection));
                 // Limit the interpolation gain for a sample grazing the source receiver.
-                cosine = min(cosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
+                float cosine = min(receiverCosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
                 float3 localLighting = reservoir.sample.radiance * (reservoir.inversePdf * cosine);
+                #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                    if (openPbr && reservoir.inversePdf > 0.0)
+                    {
+                        localLighting = (reservoir.sample.radiance * reservoir.inversePdf)
+                            * RestirOpenPbrDiffuse(prepared, receiverDirection, receiverCosine, cosine, inverseDiffuseColor);
+                    }
+                #endif
                 if (directionalContact)
                 {
                     // Close first hits already account for geometry along the ray.
                     float visibility = NearDiffuseDirectionVisibility(contact, receiverDirection);
                     localLighting *= lerp(1.0, visibility, saturate(hitDistance / _SdfNearOcclusion.x));
 
+                }
+                if (directionalContact || openPbr)
+                {
                     float4 distantDirection = _SdfDiffuseProbeInput.Load(int3(DistantProbeDirectionAddress(tile), 0));
                     if (distantDirection.w > 0.0)
                     {
                         float3 incoming = SafeNormalize(distantDirection.xyz);
                         // Distant samples were drawn from the probe's cosine PDF.
-                        float materialWeight = min(2.0, saturate(dot(normal, incoming)) / max(dot(sourceNormal, incoming), 1e-4));
-                        distant.rgb *= materialWeight * NearDiffuseDirectionVisibility(contact, incoming);
+                        float incomingCosine = saturate(dot(normal, incoming));
+                        float sourceCosine = max(dot(sourceNormal, incoming), 1e-4);
+                        float limitedCosine = min(incomingCosine, 2.0 * sourceCosine);
+                        float3 response = (limitedCosine / sourceCosine).xxx;
+                        #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                            if (openPbr)
+                                response = RestirOpenPbrDiffuse(prepared, incoming, incomingCosine,
+                                    limitedCosine, inverseDiffuseColor) / sourceCosine;
+                        #endif
+                        distant.rgb *= response;
+                        if (directionalContact)
+                            distant.rgb *= NearDiffuseDirectionVisibility(contact, incoming);
                     }
                 }
                 float3 lighting = min(localLighting + distant.rgb, 65000.0);
@@ -594,6 +659,9 @@ void IntegrateRestirLighting(uint3 id)
         result.rgb *= invCoveredWeight;
         variance = max(0.0, m2 * invCoveredWeight);
         result.a /= max(total, 1e-5);
+        // Keep the two filter domains separate; Denoise restores unsigned coverage.
+        if (openPbr)
+            result.a = -result.a;
     }
     _SdfDiffuseOutput[id.xy] = result;
     _SdfRestirVarianceOutput[id.xy] = variance;
@@ -606,6 +674,8 @@ void FilterRestirLighting(uint3 id)
         return;
 
     float4 result = _SdfDiffuseCurrentResolved.Load(int3(id.xy, 0));
+    bool openPbr = result.a < 0.0;
+    result.a = abs(result.a);
     result.rgb = _SdfRestirFilterInput.Load(int3(id.xy, 0)).rgb;
     float variance = _SdfRestirVariance.Load(int3(id.xy, 0));
     float3 position, normal;
@@ -629,9 +699,11 @@ void FilterRestirLighting(uint3 id)
                     int2 tap = int2(id.xy) + offset * step;
                     if (all(offset == 0) || any(tap < 0) || any(tap >= int2(size)))
                         continue;
-                    float confidence = _SdfDiffuseCurrentResolved.Load(int3(tap, 0)).a;
+                    float signedConfidence = _SdfDiffuseCurrentResolved.Load(int3(tap, 0)).a;
+                    float confidence = abs(signedConfidence);
                     float3 otherPosition, otherNormal;
-                    if (confidence <= 0.0 || !LoadReceiver(uint2(tap), otherPosition, otherNormal))
+                    if (confidence <= 0.0 || (signedConfidence < 0.0) != openPbr
+                        || !LoadReceiver(uint2(tap), otherPosition, otherNormal))
                         continue;
                     float weight = ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth);
                     if (weight <= 0.0)

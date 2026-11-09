@@ -91,6 +91,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Generate one ReSTIR candidate per 2x2 pixels. Hybrid uses valid screen hits first and falls back to Mesh SDF. Integrate per pixel with variance-guided filtering.")]
         public BoolParameter restirPixelIntegration = new(false);
 
+        [Tooltip("Evaluate the native OpenPBR opaque diffuse BRDF per direction during 2x2 ReSTIR integration. Requires the three OpenPBR GBuffer inputs.")]
+        public BoolParameter restirOpenPbrDiffuse = new(true);
+
         [Tooltip("Reproject the resolved indirect diffuse lighting with motion vectors instead of accumulating the probe grid.")]
         public BoolParameter pixelTemporal = new(false);
 

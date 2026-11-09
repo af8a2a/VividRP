@@ -505,7 +505,12 @@ namespace VividRP.Runtime.GPUDriven
                 }
             }
 
-            if (materialProgram.Topology != expectedTopology)
+            // Native OpenPBR is also an opaque, single-closure material. It
+            // uses an explicit graph while sharing the StandardLit proxy slot.
+            bool nativeOpenPbrGraph = graph != null
+                && materialProxy.Model == GPUDrivenMaterialProxyModel.StandardLit
+                && materialProgram.Topology == MaterialProgramTopologySpecialization.OpenPBROpaque;
+            if (materialProgram.Topology != expectedTopology && !nativeOpenPbrGraph)
             {
                 validationMessage =
                     $"Material Graph ProgramID {(uint) materialProgram.ProgramID} is not compatible with proxy model '{materialProxy.Model}'.";

@@ -10,6 +10,8 @@
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
 #pragma kernel ResolveSdfDiffuseGI
+#pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
+#pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
 #pragma kernel PlaceSdfAdaptiveProbes
 #pragma kernel FilterSdfDiffuseProbes
 #pragma kernel FilterSdfDirectionalHits
@@ -33,6 +35,14 @@
 #include "../../Public/GPUDriven/VividVisibilityBuffer.hlsl"
 #include "../../Public/VividSkyLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+#if defined(VIVID_SDF_RESTIR_OPENPBR)
+#include "../../Public/ShaderVariablesFunctions.hlsl"
+#include "../../Public/VividOpenPBROpaque.hlsl"
+#include "../../Public/VividOpenPBROpaqueGBuffer.hlsl"
+Texture2D<float4> _SdfOpenPbrParameters;
+Texture2D<float4> _SdfOpenPbrAux0;
+Texture2D<float4> _SdfOpenPbrAux1;
+#endif
 
 static const uint ProbeSpacing = 16u;
 static const uint RestirPixelSpacing = 2u;
@@ -108,6 +118,7 @@ uint _SdfDiffuseHasHistory;
 uint _SdfDiffuseDirectionalProbes;
 uint _SdfDiffuseAdaptiveProbes;
 uint _SdfRestirDense;
+uint _SdfRestirOpenPbrDiffuse;
 uint _SdfDiffuseSpatialFilter;
 uint _SdfDiffuseHitFilterEnabled;
 uint _SdfDiffuseRealtimeOnly;
@@ -1165,7 +1176,7 @@ uint2 DistantProbeDirectionAddress(uint2 tile)
 
 void StoreDistantProbeDirection(uint2 tile, float3 direction)
 {
-    if (_SdfRestirDense != 0u && _SdfNearOcclusion.z > 0.0)
+    if (_SdfRestirDense != 0u && (_SdfNearOcclusion.z > 0.0 || _SdfRestirOpenPbrDiffuse != 0u))
         _SdfDiffuseProbes[DistantProbeDirectionAddress(tile)] = float4(direction, any(direction != 0.0) ? 1.0 : 0.0);
 }
 
@@ -2031,6 +2042,13 @@ void AddProbeToResolve(uint2 tile, float weight, float3 position, float3 normal,
     totalWeight += weight;
 }
 
+#if defined(VIVID_SDF_RESTIR_OPENPBR)
+[numthreads(8, 8, 1)]
+void ResolveSdfRestirOpenPBR(uint3 id : SV_DispatchThreadID)
+{
+    IntegrateRestirLighting(id);
+}
+#else
 [numthreads(8, 8, 1)]
 void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
 {
@@ -2088,8 +2106,10 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     }
     _SdfDiffuseOutput[id.xy] = result;
 }
+#endif
 
-bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, out float4 history, out float foregroundWeight)
+bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
+    out float4 history, out float foregroundWeight)
 {
     history = 0.0;
     foregroundWeight = 0.0;
@@ -2147,8 +2167,9 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, out float4 hi
             continue;
 
         float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
-        if (sample.a > 0.0)
+        if (abs(sample.a) > 0.0 && (sample.a < 0.0) == openPbr)
         {
+            sample.a = abs(sample.a);
             history += sample * weight;
             totalWeight += weight;
         }
@@ -2157,7 +2178,7 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, out float4 hi
     return totalWeight >= 0.35;
 }
 
-float3 ClampPixelHistory(uint2 pixel, float3 position, float3 normal, float3 current, float3 history)
+float3 ClampPixelHistory(uint2 pixel, float3 position, float3 normal, float3 current, float3 history, bool openPbr)
 {
     float3 low = current;
     float3 high = current;
@@ -2172,7 +2193,8 @@ float3 ClampPixelHistory(uint2 pixel, float3 position, float3 normal, float3 cur
             continue;
         float4 lighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
         float3 otherPosition, otherNormal;
-        if (lighting.a <= 0.0 || !LoadReceiver(uint2(tap), otherPosition, otherNormal)
+        if (abs(lighting.a) <= 0.0 || (lighting.a < 0.0) != openPbr
+            || !LoadReceiver(uint2(tap), otherPosition, otherNormal)
             || ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth) < 0.15)
             continue;
         low = min(low, lighting.rgb);
@@ -2193,6 +2215,7 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         return;
 
     float4 result = _SdfDiffuseCurrentResolved.Load(int3(id.xy, 0));
+    bool openPbr = result.a < 0.0;
     float3 position, normal;
     bool receiver = LoadReceiver(id.xy, position, normal);
     float age = 0.0;
@@ -2203,7 +2226,7 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             // Occluder depth must survive even when this frame has no valid GI there.
             packed = f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0))) | (uint(PackProbeNormal(normal)) << 16u);
         #endif
-        if (result.a > 0.0)
+        if (abs(result.a) > 0.0)
         {
             #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
                 packed = f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0))) | (uint(PackProbeNormal(normal)) << 16u);
@@ -2211,9 +2234,9 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             age = 1.0;
             float4 history;
             float foregroundWeight;
-            if (_SdfDiffuseHasHistory != 0u && ReadPixelHistory(id.xy, position, normal, history, foregroundWeight))
+            if (_SdfDiffuseHasHistory != 0u && ReadPixelHistory(id.xy, position, normal, openPbr, history, foregroundWeight))
             {
-                float3 bounded = ClampPixelHistory(id.xy, position, normal, result.rgb, history.rgb);
+                float3 bounded = ClampPixelHistory(id.xy, position, normal, result.rgb, history.rgb, openPbr);
                 float confidence = 1.0;
                 #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
                     // A partly occluded footprint can renormalize a few bright taps.
@@ -2230,7 +2253,7 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, age);
+    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, openPbr ? -age : age);
     _SdfDiffusePixelGeometryOutput[id.xy] = packed;
     if (receiver && _SdfDiffuseRealtimeOnly != 0u)
         result.a = 1.0;

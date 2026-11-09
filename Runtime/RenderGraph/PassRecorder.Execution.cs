@@ -93,8 +93,8 @@ namespace VividRP.Runtime
                     s_FrameData.Get<VividSdfScreenTraceData>().Reset();
                 if (s_FrameData.Contains<VividSdfReceiverFrameData>())
                     s_FrameData.Get<VividSdfReceiverFrameData>().Reset();
-                if (s_FrameData.Contains<VividSdfSkyFrameData>())
-                    s_FrameData.Get<VividSdfSkyFrameData>().Reset();
+                if (s_FrameData.Contains<VividSdfDiffuseFrameData>())
+                    s_FrameData.Get<VividSdfDiffuseFrameData>().Reset();
                 if (s_FrameData.Contains<VividGlobalSdfFrameData>())
                     s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
             }

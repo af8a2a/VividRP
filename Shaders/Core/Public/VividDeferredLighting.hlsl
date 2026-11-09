@@ -29,6 +29,7 @@ uint _VividOpenPBRLutsReady;
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
 Texture2D<float4> _RealtimeDiffuseGI;
 uint _RealtimeDiffuseGIEnabled;
+uint _RealtimeOpenPbrDiffuse;
 #endif
 
 float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord)
@@ -134,8 +135,13 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, viewDirectionWS);
     OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared);
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+    bool realtimeOpenPbrDiffuse = false;
+    #if defined(VIVID_REALTIME_DIFFUSE_GI)
+        realtimeOpenPbrDiffuse = _RealtimeOpenPbrDiffuse != 0u;
+    #endif
     result = VividEvaluateOpenPBROpaqueIndirect(inputs, albedo, lightLoop,
-        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion), LoadVividRealtimeDiffuseGI(pixelCoord));
+        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion),
+        LoadVividRealtimeDiffuseGI(pixelCoord), realtimeOpenPbrDiffuse);
     [loop]
     for (uint i = 0u; i < _DirectionalLightCount; ++i)
     {

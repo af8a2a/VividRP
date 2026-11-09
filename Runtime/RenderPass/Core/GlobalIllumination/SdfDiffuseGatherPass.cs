@@ -16,10 +16,18 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Reset() => Visibility = Depth = GBuffer0 = GBuffer1 = null;
     }
 
-    internal sealed class VividSdfSkyFrameData : ContextItem
+    internal sealed class VividSdfDiffuseFrameData : ContextItem
     {
         internal RenderGraphTexture Output;
-        public override void Reset() => Output = null;
+        internal bool SkyHandled;
+        internal SdfDiffuseGatherPass OpenPbrSource;
+
+        public override void Reset()
+        {
+            Output = null;
+            SkyHandled = false;
+            OpenPbrSource = null;
+        }
     }
 
     public sealed class SdfDiffuseGatherPass : ComputePass, IRenderGraphPreparePass
@@ -185,6 +193,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RestirTemporalId = Shader.PropertyToID("_SdfRestirTemporal");
         private static readonly int RestirOutputId = Shader.PropertyToID("_SdfRestirOutput");
         private static readonly int RestirDenseId = Shader.PropertyToID("_SdfRestirDense");
+        private static readonly int RestirOpenPbrDiffuseId = Shader.PropertyToID("_SdfRestirOpenPbrDiffuse");
+        private static readonly int OpenPbrParametersId = Shader.PropertyToID("_SdfOpenPbrParameters");
+        private static readonly int OpenPbrAux0Id = Shader.PropertyToID("_SdfOpenPbrAux0");
+        private static readonly int OpenPbrAux1Id = Shader.PropertyToID("_SdfOpenPbrAux1");
         private static readonly int RestirSpatialId = Shader.PropertyToID("_SdfRestirSpatial");
         private static readonly int RestirVarianceId = Shader.PropertyToID("_SdfRestirVariance");
         private static readonly int RestirVarianceOutputId = Shader.PropertyToID("_SdfRestirVarianceOutput");
@@ -204,6 +216,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
+
+        [RenderGraphResource(Name = "OpenPBR Parameters (RT4)", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_OpenPbrParameters;
+
+        [RenderGraphResource(Name = "OpenPBR LayerAux0", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_OpenPbrAux0;
+
+        [RenderGraphResource(Name = "OpenPBR LayerAux1", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_OpenPbrAux1;
 
         [RenderGraphResource(Name = "Screen Trace HZB", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ScreenHzb;
@@ -245,6 +266,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool AdaptiveProbes, SpatialFilter, HitDistanceFilter;
             internal bool RestirGather;
             internal bool RestirPixelIntegration;
+            internal bool RestirOpenPbrDiffuse;
             internal ulong RestirCardVersion;
             internal bool PixelTemporal;
             internal bool CorrectReceiverSelfHits;
@@ -372,6 +394,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private ulong m_FarCardVersion;
         private float m_FarDistance;
         private Vector4 m_NearOcclusion;
+        private bool m_RestirOpenPbrDiffuse;
+        private int m_OpenPbrResolveKernel = -1;
         private int m_FarKernel = -1, m_NearOcclusionKernel = -1;
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection;
@@ -444,6 +468,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_Compute.HasKernel("ApplySdfNearOcclusion"))
                 m_NearOcclusionKernel = m_Compute.FindKernel("ApplySdfNearOcclusion");
             m_ResolveKernel = m_Compute.FindKernel("ResolveSdfDiffuseGI");
+            if (m_Compute.HasKernel("ResolveSdfRestirOpenPBR"))
+            {
+                int kernel = m_Compute.FindKernel("ResolveSdfRestirOpenPBR");
+                if (m_Compute.IsSupported(kernel))
+                    m_OpenPbrResolveKernel = kernel;
+            }
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
                 && m_Compute.HasKernel("TemporalSdfDiffuseGI"))
@@ -523,6 +553,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarCardVersion = 0;
             m_FarPending = m_FarClear = false;
             m_NearOcclusion = default;
+            m_RestirOpenPbrDiffuse = false;
             m_SkyTexture = default;
             m_SkyTraceDistance = 0f;
             m_SkyContentHash = 0;
@@ -585,6 +616,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && 4 * CoreUtils.DivRoundUp(m_Width, RestirPixelSpacing) <= SystemInfo.maxTextureSize
                 && 2 * CoreUtils.DivRoundUp(m_Height, RestirPixelSpacing) <= SystemInfo.maxTextureSize;
             m_RestirGather = canRestir && (m_TraceMode == SdfDiffuseTraceMode.SdfOnly || m_RestirPixelIntegration);
+            m_RestirOpenPbrDiffuse = m_RestirPixelIntegration && m_OpenPbrResolveKernel >= 0
+                && settings.restirOpenPbrDiffuse.value && CoversReceiver(m_OpenPbrParameters)
+                && CoversReceiver(m_OpenPbrAux0) && CoversReceiver(m_OpenPbrAux1)
+                && PipelineResourceManager.Get<VividRPCoreResources>()?.OpenPBRLuts?.IsReady == true;
             m_AdaptiveProbes &= !m_RestirPixelIntegration;
             m_DirectionalProbes &= !m_RestirPixelIntegration;
             m_HitDistanceFilter &= !m_RestirGather;
@@ -696,7 +731,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Probes.Resize(m_RestirPixelIntegration ? 1 : atlasWidth, m_RestirPixelIntegration ? 1 : m_AtlasHeight);
             bool needsProbeScratch = m_SpatialFilter || m_RestirGather || m_DirectionalCache;
             // The dense path keeps the exact far or sky direction alongside its radiance.
-            int scratchWidth = m_RestirPixelIntegration && m_NearOcclusion.z > 0f ? 2 * m_ProbeWidth : atlasWidth;
+            int scratchWidth = m_RestirPixelIntegration && (m_NearOcclusion.z > 0f || m_RestirOpenPbrDiffuse)
+                ? 2 * m_ProbeWidth : atlasWidth;
             m_FilteredProbes.Resize(needsProbeScratch ? scratchWidth : 1, needsProbeScratch ? m_AtlasHeight : 1);
             m_Geometry.Resize(m_ProbeWidth, m_AtlasHeight);
             bool probesValid = m_DirectionalCache || CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
@@ -900,7 +936,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_RawResolved.innerHandle.IsValid() && m_CurrentPixelLighting.innerHandle.IsValid()
                 && m_CurrentPixelGeometry.innerHandle.IsValid() && m_PreviousPixelLighting.innerHandle.IsValid()
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
+            m_RestirOpenPbrDiffuse &= m_OpenPbrParameters?.innerHandle.IsValid() == true
+                && m_OpenPbrAux0?.innerHandle.IsValid() == true && m_OpenPbrAux1?.innerHandle.IsValid() == true;
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
+                && m_State.RestirOpenPbrDiffuse == m_RestirOpenPbrDiffuse
                 && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting
                 && m_State.GlobalClipmapUsed == useGlobalClipmap;
             bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather && !m_DirectionalCache;
@@ -919,6 +958,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Compute, HitFilterEnabledId, m_HitDistanceFilter ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, RestirEnabledId, m_RestirGather ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, RestirDenseId, m_RestirPixelIntegration ? 1 : 0);
+            cmd.SetComputeIntParam(m_Compute, RestirOpenPbrDiffuseId, m_RestirOpenPbrDiffuse ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, RecordRayDiagnosticsId, m_RecordRayDiagnostics ? 1 : 0);
             cmd.SetComputeIntParam(m_Compute, RecordFirstHitDiagnosticsId, m_RecordFirstHitDiagnostics ? 1 : 0);
             cmd.SetComputeTextureParam(m_Compute, traceKernel, ScreenRaysId, useScreenRays ? m_ScreenRays.innerHandle : black);
@@ -1002,8 +1042,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
                     RecordNearOcclusion(cmd);
             }
-            if (m_SkyTextureParams.w > 0.5f)
-                context.GetOrCreate<VividSdfSkyFrameData>().Output = m_Output;
+            var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
+            diffuse.Output = m_Output;
+            diffuse.SkyHandled = m_SkyTextureParams.w > 0.5f;
+            diffuse.OpenPbrSource = m_RestirOpenPbrDiffuse ? this : null;
 #if UNITY_EDITOR
             EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
                 m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
@@ -1025,6 +1067,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.HitDistanceFilter = m_HitDistanceFilter;
             m_State.RestirGather = m_RestirGather;
             m_State.RestirPixelIntegration = m_RestirPixelIntegration;
+            m_State.RestirOpenPbrDiffuse = m_RestirOpenPbrDiffuse;
             m_State.RestirCardVersion = m_RestirCardVersion;
             m_State.PixelTemporal = pixelTemporal;
             m_State.CorrectReceiverSelfHits = correctReceiver;
@@ -1077,6 +1120,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
             m_RadiosityKernel = -1;
             m_FarKernel = m_NearOcclusionKernel = -1;
+            m_OpenPbrResolveKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
@@ -1418,11 +1462,26 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RestirHistory.MarkWritten();
         }
 
+        private bool CoversReceiver(RenderGraphTexture texture) =>
+            texture != null && texture.desc.Width == m_Width && texture.desc.Height == m_Height;
+
+        internal bool MatchesOpenPbrReceiver(RenderGraphTexture depth, RenderGraphTexture gbuffer0, RenderGraphTexture gbuffer1,
+            RenderGraphTexture parameters, RenderGraphTexture aux0, RenderGraphTexture aux1) =>
+            ReferenceEquals(m_Depth, depth) && ReferenceEquals(m_GBuffer0, gbuffer0) && ReferenceEquals(m_GBuffer1, gbuffer1)
+            && ReferenceEquals(m_OpenPbrParameters, parameters) && ReferenceEquals(m_OpenPbrAux0, aux0)
+            && ReferenceEquals(m_OpenPbrAux1, aux1);
+
         private void RecordResolve(ComputeCommandBuffer cmd, TextureHandle placement, bool pixelTemporal)
         {
             using var scope = new ProfilingScope(cmd, ResolveSampler);
-            int kernel = m_ResolveKernel;
+            int kernel = m_RestirOpenPbrDiffuse ? m_OpenPbrResolveKernel : m_ResolveKernel;
             BindReceiver(cmd, kernel);
+            if (m_RestirOpenPbrDiffuse)
+            {
+                cmd.SetComputeTextureParam(m_Compute, kernel, OpenPbrParametersId, m_OpenPbrParameters.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, OpenPbrAux0Id, m_OpenPbrAux0.innerHandle);
+                cmd.SetComputeTextureParam(m_Compute, kernel, OpenPbrAux1Id, m_OpenPbrAux1.innerHandle);
+            }
             cmd.SetComputeTextureParam(m_Compute, kernel, GeometryId, m_Geometry.innerHandle);
             cmd.SetComputeTextureParam(m_Compute, kernel, PlacementId, placement);
             bool useScratch = m_DirectionalCache || m_RestirPixelIntegration || (m_SpatialFilter && !m_HitDistanceFilter && !m_RestirGather);

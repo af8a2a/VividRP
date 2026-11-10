@@ -19,6 +19,20 @@ namespace VividRP.Runtime.RenderPass.Core
             : base(value, overrideState) { }
     }
 
+    public enum SdfDiffuseGatherMethod
+    {
+        [InspectorName("Screen Probe Gather")]
+        ScreenProbeGather,
+        [InspectorName("ReSTIR Gather (2 × 2)")]
+        ReSTIRGather
+    }
+
+    [Serializable]
+    public sealed class SdfDiffuseGatherMethodParameter : VolumeParameter<SdfDiffuseGatherMethod>
+    {
+        public SdfDiffuseGatherMethodParameter(SdfDiffuseGatherMethod value) : base(value) { }
+    }
+
     public enum SdfDiffuseSpatialDenoise
     {
         Legacy,
@@ -51,6 +65,9 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         [Tooltip("Enable SDF diffuse GI in graphs that contain the gather pass.")]
         public BoolParameter enabled = new(true);
+
+        [Tooltip("Choose the final gather independently of the trace mode. Screen Probe Gather filters directional probe radiance. ReSTIR Gather resamples 2×2 reservoirs and requires a usable Mesh SDF scene.")]
+        public SdfDiffuseGatherMethodParameter gatherMethod = new(SdfDiffuseGatherMethod.ScreenProbeGather);
 
         [Tooltip("Optional baked orthographic surface cards. Uncached SDFs still occlude rays.")]
         public VividSdfSurfaceCacheParameter surfaceCache = new(null);
@@ -94,10 +111,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("World-space radius of realtime diffuse contact occlusion.")]
         public ClampedFloatParameter nearOcclusionRadius = new(0.35f, 0.05f, 1f);
 
-        [Tooltip("Gather first-order directional lighting in the screen probes and evaluate it at the receiver normal.")]
+        [HideInInspector]
         public BoolParameter directionalScreenProbes = new(false);
 
-        [Tooltip("Cache incoming radiance and hit distance per direction before filtering 16 px directional screen probes.")]
+        [HideInInspector]
         public BoolParameter screenProbeDirectionalCache = new(false);
 
         [Tooltip("Use reprojected radiance to subdivide bright directions while retaining cosine coverage across the hemisphere.")]
@@ -106,10 +123,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Refine a hierarchy of octahedral directions. Use Far Radiance Cache, when enabled, if screen probe history is unavailable.")]
         public BoolParameter screenProbeHierarchicalGuide = new(false);
 
-        [Tooltip("Trace one additional probe per tile where the uniform probes do not represent nearby geometry.")]
+        [Tooltip("Trace one additional probe per tile with weak geometric support. Enabled by default with Screen Probe Gather.")]
         public BoolParameter adaptiveScreenProbes = new(false);
 
-        [Tooltip("Filter neighboring screen probes using depth and normal agreement before resolving diffuse GI.")]
+        [Tooltip("Filter neighboring screen probes before resolving diffuse GI. Enabled by default with Screen Probe Gather.")]
         public BoolParameter screenProbeSpatialFilter = new(false);
 
         [Tooltip("Probe-grid filter footprint. Adaptive 5x5 adds an outer ring for weak probes. The ray-pair hit-distance filter uses the cross footprint.")]
@@ -118,16 +135,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
         public BoolParameter screenProbeHitDistanceFilter = new(false);
 
-        [Tooltip("Use temporal and spatial reservoir resampling. Requires a Mesh SDF scene and replaces the screen probe spatial filters. Hybrid also requires ReSTIR Pixel Integration.")]
+        [HideInInspector]
         public BoolParameter restirGather = new(false);
 
-        [Tooltip("Generate one ReSTIR candidate per 2x2 pixels. Hybrid uses valid screen hits first and falls back to Mesh SDF. Integrate per pixel with variance-guided filtering.")]
+        [HideInInspector]
         public BoolParameter restirPixelIntegration = new(false);
 
         [Tooltip("Evaluate the native OpenPBR opaque diffuse BRDF per direction during 2x2 ReSTIR integration. Requires the three OpenPBR GBuffer inputs.")]
         public BoolParameter restirOpenPbrDiffuse = new(true);
 
-        [Tooltip("Reproject the resolved indirect diffuse lighting with motion vectors instead of accumulating the probe grid.")]
+        [Tooltip("Reproject the resolved diffuse lighting using motion vectors. Enabled by default for either Gather Method when motion is connected.")]
         public BoolParameter pixelTemporal = new(false);
 
         [Tooltip("Maximum age of stable full-resolution diffuse GI history. Motion, coverage loss and shading changes shorten the window.")]
@@ -150,5 +167,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [Tooltip("Diagnostic view that retains only bounce from hits outside the camera frustum.")]
         public BoolParameter offscreenBounceOnly = new(false);
+
+        // Serialized profiles can retain the former gather options until a method is selected.
+        internal bool UsesLegacyGatherSettings => !gatherMethod.overrideState
+            && gatherMethod.value == SdfDiffuseGatherMethod.ScreenProbeGather
+            && (restirGather.overrideState || restirGather.value
+                || restirPixelIntegration.overrideState || restirPixelIntegration.value
+                || directionalScreenProbes.overrideState || directionalScreenProbes.value
+                || screenProbeDirectionalCache.overrideState);
     }
 }

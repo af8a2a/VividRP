@@ -206,6 +206,9 @@ MonoBehaviour:
   enabled:
     m_OverrideState: 1
     m_Value: 1
+  gatherMethod:
+    m_OverrideState: 1
+    m_Value: 0
   surfaceCache:
     m_OverrideState: 1
     m_Value: {fileID: 11400000, guid: a9bf1ed0b0bd0a34a9afdb40337d7a6d, type: 2}
@@ -266,6 +269,9 @@ MonoBehaviour:
   screenProbeSpatialFilter:
     m_OverrideState: 1
     m_Value: 1
+  screenProbeSpatialKernel:
+    m_OverrideState: 0
+    m_Value: 1
   screenProbeHitDistanceFilter:
     m_OverrideState: 0
     m_Value: 0
@@ -281,6 +287,12 @@ MonoBehaviour:
   pixelTemporal:
     m_OverrideState: 1
     m_Value: 1
+  pixelHistoryMaxAge:
+    m_OverrideState: 0
+    m_Value: 16
+  spatialDenoise:
+    m_OverrideState: 0
+    m_Value: 2
   correctReceiverSelfHits:
     m_OverrideState: 1
     m_Value: 0

@@ -17,6 +17,8 @@
 #include "SdfScreenProbeHistory.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
 
+uint _SdfScreenPreviousRadianceValid;
+
 bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thickness, out float3 radiance)
 {
     radiance = 0.0;
@@ -87,7 +89,8 @@ void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
                 compatible = length(rayToHit) <= _SdfDiffuseMaxDistance
                     && dot(normal, directionToHit) > 0.02 && dot(hit.normal, directionToHit) < -0.05;
             }
-            if (compatible && ReadScreenRadiance(hit.pixel, hit.position, hit.normal, hit.thickness, radiance))
+            if (compatible && _SdfScreenPreviousRadianceValid != 0u
+                && ReadScreenRadiance(hit.pixel, hit.position, hit.normal, hit.thickness, radiance))
                 encodedHit = _SdfRestirDense != 0u || _SdfScreenCardLighting != 0u
                     ? asfloat(ScreenHitPixelBase + hit.pixel.y * screenSize.x + hit.pixel.x) : hit.distance;
         }

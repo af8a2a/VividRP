@@ -144,6 +144,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HzbId = Shader.PropertyToID("_SdfScreenHzb");
         private static readonly int MotionId = Shader.PropertyToID("_SdfScreenMotion");
         private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
+        private static readonly int ScreenRadianceValidId = Shader.PropertyToID("_SdfScreenPreviousRadianceValid");
         private static readonly int ScreenGeometryId = Shader.PropertyToID("_SdfScreenPreviousGeometry");
         private static readonly int PreviousInverseVpId = Shader.PropertyToID("_SdfScreenPreviousInverseVP");
         private static readonly int JitterDeltaId = Shader.PropertyToID("_SdfScreenJitterDelta");
@@ -1686,11 +1687,35 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, HzbId, m_ScreenHzb.innerHandle);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, MotionId, m_ScreenMotion.innerHandle);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRadianceId, m_PreviousScreenRadiance);
+            // Keep the screen hit distance so Hybrid can shade it through the current SDF path.
+            cmd.SetComputeIntParam(m_TraceCompute, ScreenRadianceValidId,
+                !m_UseSdf || MatchesPreviousDirectionalLighting() ? 1 : 0);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenGeometryId, m_PreviousScreenGeometry);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRaysOutputId, m_ScreenRays.innerHandle);
             cmd.SetComputeMatrixParam(m_TraceCompute, PreviousInverseVpId, m_State.ViewProjection.inverse);
             cmd.SetComputeVectorParam(m_TraceCompute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
             cmd.DispatchCompute(m_TraceCompute, kernel, groupsX, groupsY, 1);
+        }
+
+        private bool MatchesPreviousDirectionalLighting()
+        {
+            bool directional = m_LightPositionRange.w < 0f;
+            bool previousDirectional = m_State.LightPositionRange.w < 0f;
+            if (!directional && !previousDirectional)
+                return true;
+            if (directional != previousDirectional || m_State.LightLayerMask != m_LightLayerMask)
+                return false;
+
+            Vector3 color = m_LightColorShadow;
+            Vector3 previousColor = m_State.LightColorShadow;
+            float colorScaleSquared = Mathf.Max(color.sqrMagnitude, previousColor.sqrMagnitude);
+            // Small per-frame changes can still use the one-frame-old screen radiance.
+            const float relativeColorToleranceSquared = 0.01f;
+            const float directionCosineTolerance = 0.9998477f; // One degree.
+            const float shadowStrengthTolerance = 0.1f;
+            return (color - previousColor).sqrMagnitude <= relativeColorToleranceSquared * colorScaleSquared
+                && Vector3.Dot(m_LightPositionRange, m_State.LightPositionRange) >= directionCosineTolerance
+                && Mathf.Abs(m_LightColorShadow.w - m_State.LightColorShadow.w) <= shadowStrengthTolerance;
         }
 
         private void RecordDirectionalGuide(ComputeCommandBuffer cmd, TextureHandle placement, TextureHandle black,

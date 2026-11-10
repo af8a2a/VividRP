@@ -21,7 +21,27 @@ float FilterNeighborWeight(uint2 tile, float4 center, float3 normal, float eyeDe
     return weight * _SdfDiffuseProbeInput.Load(int3(tile, 0)).a;
 }
 
-static const int2 ProbeFilterOffsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+static const int2 ProbeFilterOffsets[24] =
+{
+    int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1),
+    int2(-1, -1), int2(1, -1), int2(-1, 1), int2(1, 1),
+    int2(-2, 0), int2(2, 0), int2(0, -2), int2(0, 2),
+    int2(-2, -1), int2(-2, 1), int2(2, -1), int2(2, 1),
+    int2(-1, -2), int2(1, -2), int2(-1, 2), int2(1, 2),
+    int2(-2, -2), int2(2, -2), int2(-2, 2), int2(2, 2)
+};
+
+uint ProbeSpatialTapCount(float confidence)
+{
+    if (_SdfProbeSpatialKernel == 0u)
+        return 4u;
+    return _SdfProbeSpatialKernel == 2u && confidence < 0.625 ? 24u : 8u;
+}
+
+float ProbeSpatialFalloff(int2 offset)
+{
+    return exp2(-0.55 * float(dot(offset, offset) - 1));
+}
 
 float SelectFilterNeighbor(int2 neighbor, uint2 grid, float4 center, float3 normal, float eyeDepth, out uint2 selected)
 {
@@ -50,17 +70,21 @@ void FilterProbeLighting(uint2 tile, uint2 grid, float4 center, float4 geometry,
     for (uint plane = 0u; plane < planes; ++plane)
         lighting[plane] = _SdfDiffuseProbeInput.Load(int3(tile + plane * stride, 0)).rgb;
 
-    float total = 1.0;
+    float total = _SdfProbeSpatialKernel == 0u ? 1.0 : max(0.25, center.a);
+    [loop]
+    for (uint plane = 0u; plane < planes; ++plane)
+        lighting[plane] *= total;
     if (geometry.w >= 0.0 && center.a > 0.0)
     {
         float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
         int2 uniformTile = int2(tile.x, tile.y % grid.y);
         [loop]
-        for (uint i = 0u; i < 4u; ++i)
+        for (uint i = 0u; i < ProbeSpatialTapCount(center.a); ++i)
         {
             uint2 selected;
-            float weight = SelectFilterNeighbor(uniformTile + ProbeFilterOffsets[i], grid, geometry, normal, eyeDepth, selected);
-            weight *= compatibility[i];
+            int2 offset = ProbeFilterOffsets[i];
+            float weight = SelectFilterNeighbor(uniformTile + offset, grid, geometry, normal, eyeDepth, selected);
+            weight *= i < 4u ? compatibility[min(i, 3u)] : ProbeSpatialFalloff(offset);
             if (weight <= 0.0)
                 continue;
             total += weight;
@@ -374,31 +398,35 @@ void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, ui
     _SdfDirectionalTemporalOutput[address] = current;
 }
 
-static const int2 ProbeTraceNeighborOffsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
-
 [numthreads(16, 1, 1)]
 void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
 {
     uint2 tile = group.xy;
     uint2 address = DirectionalGatherAddress(tile, bin);
     float4 lighting = _SdfDirectionalTemporal.Load(int3(address, 0));
-    if (_SdfDiffuseSpatialFilter != 0u && lighting.a > 0.0)
+    if (_SdfDiffuseSpatialFilter != 0u)
     {
         uint2 grid = DirectionalGrid();
         uint2 offset = DirectionalMetadataOffset(grid);
         float4 hit = _SdfDirectionalComposite.Load(int3(address + offset, 0));
-        if (hit.x != 0.0)
+        float4 geometry = _SdfDiffuseGeometry[tile];
+        // A traced miss stays unresolved. Only directions without a draw can borrow shape.
+        bool fill = _SdfProbeSpatialKernel != 0u && hit.y == 0.0 && lighting.a == 0.0;
+        if (geometry.w >= 0.0 && ((hit.x != 0.0 && lighting.a > 0.0) || fill))
         {
-            float4 geometry = _SdfDiffuseGeometry[tile];
             float3 normal = UnpackProbeNormal(geometry.w);
             float3 direction = DirectionalGatherDirection(bin, GetLocalFrame(normal));
             float eyeDepth = max(0.1, dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward));
-            float3 sum = lighting.rgb;
-            float total = 1.0;
+            float total = fill ? 0.0 : _SdfProbeSpatialKernel == 0u ? 1.0 : max(0.25, lighting.a);
+            float3 sum = lighting.rgb * total;
+            uint donors = 0u;
+            float4 referenceHit = hit;
+            float3 referencePosition = geometry.xyz;
             [loop]
-            for (uint tap = 0u; tap < 4u; ++tap)
+            for (uint tap = 0u; tap < ProbeSpatialTapCount(lighting.a); ++tap)
             {
-                int2 candidate = int2(tile.x, tile.y % grid.y) + ProbeTraceNeighborOffsets[tap];
+                int2 tapOffset = ProbeFilterOffsets[tap];
+                int2 candidate = int2(tile.x, tile.y % grid.y) + tapOffset;
                 if (any(candidate < 0) || any(candidate >= int2(grid)))
                     continue;
                 uint2 neighbor = uint2(candidate);
@@ -422,11 +450,33 @@ void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_Gro
                 uint2 otherAddress = DirectionalGatherAddress(neighbor, otherBin);
                 float4 otherLighting = _SdfDirectionalTemporal.Load(int3(otherAddress, 0));
                 float4 otherHit = _SdfDirectionalComposite.Load(int3(otherAddress + offset, 0));
-                weight *= otherLighting.a * ProbeTraceHitWeight(hit, otherHit, other.xyz - geometry.xyz);
+                if (fill)
+                {
+                    float3 delta = other.xyz - geometry.xyz;
+                    float3 endpoint = delta + otherHit.x * VividDecodeSurfaceSummaryNormal(otherHit.zw);
+                    // Without a center endpoint, accept only mutually consistent distant surface hits.
+                    if (otherLighting.a <= 0.0 || otherHit.x <= max(0.5, 2.0 * length(delta))
+                        || dot(direction, SafeNormalize(endpoint)) < 0.92)
+                        continue;
+                    if (donors == 0u)
+                    {
+                        referenceHit = otherHit;
+                        referencePosition = other.xyz;
+                    }
+                }
+                weight *= otherLighting.a * ProbeSpatialFalloff(tapOffset)
+                    * ProbeTraceHitWeight(referenceHit, otherHit, other.xyz - referencePosition);
+                if (weight <= 0.0)
+                    continue;
+                donors++;
                 sum += otherLighting.rgb * weight;
                 total += weight;
             }
-            lighting.rgb = sum / total;
+            if (!fill)
+                lighting.rgb = sum / total;
+            else if (donors >= 2u && total > 1e-4)
+                // Negative alpha carries limited shape support. It is excluded from sampling guidance.
+                lighting = float4(sum / total, -0.125 * saturate(total));
         }
     }
     _SdfDirectionalFilteredOutput[address] = lighting;
@@ -447,18 +497,40 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
         float3 normal = UnpackProbeNormal(geometry.w);
         float3x3 basis = GetLocalFrame(normal);
         float3 anchor = 0.0;
+        float3 borrowedAnchor = 0.0;
         [loop]
         for (uint bin = 0u; bin < DirectionalGatherBinCount; ++bin)
         {
             uint2 address = DirectionalGatherAddress(id.xy, bin);
             float weight = _SdfDirectionalComposite.Load(int3(address, 0)).a;
+            float4 filtered = _SdfDirectionalFiltered.Load(int3(address, 0));
+            if (filtered.a < 0.0)
+            {
+                float3 sample = filtered.rgb * -filtered.a;
+                float3 direction = DirectionalGatherDirection(bin, basis);
+                ProjectSdfProbeIrradiance(sh, sample / max(dot(normal, direction), 0.25), direction);
+                borrowedAnchor += sample;
+                continue;
+            }
             if (weight <= 0.0)
                 continue;
-            float3 sample = _SdfDirectionalFiltered.Load(int3(address, 0)).rgb * weight;
+            float3 sample = filtered.rgb * weight;
             float3 direction = DirectionalGatherDirection(bin, basis);
             ProjectSdfProbeIrradiance(sh, sample / max(dot(normal, direction), 0.25), direction);
             anchor += sample;
             covered += weight;
+        }
+        if (any(borrowedAnchor > 0.0))
+        {
+            // Redistribute directional shape without creating energy or trace coverage.
+            float3 scale = anchor / max(anchor + borrowedAnchor, 1e-5);
+            sh.r0 *= scale.r;
+            sh.r1 *= scale.r;
+            sh.g0 *= scale.g;
+            sh.g1 *= scale.g;
+            sh.b0 *= scale.b;
+            sh.b1 *= scale.b;
+            sh.c *= scale;
         }
         // SH truncation and a sparse cosine chart can shift the anchor energy.
         // Preserve the traced irradiance at the probe normal exactly.

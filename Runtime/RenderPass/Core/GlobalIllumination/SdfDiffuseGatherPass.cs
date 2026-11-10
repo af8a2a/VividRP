@@ -198,6 +198,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int AdaptiveProbesId = Shader.PropertyToID("_SdfDiffuseAdaptiveProbes");
         private static readonly int IntegrationJitterId = Shader.PropertyToID("_SdfScreenProbeIntegrationJitter");
         private static readonly int SpatialFilterId = Shader.PropertyToID("_SdfDiffuseSpatialFilter");
+        private static readonly int ProbeSpatialKernelId = Shader.PropertyToID("_SdfProbeSpatialKernel");
+        private static readonly int ProbeHistoryBlendId = Shader.PropertyToID("_SdfProbeHistoryBlend");
         private static readonly int ProbeCameraForwardId = Shader.PropertyToID("_SdfProbeCameraForward");
         private static readonly int PlacementId = Shader.PropertyToID("_SdfAdaptivePlacement");
         private static readonly int PlacementOutputId = Shader.PropertyToID("_SdfAdaptivePlacementOutput");
@@ -291,6 +293,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool HasScreenRays;
             internal bool DirectionalProbes;
             internal bool AdaptiveProbes, SpatialFilter, HitDistanceFilter;
+            internal SdfScreenProbeSpatialKernel ProbeSpatialKernel;
             internal bool RestirGather;
             internal bool RestirPixelIntegration;
             internal bool RestirOpenPbrDiffuse;
@@ -484,6 +487,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_HasScreenHistory, m_UseSdf;
         private bool m_DirectionalProbes;
         private bool m_AdaptiveProbes, m_SpatialFilter, m_HitDistanceFilter;
+        private SdfScreenProbeSpatialKernel m_ProbeSpatialKernel;
         private bool m_RestirGather;
         private bool m_RestirPixelIntegration;
         private ulong m_RestirCardVersion;
@@ -727,6 +731,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalGuide = m_DirectionalCache && settings.screenProbeSamplingGuide.value;
             m_DirectionalHierarchicalGuide = m_DirectionalGuide && settings.screenProbeHierarchicalGuide.value;
             m_HitDistanceFilter &= !m_DirectionalCache;
+            m_ProbeSpatialKernel = m_SpatialFilter && !m_RestirGather && !m_HitDistanceFilter
+                ? settings.screenProbeSpatialKernel.value : SdfScreenProbeSpatialKernel.Cross;
             int directionalWidth = m_DirectionalCache ? RaysPerProbe * m_ProbeWidth : 1;
             m_DirectionalGuideTexture.Resize(directionalWidth, m_DirectionalCache ? m_AtlasHeight : 1);
             m_DirectionalRayTexture.Resize(directionalWidth, m_DirectionalCache ? 2 * m_AtlasHeight : 1);
@@ -857,6 +863,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.DirectionalHierarchicalGuide == m_DirectionalHierarchicalGuide
                 && m_State.AdaptiveProbes == m_AdaptiveProbes && m_State.SpatialFilter == m_SpatialFilter
                 && m_State.HitDistanceFilter == m_HitDistanceFilter
+                && m_State.ProbeSpatialKernel == m_ProbeSpatialKernel
                 && m_State.RestirGather == m_RestirGather && m_State.RestirCardVersion == m_RestirCardVersion
                 && m_State.RestirPixelIntegration == m_RestirPixelIntegration
                 && m_State.SunConfigured == (m_SunHistory != null)
@@ -1047,7 +1054,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.RestirOpenPbrDiffuse == m_RestirOpenPbrDiffuse
                 && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting
                 && m_State.GlobalClipmapUsed == useGlobalClipmap;
-            bool useProbeHistory = hasHistory && !pixelTemporal && !m_RestirGather && !m_DirectionalCache;
+            bool wideProbeFilter = m_ProbeSpatialKernel != SdfScreenProbeSpatialKernel.Cross;
+            bool useProbeHistory = hasHistory && (!pixelTemporal || wideProbeFilter) && !m_RestirGather && !m_DirectionalCache;
             bool useDirectionalHistory = m_DirectionalCache && hasHistory && m_DirectionalHistoryValid
                 && m_PreviousDirectional.innerHandle.IsValid();
             bool useDirectionalGuideHistory = m_DirectionalGuide && hasHistory && m_DirectionalGuideHistoryValid
@@ -1076,6 +1084,8 @@ namespace VividRP.Runtime.RenderPass.Core
             int frame = unchecked((int)m_State.Frame++);
             cmd.SetComputeIntParam(m_TraceCompute, FrameId, frame);
             cmd.SetComputeIntParam(m_TraceCompute, HasHistoryId, useProbeHistory ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, ProbeSpatialKernelId, (int)m_ProbeSpatialKernel);
+            cmd.SetComputeFloatParam(m_TraceCompute, ProbeHistoryBlendId, pixelTemporal ? 0.55f : 0.75f);
             cmd.SetComputeIntParam(m_TraceCompute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, SpatialFilterId, m_SpatialFilter || m_RestirGather ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, OffscreenOnlyId, m_OffscreenOnly ? 1 : 0);
@@ -1119,6 +1129,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     BindProbeFrame(cmd, m_FilterCompute);
                     cmd.SetComputeIntParam(m_FilterCompute, DirectionalProbesId, m_DirectionalProbes ? 1 : 0);
                     cmd.SetComputeIntParam(m_FilterCompute, SpatialFilterId, m_SpatialFilter ? 1 : 0);
+                    cmd.SetComputeIntParam(m_FilterCompute, ProbeSpatialKernelId, (int)m_ProbeSpatialKernel);
                     if (m_HitDistanceFilter)
                     {
                         cmd.SetComputeIntParam(m_FilterCompute, HasHistoryId, useProbeHistory ? 1 : 0);
@@ -1193,6 +1204,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.AdaptiveProbes = m_AdaptiveProbes;
             m_State.SpatialFilter = m_SpatialFilter;
             m_State.HitDistanceFilter = m_HitDistanceFilter;
+            m_State.ProbeSpatialKernel = m_ProbeSpatialKernel;
             m_State.RestirGather = m_RestirGather;
             m_State.RestirPixelIntegration = m_RestirPixelIntegration;
             m_State.RestirOpenPbrDiffuse = m_RestirOpenPbrDiffuse;

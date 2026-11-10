@@ -96,6 +96,8 @@ uint _SdfDiffuseAdaptiveProbes;
 uint _SdfRestirDense;
 uint _SdfRestirOpenPbrDiffuse;
 uint _SdfDiffuseSpatialFilter;
+uint _SdfProbeSpatialKernel;
+float _SdfProbeHistoryBlend;
 uint _SdfDiffuseHitFilterEnabled;
 uint _SdfDiffuseOffscreenOnly;
 uint _SdfDiffuseUseScreenRays;

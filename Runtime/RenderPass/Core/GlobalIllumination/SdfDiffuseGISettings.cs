@@ -33,6 +33,19 @@ namespace VividRP.Runtime.RenderPass.Core
             : base(value) { }
     }
 
+    public enum SdfScreenProbeSpatialKernel
+    {
+        Cross,
+        [InspectorName("3 × 3")] Neighborhood3x3,
+        [InspectorName("Adaptive 5 × 5")] Adaptive5x5
+    }
+
+    [Serializable]
+    public sealed class SdfScreenProbeSpatialKernelParameter : VolumeParameter<SdfScreenProbeSpatialKernel>
+    {
+        public SdfScreenProbeSpatialKernelParameter(SdfScreenProbeSpatialKernel value) : base(value) { }
+    }
+
     [Serializable, VolumeComponentMenu("VividRP/Lighting/SDF Diffuse GI")]
     public sealed class SdfDiffuseGISettings : VolumeComponent
     {
@@ -98,6 +111,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [Tooltip("Filter neighboring screen probes using depth and normal agreement before resolving diffuse GI.")]
         public BoolParameter screenProbeSpatialFilter = new(false);
+
+        [Tooltip("Probe-grid filter footprint. Adaptive 5x5 adds an outer ring for weak probes. The ray-pair hit-distance filter uses the cross footprint.")]
+        public SdfScreenProbeSpatialKernelParameter screenProbeSpatialKernel = new(SdfScreenProbeSpatialKernel.Neighborhood3x3);
 
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
         public BoolParameter screenProbeHitDistanceFilter = new(false);

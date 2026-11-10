@@ -1,4 +1,3 @@
-%UNITY 7.0
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!114 &11400000
@@ -18,12 +17,12 @@ MonoBehaviour:
   m_ManifestVersion: 6
   m_RuntimeAbiVersion: 3
   m_ManifestHashVersion: 6
-  m_ManifestHash: 16662843074788994803
+  m_ManifestHash: 2210924977200051349
   m_IsCommitted: 1
   m_ArtifactSetHashVersion: 2
-  m_ArtifactSetHash: 15851011030966198494
+  m_ArtifactSetHash: 10352808710140731822
   m_CatalogPayloadSealVersion: 1
-  m_CatalogPayloadSealHash: 11800879380220013635
+  m_CatalogPayloadSealHash: 5594991616891068682
   m_Slots:
   - m_ProgramID: 0
     m_StableName: P0.StandardSingleSlab
@@ -280,4 +279,40 @@ MonoBehaviour:
     m_ParameterStrideInWords: 0
     m_ResourceCount: 0
     m_ParameterBindings: []
+    m_ResourceBindings: []
+  - m_ProgramID: 5
+    m_StableName: G.10.FE9B0478ADA1DC31.819C450C5B09A7B8.5ACCB345732F15BC.31681B92A13F2E05
+    m_IsReserved: 0
+    m_CompiledHashVersion: 10
+    m_CompiledHash: 18346262423379500081
+    m_LayoutFingerprintVersion: 3
+    m_LayoutFingerprint: 9339415646628849592
+    m_DeferredExportFingerprintVersion: 2
+    m_DeferredExportFingerprint: 9578047907624014108
+    m_CoveragePayloadHash: 6542801469529068988
+    m_SurfacePayloadHash: 3560125822020824581
+    m_RuntimeVersion: 3
+    m_CoverageProgramID: 0
+    m_SurfaceProgramID: 2
+    m_TransportProgramID: 0
+    m_ParameterLayoutID: 2
+    m_ResourceLayoutID: 2
+    m_CapabilityFlags: 10
+    m_ExecutionClass: 0
+    m_Topology: 3
+    m_ParameterStrideInWords: 8
+    m_ResourceCount: 0
+    m_ParameterBindings:
+    - m_Symbol: BaseColor
+      m_Type: 4
+      m_WordOffset: 0
+      m_WordCount: 4
+    - m_Symbol: DiffuseRoughness
+      m_Type: 1
+      m_WordOffset: 4
+      m_WordCount: 1
+    - m_Symbol: Roughness
+      m_Type: 1
+      m_WordOffset: 5
+      m_WordCount: 1
     m_ResourceBindings: []

@@ -70,7 +70,7 @@ bool TryPrepareRestirOpenPbr(uint2 pixel, float3 position, float3 normal,
         || !VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
         return false;
 
-    float3 view = SafeNormalize(GetWorldSpaceViewDir(position));
+    float3 view = SafeNormalize(GetWorldSpaceCameraViewDir(position));
     if (dot(normal, view) <= 0.0)
         return false;
     prepared = VividPrepareOpenPBROpaque(resolved, view);

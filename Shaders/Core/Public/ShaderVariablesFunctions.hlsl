@@ -96,6 +96,13 @@ float3 GetWorldSpaceNormalizeViewDir(float3 positionRWS)
     return normalize(GetWorldSpaceViewDir(positionRWS));
 }
 
+// Camera compute passes can use the explicit projection mode even when the
+// active projection matrix is modified by another rendering pass.
+float3 GetWorldSpaceCameraViewDir(float3 positionRWS)
+{
+    return unity_OrthoParams.w == 0.0 ? GetPrimaryCameraPosition() - positionRWS : -GetViewForwardDir();
+}
+
 // UNITY_MATRIX_V defines a right-handed view space with the Z axis pointing towards the viewer.
 // This function reverses the direction of the Z axis (so that it points forward),
 // making the view space coordinate system left-handed.

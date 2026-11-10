@@ -6,18 +6,18 @@
 
 #define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 9u
 
-// Expected Material Program artifact set: v2 0xDBFA1A8CE789E0DE
+// Expected Material Program artifact set: v2 0x8FAC90AB9B8221AE
 #include "VividMaterialProgramCatalogStamp.generated.hlsl"
 #if !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_INCLUDED)
 #error Missing published Material Program Catalog stamp for Surface dispatcher.
-#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_HDBFA1A8CE789E0DE)
+#elif !defined(VIVID_MATERIAL_PUBLISHED_ARTIFACT_SET_V00000002_H8FAC90AB9B8221AE)
 #error Surface dispatcher does not match the published Material Program Catalog artifact set.
 #endif
 
 #ifndef VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
 #define VIVID_MATERIAL_CATALOG_MANIFEST_INCLUDED
-#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000006_HE73E4F7E34E02EF3_N00000005 1
-#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000006_HE73E4F7E34E02EF3_N00000005)
+#define VIVID_MATERIAL_CATALOG_MANIFEST_V00000006_H1EAEC88D830C3495_N00000006 1
+#elif !defined(VIVID_MATERIAL_CATALOG_MANIFEST_V00000006_H1EAEC88D830C3495_N00000006)
 #error Material dispatchers use different frozen catalog manifests.
 #endif
 
@@ -567,6 +567,43 @@ VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_30B108E514D38D6E(
     return output;
 }
 
+// Surface AOT HLSL artifact v5, backend v9.
+VividAOTSurfaceProgramOutput VividEvaluateAOTSurface_E04756A8B9EB5AF9(
+    const uint parameterAddress,
+    const uint resourceAddress,
+    const VividAOTSurfaceContext context)
+{
+    const float vivid_v0000 = asfloat(0x00000000u);
+    const float vivid_v0001 = asfloat(0x3F800000u);
+    const float vivid_v0002 = asfloat(0x3FC00000u);
+    const float3 vivid_v0003 = float3(asfloat(0x3F800000u), asfloat(0x3F800000u), asfloat(0x3F800000u));
+    const float3 vivid_v0004 = context.GeometryNormalWS;
+    const float vivid_v0005 = VividLoadMaterialFloat(parameterAddress, 4u);
+    const float vivid_v0006 = VividLoadMaterialFloat(parameterAddress, 5u);
+    const float4 vivid_v0007 = VividLoadMaterialFloat4(parameterAddress, 0u);
+    const float3 vivid_v0008 = vivid_v0007.xyz;
+
+    VividAOTSurfaceProgramOutput output = (VividAOTSurfaceProgramOutput) 0;
+    output.Profile = VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE;
+    output.NativeProfileVersion = VIVID_OPENPBR_OPAQUE_CONTRACT_VERSION;
+    output.NativeProfileFingerprintLo = VIVID_OPENPBR_OPAQUE_FINGERPRINT_LO;
+    output.NativeProfileFingerprintHi = VIVID_OPENPBR_OPAQUE_FINGERPRINT_HI;
+    output.OpenPBROpaque.baseWeight = vivid_v0001;
+    output.OpenPBROpaque.baseColor = vivid_v0008;
+    output.OpenPBROpaque.baseDiffuseRoughness = vivid_v0005;
+    output.OpenPBROpaque.baseMetalness = vivid_v0000;
+    output.OpenPBROpaque.specularWeight = vivid_v0001;
+    output.OpenPBROpaque.specularColor = vivid_v0003;
+    output.OpenPBROpaque.specularRoughness = vivid_v0006;
+    output.OpenPBROpaque.specularIor = vivid_v0002;
+    output.OpenPBROpaque.normalWS = vivid_v0004;
+    output.OpenPBROpaque.emissionLuminance = vivid_v0000;
+    output.OpenPBROpaque.emissionColor = vivid_v0003;
+    output.ClosureCount = VIVID_OPENPBR_OPAQUE_CLOSURE_COUNT;
+    output.LayerOperator = 0u;
+    return output;
+}
+
 bool VividTryEvaluateAOTSurfaceProgram(
     const VividMaterialRuntimeHeader runtimeHeader,
     const VividMaterialProgramData programData,
@@ -719,6 +756,43 @@ bool VividTryEvaluateAOTSurfaceProgram(
             deferredExportContract.PayloadFlags = 16u;
             deferredExportContract.PolicyFlags = 0u;
             output = VividEvaluateAOTSurface_30B108E514D38D6E(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
+                context);
+            if (!VividIsAOTDeferredExportContractSupported(deferredExportContract)
+                || output.Profile != VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE
+                || output.NativeProfileVersion != deferredExportContract.NativeProfileVersion
+                || output.NativeProfileFingerprintLo != deferredExportContract.NativeProfileFingerprintLo
+                || output.NativeProfileFingerprintHi != deferredExportContract.NativeProfileFingerprintHi
+                || output.ClosureCount != deferredExportContract.ExpectedClosureCount
+                || output.LayerOperator != deferredExportContract.Topology
+                || VividValidateOpenPBROpaqueInputs(output.OpenPBROpaque, 0u) != 0u)
+                return false;
+            return true;
+        }
+        case 5u:
+        {
+            const uint parameterLaneCount = 2u;
+            const uint resourceCount = 0u;
+            if (runtimeHeader.ParameterAddress > _MaterialParameterDataCount
+                || parameterLaneCount > _MaterialParameterDataCount - runtimeHeader.ParameterAddress
+                || runtimeHeader.ResourceBindingAddress > _MaterialResourceDataCount
+                || resourceCount > _MaterialResourceDataCount - runtimeHeader.ResourceBindingAddress)
+                return false;
+            deferredExportContract.Version = 2u;
+            deferredExportContract.SurfaceSummaryAbi = 0u;
+            deferredExportContract.DualSlabSidecarAbi = 0u;
+            deferredExportContract.NativePayloadAbi = 1u;
+            deferredExportContract.NativeProfileVersion = 1u;
+            deferredExportContract.NativeProfileFingerprintLo = 3867404148u;
+            deferredExportContract.NativeProfileFingerprintHi = 369231404u;
+            deferredExportContract.ShadingModelMask = 4u;
+            deferredExportContract.LitClass = 6u;
+            deferredExportContract.ExpectedClosureCount = 1u;
+            deferredExportContract.Topology = 0u;
+            deferredExportContract.PayloadFlags = 16u;
+            deferredExportContract.PolicyFlags = 0u;
+            output = VividEvaluateAOTSurface_E04756A8B9EB5AF9(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 context);

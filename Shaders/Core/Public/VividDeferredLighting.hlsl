@@ -134,7 +134,7 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     OpenPBR_ResolvedInputs resolved;
     if (!VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
         return false;
-    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
     if (dot(inputs.normalWS, viewDirectionWS) <= 0.0)
         return true;
     OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, viewDirectionWS);

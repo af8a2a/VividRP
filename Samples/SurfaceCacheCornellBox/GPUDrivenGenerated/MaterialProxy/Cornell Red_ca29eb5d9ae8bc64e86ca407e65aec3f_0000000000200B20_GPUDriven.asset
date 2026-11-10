@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Cornell Red_ca29eb5d9ae8bc64e86ca407e65aec3f_0000000000200B20_GPUDriven
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.GPUDrivenMaterialProxy
   m_SourceMaterial: {fileID: 2100000, guid: ca29eb5d9ae8bc64e86ca407e65aec3f, type: 2}
-  m_MaterialGraph: {fileID: 0}
+  m_MaterialGraph: {fileID: 5690770411550333822, guid: 961046a256b712a4e80aba0a9ff4dc9e, type: 3}
   m_Model: 0
   m_DualSlabDefinition: {fileID: 0}
   m_LayerWeight: 0.5
@@ -36,6 +36,9 @@ MonoBehaviour:
   m_Cutoff: 0.5
   m_CullMode: 2
   m_DisableLighting: 0
-  m_ParameterOverrides: []
+  m_ParameterOverrides:
+  - m_Symbol: DiffuseRoughness
+    m_Type: 1
+    m_Value: {x: 0.5, y: 0, z: 0, w: 0}
   m_TextureOverrides: []
-  m_Revision: 6
+  m_Revision: 9

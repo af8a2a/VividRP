@@ -19,8 +19,45 @@ bool LoadScreenHitGeometry(uint2 pixel, float depth, out float3 position, out fl
     return depth != UNITY_RAW_FAR_CLIP_VALUE && VividIsSurfaceSummaryGBufferABIValid(packedNormal.a);
 }
 
+bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thickness, out float3 radiance)
+{
+    radiance = 0.0;
+    float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
+    if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
+        return false;
+
+    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+    if (PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
+        return false;
+    float2 motion;
+    DecodeMotionVector(packedMotion, motion);
+    float2 previousUv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw - motion + _SdfScreenJitterDelta;
+    if (any(previousUv < 0.0) || any(previousUv >= 1.0))
+        return false;
+
+    uint2 previousPixel = uint2(previousUv * _SdfDiffuseScreenSize.xy);
+    float2 geometry = _SdfScreenPreviousGeometry.Load(int3(previousPixel, 0));
+    if (geometry.y < 0.0)
+        return false;
+    uint oct = (uint)geometry.y;
+    float3 previousNormal = VividDecodeSurfaceSummaryNormal(float2(oct & 1023u, oct >> 10u) / 1023.0);
+    if (dot(normal, previousNormal) < 0.92)
+        return false;
+
+    float2 sampleUv = (float2(previousPixel) + 0.5) * _SdfDiffuseScreenSize.zw;
+    float3 previousPosition = ComputeWorldSpacePosition(sampleUv, geometry.x, _SdfScreenPreviousInverseVP);
+    float3 expectedDepthPosition = ComputeWorldSpacePosition(sampleUv, previousClip.z / previousClip.w,
+        _SdfScreenPreviousInverseVP);
+    if (distance(previousPosition, expectedDepthPosition) > thickness)
+        return false;
+
+    radiance = _SdfScreenPreviousRadiance.Load(int3(previousPixel, 0)).rgb;
+    return all(isfinite(radiance));
+}
+
 // Traverse a reversed-Z closest-depth pyramid in projected pixel space.
-bool TraceScreenGeometry(float3 origin, float3 direction, float maxDistance, out ScreenRayHit hit)
+bool TraceScreenGeometry(float3 origin, float3 direction, float maxDistance, out ScreenRayHit hit,
+    uint maxIterations = 48u)
 {
     hit = (ScreenRayHit)0;
     float4 start = mul(_SdfDiffuseVP, float4(origin, 1.0));
@@ -48,7 +85,7 @@ bool TraceScreenGeometry(float3 origin, float3 direction, float maxDistance, out
     int maxMip = min(4, int(mips) - 1);
     int mip = maxMip;
     [loop]
-    for (uint iteration = 0u; iteration < 48u && t < 1.0; iteration++)
+    for (uint iteration = 0u; iteration < maxIterations && t < 1.0; iteration++)
     {
         float2 pixel = startPixel + delta * t;
         if (any(pixel < 0.0) || any(pixel >= screenSize))

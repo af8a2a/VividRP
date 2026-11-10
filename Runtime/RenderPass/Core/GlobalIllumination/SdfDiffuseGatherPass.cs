@@ -197,6 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HasHistoryId = Shader.PropertyToID("_SdfDiffuseHasHistory");
         private static readonly int DirectionalProbesId = Shader.PropertyToID("_SdfDiffuseDirectionalProbes");
         private static readonly int AdaptiveProbesId = Shader.PropertyToID("_SdfDiffuseAdaptiveProbes");
+        private static readonly int ProbeResolveRepairModeId = Shader.PropertyToID("_SdfProbeResolveRepairMode");
         private static readonly int IntegrationJitterId = Shader.PropertyToID("_SdfScreenProbeIntegrationJitter");
         private static readonly int SpatialFilterId = Shader.PropertyToID("_SdfDiffuseSpatialFilter");
         private static readonly int ProbeSpatialKernelId = Shader.PropertyToID("_SdfProbeSpatialKernel");
@@ -992,6 +993,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var cache = m_UseSdf ? m_Scene.SurfaceCache : null;
             bool useScreenRays = m_HasScreenHistory && m_ScreenRays.innerHandle.IsValid()
                 && m_ScreenHzb.innerHandle.IsValid() && m_ScreenMotion.innerHandle.IsValid();
+            bool validScreenRadiance = useScreenRays && (!m_UseSdf || MatchesPreviousDirectionalLighting());
+            bool repairScreenRays = m_RealtimeOnly && validScreenRadiance && !m_OffscreenOnly;
             bool useSunCache = m_SunAtlas.IsValid() && m_SunCacheHits.innerHandle.IsValid();
             int traceKernel = !m_UseSdf ? m_ScreenGatherKernel : cache != null ? m_CachedTraceKernel : m_TraceKernel;
             if (useSunCache)
@@ -1108,6 +1111,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(m_GatherCompute, RestirOpenPbrDiffuseId, m_RestirOpenPbrDiffuse ? 1 : 0);
                 cmd.SetComputeVectorParam(m_GatherCompute, NearOcclusionId, m_NearOcclusion);
                 cmd.SetComputeFloatParam(m_GatherCompute, RayBiasId, m_Bias);
+                cmd.SetComputeFloatParam(m_GatherCompute, MaxDistanceId, m_TraceDistance);
+                cmd.SetComputeIntParam(m_GatherCompute, ProbeResolveRepairModeId, repairScreenRays ? 2 : m_RealtimeOnly ? 1 : 0);
                 if (m_AdaptiveProbes)
                 {
                     using var scope = new ProfilingScope(cmd, PlacementSampler);
@@ -1125,7 +1130,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_DirectionalCache)
                     RecordDirectionalGuide(cmd, placement, black, useDirectionalGuideHistory, frame, groupsX, groupsY);
                 if (useScreenRays)
-                    RecordScreenTrace(cmd, groupsX, groupsY, placement, black);
+                    RecordScreenTrace(cmd, groupsX, groupsY, placement, black, validScreenRadiance);
                 using (new ProfilingScope(cmd, GatherSampler))
                     cmd.DispatchCompute(m_TraceCompute, traceKernel, groupsX, groupsY, 1);
                 if (m_DirectionalCache || m_HitDistanceFilter || (m_SpatialFilter && !m_RestirGather))
@@ -1169,7 +1174,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, FilteredProbesId, m_FilteredProbes.innerHandle);
                     cmd.DispatchCompute(m_FilterCompute, m_FilterKernel, groupsX, groupsY, 1);
                 }
-                RecordResolve(cmd, placement, pixelTemporal);
+                RecordResolve(cmd, placement, pixelTemporal, repairScreenRays, black);
                 if (pixelTemporal)
                     RecordPixelTemporal(cmd, hasHistory && m_State.PixelHistoryMaxAge == m_PixelHistoryMaxAge
                         && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
@@ -1640,7 +1645,8 @@ namespace VividRP.Runtime.RenderPass.Core
             && ReferenceEquals(m_OpenPbrParameters, parameters) && ReferenceEquals(m_OpenPbrAux0, aux0)
             && ReferenceEquals(m_OpenPbrAux1, aux1);
 
-        private void RecordResolve(ComputeCommandBuffer cmd, TextureHandle placement, bool pixelTemporal)
+        private void RecordResolve(ComputeCommandBuffer cmd, TextureHandle placement, bool pixelTemporal,
+            bool repairScreenRays, TextureHandle black)
         {
             using var scope = new ProfilingScope(cmd, ResolveSampler);
             int kernel = m_DirectionalCache ? m_DirectionalResolveKernel
@@ -1648,6 +1654,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_DirectionalCache)
                 cmd.SetComputeIntParam(m_GatherCompute, IntegrationJitterId, pixelTemporal ? 1 : 0);
             BindReceiver(cmd, m_GatherCompute, kernel);
+            BindScreenTraceHistory(cmd, m_GatherCompute, kernel, repairScreenRays, black);
             if (m_RestirOpenPbrDiffuse)
             {
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrParametersId, m_OpenPbrParameters.innerHandle);
@@ -1770,24 +1777,34 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RestirVarianceHistory.MarkWritten();
         }
 
-        private void RecordScreenTrace(ComputeCommandBuffer cmd, int groupsX, int groupsY, TextureHandle placement, TextureHandle black)
+        private void RecordScreenTrace(ComputeCommandBuffer cmd, int groupsX, int groupsY, TextureHandle placement,
+            TextureHandle black, bool validScreenRadiance)
         {
             using var scope = new ProfilingScope(cmd, ScreenTraceSampler);
             int kernel = m_ScreenTraceKernel;
             BindReceiver(cmd, m_TraceCompute, kernel);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, PlacementId, placement);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, DirectionalGuideId, m_DirectionalCache ? m_DirectionalGuideTexture.innerHandle : black);
-            cmd.SetComputeTextureParam(m_TraceCompute, kernel, HzbId, m_ScreenHzb.innerHandle);
-            cmd.SetComputeTextureParam(m_TraceCompute, kernel, MotionId, m_ScreenMotion.innerHandle);
-            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRadianceId, m_PreviousScreenRadiance);
+            BindScreenTraceHistory(cmd, m_TraceCompute, kernel, true, black);
             // Keep the screen hit distance so Hybrid can shade it through the current SDF path.
-            cmd.SetComputeIntParam(m_TraceCompute, ScreenRadianceValidId,
-                !m_UseSdf || MatchesPreviousDirectionalLighting() ? 1 : 0);
-            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenGeometryId, m_PreviousScreenGeometry);
+            cmd.SetComputeIntParam(m_TraceCompute, ScreenRadianceValidId, validScreenRadiance ? 1 : 0);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRaysOutputId, m_ScreenRays.innerHandle);
-            cmd.SetComputeMatrixParam(m_TraceCompute, PreviousInverseVpId, m_State.ViewProjection.inverse);
-            cmd.SetComputeVectorParam(m_TraceCompute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
             cmd.DispatchCompute(m_TraceCompute, kernel, groupsX, groupsY, 1);
+        }
+
+        private void BindScreenTraceHistory(ComputeCommandBuffer cmd, ComputeShader shader, int kernel,
+            bool available, TextureHandle black)
+        {
+            cmd.SetComputeTextureParam(shader, kernel, HzbId, available ? m_ScreenHzb.innerHandle : black);
+            cmd.SetComputeTextureParam(shader, kernel, MotionId, available ? m_ScreenMotion.innerHandle : black);
+            cmd.SetComputeTextureParam(shader, kernel, ScreenRadianceId, available ? m_PreviousScreenRadiance : black);
+            cmd.SetComputeTextureParam(shader, kernel, ScreenGeometryId, available ? m_PreviousScreenGeometry : black);
+            if (!available)
+                return;
+
+            cmd.SetComputeMatrixParam(shader, PreviousViewProjectionId, m_State.ViewProjection);
+            cmd.SetComputeMatrixParam(shader, PreviousInverseVpId, m_State.ViewProjection.inverse);
+            cmd.SetComputeVectorParam(shader, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
         }
 
         private bool MatchesPreviousDirectionalLighting()

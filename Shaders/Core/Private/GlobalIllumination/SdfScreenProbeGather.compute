@@ -7,6 +7,7 @@
 #pragma kernel FilterSdfDiffuseAtrousFinal VIVID_SDF_ATROUS VIVID_SDF_ATROUS_FINAL
 
 #include "SdfScreenProbeCommon.hlsl"
+#include "SdfScreenProbeTracingCommon.hlsl"
 #include "SdfShortRangeAOCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
 #if defined(VIVID_SDF_ATROUS)
@@ -15,6 +16,11 @@
 #if defined(VIVID_SDF_PROBE_IRRADIANCE)
 #include "SdfScreenProbeIrradiance.hlsl"
 #endif
+
+// 0: baked fallback is available, 1: same-surface repair, 2: also trace screen radiance.
+uint _SdfProbeResolveRepairMode;
+static const float MinProbeInterpolationWeight = 0.01;
+static const float MinProbeInterpolationFallbackWeight = 0.0001;
 
 [numthreads(8, 8, 1)]
 void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
@@ -26,17 +32,21 @@ void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
 
     uint encoded = 0u;
     float worstCoverage = 0.22;
+    // Check the original four samples first. Search the finer grid only until
+    // an unsupported receiver is found, keeping one adaptive slot per tile.
+    uint sampleCount = _SdfProbeResolveRepairMode != 0u ? 20u : 4u;
     [loop]
-    for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex)
+    for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex)
     {
-        uint2 offset = uint2(sampleIndex & 1u, sampleIndex >> 1u) * 8u + 4u;
+        uint2 offset = sampleIndex < 4u ? uint2(sampleIndex & 1u, sampleIndex >> 1u) * 8u + 4u
+            : uint2((sampleIndex - 4u) & 3u, (sampleIndex - 4u) >> 2u) * 4u + 2u;
         uint2 pixel = id.xy * ProbeSpacing + offset;
         float3 position, normal;
         if (any(pixel >= screenSize) || !LoadReceiver(pixel, position, normal))
             continue;
 
         float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
-        int2 low = int2(id.xy) + int2(sampleIndex & 1u, sampleIndex >> 1u) - 1;
+        int2 low = int2(id.xy) + int2(offset / (ProbeSpacing / 2u)) - 1;
         float coverage = 0.0;
         [unroll]
         for (uint neighbor = 0u; neighbor < 4u; ++neighbor)
@@ -51,6 +61,8 @@ void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
         {
             worstCoverage = coverage;
             encoded = 1u + offset.x + offset.y * ProbeSpacing;
+            if (coverage == 0.0)
+                break;
         }
     }
     _SdfAdaptivePlacementOutput[id.xy] = float(encoded);
@@ -95,6 +107,138 @@ float3 RestirOpenPbrDiffuse(OpenPBR_PreparedBsdf prepared, float3 direction,
 }
 #endif
 
+float4 BlendProbeResolveRepair(float4 primary, float4 repair, float strength)
+{
+    float added = repair.a * strength * (1.0 - primary.a);
+    float coverage = primary.a + added;
+    return float4((primary.rgb * primary.a + repair.rgb * added) / max(coverage, 1e-5), coverage);
+}
+
+float4 TraceProbeResolveRepair(uint2 pixel, float3 position, float3 normal, float eyeDepth, float4 contact
+#if defined(VIVID_SDF_RESTIR_OPENPBR)
+    , bool openPbr, OpenPBR_PreparedBsdf prepared, float3 inverseDiffuseColor
+#endif
+)
+{
+    if (_SdfProbeResolveRepairMode < 2u)
+        return 0.0;
+
+    float range = min(_SdfDiffuseMaxDistance, clamp(0.2 * eyeDepth, 0.5, 2.0));
+    float3 origin = position + normal * _SdfDiffuseRayBias;
+    float3x3 basis = GetLocalFrame(normal);
+    uint2 block = pixel / 2u;
+    uint seed = HashProbe(block.x + block.y * 65537u + _SdfDiffuseFrame * 0x9e3779b9u);
+    float3 sum = 0.0;
+    float valid = 0.0;
+    const uint rayCount = 2u;
+    [loop]
+    for (uint ray = 0u; ray < rayCount; ++ray)
+    {
+        float3 direction = CosineRayDirection(ray, rayCount, seed, basis);
+        ScreenRayHit hit;
+        float3 radiance;
+        if (!TraceScreenGeometry(origin, direction, range, hit, 20u)
+            || !ReadScreenRadiance(hit.pixel, hit.position, hit.normal, hit.thickness, radiance))
+            continue;
+        #if defined(VIVID_SDF_RESTIR_OPENPBR)
+            if (openPbr)
+            {
+                float cosine = max(dot(normal, direction), 1e-4);
+                radiance *= RestirOpenPbrDiffuse(prepared, direction, cosine, cosine, inverseDiffuseColor) / cosine;
+            }
+        #endif
+        float visibility = lerp(1.0, NearDiffuseDirectionVisibility(contact, direction),
+            saturate(hit.distance / max(_SdfNearOcclusion.x, 1e-5)));
+        sum += min(radiance * visibility, 65000.0);
+        valid += 1.0;
+    }
+    // Keep invalid rays uncovered, including rays that leave the visible screen.
+    return float4(sum / max(valid, 1.0), valid / float(rayCount));
+}
+
+bool ProbeResolveRepairSpan(uint2 pixel, uint2 samplePixel, float3 position, float3 normal, float tolerance)
+{
+    // Verify the span on the visible receiver before borrowing any light.
+    [unroll]
+    for (uint step = 1u; step <= 2u; ++step)
+    {
+        uint2 tap = uint2(round(lerp(float2(pixel), float2(samplePixel), float(step) / 3.0)));
+        float3 tapPosition, tapNormal;
+        if (!LoadReceiver(tap, tapPosition, tapNormal) || dot(normal, tapNormal) < 0.94
+            || abs(dot(tapPosition - position, normal)) > tolerance)
+            return false;
+    }
+    return true;
+}
+
+bool FindProbeResolveRepair(uint2 pixel, uint2 size, uint2 grid, float3 position, float3 normal,
+    float eyeDepth, out uint2 bestTile, out float confidence)
+{
+    bestTile = 0u;
+    confidence = 0.0;
+    float bestScore = 0.0;
+    float tolerance = clamp(0.0025 * eyeDepth, 0.012, 0.04);
+    int2 center = int2(pixel / ProbeSpacing);
+    [loop]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [loop]
+        for (int x = -1; x <= 1; ++x)
+        {
+            int2 candidate = center + int2(x, y);
+            if (any(candidate < 0) || any(candidate >= int2(grid)))
+                continue;
+            [loop]
+            for (uint adaptive = 0u; adaptive <= _SdfDiffuseAdaptiveProbes; ++adaptive)
+            {
+                uint2 probe = uint2(candidate) + uint2(0u, adaptive * grid.y);
+                uint2 samplePixel;
+                if (!LoadProbeReceiverPixel(probe, size, samplePixel))
+                    continue;
+                float2 offset = float2(samplePixel) - float2(pixel);
+                float screenWeight = saturate(1.0 - length(offset) / (1.5 * ProbeSpacing));
+                if (screenWeight <= bestScore)
+                    continue;
+
+                float4 geometry = _SdfDiffuseGeometry[probe];
+                if (geometry.w < 0.0)
+                    continue;
+                float3 sampleNormal = UnpackProbeNormal(geometry.w);
+                float3 delta = geometry.xyz - position;
+                float plane = max(abs(dot(delta, normal)), abs(dot(delta, sampleNormal)));
+                float support = screenWeight * saturate(1.0 - plane / tolerance)
+                    * smoothstep(0.94, 0.99, dot(normal, sampleNormal));
+                #if defined(VIVID_SDF_PROBE_IRRADIANCE)
+                    uint2 coveragePixel = probe + uint2(6u * grid.x, 0u);
+                #else
+                    uint2 coveragePixel = probe;
+                #endif
+                float score = support * _SdfDiffuseProbeInput.Load(int3(coveragePixel, 0)).a;
+                if (score <= bestScore)
+                    continue;
+
+                if (!ProbeResolveRepairSpan(pixel, samplePixel, position, normal, tolerance))
+                    continue;
+                bestTile = probe;
+                bestScore = score;
+                confidence = saturate(support / 0.25);
+            }
+        }
+    }
+    return bestScore > 0.0;
+}
+
+int2 RestirResolveOffset(uint tap)
+{
+    if (tap < 16u)
+        return int2(tap & 3u, tap >> 2u);
+    // The extra ring extends the 4x4 support by one reservoir on each side.
+    uint edge = tap - 16u;
+    if (edge < 12u)
+        return int2(int(edge % 6u) - 1, edge < 6u ? -1 : 4);
+    return int2(edge < 16u ? -1 : 4, int((edge - 12u) & 3u));
+}
+
 void IntegrateRestirLighting(uint3 id)
 {
     uint2 size = uint2(_SdfDiffuseScreenSize.xy);
@@ -127,95 +271,116 @@ void IntegrateRestirLighting(uint3 id)
         float mean = 0.0;
         float m2 = 0.0;
         [loop]
-        for (int y = 0; y < 4; ++y)
+        for (uint tap = 0u; tap < 36u; ++tap)
         {
-            [loop]
-            for (int x = 0; x < 4; ++x)
+            bool repair = tap >= 16u;
+            if (tap == 16u && (_SdfProbeResolveRepairMode == 0u || result.a >= 0.08 * max(total, 1e-5)))
+                break;
+            int2 adjacent = start + RestirResolveOffset(tap);
+            if (any(adjacent < 0) || any(adjacent >= int2(grid)))
+                continue;
+            uint2 tile = uint2(adjacent);
+            float4 geometry = _SdfDiffuseGeometry[tile];
+            float weight = RestirReceiverWeight(geometry, position, normal, eyeDepth, radius);
+            if (weight <= 0.0)
+                continue;
+
+            uint2 samplePixel;
+            LoadProbeReceiverPixel(tile, size, samplePixel);
+            float2 offset = float2(samplePixel) - float2(id.xy);
+            weight *= rcp(1.0 + 0.10 * dot(offset, offset));
+            float4 distant = _SdfDiffuseProbeInput.Load(int3(tile, 0));
+            if (repair)
             {
-                int2 adjacent = start + int2(x, y);
-                if (any(adjacent < 0) || any(adjacent >= int2(grid)))
-                    continue;
-                uint2 tile = uint2(adjacent);
-                float4 geometry = _SdfDiffuseGeometry[tile];
-                float weight = RestirReceiverWeight(geometry, position, normal, eyeDepth, radius);
-                if (weight <= 0.0)
-                    continue;
-
-                uint2 samplePixel;
-                LoadProbeReceiverPixel(tile, size, samplePixel);
-                float2 offset = float2(samplePixel) - float2(id.xy);
-                weight *= rcp(1.0 + 0.10 * dot(offset, offset));
-                total += weight;
-                float4 distant = _SdfDiffuseProbeInput.Load(int3(tile, 0));
-                float coveredWeight = weight * distant.a;
-                if (coveredWeight <= 0.0)
-                    continue;
-
-                RestirReservoir reservoir = LoadRestir(_SdfRestirSpatial, tile, grid.x);
+                float tolerance = clamp(0.0025 * eyeDepth, 0.012, 0.04);
                 float3 sourceNormal = UnpackProbeNormal(geometry.w);
-                float3 origin = geometry.xyz + sourceNormal * _SdfDiffuseRayBias;
-                float3 direction = SafeNormalize(reservoir.sample.position - origin);
-                float3 receiverDirection = direction;
-                float hitDistance = 0.0;
-                if (directionalContact || openPbr)
-                {
-                    float3 receiverDelta = reservoir.sample.position - (position + normal * _SdfDiffuseRayBias);
-                    hitDistance = length(receiverDelta);
-                    receiverDirection = receiverDelta / max(hitDistance, 1e-5);
-                }
-                float receiverCosine = saturate(dot(normal, receiverDirection));
-                // Limit the interpolation gain for a sample grazing the source receiver.
-                float cosine = min(receiverCosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
-                float3 localLighting = reservoir.sample.radiance * (reservoir.inversePdf * cosine);
-                #if defined(VIVID_SDF_RESTIR_OPENPBR)
-                    if (openPbr && reservoir.inversePdf > 0.0)
-                    {
-                        localLighting = (reservoir.sample.radiance * reservoir.inversePdf)
-                            * RestirOpenPbrDiffuse(prepared, receiverDirection, receiverCosine, cosine, inverseDiffuseColor);
-                    }
-                #endif
-                if (directionalContact)
-                {
-                    // Close first hits already account for geometry along the ray.
-                    float visibility = NearDiffuseDirectionVisibility(contact, receiverDirection);
-                    localLighting *= lerp(1.0, visibility, saturate(hitDistance / _SdfNearOcclusion.x));
-
-                }
-                if (directionalContact || openPbr)
-                {
-                    float4 distantDirection = _SdfDiffuseProbeInput.Load(int3(DistantProbeDirectionAddress(tile), 0));
-                    if (distantDirection.w > 0.0)
-                    {
-                        float3 incoming = SafeNormalize(distantDirection.xyz);
-                        // Distant samples were drawn from the probe's cosine PDF.
-                        float incomingCosine = saturate(dot(normal, incoming));
-                        float sourceCosine = max(dot(sourceNormal, incoming), 1e-4);
-                        float limitedCosine = min(incomingCosine, 2.0 * sourceCosine);
-                        float3 response = (limitedCosine / sourceCosine).xxx;
-                        #if defined(VIVID_SDF_RESTIR_OPENPBR)
-                            if (openPbr)
-                                response = RestirOpenPbrDiffuse(prepared, incoming, incomingCosine,
-                                    limitedCosine, inverseDiffuseColor) / sourceCosine;
-                        #endif
-                        distant.rgb *= response;
-                        if (directionalContact)
-                            distant.rgb *= NearDiffuseDirectionVisibility(contact, incoming);
-                    }
-                }
-                float3 lighting = min(localLighting + distant.rgb, 65000.0);
-                result += coveredWeight * float4(lighting, 1.0);
-
-                // Weighted log-luminance variance keeps HDR outliers in a useful FP16 range.
-                float value = log2(1.0 + RestirLuminance(lighting));
-                float delta = value - mean;
-                mean += (coveredWeight / result.a) * delta;
-                m2 += coveredWeight * delta * (value - mean);
+                float3 delta = geometry.xyz - position;
+                if (distant.a <= 0.0 || dot(normal, sourceNormal) < 0.94
+                    || max(abs(dot(delta, normal)), abs(dot(delta, sourceNormal))) > tolerance
+                    || !ProbeResolveRepairSpan(id.xy, samplePixel, position, normal, tolerance))
+                    continue;
+                weight *= 0.5;
             }
+            total += weight;
+            float coveredWeight = weight * distant.a * (repair ? 0.5 : 1.0);
+            if (coveredWeight <= 0.0)
+                continue;
+
+            RestirReservoir reservoir = LoadRestir(_SdfRestirSpatial, tile, grid.x);
+            float3 sourceNormal = UnpackProbeNormal(geometry.w);
+            float3 origin = geometry.xyz + sourceNormal * _SdfDiffuseRayBias;
+            float3 direction = SafeNormalize(reservoir.sample.position - origin);
+            float3 receiverDirection = direction;
+            float hitDistance = 0.0;
+            if (directionalContact || openPbr)
+            {
+                float3 receiverDelta = reservoir.sample.position - (position + normal * _SdfDiffuseRayBias);
+                hitDistance = length(receiverDelta);
+                receiverDirection = receiverDelta / max(hitDistance, 1e-5);
+            }
+            float receiverCosine = saturate(dot(normal, receiverDirection));
+            // Limit the interpolation gain for a sample grazing the source receiver.
+            float cosine = min(receiverCosine, 2.0 * max(dot(sourceNormal, direction), 0.01));
+            float3 localLighting = reservoir.sample.radiance * (reservoir.inversePdf * cosine);
+            #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                if (openPbr && reservoir.inversePdf > 0.0)
+                {
+                    localLighting = (reservoir.sample.radiance * reservoir.inversePdf)
+                        * RestirOpenPbrDiffuse(prepared, receiverDirection, receiverCosine, cosine, inverseDiffuseColor);
+                }
+            #endif
+            if (directionalContact)
+            {
+                // Close first hits already account for geometry along the ray.
+                float visibility = NearDiffuseDirectionVisibility(contact, receiverDirection);
+                localLighting *= lerp(1.0, visibility, saturate(hitDistance / _SdfNearOcclusion.x));
+
+            }
+            if (directionalContact || openPbr)
+            {
+                float4 distantDirection = _SdfDiffuseProbeInput.Load(int3(DistantProbeDirectionAddress(tile), 0));
+                if (distantDirection.w > 0.0)
+                {
+                    float3 incoming = SafeNormalize(distantDirection.xyz);
+                    // Distant samples were drawn from the probe's cosine PDF.
+                    float incomingCosine = saturate(dot(normal, incoming));
+                    float sourceCosine = max(dot(sourceNormal, incoming), 1e-4);
+                    float limitedCosine = min(incomingCosine, 2.0 * sourceCosine);
+                    float3 response = (limitedCosine / sourceCosine).xxx;
+                    #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                        if (openPbr)
+                            response = RestirOpenPbrDiffuse(prepared, incoming, incomingCosine,
+                                limitedCosine, inverseDiffuseColor) / sourceCosine;
+                    #endif
+                    distant.rgb *= response;
+                    if (directionalContact)
+                        distant.rgb *= NearDiffuseDirectionVisibility(contact, incoming);
+                }
+            }
+            float3 lighting = min(localLighting + distant.rgb, 65000.0);
+            result += coveredWeight * float4(lighting, 1.0);
+
+            // Weighted log-luminance variance keeps HDR outliers in a useful FP16 range.
+            float value = log2(1.0 + RestirLuminance(lighting));
+            float delta = value - mean;
+            mean += (coveredWeight / result.a) * delta;
+            m2 += coveredWeight * delta * (value - mean);
         }
         float invCoveredWeight = rcp(max(result.a, 1e-5));
         result.rgb *= invCoveredWeight;
         variance = max(0.0, m2 * invCoveredWeight);
         result.a /= max(total, 1e-5);
+        if (_SdfProbeResolveRepairMode == 2u && result.a < 0.08)
+        {
+            float4 repair = TraceProbeResolveRepair(id.xy, position, normal, eyeDepth, contact
+            #if defined(VIVID_SDF_RESTIR_OPENPBR)
+                , openPbr, prepared, inverseDiffuseColor
+            #endif
+            );
+            float strength = 1.0 - smoothstep(0.0, 0.08, result.a);
+            variance = max(variance, 0.25 * repair.a * strength);
+            result = BlendProbeResolveRepair(result, repair, strength);
+        }
         // Keep the two filter domains separate; Denoise restores unsigned coverage.
         if (openPbr)
             result.a = -result.a;
@@ -298,9 +463,10 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     {
         float visibility = 1.0;
         float3 bentNormal = normal;
+        float4 contact = float4(0.0, 0.0, 0.0, 1.0);
         if (_SdfNearOcclusion.z > 0.0)
         {
-            float4 contact = EvaluateNearDiffuseVisibility(id.xy, position, normal, true);
+            contact = EvaluateNearDiffuseVisibility(id.xy, position, normal, true);
             visibility = contact.w;
             bentNormal = SafeNormalize(normal + contact.xyz / max(visibility, 1e-5));
         }
@@ -333,14 +499,28 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         result = resolve.lighting;
         result.rgb = min(result.rgb / max(result.a, 1e-5), 65000.0);
         result.a /= max(resolve.weight, 1e-5);
+        if (_SdfProbeResolveRepairMode != 0u && (resolve.weight < MinProbeInterpolationWeight || result.a < 0.08))
+        {
+            uint2 tile;
+            float confidence;
+            if (FindProbeResolveRepair(id.xy, screenSize, probeGrid, position, normal, eyeDepth, tile, confidence))
+            {
+                SdfProbeResolve repair = (SdfProbeResolve)0;
+                AddProbeToResolve(tile, 1.0, position, normal, eyeDepth, bentNormal, visibility, repair);
+                float4 sample = float4(repair.lighting.rgb / max(repair.lighting.a, 1e-5),
+                    repair.lighting.a / max(repair.weight, 1e-5));
+                result = BlendProbeResolveRepair(result, sample, confidence);
+            }
+            if (result.a < 0.08)
+                result = BlendProbeResolveRepair(result, TraceProbeResolveRepair(id.xy, position, normal, eyeDepth, contact),
+                    1.0 - smoothstep(0.0, 0.08, result.a));
+        }
     }
     _SdfDiffuseOutput[id.xy] = result;
 }
 #endif
 
 #if defined(VIVID_SDF_PROBE_IRRADIANCE)
-static const float MinProbeInterpolationWeight = 0.01;
-static const float MinProbeInterpolationFallbackWeight = 0.0001;
 uint _SdfScreenProbeIntegrationJitter;
 
 float2 GetScreenProbeInterpolationPixel(uint2 pixel, uint2 size, float3 position, float3 normal, float eyeDepth)
@@ -408,7 +588,8 @@ void AccumulateScreenProbeIrradiance(uint2 tile, uint2 stride, float weight,
 
 struct ScreenProbeInterpolation
 {
-    uint2 tiles[4];
+    uint4 tileX;
+    uint4 tileY;
     float4 weights;
 };
 
@@ -428,33 +609,47 @@ ScreenProbeInterpolation CalculateScreenProbeInterpolation(uint2 pixel, uint2 si
     {
         uint2 corner = uint2(i & 1u, i >> 1u);
         uint2 tile = first + corner;
-        if (any(tile > last))
-            continue;
-        float2 spatial = lerp(1.0 - fraction, fraction, float2(corner));
-        if (first.x == last.x)
-            spatial.x = 1.0;
-        if (first.y == last.y)
-            spatial.y = 1.0;
-        float weight = spatial.x * spatial.y * ScreenProbeBilateralWeight(tile, position, normal, eyeDepth);
-        if (_SdfDiffuseAdaptiveProbes != 0u && weight < MinProbeInterpolationWeight)
+        if (all(tile <= last))
         {
-            uint2 samplePixel;
-            if (LoadAdaptiveProbePixel(tile, samplePixel))
+            float2 spatial = lerp(1.0 - fraction, fraction, float2(corner));
+            if (first.x == last.x)
+                spatial.x = 1.0;
+            if (first.y == last.y)
+                spatial.y = 1.0;
+            float weight = spatial.x * spatial.y * ScreenProbeBilateralWeight(tile, position, normal, eyeDepth);
+            if (_SdfDiffuseAdaptiveProbes != 0u && weight < MinProbeInterpolationWeight)
             {
-                uint2 adaptive = tile + uint2(0u, grid.y);
-                float candidate = AdaptiveScreenProbeFootprint(samplePixel, pixel)
-                    * ScreenProbeBilateralWeight(adaptive, position, normal, eyeDepth);
-                if (candidate > weight)
+                uint2 samplePixel;
+                if (LoadAdaptiveProbePixel(tile, samplePixel))
                 {
-                    tile = adaptive;
-                    weight = candidate;
+                    uint2 adaptive = tile + uint2(0u, grid.y);
+                    float candidate = AdaptiveScreenProbeFootprint(samplePixel, pixel)
+                        * ScreenProbeBilateralWeight(adaptive, position, normal, eyeDepth);
+                    if (candidate > weight)
+                    {
+                        tile = adaptive;
+                        weight = candidate;
+                    }
                 }
             }
+            samples.tileX[i] = tile.x;
+            samples.tileY[i] = tile.y;
+            samples.weights[i] = weight;
         }
-        samples.tiles[i] = tile;
-        samples.weights[i] = weight;
     }
     return samples;
+}
+
+float3 ResolveScreenProbeIrradiance(SdfProbeIrradiance sh, float3 normal, float4 contact)
+{
+    float3 irradiance = max(0.0, EvaluateSdfProbeIrradiance(sh, normal));
+    if (contact.w < 1.0)
+    {
+        float3 bentNormal = SafeNormalize(normal + contact.xyz / max(contact.w, 1e-5));
+        float3 bent = max(0.0, EvaluateSdfProbeIrradiance(sh, bentNormal));
+        irradiance = min(irradiance, bent * contact.w);
+    }
+    return irradiance;
 }
 
 float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, float3 normal)
@@ -476,34 +671,52 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
             totalWeight = unjitteredWeight;
         }
     }
-    if (totalWeight < MinProbeInterpolationFallbackWeight)
-        return 0.0;
-
     float coveredWeight = 0.0;
     SdfProbeIrradiance sh = (SdfProbeIrradiance)0;
     uint2 stride = uint2(grid.x, 0u);
-    [unroll]
-    for (uint i = 0u; i < 4u; ++i)
+    if (totalWeight >= MinProbeInterpolationFallbackWeight)
     {
-        if (samples.weights[i] > 0.0)
-            AccumulateScreenProbeIrradiance(samples.tiles[i], stride, samples.weights[i], sh, coveredWeight);
+        [unroll]
+        for (uint i = 0u; i < 4u; ++i)
+        {
+            if (samples.weights[i] > 0.0)
+                AccumulateScreenProbeIrradiance(uint2(samples.tileX[i], samples.tileY[i]), stride,
+                    samples.weights[i], sh, coveredWeight);
+        }
     }
-    if (coveredWeight <= 0.0)
+    if (coveredWeight <= 0.0 && _SdfProbeResolveRepairMode == 0u)
         return 0.0;
 
-    float3 irradiance = max(0.0, EvaluateSdfProbeIrradiance(sh, normal));
+    float4 contact = float4(0.0, 0.0, 0.0, 1.0);
     if (_SdfNearOcclusion.z > 0.0)
-    {
-        float4 contact = EvaluateNearDiffuseVisibility(pixel, position, normal, true);
-        float3 bentNormal = SafeNormalize(normal + contact.xyz / max(contact.w, 1e-5));
-        float3 bent = max(0.0, EvaluateSdfProbeIrradiance(sh, bentNormal));
-        irradiance = min(irradiance, bent * contact.w);
-    }
+        contact = EvaluateNearDiffuseVisibility(pixel, position, normal, true);
 
-    // Weak geometric support fades to the existing baked GI fallback.
-    // Covered black still contributes its full share of the coverage.
-    float coverage = saturate(coveredWeight / max(totalWeight, MinProbeInterpolationWeight));
-    return float4(min(irradiance / coveredWeight, 65000.0), coverage);
+    float4 result = 0.0;
+    if (coveredWeight > 0.0)
+    {
+        float3 irradiance = ResolveScreenProbeIrradiance(sh, normal, contact);
+        // Covered black still contributes its full share of the coverage.
+        result = float4(min(irradiance / coveredWeight, 65000.0),
+            saturate(coveredWeight / max(totalWeight, MinProbeInterpolationWeight)));
+    }
+    if (_SdfProbeResolveRepairMode != 0u && (totalWeight < MinProbeInterpolationWeight || result.a < 0.08))
+    {
+        uint2 tile;
+        float confidence;
+        if (FindProbeResolveRepair(pixel, size, grid, position, normal, eyeDepth, tile, confidence))
+        {
+            SdfProbeIrradiance repair = (SdfProbeIrradiance)0;
+            float repairCoverage = 0.0;
+            AccumulateScreenProbeIrradiance(tile, stride, 1.0, repair, repairCoverage);
+            float3 irradiance = ResolveScreenProbeIrradiance(repair, normal, contact);
+            result = BlendProbeResolveRepair(result,
+                float4(min(irradiance / max(repairCoverage, 1e-5), 65000.0), repairCoverage), confidence);
+        }
+        if (result.a < 0.08)
+            result = BlendProbeResolveRepair(result, TraceProbeResolveRepair(pixel, position, normal, eyeDepth, contact),
+                1.0 - smoothstep(0.0, 0.08, result.a));
+    }
+    return result;
 }
 
 [numthreads(8, 8, 1)]

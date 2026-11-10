@@ -102,6 +102,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler AtrousCoarseSampler = new("Diffuse GI Atrous Step 4");
         private static readonly ProfilingSampler ResolveSampler = new("Screen Probe Resolve");
         private static readonly ProfilingSampler PixelTemporalSampler = new("Screen Probe Pixel Temporal");
+        private static readonly int PixelHistoryMaxAgeId = Shader.PropertyToID("_SdfPixelHistoryMaxAge");
         private static readonly ProfilingSampler SunUpdateSampler = new("Surface Cache Sun Update");
         private static readonly CameraHistoryId SunHistoryId = CameraHistoryId.Create("SdfSurfaceSunVisibility");
         private static readonly int SunLayoutId = Shader.PropertyToID("_SdfSunLayout");
@@ -299,6 +300,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool RestirOpenPbrDiffuse;
             internal ulong RestirCardVersion;
             internal bool PixelTemporal;
+            internal int PixelHistoryMaxAge;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
             internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide;
@@ -475,6 +477,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_RestirDenoiseKernel = -1;
         private int m_AtrousKernel = -1, m_AtrousFinalKernel = -1, m_AtrousIterations;
         private int m_PixelTemporalKernel = -1, m_ScreenProbeTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
+        private int m_PixelHistoryMaxAge;
         private int m_RestirVarianceTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private int m_AtlasHeight;
@@ -663,6 +666,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RecordFirstHitDiagnostics = m_RecordRayDiagnostics && settings.recordFirstHitDiagnostics.value;
             bool motionConnected = m_ScreenMotion != null && !ReferenceEquals(m_ScreenMotion, m_LocalMotion);
             bool pixelTemporal = useSettings && settings.pixelTemporal.value && motionConnected && m_PixelTemporalKernel >= 0;
+            m_PixelHistoryMaxAge = pixelTemporal ? Mathf.Clamp(settings.pixelHistoryMaxAge.value, 8, 32) : 8;
             m_SunCacheHits.Resize(1, 1);
             if (m_TraceKernel < 0 || camera == null || camera.cullingMask == 0 || camera.stereoEnabled
                 || DebugPassCameraUtility.ShouldSkipExecution(camera))
@@ -1167,7 +1171,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 RecordResolve(cmd, placement, pixelTemporal);
                 if (pixelTemporal)
-                    RecordPixelTemporal(cmd, hasHistory && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
+                    RecordPixelTemporal(cmd, hasHistory && m_State.PixelHistoryMaxAge == m_PixelHistoryMaxAge
+                        && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
                 bool atrous = m_AtrousIterations > 0 && m_AtrousLighting.innerHandle.IsValid()
                     && m_AtrousVarianceA.innerHandle.IsValid() && (m_AtrousIterations < 3
                         || (m_AtrousVarianceB.innerHandle.IsValid() && m_RawResolved.innerHandle.IsValid()));
@@ -1210,6 +1215,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.RestirOpenPbrDiffuse = m_RestirOpenPbrDiffuse;
             m_State.RestirCardVersion = m_RestirCardVersion;
             m_State.PixelTemporal = pixelTemporal;
+            m_State.PixelHistoryMaxAge = m_PixelHistoryMaxAge;
             m_State.CorrectReceiverSelfHits = correctReceiver;
             m_State.ScreenCardLighting = screenCardLighting;
             m_State.MeshDetailDistance = m_MeshDetailDistance;
@@ -1747,6 +1753,7 @@ namespace VividRP.Runtime.RenderPass.Core
             BindProbeFrame(cmd, m_GatherTemporalCompute);
             cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousViewProjectionId, m_State.ViewProjection);
             cmd.SetComputeIntParam(m_GatherTemporalCompute, HasHistoryId, hasHistory ? 1 : 0);
+            cmd.SetComputeFloatParam(m_GatherTemporalCompute, PixelHistoryMaxAgeId, m_PixelHistoryMaxAge);
             cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousInverseVpId, m_State.ViewProjection.inverse);
             cmd.SetComputeVectorParam(m_GatherTemporalCompute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
             cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, MotionId, m_ScreenMotion.innerHandle);

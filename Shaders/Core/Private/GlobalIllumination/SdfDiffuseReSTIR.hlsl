@@ -38,7 +38,7 @@ float PackRestirPixelHistory(float age, float coverage, bool openPbr)
         return 0.0;
 
     // Keep the material domain in the sign. The finite FP16 payload stores age and coverage.
-    uint ageBits = uint(round(saturate((age - 1.0) / 7.0) * 31.0));
+    uint ageBits = uint(round(clamp(age, 1.0, 32.0))) - 1u;
     uint coverageBits = max(1u, uint(round(saturate(coverage) * 511.0)));
     float packed = f16tof32(0x0400u + (ageBits << 9u) + coverageBits);
     return openPbr ? -packed : packed;
@@ -51,7 +51,7 @@ float2 UnpackRestirPixelHistory(float packed)
         return 0.0;
 
     bits -= 0x0400u;
-    return float2(1.0 + (bits >> 9u) * (7.0 / 31.0), (bits & 511u) * (1.0 / 511.0));
+    return float2(1.0 + (bits >> 9u), (bits & 511u) * (1.0 / 511.0));
 }
 
 float RestirRandom(uint seed)

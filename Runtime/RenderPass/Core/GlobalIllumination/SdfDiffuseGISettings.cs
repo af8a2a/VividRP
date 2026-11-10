@@ -130,6 +130,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Reproject the resolved indirect diffuse lighting with motion vectors instead of accumulating the probe grid.")]
         public BoolParameter pixelTemporal = new(false);
 
+        [Tooltip("Maximum age of stable full-resolution diffuse GI history. Motion, coverage loss and shading changes shorten the window.")]
+        public ClampedIntParameter pixelHistoryMaxAge = new(16, 8, 32);
+
         [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
         public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);
 

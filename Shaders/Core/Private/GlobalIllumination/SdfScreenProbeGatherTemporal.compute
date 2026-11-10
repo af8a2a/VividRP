@@ -6,6 +6,8 @@
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
 
+float _SdfPixelHistoryMaxAge;
+
 #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
 Texture2D<float> _SdfRestirPreviousVariance;
 RWTexture2D<float> _SdfRestirVarianceHistoryOutput;
@@ -24,35 +26,114 @@ float PackScreenProbePixelHistory(float age, float coverage, uint historyStatus)
     // A normal, finite FP16 encoding preserves the payload through the history RT.
     // Bits after the exponent offset are coverage (8), age (5), and status (2).
     uint coverageBits = max(1u, uint(round(saturate(coverage) * 255.0)));
-    uint ageBits = uint(round((age - 1.0) * (31.0 / 7.0)));
+    uint ageBits = uint(round(clamp(age, 1.0, 32.0))) - 1u;
     return f16tof32(0x0400u + (historyStatus << 13u) + (ageBits << 8u) + coverageBits);
 }
 
 float2 UnpackScreenProbePixelHistory(float packed)
 {
     uint bits = f32tof16(packed) - 0x0400u;
-    return float2(1.0 + ((bits >> 8u) & 31u) * (7.0 / 31.0), (bits & 255u) * (1.0 / 255.0));
+    return float2(1.0 + ((bits >> 8u) & 31u), (bits & 255u) * (1.0 / 255.0));
 }
 #endif
 
+float3 SdfHistoryYCoCg(float3 rgb)
+{
+    return float3(dot(rgb, float3(0.25, 0.5, 0.25)), 0.5 * (rgb.r - rgb.b),
+        0.5 * rgb.g - 0.25 * (rgb.r + rgb.b));
+}
+
+float3 SdfHistoryRgb(float3 color)
+{
+    return float3(color.x + color.y - color.z, color.x + color.z, color.x - color.y - color.z);
+}
+
+float SdfPixelHistoryFastUpdate(float foreground, float objectMotionPixels)
+{
+    return max(saturate(4.0 * foreground), 0.85 * smoothstep(0.75, 4.0, objectMotionPixels));
+}
+
+float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 current,
+    float3 history, inout float fastUpdate)
+{
+    int2 size = int2(_SdfDiffuseScreenSize.xy);
+    float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+    float4 material = _SdfDiffuseGBuffer0.Load(int3(pixel, 0));
+    float3 center = SdfHistoryYCoCg(current.rgb);
+    float3 sum = center;
+    float3 sumSquared = center * center;
+    float total = 1.0;
+    const int2 offsets[8] = { int2(-1, -1), int2(0, -1), int2(1, -1), int2(-1, 0),
+        int2(1, 0), int2(-1, 1), int2(0, 1), int2(1, 1) };
+    [loop]
+    for (uint i = 0u; i < 8u; ++i)
+    {
+        int2 tap = int2(pixel) + offsets[i];
+        if (any(tap < 0) || any(tap >= size))
+            continue;
+        float4 lighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
+        float coverage = min(abs(current.a), abs(lighting.a)) / max(abs(current.a), abs(lighting.a));
+        if (coverage < 0.25 || (lighting.a < 0.0) != (current.a < 0.0))
+            continue;
+        float4 tapMaterial = _SdfDiffuseGBuffer0.Load(int3(tap, 0));
+        float3 albedoDelta = tapMaterial.rgb - material.rgb;
+        float3 tapPosition, tapNormal;
+        if (tapMaterial.a != material.a || !LoadReceiver(uint2(tap), tapPosition, tapNormal))
+            continue;
+        float geometryWeight = ProbeGeometryWeight(tapPosition - position, normal, tapNormal, eyeDepth);
+        if (geometryWeight < 0.15)
+            continue;
+
+        float weight = geometryWeight * coverage * exp2(-16.0 * dot(albedoDelta, albedoDelta));
+        float3 color = SdfHistoryYCoCg(lighting.rgb);
+        sum += weight * color;
+        sumSquared += weight * color * color;
+        total += weight;
+    }
+
+    float3 mean = sum / total;
+    float3 deviation = sqrt(max(0.0, sumSquared / total - mean * mean));
+    float3 sigmaScale = lerp(float3(2.5, 2.0, 2.0), float3(1.25, 1.25, 1.25), fastUpdate);
+    float3 extent = max(deviation * sigmaScale, 0.01 + 0.04 * max(center.x, mean.x));
+    float3 historyColor = SdfHistoryYCoCg(history);
+    float3 delta = historyColor - mean;
+    float3 normalized = abs(delta) / extent;
+    float3 bounded = max(0.0, SdfHistoryRgb(mean + delta / max(1.0, Max3(normalized.x, normalized.y, normalized.z))));
+    // A sparse sample can change color abruptly across the entire 3x3 neighborhood.
+    // Shorten stable history only for a large, spatially coherent luminance change.
+    float lumaScale = max(0.05, max(historyColor.x, mean.x));
+    float lumaResidual = max(0.0, abs(delta.x) - extent.x) / lumaScale;
+    float coherentChange = smoothstep(0.45, 0.8, lumaResidual)
+        * (1.0 - smoothstep(0.05, 0.2, deviation.x / lumaScale));
+    fastUpdate = max(fastUpdate, 0.25 * coherentChange);
+    // Weak rectification on stable pixels lets the long window absorb sparse trace noise.
+    return lerp(history, bounded, lerp(0.10, 1.0, fastUpdate));
+}
+
 #if !defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
 bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
-    out float4 history, out float historyCoverage, out float foregroundWeight, out float historyVariance)
+    out float4 history, out float historyCoverage, out float foregroundWeight, out float historyVariance,
+    out float objectMotionPixels)
 {
     history = 0.0;
     historyCoverage = 0.0;
     foregroundWeight = 0.0;
     historyVariance = 0.0;
+    objectMotionPixels = 0.0;
     float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
         return false;
 
     float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
-    if (PixelSetAsNoMotionVectors(packedMotion))
+    if (PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
         return false;
     float2 motion;
     DecodeMotionVector(packedMotion, motion);
     float2 previousPixel = float2(pixel) + (_SdfScreenJitterDelta - motion) * _SdfDiffuseScreenSize.xy;
+    float2 previousUv = (previousPixel + 0.5) * _SdfDiffuseScreenSize.zw;
+    if (any(previousUv < 0.0) || any(previousUv >= 1.0))
+        return false;
+    objectMotionPixels = length((previousUv - ScreenUv(previousClip)) * _SdfDiffuseScreenSize.xy);
     int2 low = int2(floor(previousPixel));
     float2 fraction = frac(previousPixel);
     int2 screenSize = int2(_SdfDiffuseScreenSize.xy);
@@ -74,25 +155,18 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
         float depth = f16tof32(packed & 65535u);
         float3 previousNormal = UnpackProbeNormal(float(packed >> 16u));
         bool normalMatches = dot(normal, previousNormal) >= 0.92;
-        #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
-            // Reversed Z. Even a mismatched normal may belong to a foreground occluder.
-            bool nearer = depth > expectedDepth;
-            if (depth <= 0.0 || (!normalMatches && !nearer))
-                continue;
-        #else
-            if (depth <= 0.0 || !normalMatches)
-                continue;
-        #endif
+        // Reversed Z. Even a mismatched normal may belong to a foreground occluder.
+        bool nearer = depth > expectedDepth;
+        if (depth <= 0.0 || (!normalMatches && !nearer))
+            continue;
 
         float2 uv = (float2(tap) + 0.5) * _SdfDiffuseScreenSize.zw;
         float3 previousPosition = ComputeWorldSpacePosition(uv, depth, _SdfScreenPreviousInverseVP);
         float3 expectedPosition = ComputeWorldSpacePosition(uv, expectedDepth, _SdfScreenPreviousInverseVP);
         float depthError = distance(previousPosition, expectedPosition);
         float planeError = abs(dot(previousPosition - position, normal));
-        #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
-            if (nearer && depthError > thickness && planeError > thickness)
-                foregroundWeight += weight;
-        #endif
+        if (nearer && depthError > thickness && planeError > thickness)
+            foregroundWeight += weight;
         if (!normalMatches || depthError > thickness || planeError > thickness)
             continue;
 
@@ -130,33 +204,7 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
         historyVariance /= max(historyCoverage, 1e-5);
         historyCoverage /= max(totalWeight, 1e-5);
     #endif
-    return totalWeight >= 0.35;
-}
-
-float3 ClampPixelHistory(uint2 pixel, float3 position, float3 normal, float3 current, float3 history, bool openPbr)
-{
-    float3 low = current;
-    float3 high = current;
-    int2 screenSize = int2(_SdfDiffuseScreenSize.xy);
-    float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
-    const int2 offsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
-    [unroll]
-    for (uint i = 0u; i < 4u; ++i)
-    {
-        int2 tap = int2(pixel) + offsets[i];
-        if (any(tap < 0) || any(tap >= screenSize))
-            continue;
-        float4 lighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
-        float3 otherPosition, otherNormal;
-        if (abs(lighting.a) <= 0.0 || (lighting.a < 0.0) != openPbr
-            || !LoadReceiver(uint2(tap), otherPosition, otherNormal)
-            || ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth) < 0.15)
-            continue;
-        low = min(low, lighting.rgb);
-        high = max(high, lighting.rgb);
-    }
-    float3 margin = max(0.25 * (high - low), 0.15 * high);
-    return clamp(history, max(0.0, low - margin), high + margin);
+    return totalWeight >= 0.35 && foregroundWeight < 0.25;
 }
 
 [numthreads(8, 8, 1)]
@@ -176,7 +224,8 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     float3 position, normal;
     bool receiver = LoadReceiver(id.xy, position, normal);
     float age = 0.0;
-    uint packed = 0u;
+    uint packed = f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0)))
+        | (receiver ? uint(PackProbeNormal(normal)) << 16u : 0u);
     #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
         float variance = 0.0;
     #endif
@@ -185,15 +234,8 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
     #endif
     if (receiver)
     {
-        #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
-            // Occluder depth must survive even when this frame has no valid GI there.
-            packed = f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0))) | (uint(PackProbeNormal(normal)) << 16u);
-        #endif
         if (abs(result.a) > 0.0)
         {
-            #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
-                packed = f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0))) | (uint(PackProbeNormal(normal)) << 16u);
-            #endif
             age = 1.0;
             #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
                 variance = _SdfRestirVariance.Load(int3(id.xy, 0));
@@ -202,30 +244,27 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             float historyCoverage;
             float foregroundWeight;
             float historyVariance;
+            float objectMotionPixels;
             if (_SdfDiffuseHasHistory != 0u
-                && ReadPixelHistory(id.xy, position, normal, openPbr, history, historyCoverage, foregroundWeight, historyVariance))
+                && ReadPixelHistory(id.xy, position, normal, openPbr, history, historyCoverage, foregroundWeight, historyVariance,
+                    objectMotionPixels))
             {
-                float3 bounded = ClampPixelHistory(id.xy, position, normal, result.rgb, history.rgb, openPbr);
                 float confidence = 1.0;
-                #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
-                    // A partly occluded footprint can renormalize a few bright taps.
-                    // Retain normal accumulation when current same-surface lighting supports those taps.
-                    float brightness = RestirLuminance(history.rgb);
-                    float excess = brightness - RestirLuminance(bounded);
-                    if (foregroundWeight > 0.0 && excess > max(0.05, 0.1 * brightness))
-                        confidence = foregroundWeight >= 0.125 ? 0.0 : 1.0 - 2.0 * foregroundWeight;
+                float fastUpdate = SdfPixelHistoryFastUpdate(foregroundWeight, objectMotionPixels);
+                #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY) || defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
+                    float coverageAgreement = min(abs(result.a), historyCoverage) / max(abs(result.a), historyCoverage);
                     #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
-                        if (foregroundWeight >= 0.25)
-                            confidence = 0.0;
+                        fastUpdate = max(fastUpdate, 1.0 - smoothstep(0.25, 0.65, coverageAgreement));
+                    #else
+                        confidence = coverageAgreement;
                     #endif
-                #else
-                    // Keep normal accumulation on equally covered receivers.
-                    // A coverage jump lowers trust despite a valid geometric reprojection.
-                    confidence = min(result.a, historyCoverage) / max(result.a, historyCoverage);
+                #endif
+                float3 rectified = RectifyPixelHistory(id.xy, position, normal, result, history.rgb, fastUpdate);
+                confidence *= 1.0 - fastUpdate;
+                age += min(history.a, _SdfPixelHistoryMaxAge - 1.0) * confidence;
+                #if !defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
                     historyStatus = confidence < 0.8 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
                 #endif
-                age = lerp(1.0, min(history.a + 1.0, 8.0), confidence);
-                float3 rectified = lerp(history.rgb, bounded, lerp(1.0, 0.20, confidence));
                 float currentWeight = rcp(age);
                 #if defined(VIVID_SDF_RESTIR_VARIANCE_HISTORY)
                     // A shared bright path can give the current reservoirs low spatial variance.
@@ -361,32 +400,6 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     return true;
 }
 
-void ScreenProbeTemporalNeighborhood(uint2 pixel, float3 position, float3 normal, float4 current,
-    out float3 low, out float3 high)
-{
-    low = high = current.rgb;
-    int2 size = int2(_SdfDiffuseScreenSize.xy);
-    float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
-    const int2 offsets[8] = { int2(-1, -1), int2(0, -1), int2(1, -1), int2(-1, 0),
-        int2(1, 0), int2(-1, 1), int2(0, 1), int2(1, 1) };
-    [loop]
-    for (uint i = 0u; i < 8u; ++i)
-    {
-        int2 tap = int2(pixel) + offsets[i];
-        if (any(tap < 0) || any(tap >= size))
-            continue;
-
-        float4 lighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
-        float3 otherPosition, otherNormal;
-        if (min(lighting.a, current.a) < 0.5 * max(lighting.a, current.a)
-            || !LoadReceiver(uint2(tap), otherPosition, otherNormal)
-            || ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth) < 0.15)
-            continue;
-        low = min(low, lighting.rgb);
-        high = max(high, lighting.rgb);
-    }
-}
-
 [numthreads(8, 8, 1)]
 void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 {
@@ -407,19 +420,10 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         float coverageAgreement = min(result.a, history.coverage) / max(result.a, history.coverage);
         if (coverageAgreement >= 0.35)
         {
-            float3 low, high;
-            ScreenProbeTemporalNeighborhood(id.xy, position, normal, result, low, high);
             float3 historyLighting = history.coveredLighting / history.coverage;
-            float fastUpdate = max(4.0 * history.foreground, 0.85 * smoothstep(0.75, 4.0, history.objectMotionPixels));
-
-            // Let the accumulation window absorb sampling variance on stable
-            // surfaces. Only geometry and object motion tighten the bounds.
-            float clipping = saturate(2.0 * fastUpdate);
-            float3 margin = max(0.25 * (high - low), 0.15 * high) * (1.0 - clipping);
-            float3 bounded = clamp(historyLighting, max(0.0, low - margin), high + margin);
-            float rectification = lerp(0.20, 1.0, max(1.0 - coverageAgreement, clipping));
-            float3 rectified = lerp(historyLighting, bounded, rectification);
-            age += min(history.age, 7.0) * coverageAgreement * (1.0 - fastUpdate);
+            float fastUpdate = SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels);
+            float3 rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
+            age += min(history.age, _SdfPixelHistoryMaxAge - 1.0) * coverageAgreement * (1.0 - fastUpdate);
             historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
                 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
 

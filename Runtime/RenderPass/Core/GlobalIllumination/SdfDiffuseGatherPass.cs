@@ -97,6 +97,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler RestirTemporalSampler = new("ReSTIR Gather Temporal");
         private static readonly ProfilingSampler RestirSpatialSampler = new("ReSTIR Gather Spatial");
         private static readonly ProfilingSampler RestirDenoiseSampler = new("ReSTIR Variance Bilateral");
+        private static readonly ProfilingSampler AtrousFineSampler = new("Diffuse GI Atrous Step 1");
+        private static readonly ProfilingSampler AtrousMiddleSampler = new("Diffuse GI Atrous Step 2");
+        private static readonly ProfilingSampler AtrousCoarseSampler = new("Diffuse GI Atrous Step 4");
         private static readonly ProfilingSampler ResolveSampler = new("Screen Probe Resolve");
         private static readonly ProfilingSampler PixelTemporalSampler = new("Screen Probe Pixel Temporal");
         private static readonly ProfilingSampler SunUpdateSampler = new("Surface Cache Sun Update");
@@ -220,6 +223,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RestirFilterHistoryModeId = Shader.PropertyToID("_SdfRestirFilterHistoryMode");
         private static readonly int RestirVarianceOutputId = Shader.PropertyToID("_SdfRestirVarianceOutput");
         private static readonly int RestirFilterInputId = Shader.PropertyToID("_SdfRestirFilterInput");
+        private static readonly int AtrousInputId = Shader.PropertyToID("_SdfAtrousInput");
+        private static readonly int AtrousVarianceId = Shader.PropertyToID("_SdfAtrousVariance");
+        private static readonly int AtrousVarianceOutputId = Shader.PropertyToID("_SdfAtrousVarianceOutput");
+        private static readonly int AtrousStepId = Shader.PropertyToID("_SdfAtrousStep");
+        private static readonly int AtrousUseRestirDomainId = Shader.PropertyToID("_SdfAtrousUseRestirDomain");
+        private static readonly int AtrousHasVarianceId = Shader.PropertyToID("_SdfAtrousHasVariance");
         private static readonly int OffscreenOnlyId = Shader.PropertyToID("_SdfDiffuseOffscreenOnly");
         private static readonly int ViewProjectionId = Shader.PropertyToID("_SdfDiffuseVP");
         private static readonly int CardAlbedoDepthId = Shader.PropertyToID("_SdfSurfaceAlbedoDepth");
@@ -358,6 +367,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Raw Resolved Diffuse GI", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_RawResolved = CreateScratch("SDF Diffuse Raw Resolved", ProbeFormat);
+        [RenderGraphResource(Name = "Diffuse GI Atrous Lighting", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_AtrousLighting = CreateScratch("Diffuse GI Atrous Lighting", ProbeFormat);
+        [RenderGraphResource(Name = "Diffuse GI Atrous Variance A", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_AtrousVarianceA = CreateScratch("Diffuse GI Atrous Variance A", GraphicsFormat.R16_SFloat);
+        [RenderGraphResource(Name = "Diffuse GI Atrous Variance B", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_AtrousVarianceB = CreateScratch("Diffuse GI Atrous Variance B", GraphicsFormat.R16_SFloat);
         [RenderGraphResource(Name = "Spatial ReSTIR Reservoirs", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_SpatialRestir = CreateScratch("Spatial ReSTIR Reservoirs", GeometryFormat);
@@ -452,6 +470,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_PlacementKernel = -1, m_FilterKernel = -1, m_HitFilterKernel = -1;
         private int m_RestirTemporalKernel = -1, m_RestirSpatialKernel = -1;
         private int m_RestirDenoiseKernel = -1;
+        private int m_AtrousKernel = -1, m_AtrousFinalKernel = -1, m_AtrousIterations;
         private int m_PixelTemporalKernel = -1, m_ScreenProbeTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
         private int m_RestirVarianceTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
@@ -539,6 +558,12 @@ namespace VividRP.Runtime.RenderPass.Core
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R32_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
                 && HasKernel(m_GatherCompute, "PlaceSdfAdaptiveProbes"))
                 m_PlacementKernel = m_GatherCompute.FindKernel("PlaceSdfAdaptiveProbes");
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
+                && HasKernel(m_GatherCompute, "FilterSdfDiffuseAtrous") && HasKernel(m_GatherCompute, "FilterSdfDiffuseAtrousFinal"))
+            {
+                m_AtrousKernel = m_GatherCompute.FindKernel("FilterSdfDiffuseAtrous");
+                m_AtrousFinalKernel = m_GatherCompute.FindKernel("FilterSdfDiffuseAtrousFinal");
+            }
             if (HasKernel(m_FilterCompute, "FilterSdfDiffuseProbes"))
                 m_FilterKernel = m_FilterCompute.FindKernel("FilterSdfDiffuseProbes");
             if (HasKernel(m_FilterCompute, "FilterSdfDirectionalHits"))
@@ -716,8 +741,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RecordFirstHitDiagnostics ? 3 * m_AtlasHeight : 1);
             m_AdaptivePlacement.Resize(m_AdaptiveProbes ? m_ProbeWidth : 1, m_AdaptiveProbes ? m_ProbeHeight : 1);
             m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * rayCount : 1, screenConfigured ? m_AtlasHeight : 1);
-            bool rawResolved = pixelTemporal || m_RestirPixelIntegration;
+            m_AtrousIterations = useSettings && m_AtrousKernel >= 0 ? settings.spatialDenoise.value switch
+            {
+                SdfDiffuseSpatialDenoise.Atrous2 => 2,
+                SdfDiffuseSpatialDenoise.Atrous3 => 3,
+                _ => 0
+            } : 0;
+            bool rawResolved = pixelTemporal || m_RestirPixelIntegration || m_AtrousIterations == 3;
             m_RawResolved.Resize(rawResolved ? m_Width : 1, rawResolved ? m_Height : 1);
+            m_AtrousLighting.Resize(m_AtrousIterations > 0 ? m_Width : 1, m_AtrousIterations > 0 ? m_Height : 1);
+            m_AtrousVarianceA.Resize(m_AtrousIterations > 0 ? m_Width : 1, m_AtrousIterations > 0 ? m_Height : 1);
+            m_AtrousVarianceB.Resize(m_AtrousIterations == 3 ? m_Width : 1, m_AtrousIterations == 3 ? m_Height : 1);
             m_RestirVariance.Resize(m_RestirPixelIntegration ? m_Width : 1, m_RestirPixelIntegration ? m_Height : 1);
             m_SpatialRestir.Resize(m_RestirPixelIntegration ? 2 * m_ProbeWidth : 1, m_RestirPixelIntegration ? m_AtlasHeight : 1);
             bool storeRayData = m_HitDistanceFilter || m_RestirGather;
@@ -1123,8 +1157,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 RecordResolve(cmd, placement, pixelTemporal);
                 if (pixelTemporal)
                     RecordPixelTemporal(cmd, hasHistory && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
+                bool atrous = m_AtrousIterations > 0 && m_AtrousLighting.innerHandle.IsValid()
+                    && m_AtrousVarianceA.innerHandle.IsValid() && (m_AtrousIterations < 3
+                        || (m_AtrousVarianceB.innerHandle.IsValid() && m_RawResolved.innerHandle.IsValid()));
                 if (m_RestirPixelIntegration)
                     RecordRestirDenoise(cmd, pixelTemporal, restirVarianceTemporal);
+                if (atrous)
+                    RecordAtrousDenoise(cmd, black, restirVarianceTemporal);
                 if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
                     RecordNearOcclusion(cmd);
             }
@@ -1214,6 +1253,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
+            m_AtrousKernel = m_AtrousFinalKernel = -1;
             m_PixelTemporalKernel = m_ScreenProbeTemporalKernel = m_RestirPixelTemporalKernel = -1;
             m_RestirVarianceTemporalKernel = -1;
         }
@@ -1621,6 +1661,40 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_RestirCompute, RestirFilterHistoryModeId, restirVarianceTemporal ? 2 : pixelTemporal ? 1 : 0);
             cmd.SetComputeTextureParam(m_RestirCompute, kernel, OutputId, m_Output.innerHandle);
             cmd.DispatchCompute(m_RestirCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+        }
+
+        private void RecordAtrousDenoise(ComputeCommandBuffer cmd, TextureHandle black, bool restirVarianceTemporal)
+        {
+            var input = m_Output.innerHandle;
+            var variance = restirVarianceTemporal ? m_CurrentRestirVariance.innerHandle
+                : m_RestirPixelIntegration ? m_RestirVariance.innerHandle : black;
+            int groupsX = CoreUtils.DivRoundUp(m_Width, GroupSize);
+            int groupsY = CoreUtils.DivRoundUp(m_Height, GroupSize);
+            for (int iteration = 0; iteration < m_AtrousIterations; iteration++)
+            {
+                bool first = iteration == 0;
+                bool last = iteration == m_AtrousIterations - 1;
+                int kernel = last ? m_AtrousFinalKernel : m_AtrousKernel;
+                // The resolve and temporal passes are finished before the second wavelet write.
+                var output = last ? m_Output.innerHandle : first ? m_AtrousLighting.innerHandle : m_RawResolved.innerHandle;
+                var varianceOutput = first ? m_AtrousVarianceA.innerHandle : m_AtrousVarianceB.innerHandle;
+                using var scope = new ProfilingScope(cmd, first ? AtrousFineSampler
+                    : iteration == 1 ? AtrousMiddleSampler : AtrousCoarseSampler);
+                BindReceiver(cmd, m_GatherCompute, kernel);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, AtrousInputId, input);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, CurrentResolvedId,
+                    first && m_RestirPixelIntegration ? m_RawResolved.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, AtrousVarianceId, variance);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OutputId, output);
+                if (!last)
+                    cmd.SetComputeTextureParam(m_GatherCompute, kernel, AtrousVarianceOutputId, varianceOutput);
+                cmd.SetComputeIntParam(m_GatherCompute, AtrousStepId, 1 << iteration);
+                cmd.SetComputeIntParam(m_GatherCompute, AtrousUseRestirDomainId, first && m_RestirPixelIntegration ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherCompute, AtrousHasVarianceId, !first || m_RestirPixelIntegration ? 1 : 0);
+                cmd.DispatchCompute(m_GatherCompute, kernel, groupsX, groupsY, 1);
+                input = output;
+                variance = varianceOutput;
+            }
         }
 
         private void PreparePixelHistory(Camera camera)

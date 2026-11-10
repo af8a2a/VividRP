@@ -19,6 +19,20 @@ namespace VividRP.Runtime.RenderPass.Core
             : base(value, overrideState) { }
     }
 
+    public enum SdfDiffuseSpatialDenoise
+    {
+        Legacy,
+        [InspectorName("À-Trous (2 passes)")] Atrous2 = 2,
+        [InspectorName("À-Trous (3 passes)")] Atrous3 = 3
+    }
+
+    [Serializable]
+    public sealed class SdfDiffuseSpatialDenoiseParameter : VolumeParameter<SdfDiffuseSpatialDenoise>
+    {
+        public SdfDiffuseSpatialDenoiseParameter(SdfDiffuseSpatialDenoise value)
+            : base(value) { }
+    }
+
     [Serializable, VolumeComponentMenu("VividRP/Lighting/SDF Diffuse GI")]
     public sealed class SdfDiffuseGISettings : VolumeComponent
     {
@@ -99,6 +113,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [Tooltip("Reproject the resolved indirect diffuse lighting with motion vectors instead of accumulating the probe grid.")]
         public BoolParameter pixelTemporal = new(false);
+
+        [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
+        public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);
 
         [Tooltip("Resolve thin-shell self hits using the matching GPU-driven visibility and depth buffers.")]
         public BoolParameter correctReceiverSelfHits = new(false);

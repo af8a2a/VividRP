@@ -3,10 +3,15 @@
 #pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
 #pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
 #pragma kernel PlaceSdfAdaptiveProbes
+#pragma kernel FilterSdfDiffuseAtrous VIVID_SDF_ATROUS
+#pragma kernel FilterSdfDiffuseAtrousFinal VIVID_SDF_ATROUS VIVID_SDF_ATROUS_FINAL
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfShortRangeAOCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
+#if defined(VIVID_SDF_ATROUS)
+#include "SdfDiffuseAtrous.hlsl"
+#endif
 #if defined(VIVID_SDF_PROBE_IRRADIANCE)
 #include "SdfScreenProbeIrradiance.hlsl"
 #endif

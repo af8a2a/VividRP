@@ -553,10 +553,10 @@ MonoBehaviour:
   m_FSR3Quality: 2
   m_FSR3EnableSharpening: 1
   m_FSR3Sharpness: 0.2
-  m_TSRQuality: 2
+  m_TSRQuality: 1
   m_TSREnableSharpening: 1
-  m_TSRSharpness: 0.2
-  m_TSRHistorySampleCount: 16
+  m_TSRSharpness: 0.867
+  m_TSRHistorySampleCount: 31
 --- !u!20 &1211502960
 Camera:
   m_ObjectHideFlags: 0

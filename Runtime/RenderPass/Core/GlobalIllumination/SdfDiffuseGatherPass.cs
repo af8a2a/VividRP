@@ -62,7 +62,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const float FarCellSize = 2.5f;
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
-        private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalCompositeHistory");
+        private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalTemporalRadianceHistory");
         private static readonly CameraHistoryId DirectionalGuideHistoryId = CameraHistoryId.Create("SdfDirectionalFilteredHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
         private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistoryWithCoverage");
@@ -351,11 +351,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ReceiverTraceKernel = -1, m_ReceiverCachedKernel = -1, m_ReceiverCachedSunKernel = -1;
         private readonly RenderGraphTexture m_PreviousProbes = RenderGraphTexture.CreateInput("Previous SDF Diffuse Probes", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousDirectional = RenderGraphTexture.CreateInput("Previous Screen Probe Composited Radiance", ProbeFormat);
+        [RenderGraphResource(Name = "Composite Probe Radiance", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private readonly RenderGraphTexture m_CurrentDirectional = CreateScratch("Screen Probe Composited Radiance", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousDirectionalFiltered = RenderGraphTexture.CreateInput("Previous Screen Probe Filtered Radiance", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentDirectionalFiltered = CreateScratch("Screen Probe Filtered Radiance History", ProbeFormat);
-        [RenderGraphResource(Name = "Temporal Probe Radiance", Access = AccessFlags.ReadWrite)]
-        [TransientResource]
         private readonly RenderGraphTexture m_DirectionalTemporal = CreateScratch("Screen Probe Temporal Radiance", ProbeFormat);
         [RenderGraphResource(Name = "Directional Probe Guide", Access = AccessFlags.ReadWrite)]
         [TransientResource]
@@ -752,7 +752,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalGuideTexture.Resize(m_DirectionalGuide ? directionalWidth : 1, m_DirectionalGuide ? m_AtlasHeight : 1);
             m_DirectionalRayTexture.Resize(directionalWidth, m_DirectionalCache ? 2 * m_AtlasHeight : 1);
             m_DirectionalTemporal.Resize(m_DirectionalCache ? DirectionalGatherBins * m_ProbeWidth : 1,
-                m_DirectionalCache ? m_AtlasHeight : 1);
+                m_DirectionalCache ? 2 * m_AtlasHeight : 1);
             int rayCount = m_RestirPixelIntegration ? 1 : RaysPerProbe;
             m_HitLighting.Resize(m_ProbeWidth, m_AtlasHeight);
             m_TraceSources.Resize(m_ProbeWidth, m_AtlasHeight);
@@ -855,7 +855,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? 2 * m_ProbeWidth : atlasWidth;
             m_FilteredProbes.Resize(needsProbeScratch ? scratchWidth : 1, needsProbeScratch ? m_AtlasHeight : 1);
             m_Geometry.Resize(m_ProbeWidth, m_AtlasHeight);
-            bool probesValid = m_DirectionalCache || CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
+            bool probesValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, ProbeHistoryId,
                 m_PreviousProbes, m_Probes, m_Probes.desc, out m_ProbeHistory);
             bool geometryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, GeometryHistoryId,
                 m_PreviousGeometry, m_Geometry, m_Geometry.desc, out m_GeometryHistory);
@@ -864,7 +864,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 int gatherWidth = DirectionalGatherBins * m_ProbeWidth;
                 m_CurrentDirectional.Resize(gatherWidth, 2 * m_AtlasHeight);
                 m_DirectionalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalHistoryId,
-                    m_PreviousDirectional, m_CurrentDirectional, m_CurrentDirectional.desc, out m_DirectionalHistory);
+                    m_PreviousDirectional, m_DirectionalTemporal, m_DirectionalTemporal.desc, out m_DirectionalHistory);
                 m_CurrentDirectionalFiltered.Resize(gatherWidth, m_AtlasHeight);
                 m_DirectionalGuideHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalGuideHistoryId,
                     m_PreviousDirectionalFiltered, m_CurrentDirectionalFiltered, m_CurrentDirectionalFiltered.desc, out m_DirectionalGuideHistory);
@@ -1908,6 +1908,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalCompositeId, composite);
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalFilteredId, filtered);
                 cmd.SetComputeTextureParam(shader, kernel, FilteredProbesId, m_FilteredProbes.innerHandle);
+                cmd.SetComputeIntParam(shader, HasHistoryId, hasHistory ? 1 : 0);
+                cmd.SetComputeMatrixParam(shader, PreviousViewProjectionId, m_State.ViewProjection);
+                cmd.SetComputeTextureParam(shader, kernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
+                cmd.SetComputeTextureParam(shader, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
+                cmd.SetComputeTextureParam(shader, kernel, ProbeId, m_Probes.innerHandle);
                 cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
             }
         }

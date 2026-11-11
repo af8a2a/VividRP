@@ -51,6 +51,10 @@ bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thick
     if (distance(previousPosition, expectedDepthPosition) > thickness)
         return false;
 
+    // Native OpenPBR exports unexposed Lambertian bounce radiance plus emission,
+    // matching Surface Cache lighting instead of the camera-view diffuse BSDF. Its
+    // material base color is already included; multiplying albedo here again
+    // would attenuate and recolor a Screen Hit relative to an SDF Hit.
     radiance = _SdfScreenPreviousRadiance.Load(int3(previousPixel, 0)).rgb;
     return all(isfinite(radiance));
 }

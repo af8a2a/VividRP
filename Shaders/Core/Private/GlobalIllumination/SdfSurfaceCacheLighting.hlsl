@@ -161,6 +161,8 @@ float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, Dif
             shadow -= strength;
     }
 
+    // Incident directional illuminance is unexposed. Lambertian outgoing radiance
+    // is albedo * E / PI; the gather's cosine PDF cancels its receiver BRDF / PI.
     return radiance + saturate(surface.albedoAndValid.rgb) * max(_SdfDiffuseLightColorShadow.rgb, 0.0)
         * (INV_PI * nDotL * attenuation * shadow);
 }
@@ -228,9 +230,10 @@ bool TryLoadCardIndirect(DiffuseSurface surface, VividMeshSdfHit hit, uint3 card
         total += weight;
     }
 
-    // Cached irradiance divided by pi. Apply the hit material only once, and keep
-    // the feedback contractive even for ideal white cards.
-    radiance = min(saturate(surface.albedoAndValid.rgb), 0.95) * (sum / max(total, 1e-5));
+    // Cached E / PI becomes outgoing radiance after exactly one albedo multiply.
+    // Bounce sweeps are finite; do not darken high-reflectance channels to force
+    // contraction or apply another / PI to an already cosine-integrated cache.
+    radiance = saturate(surface.albedoAndValid.rgb) * (sum / max(total, 1e-5));
     return total > 0.0;
 }
 

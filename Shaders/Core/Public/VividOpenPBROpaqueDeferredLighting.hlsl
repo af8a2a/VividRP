@@ -57,6 +57,15 @@ void VividAccumulateOpenPBROpaqueLight(OpenPBR_DiffuseSpecular light,
     result.specularLighting += light.specular;
 }
 
+float3 VividEvaluateOpenPBROpaqueDiffuseBounce(VividOpenPBROpaqueInputs inputs,
+    float3 directionWS, float3 incidentRadiance)
+{
+    // Screen traces and Surface Cache hits share a view-independent Lambertian
+    // radiance contract. The visible surface still uses the complete OpenPBR BSDF.
+    return saturate(VividOpenPBROpaqueDiffuseColor(inputs)) * max(incidentRadiance, 0.0)
+        * (INV_PI * saturate(dot(inputs.normalWS, directionWS)));
+}
+
 VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     VividOpenPBROpaqueInputs inputs, OpenPBR_DiffuseSpecular albedo,
     VividLightingLoopContext lightLoop, float3 positionWS, float3 viewDirectionWS, float ao,
@@ -94,8 +103,9 @@ VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
 
 OpenPBR_DiffuseSpecular VividEvaluateOpenPBROpaqueAreaLight(
     VividOpenPBROpaqueInputs inputs, OpenPBR_DiffuseSpecular albedo,
-    float3 positionWS, float3 viewDirectionWS, AreaLightData light)
+    float3 positionWS, float3 viewDirectionWS, AreaLightData light, out float3 diffuseBounce)
 {
+    diffuseBounce = 0.0;
     ApplyRectangularAreaLightBarnDoor(light, positionWS);
     float intensity = EvaluateAreaLightIntensity(light, positionWS);
     float nDotV = dot(inputs.normalWS, viewDirectionWS);
@@ -113,6 +123,7 @@ OpenPBR_DiffuseSpecular VividEvaluateOpenPBROpaqueAreaLight(
     float4 specular = EvaluateLTC_Area(rectangle, center, right, up,
         light.width * 0.5, light.height * 0.5, transpose(specularMatrix));
     float3 color = max(light.color, 0.0) * intensity;
+    diffuseBounce = diffuse.rgb * diffuse.a * color * saturate(VividOpenPBROpaqueDiffuseColor(inputs));
     // Lambert/GGX LTC shapes with OpenPBR integrated amplitudes. This is a
     // shape approximation for EON and multiple scattering, not an OpenPBR fit.
     return openpbr_make_diffuse_specular(diffuse.rgb * diffuse.a * color * albedo.diffuse,

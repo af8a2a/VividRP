@@ -117,9 +117,11 @@ float EvaluateDeferredDirectionalShadowAttenuation(
 }
 
 bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
-    uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result)
+    uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result,
+    out float3 diffuseBounce)
 {
     result = (VividSimpleSlabDeferredLighting)0;
+    diffuseBounce = 0.0;
     uint width, height, auxWidth, auxHeight, aux1Width, aux1Height;
     _GBuffer0.GetDimensions(width, height);
     _LayerAux0.GetDimensions(auxWidth, auxHeight);
@@ -152,6 +154,8 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     {
         DirectionalLightData light = GetDirectionalLight(i);
         float shadow = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, i, light);
+        diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(inputs,
+            SafeNormalize(light.directionWS), max(light.color, 0.0) * shadow);
         VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueLight(prepared,
             inputs.normalWS, SafeNormalize(light.directionWS), max(light.color, 0.0) * shadow), result);
     }
@@ -168,14 +172,22 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
         float attenuation = VividPunctualLightAttenuationWithDistanceModification(
             light, positionWS - light.positionWS, distances);
         if (attenuation > 0.0)
+        {
+            diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(inputs,
+                direction, max(light.color, 0.0) * attenuation);
             VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueLight(prepared,
                 inputs.normalWS, direction, max(light.color, 0.0) * attenuation), result);
+        }
     }
     uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint i = 0u; i < areaCount; ++i)
+    {
+        float3 areaBounce;
         VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueAreaLight(inputs,
-            albedo, positionWS, viewDirectionWS, VividLightingLoop::LoadAreaLight(lightLoop, i)), result);
+            albedo, positionWS, viewDirectionWS, VividLightingLoop::LoadAreaLight(lightLoop, i), areaBounce), result);
+        diffuseBounce += areaBounce;
+    }
     return true;
 }
 
@@ -511,10 +523,12 @@ float3 VividEvaluateDeferredSurfacePixel(
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     VividSimpleSlabDeferredLighting lightLoopOutput;
+    float3 nativeDiffuseBounce = 0.0;
     UNITY_BRANCH
     if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
     {
-        if (!TryEvaluateDeferredOpenPBROpaqueLighting(summary, pixelCoord, positionWS, lightLoopOutput))
+        if (!TryEvaluateDeferredOpenPBROpaqueLighting(summary, pixelCoord, positionWS,
+                lightLoopOutput, nativeDiffuseBounce))
         {
             debugLighting = float4(1.0, 0.0, 1.0, 1.0);
             return VividApplyPreExposure(float3(1.0, 0.0, 1.0));
@@ -541,7 +555,9 @@ float3 VividEvaluateDeferredSurfacePixel(
             pixelCoord,
             positionWS);
     }
-    bounceSource += max(lightLoopOutput.diffuseLighting - lightLoopOutput.indirectDiffuseLighting, 0.0);
+    bounceSource += deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE
+        ? nativeDiffuseBounce
+        : max(lightLoopOutput.diffuseLighting - lightLoopOutput.indirectDiffuseLighting, 0.0);
     float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
     float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting, 0.0));
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, summary);

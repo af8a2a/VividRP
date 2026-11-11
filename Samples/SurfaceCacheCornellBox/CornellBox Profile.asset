@@ -208,7 +208,7 @@ MonoBehaviour:
     m_Value: 1
   gatherMethod:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0
   surfaceCache:
     m_OverrideState: 1
     m_Value: {fileID: 11400000, guid: a9bf1ed0b0bd0a34a9afdb40337d7a6d, type: 2}
@@ -217,7 +217,13 @@ MonoBehaviour:
     m_Value: 0
   surfaceCacheBounceOrders:
     m_OverrideState: 1
-    m_Value: 3
+    m_Value: 8
+  surfaceCacheCardsPerFrame:
+    m_OverrideState: 1
+    m_Value: 16
+  surfaceCacheFullUpdateCardLimit:
+    m_OverrideState: 1
+    m_Value: 128
   screenHitCardLighting:
     m_OverrideState: 0
     m_Value: 1

@@ -76,7 +76,13 @@ namespace VividRP.Runtime.RenderPass.Core
         public BoolParameter cacheSunVisibility = new(false);
 
         [Tooltip("Additional diffuse bounce orders propagated through the Surface Cache. Zero uses direct light and emission at SDF hits.")]
-        public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 3);
+        public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 8);
+
+        [Tooltip("Maximum cards updated per frame in a large Surface Cache. Each complete sweep publishes one additional diffuse bounce order.")]
+        public ClampedIntParameter surfaceCacheCardsPerFrame = new(16, 1, 4096);
+
+        [Tooltip("Update a complete bounce sweep per frame when the scene has at most this many cards. Zero disables the small-scene fast fill. Large scenes retain the per-frame card budget.")]
+        public ClampedIntParameter surfaceCacheFullUpdateCardLimit = new(128, 0, 4096);
 
         [Tooltip("Add published card indirect lighting to screen hits that match the same Mesh SDF surface.")]
         public BoolParameter screenHitCardLighting = new(true);

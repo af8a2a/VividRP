@@ -172,6 +172,9 @@ namespace VividRP.Editor
                                         pagePixels,
                                         repeat,
                                         sourceMipOffsets[layerIndex]);
+                                    if (gpuDrivenSurface && layers[layerIndex].Semantic == VTLayerSemantic.BaseColor)
+                                        EncodeBaseColorForSRGB(pagePixels,
+                                            GraphicsFormatUtility.IsSRGBFormat(producers[layerIndex].SourceTexture.graphicsFormat));
                                 }
                                 else
                                 {
@@ -637,6 +640,10 @@ namespace VividRP.Editor
                             pixels,
                             repeat,
                             sourceMipOffsets[layerIndex]);
+                        if (parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
+                            && layers[layerIndex].Semantic == VTLayerSemantic.BaseColor)
+                            EncodeBaseColorForSRGB(pixels,
+                                GraphicsFormatUtility.IsSRGBFormat(producers[layerIndex].SourceTexture.graphicsFormat));
                         ConvertLayerEncoding(pixels, layers[layerIndex].Encoding);
                     }
                     else
@@ -687,6 +694,24 @@ namespace VividRP.Editor
             }
 
             return decodedData;
+        }
+
+        internal static void EncodeBaseColorForSRGB(Color32[] pixels, bool sourceIsSRGB)
+        {
+            if (sourceIsSRGB)
+                return;
+
+            // GPUDriven BaseColor pages always use an sRGB layer. Readable
+            // linear textures provide linear bytes, which must be encoded before
+            // storage so the runtime layer decode preserves the source reflectance.
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                Color32 value = pixels[i];
+                pixels[i] = (Color32)new Color(
+                    Mathf.LinearToGammaSpace(value.r / 255f),
+                    Mathf.LinearToGammaSpace(value.g / 255f),
+                    Mathf.LinearToGammaSpace(value.b / 255f), value.a / 255f);
+            }
         }
 
         private static void ConvertLayerEncoding(Color32[] pixels, VTLayerDataEncoding encoding)
@@ -1072,6 +1097,8 @@ namespace VividRP.Editor
             {
                 uint hash = 2166136261u;
                 hash = AppendHash(hash, (int) parameters.BuildProfile);
+                if (parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface)
+                    hash = AppendStringHash(hash, "LinearBaseColorToSRGB-v1");
                 hash = AppendHash(hash, pageSize);
                 hash = AppendHash(hash, borderSize);
                 hash = AppendHash(hash, pageCountX);

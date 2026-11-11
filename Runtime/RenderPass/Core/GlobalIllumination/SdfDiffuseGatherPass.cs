@@ -53,7 +53,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int RadiosityCardSize = 8; // One compute group per card.
         private const int RadiosityColumns = 16;
         private const int RadiosityCardLimit = 4096;
-        private const int RadiosityCardsPerFrame = 16;
         // Keep the grid and directional resolution in sync with SdfRadianceCacheCommon.hlsl.
         private const int FarGridSize = 16;
         private const int FarDirectionCount = 64;
@@ -68,7 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistoryWithCoverage");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
         private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
-        private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenRadianceHistory");
+        private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenLambertRadianceHistory");
         private static readonly CameraHistoryId ScreenGeometryHistoryId = CameraHistoryId.Create("SdfDiffuseScreenGeometryHistory");
         private static readonly ProfilingSampler ScreenTraceSampler = new("Diffuse GI Screen Trace");
         private static readonly ProfilingSampler GatherSampler = new("Diffuse GI Gather and SDF Fallback");
@@ -811,7 +810,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     float.IsFinite(settings.meshSdfDetailDistance.value) ? settings.meshSdfDetailDistance.value : 2f,
                     0.1f, m_TraceDistance);
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
-            ReadLight();
+            ReadLight(camera);
             bool farConfigured = useSettings && settings.farRadianceCache.value && m_UseSdf && cache != null
                 && m_FarKernel >= 0 && !m_OffscreenOnly && (!m_RestirGather || m_RestirPixelIntegration)
                 && float.IsFinite(settings.farTraceDistance.value) && settings.farTraceDistance.value > m_TraceDistance + FarCellSize;
@@ -828,7 +827,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_SunUpdateKernel >= 0 && m_LightPositionRange.w < 0f && m_LightColorShadow.w > 0f)
                 PrepareSunCache(camera, cache);
             if (m_UseSdf && cache != null && m_RadiosityKernel >= 0 && settings.surfaceCacheBounceOrders.value > 0)
-                PrepareRadiosity(camera, cache, settings.surfaceCacheBounceOrders.value);
+                PrepareRadiosity(camera, cache, settings.surfaceCacheBounceOrders.value,
+                    settings.surfaceCacheCardsPerFrame.value, settings.surfaceCacheFullUpdateCardLimit.value);
             // Dense reservoirs and card lighting need the exact raster hit pixel.
             bool storeScreenPixel = screenConfigured && (m_RestirPixelIntegration
                 || (m_ScreenCardLightingRequested && m_ReceiverVisibilitySource != null && m_RadiosityInput.IsValid()));
@@ -1366,7 +1366,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SunHistory.MarkWritten();
         }
 
-        private void PrepareRadiosity(Camera camera, VividSdfSurfaceCache cache, int targetOrders)
+        internal static int GetRadiosityUpdateCount(int cards, int cursor, int cardsPerFrame, int fullUpdateCardLimit)
+        {
+            int remaining = Mathf.Max(0, cards - cursor);
+            int budget = cards <= fullUpdateCardLimit ? cards : Mathf.Max(1, cardsPerFrame);
+            return Mathf.Min(remaining, budget);
+        }
+
+        private void PrepareRadiosity(Camera camera, VividSdfSurfaceCache cache, int targetOrders,
+            int cardsPerFrame, int fullUpdateCardLimit)
         {
             var history = camera.GetVividCameraHistory();
             int maxDimension = SystemInfo.maxTextureSize;
@@ -1404,7 +1412,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_RadiosityOrder < targetOrders)
             {
                 m_RadiosityOutput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityWriteHistory, 0, AccessFlags.Write);
-                m_RadiosityUpdateCards = m_RadiosityOutput.IsValid() ? Mathf.Min(cards - m_RadiosityCursor, RadiosityCardsPerFrame) : 0;
+                m_RadiosityUpdateCards = m_RadiosityOutput.IsValid()
+                    ? GetRadiosityUpdateCount(cards, m_RadiosityCursor, cardsPerFrame, fullUpdateCardLimit) : 0;
             }
         }
 
@@ -1962,7 +1971,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
         }
 
-        private void ReadLight()
+        private void ReadLight(Camera camera)
         {
             m_LightPositionRange = m_LightColorShadow = Vector4.zero;
             m_LightLayerMask = 0;
@@ -1978,6 +1987,13 @@ namespace VividRP.Runtime.RenderPass.Core
             var positionOrDirection = useSun ? -light.forwardWS : light.positionWS;
             float range = useSun ? -(float.IsFinite(m_SunShadowDistance) ? Mathf.Max(1f, m_SunShadowDistance) : 64f) : light.range;
             var color = light.color;
+            // LightGrid attenuates directional uploads after creating VividLightData.
+            // Surface Cache lighting must use that same ground-level sun color.
+            if (useSun && (!source.TryGetComponent<VividAdditionalLightData>(out var additional)
+                    || additional.interactsWithSky)
+                && PhysicallyBasedSkyAtmosphericAttenuation.TryCreate(camera, out var atmosphere))
+                color = Vector3.Scale(color,
+                    PhysicallyBasedSkyAtmosphericAttenuation.Evaluate(in atmosphere, positionOrDirection));
             m_LightLayerMask = source.cullingMask & m_LayerMask;
             m_LightPositionRange = new Vector4(positionOrDirection.x, positionOrDirection.y, positionOrDirection.z, range);
             m_LightColorShadow = new Vector4(color.x, color.y, color.z, Mathf.Clamp01(light.shadowStrength));

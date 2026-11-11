@@ -19,6 +19,27 @@ namespace VividRP.Editor.Tests
         private const string TempFolder = "Assets/VividVirtualTextureImporterTests";
         private readonly List<string> m_TempFiles = new();
 
+        [Test]
+        public void EncodeBaseColorForSRGB_PreservesLinearReflectanceAndAlpha()
+        {
+            var pixels = new[] { new Color32(128, 64, 32, 123), new Color32(0, 255, 0, 17) };
+            VividVirtualTextureAssetBuilder.EncodeBaseColorForSRGB(pixels, sourceIsSRGB: false);
+            Assert.That(pixels[0], Is.EqualTo(new Color32(188, 137, 99, 123)));
+            Assert.That(pixels[1], Is.EqualTo(new Color32(0, 255, 0, 17)));
+            Color decoded = ((Color)pixels[0]).linear;
+            Assert.That(decoded.r, Is.EqualTo(128f / 255f).Within(0.004f));
+            Assert.That(decoded.g, Is.EqualTo(64f / 255f).Within(0.004f));
+            Assert.That(decoded.b, Is.EqualTo(32f / 255f).Within(0.004f));
+        }
+
+        [Test]
+        public void EncodeBaseColorForSRGB_LeavesSRGBSourceBytesUnchanged()
+        {
+            var pixels = new[] { new Color32(128, 64, 32, 123) };
+            VividVirtualTextureAssetBuilder.EncodeBaseColorForSRGB(pixels, sourceIsSRGB: true);
+            Assert.That(pixels[0], Is.EqualTo(new Color32(128, 64, 32, 123)));
+        }
+
         [TearDown]
         public void TearDown()
         {

@@ -28,6 +28,37 @@ uint2 DirectionalMetadataOffset(uint2 grid)
     return uint2(0u, grid.y * (1u + _SdfDiffuseAdaptiveProbes));
 }
 
+float4 PackDirectionalHitPlane(float3 normal, uint instanceIndex)
+{
+    // Two finite half payloads preserve 26 instance bits exactly. Unknown or
+    // larger identities use the conservative range tier. Scene revision invalidates indices.
+    if (instanceIndex >= 0x4000000u || dot(normal, normal) < 0.5)
+        return 0.0;
+    uint2 words = uint2(instanceIndex & 8191u, instanceIndex >> 13u) + 0x400u;
+    return float4(VividEncodeSurfaceSummaryNormal(normal), f16tof32(words));
+}
+
+bool SameDirectionalHitPlane(float4 a, float4 b)
+{
+    return a.w > 0.0 && b.w > 0.0 && all(a.zw == b.zw);
+}
+
+float PackDirectionalHistoryAge(float age, float stale)
+{
+    uint mass = uint(round(clamp(age, 0.0, 8.0) * 32.0));
+    uint undrawn = uint(round(clamp(stale, 0.0, 8.0)));
+    return f16tof32(0x400u + mass + (undrawn << 9u));
+}
+
+float2 UnpackDirectionalHistoryAge(float packed)
+{
+    uint bits = f32tof16(packed);
+    if (bits < 0x400u || bits >= 0x2400u)
+        return 0.0;
+    uint payload = bits - 0x400u;
+    return float2(float(payload & 511u) / 32.0, float((payload >> 9u) & 15u));
+}
+
 float3 DirectionalBinDirection(uint bin, float2 sampleUv, float3x3 basis)
 {
     float u = (float(bin >> 2u) + sampleUv.x) * 0.5;

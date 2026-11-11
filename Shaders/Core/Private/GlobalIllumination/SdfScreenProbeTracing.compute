@@ -70,7 +70,7 @@ void StoreDistantProbeDirection(uint2 tile, float3 direction)
 }
 
 void StoreDirectionalRay(uint2 tile, uint ray, uint bin, float inverseRelativePdf, uint state,
-    float distance, float3 radiance, float3 direction)
+    float distance, float3 radiance, float3 direction, float3 hitNormal, uint hitInstance)
 {
     uint2 address = DirectionalAddress(tile, ray);
     uint source = state & 7u;
@@ -83,13 +83,16 @@ void StoreDirectionalRay(uint2 tile, uint ray, uint bin, float inverseRelativePd
     _SdfDiffuseProbes[address] = float4(clamp(radiance, 0.0, 65000.0), hit);
     _SdfDiffuseProbes[address + DirectionalMetadataOffset(DirectionalGrid())] =
         float4(bin, inverseRelativePdf, VividEncodeSurfaceSummaryNormal(direction));
+    _SdfDiffuseProbes[address + 2u * DirectionalMetadataOffset(DirectionalGrid())] = hit > 0.0
+        ? PackDirectionalHitPlane(hitNormal, hitInstance) : 0.0;
 }
 
 void StoreTraceSample(uint2 tile, uint ray, uint state, float distance, float3 radiance,
-    float3 direction = 0.0, uint bin = 0u, float inverseRelativePdf = 1.0)
+    float3 direction = 0.0, uint bin = 0u, float inverseRelativePdf = 1.0, float3 hitNormal = 0.0,
+    uint hitInstance = 0xffffffffu)
 {
     if (_SdfDirectionalCacheEnabled != 0u && state != 0u)
-        StoreDirectionalRay(tile, ray, bin, inverseRelativePdf, state, distance, radiance, direction);
+        StoreDirectionalRay(tile, ray, bin, inverseRelativePdf, state, distance, radiance, direction, hitNormal, hitInstance);
     uint2 address = uint2(tile.x * ProbeRayCount() + ray, tile.y);
     if (_SdfDiffuseHitFilterEnabled != 0u)
     {
@@ -288,6 +291,7 @@ void TraceProbe(uint3 id)
                 float3 radiance = screenHit.rgb;
                 uint hitState = RayScreenHit;
                 VividMeshSdfHit screenSurface = (VividMeshSdfHit)0;
+                float3 screenNormal = 0.0;
                 screenSurface.instanceIndex = 0xffffffffu;
                 bool accepted = true;
                 if (_SdfRestirDense != 0u || _SdfScreenCardLighting != 0u)
@@ -298,6 +302,7 @@ void TraceProbe(uint3 id)
                     accepted = LoadScreenHitGeometry(pixel, _SdfDiffuseDepth.Load(int3(pixel, 0)), sample.position, sample.normal);
                     if (accepted)
                     {
+                        screenNormal = sample.normal;
                         distance = dot(sample.position - origin, direction);
                         #if defined(VIVID_SDF_SURFACE_CACHE) && defined(VIVID_SDF_RECEIVER)
                             float3 indirect;
@@ -319,7 +324,8 @@ void TraceProbe(uint3 id)
                 }
                 if (accepted)
                 {
-                    StoreTraceSample(tile, ray, hitState, distance, radiance, direction, bin, inverseRelativePdf);
+                    StoreTraceSample(tile, ray, hitState, distance, radiance, direction, bin, inverseRelativePdf,
+                        screenNormal, screenSurface.instanceIndex);
                     if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
                         StoreFirstHitDiagnostic(tile, ray, origin, direction, screenSurface, 0u);
                     sum += inverseRelativePdf * radiance;
@@ -470,7 +476,8 @@ void TraceProbe(uint3 id)
             RestirUpdate(reservoir, reservoirWeightSum, sample, RestirLuminance(radiance), 0u,
                 RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));
         }
-        StoreTraceSample(tile, ray, rayState | RaySdfHit, hit.distance, radiance, direction, bin, inverseRelativePdf);
+        StoreTraceSample(tile, ray, rayState | RaySdfHit, hit.distance, radiance, direction, bin, inverseRelativePdf,
+            hit.normalWS, hit.instanceIndex);
         sum += inverseRelativePdf * radiance;
         if (_SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
             moments += ProbeSampleMoments(radiance, direction, normal);

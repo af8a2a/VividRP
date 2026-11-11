@@ -81,7 +81,13 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Cosine rays per radiosity texel and bounce sweep. Higher counts reduce fixed Surface Cache sampling error; use a smaller card update budget for expensive reference solves.")]
         public ClampedIntParameter surfaceCacheRadiositySamples = new(16, 16, 4096);
 
-        [Tooltip("Maximum cards updated per frame in a large Surface Cache. Each complete sweep publishes one additional diffuse bounce order.")]
+        [Tooltip("Experimental: keep a separate estimate for each bounce order and refine it with new sample batches. A complete target-order sweep publishes atomically; lighting changes restart all batches.")]
+        public BoolParameter surfaceCacheRadiosityAccumulate = new(false);
+
+        [Tooltip("Independent sample batches per bounce order before the static radiosity cache stops updating. Rays per texel are samples per batch times this limit.")]
+        public ClampedIntParameter surfaceCacheRadiosityBatchLimit = new(64, 1, 4096);
+
+        [Tooltip("Maximum cards updated per frame in a large Surface Cache. One sweep updates a bounce order; accumulation publishes after a complete target-order batch.")]
         public ClampedIntParameter surfaceCacheCardsPerFrame = new(16, 1, 4096);
 
         [Tooltip("Update a complete bounce sweep per frame when the scene has at most this many cards. Zero disables the small-scene fast fill. Large scenes retain the per-frame card budget.")]

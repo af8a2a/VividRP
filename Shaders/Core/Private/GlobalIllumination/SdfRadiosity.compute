@@ -1,4 +1,6 @@
 #pragma kernel UpdateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
+#pragma kernel AccumulateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER VIVID_SDF_RADIOSITY_ACCUMULATION
+#pragma kernel PublishSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfScreenProbeReceiver.hlsl"
@@ -9,6 +11,8 @@ RWTexture2D<float4> _SdfRadiosityOutput;
 uint _SdfRadiosityFirstCard;
 uint _SdfRadiositySamples;
 uint _SdfRadiositySeed;
+uint _SdfRadiosityBatch;
+uint _SdfRadiosityBounce;
 
 float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
 {
@@ -71,6 +75,12 @@ float4 GatherCardIndirect(uint card, uint2 cell)
     float3x3 basis = GetLocalFrame(normalWS);
     uint seed = HashProbe((card * (RadiosityCardSize * RadiosityCardSize) + cell.y * RadiosityCardSize + cell.x)
         ^ _SdfRadiositySeed);
+    #if defined(VIVID_SDF_RADIOSITY_ACCUMULATION)
+        // Batch zero reproduces the fixed sequence. Subsequent batches are independent
+        // per bounce; advancing samples must not silently introduce another bounce.
+        if (_SdfRadiosityBatch > 0u)
+            seed = HashProbe(seed ^ HashProbe(_SdfRadiosityBatch + 0x9e3779b9u * (_SdfRadiosityBounce + 1u)));
+    #endif
     uint rayCount = clamp(_SdfRadiositySamples, RadiosityRays, 4096u);
     float3 sum = 0.0;
     [loop]
@@ -91,5 +101,28 @@ void UpdateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
 {
     uint card = _SdfRadiosityFirstCard + id.z;
     _SdfRadiosityOutput[RadiosityAtlasPixel(card, id.xy)] = GatherCardIndirect(card, id.xy);
+}
+
+[numthreads(8, 8, 1)]
+void AccumulateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
+{
+    uint card = _SdfRadiosityFirstCard + id.z;
+    uint2 pixel = RadiosityAtlasPixel(card, id.xy);
+    float4 sample = GatherCardIndirect(card, id.xy);
+    // Only this invocation owns this texel. Different orders use different atlases.
+    // On invalidation batch=0 overwrites all owned cells without reading old energy.
+    if (_SdfRadiosityBatch > 0u && sample.a > 0.0)
+    {
+        float4 old = _SdfRadiosityOutput[pixel];
+        if (old.a > 0.0)
+            sample.rgb = lerp(old.rgb, sample.rgb, rcp(float(_SdfRadiosityBatch + 1u)));
+    }
+    _SdfRadiosityOutput[pixel] = SdfRoundToNearestHalf(sample);
+}
+
+[numthreads(8, 8, 1)]
+void PublishSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
+{
+    _SdfRadiosityOutput[id.xy] = _SdfRadiosityInput.Load(int3(id.xy, 0));
 }
 #endif

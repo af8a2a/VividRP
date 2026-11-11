@@ -7,6 +7,8 @@
 #if defined(VIVID_SDF_RADIOSITY_UPDATE)
 RWTexture2D<float4> _SdfRadiosityOutput;
 uint _SdfRadiosityFirstCard;
+uint _SdfRadiositySamples;
+uint _SdfRadiositySeed;
 
 float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
 {
@@ -67,19 +69,21 @@ float4 GatherCardIndirect(uint card, uint2 cell)
 
     float3 origin = receiver.positionWS + receiver.normalWS * ResolveSunShadowBias(field, instance, receiver.normalWS);
     float3x3 basis = GetLocalFrame(normalWS);
-    uint seed = HashProbe(card * (RadiosityCardSize * RadiosityCardSize) + cell.y * RadiosityCardSize + cell.x);
+    uint seed = HashProbe((card * (RadiosityCardSize * RadiosityCardSize) + cell.y * RadiosityCardSize + cell.x)
+        ^ _SdfRadiositySeed);
+    uint rayCount = clamp(_SdfRadiositySamples, RadiosityRays, 4096u);
     float3 sum = 0.0;
     [loop]
-    for (uint ray = 0u; ray < RadiosityRays; ray++)
+    for (uint ray = 0u; ray < rayCount; ray++)
     {
-        float3 direction = CosineRayDirection(ray, RadiosityRays, seed, basis);
+        float3 direction = CosineRayDirection(ray, rayCount, seed, basis);
         if (dot(receiver.normalWS, direction) > 0.0)
             sum += TraceCardRadiance(origin, direction, receiver);
     }
     // p(w) = cos(theta) / PI, so mean incoming radiance estimates E / PI.
     // The receiving card's albedo is applied only when this cache is read at a hit.
     // Keep zero for uncovered cells and preserve covered black as a valid sample.
-    return float4(clamp(sum / RadiosityRays, 0.0, 65000.0), 1.0 + depth);
+    return float4(clamp(sum / rayCount, 0.0, 65000.0), 1.0 + depth);
 }
 
 [numthreads(8, 8, 1)]

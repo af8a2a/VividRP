@@ -104,6 +104,53 @@ uint _SdfDiffuseUseScreenRays;
 uint _SdfScreenCardLighting;
 uint _SdfDiffuseRecordRayDiagnostics;
 uint _SdfDiffuseRecordFirstHitDiagnostics;
+// Editor ablations. Bits 128/256/512 restore legacy stores/centers/fine-only bounds.
+// Normal rendering binds zero and retains the original 0.85 anchor blend.
+uint _SdfGatherHistoryDiagnostics;
+float _SdfProbeAnchorHistoryBlend;
+
+float2 ProbeHistoryGridPosition(float2 uv)
+{
+    if ((_SdfGatherHistoryDiagnostics & 256u) != 0u)
+        return uv * _SdfDiffuseScreenSize.xy / ProbeSpacing - 0.5;
+    // ReceiverPixel is an integer texel index; its projected UV is at index + 0.5.
+    float2 pixel = uv * _SdfDiffuseScreenSize.xy - 0.5;
+    float2 probe = pixel / ProbeSpacing - 0.5;
+    uint2 grid = (uint2(_SdfDiffuseScreenSize.xy) + ProbeSpacing - 1u) / ProbeSpacing;
+    float2 lower = max(float2(grid) - 2.0, 0.0);
+    float2 lowerPixel = min(lower * ProbeSpacing + ProbeSpacing / 2u, _SdfDiffuseScreenSize.xy - 1.0);
+    float2 lastPixel = min(float2(grid - 1u) * ProbeSpacing + ProbeSpacing / 2u, _SdfDiffuseScreenSize.xy - 1.0);
+    float2 tail = lower + (pixel - lowerPixel) / max(lastPixel - lowerPixel, 1.0);
+    probe = lerp(probe, tail, float2(pixel >= lowerPixel));
+    return probe * float2(grid > 1u);
+}
+
+float4 SdfRoundToNearestHalf(float4 value)
+{
+    // Do not assume either f32tof16 or a typed R16F UAV store rounds to nearest.
+    // Bracket the magnitude using adjacent half values, then resolve ties to even.
+    float4 magnitude = min(abs(value), 65504.0);
+    uint4 lower = f32tof16(magnitude);
+    lower -= uint4(f16tof32(lower) > magnitude);
+    float4 low = f16tof32(lower);
+    float4 high = f16tof32(min(lower + 1u, 0x7bffu));
+    float4 below = magnitude - low;
+    float4 above = high - magnitude;
+    uint4 up = uint4(below > above) | (uint4(below == above) & (lower & 1u));
+    up &= uint4(lower < 0x7bffu);
+    float4 rounded = f16tof32(lower + up);
+    return asfloat(asuint(rounded) | (asuint(value) & 0x80000000u));
+}
+
+float4 RoundSdfHistory(float4 value)
+{
+    return (_SdfGatherHistoryDiagnostics & 128u) != 0u ? value : SdfRoundToNearestHalf(value);
+}
+
+float4 RoundSdfAnchorHistory(float4 value)
+{
+    return (_SdfGatherHistoryDiagnostics & 32u) != 0u ? value : RoundSdfHistory(value);
+}
 
 bool LoadReceiver(uint2 pixel, out float3 position, out float3 normal)
 {

@@ -2,6 +2,7 @@
 #pragma kernel ScreenProbeTemporalReprojectionCS VIVID_SDF_SCREEN_PROBE_TEMPORAL
 #pragma kernel TemporalSdfRestirDiffuseGI VIVID_SDF_RESTIR_PIXEL_HISTORY
 #pragma kernel TemporalSdfRestirVariance VIVID_SDF_RESTIR_PIXEL_HISTORY VIVID_SDF_RESTIR_VARIANCE_HISTORY
+#pragma kernel InspectSdfHistoryQuantizationCS
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
@@ -56,6 +57,8 @@ float SdfPixelHistoryFastUpdate(float foreground, float objectMotionPixels)
 float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 current,
     float3 history, inout float fastUpdate)
 {
+    if ((_SdfGatherHistoryDiagnostics & 1u) != 0u)
+        return history;
     int2 size = int2(_SdfDiffuseScreenSize.xy);
     float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
     float4 material = _SdfDiffuseGBuffer0.Load(int3(pixel, 0));
@@ -92,7 +95,42 @@ float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 c
     }
 
     float3 mean = sum / total;
-    float3 deviation = sqrt(max(0.0, sumSquared / total - mean * mean));
+    float3 variance = max(0.0, sumSquared / total - mean * mean);
+    bool probeScaleVariance = (_SdfGatherHistoryDiagnostics & 64u) != 0u;
+    #if defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
+        probeScaleVariance = (_SdfGatherHistoryDiagnostics & 512u) == 0u;
+    #endif
+    if (probeScaleVariance)
+    {
+        // A 3x3 pixel neighborhood underestimates noise shared by a 16px probe tile.
+        // Expand only the variance bound; retain the fine mean and validate geometry/materials.
+        float3 coarseVariance = 0.0;
+        float coarseWeight = 0.0;
+        [loop]
+        for (uint i = 0u; i < 8u; ++i)
+        {
+            int2 tap = int2(pixel) + offsets[i] * int(ProbeSpacing / 2u);
+            if (any(tap < 0) || any(tap >= size))
+                continue;
+            float4 lighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
+            float agreement = min(abs(current.a), abs(lighting.a)) / max(abs(current.a), abs(lighting.a));
+            float4 tapMaterial = _SdfDiffuseGBuffer0.Load(int3(tap, 0));
+            float3 tapPosition, tapNormal;
+            if (agreement < 0.25 || tapMaterial.a != material.a || (lighting.a < 0.0) != (current.a < 0.0)
+                || !LoadReceiver(uint2(tap), tapPosition, tapNormal))
+                continue;
+            float geometryWeight = ProbeGeometryWeight(tapPosition - position, normal, tapNormal, eyeDepth);
+            float3 albedoDelta = tapMaterial.rgb - material.rgb;
+            float weight = geometryWeight * agreement * exp2(-16.0 * dot(albedoDelta, albedoDelta));
+            if (geometryWeight < 0.15)
+                continue;
+            float3 delta = SdfHistoryYCoCg(lighting.rgb) - mean;
+            coarseVariance += weight * delta * delta;
+            coarseWeight += weight;
+        }
+        variance = max(variance, coarseVariance / max(coarseWeight, 1e-5));
+    }
+    float3 deviation = sqrt(variance);
     float3 sigmaScale = lerp(float3(2.5, 2.0, 2.0), float3(1.25, 1.25, 1.25), fastUpdate);
     float3 extent = max(deviation * sigmaScale, 0.01 + 0.04 * max(center.x, mean.x));
     float3 historyColor = SdfHistoryYCoCg(history);
@@ -423,7 +461,8 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
             float3 historyLighting = history.coveredLighting / history.coverage;
             float fastUpdate = SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels);
             float3 rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
-            age += min(history.age, _SdfPixelHistoryMaxAge - 1.0) * coverageAgreement * (1.0 - fastUpdate);
+            float ageConfidence = (_SdfGatherHistoryDiagnostics & 8u) != 0u ? 1.0 : coverageAgreement;
+            age += min(history.age, _SdfPixelHistoryMaxAge - 1.0) * ageConfidence * (1.0 - fastUpdate);
             historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
                 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
 
@@ -435,7 +474,26 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     }
 
     _SdfDiffusePixelGeometryOutput[id.xy] = geometry;
-    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, PackScreenProbePixelHistory(age, result.a, historyStatus));
+    float historyAlpha = PackScreenProbePixelHistory(age, result.a, historyStatus);
+    result = RoundSdfHistory(result);
+    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, historyAlpha);
     _SdfDiffuseOutput[id.xy] = result;
 }
 #endif
+
+RWTexture2D<float4> _SdfHistoryQuantizationFloat;
+RWTexture2D<float4> _SdfHistoryQuantizationHalf;
+
+[numthreads(64, 1, 1)]
+void InspectSdfHistoryQuantizationCS(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x & 63u;
+    uint category = id.x >> 6u;
+    float value = category == 0u ? 1.0 + (float(index) + 0.25) / 2048.0
+        : category == 1u ? 1.0 + (float(index) + 0.5) / 1024.0
+        : category == 2u ? (float(index) + 0.25) * exp2(-25.0) : 65000.0 + 1.25 * float(index);
+    float4 rounded = SdfRoundToNearestHalf(float4(value, -value, 0.0, 0.0));
+    float4 sample = float4(value, rounded.x, -value, rounded.y);
+    _SdfHistoryQuantizationFloat[id.xy] = sample;
+    _SdfHistoryQuantizationHalf[id.xy] = sample;
+}

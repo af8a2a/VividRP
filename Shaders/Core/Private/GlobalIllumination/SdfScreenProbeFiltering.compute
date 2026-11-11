@@ -4,6 +4,7 @@
 #pragma kernel ScreenProbeCompositeTracesWithScatterCS
 #pragma kernel ScreenProbeTemporallyAccumulateTraceRadianceCS
 #pragma kernel ScreenProbeFilterGatherTracesCS
+#pragma kernel ScreenProbePrepareAnchorCS
 #pragma kernel ScreenProbeConvertToIrradianceCS
 
 #include "SdfScreenProbeCommon.hlsl"
@@ -11,6 +12,11 @@
 #include "SdfDiffuseDirectionalCache.hlsl"
 
 #include "SdfScreenProbeIrradiance.hlsl"
+
+uint _SdfProbeAnchorDiagnostics;
+uint _SdfSpatialProbeAnchor;
+Texture2D<float4> _SdfPreparedProbeAnchor;
+RWTexture2D<float4> _SdfPreparedProbeAnchorOutput;
 
 float FilterNeighborWeight(uint2 tile, float4 center, float3 normal, float eyeDepth)
 {
@@ -332,7 +338,7 @@ void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, ui
             float3 normal = UnpackProbeNormal(geometry.w);
             float3 direction = DirectionalGatherDirection(bin, GetLocalFrame(normal));
             float eyeDepth = max(0.1, dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward));
-            float2 probe = uv * _SdfDiffuseScreenSize.xy / ProbeSpacing - 0.5;
+            float2 probe = ProbeHistoryGridPosition(uv);
             int2 lower = int2(floor(probe));
             float2 fraction = frac(probe);
             float3 history = 0.0;
@@ -419,8 +425,8 @@ void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, ui
             }
         }
     }
-    _SdfDirectionalTemporalOutput[address] = current;
-    _SdfDirectionalTemporalOutput[address + offset] = temporalHit;
+    _SdfDirectionalTemporalOutput[address] = RoundSdfHistory(current);
+    _SdfDirectionalTemporalOutput[address + offset] = RoundSdfHistory(temporalHit);
 }
 
 [numthreads(16, 1, 1)]
@@ -520,7 +526,7 @@ float4 AccumulateDirectionalProbeAnchor(float4 current, float3 position, float3 
         return current;
 
     uint2 grid = DirectionalGrid();
-    float2 probe = uv * _SdfDiffuseScreenSize.xy / ProbeSpacing - 0.5;
+    float2 probe = ProbeHistoryGridPosition(uv);
     int2 lower = int2(floor(probe));
     float2 fraction = frac(probe);
     float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
@@ -559,10 +565,112 @@ float4 AccumulateDirectionalProbeAnchor(float4 current, float3 position, float3 
     if (total > 1e-5)
     {
         float4 covered = float4(current.rgb * current.a, current.a);
-        covered = lerp(covered, history / total, 0.85 * saturate(total));
+        covered = lerp(covered, history / total, _SdfProbeAnchorHistoryBlend * saturate(total));
         current = float4(covered.rgb / max(covered.a, 1e-5), covered.a);
     }
     return current;
+}
+
+[numthreads(8, 8, 1)]
+void ScreenProbePrepareAnchorCS(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = DirectionalGrid();
+    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+        return;
+    float4 geometry = _SdfDiffuseGeometry[id.xy];
+    float4 anchor = 0.0;
+    if (geometry.w >= 0.0)
+    {
+        [loop]
+        for (uint bin = 0u; bin < DirectionalGatherBinCount; ++bin)
+        {
+            float4 traced = _SdfDirectionalComposite.Load(int3(DirectionalGatherAddress(id.xy, bin), 0));
+            anchor += float4(traced.rgb * traced.a, traced.a);
+        }
+        anchor.rgb /= max(anchor.a, 1e-5);
+        anchor.a = saturate(anchor.a / RaysPerProbe);
+        anchor = AccumulateDirectionalProbeAnchor(anchor, geometry.xyz, UnpackProbeNormal(geometry.w));
+    }
+    _SdfPreparedProbeAnchorOutput[id.xy] = RoundSdfAnchorHistory(anchor);
+}
+
+float AnchorConnectionWeight(float4 center, float4 other, float3 normal, float3 otherNormal)
+{
+    float alignment = dot(normal, otherNormal);
+    if (alignment < 0.995)
+        return 0.0;
+    float3 delta = other.xyz - center.xyz;
+    float separation = length(delta);
+    float tolerance = 0.002 + 0.008 * separation; // Includes 8-bit oct-normal quantization.
+    float planeDistance = max(abs(dot(delta, normal)), abs(dot(delta, otherNormal)));
+    float eyeDepth = min(dot(float4(center.xyz, 1.0), _SdfProbeCameraForward),
+        dot(float4(other.xyz, 1.0), _SdfProbeCameraForward));
+    float radius = clamp(0.08 * eyeDepth, 0.08, 0.35);
+    if (planeDistance >= tolerance || separation >= radius)
+        return 0.0;
+
+    float4 centerClip = mul(_SdfDiffuseVP, float4(center.xyz, 1.0));
+    float4 otherClip = mul(_SdfDiffuseVP, float4(other.xyz, 1.0));
+    if (centerClip.w <= 0.0 || otherClip.w <= 0.0)
+        return 0.0;
+    float2 centerUv = ScreenUv(centerClip), otherUv = ScreenUv(otherClip);
+    // Reject a foreground occluder between otherwise coplanar endpoints.
+    [unroll]
+    for (uint tap = 1u; tap <= 3u; ++tap)
+    {
+        float2 uv = lerp(centerUv, otherUv, float(tap) * 0.25);
+        if (any(uv < 0.0) || any(uv >= 1.0))
+            return 0.0;
+        float3 position, sampleNormal;
+        if (!LoadReceiver(uint2(uv * _SdfDiffuseScreenSize.xy), position, sampleNormal)
+            || min(dot(sampleNormal, normal), dot(sampleNormal, otherNormal)) < 0.995
+            || abs(dot(position - center.xyz, normal)) >= tolerance
+            || abs(dot(position - other.xyz, otherNormal)) >= tolerance)
+            return 0.0;
+    }
+    float planeWeight = saturate(1.0 - planeDistance / tolerance);
+    return planeWeight * planeWeight * smoothstep(0.995, 0.9999, alignment)
+        * exp2(-2.0 * dot(delta, delta) / (radius * radius));
+}
+
+float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4 center)
+{
+    uint2 grid = DirectionalGrid();
+    // Adaptive probes protect discontinuities and retain their own temporal anchor.
+    if (tile.y >= grid.y || center.a < 0.25)
+        return center;
+    float3 energy = center.rgb * center.a;
+    float3 reconstructed = energy;
+    [loop]
+    for (uint tap = 0u; tap < 24u; ++tap)
+    {
+        int2 offset = ProbeFilterOffsets[tap];
+        int2 candidate = int2(tile) + offset;
+        if (any(candidate < 0) || any(candidate >= int2(grid)))
+            continue;
+        float4 other = _SdfDiffuseGeometry[uint2(candidate)];
+        float4 sample = _SdfPreparedProbeAnchor.Load(int3(candidate, 0));
+        if (other.w < 0.0 || sample.a < 0.25)
+            continue;
+        float weight = AnchorConnectionWeight(geometry, other, normal, UnpackProbeNormal(other.w));
+        // Fixed normalization over the complete 5x5 stencil. Rejected pair weights
+        // remain at the center; symmetric pairwise flux preserves total plane energy.
+        weight *= 0.12743124892 * exp2(-0.55 * float(dot(offset, offset)));
+        reconstructed += weight * (sample.rgb * sample.a - energy);
+    }
+    return float4(reconstructed / center.a, center.a);
+}
+
+void StoreProbeAnchorDiagnostics(uint2 address, uint2 stride, SdfProbeIrradiance sh,
+    float invCovered, float coverage)
+{
+    _SdfDiffuseFilteredProbes[address] = clamp(sh.r0 * invCovered, -65000.0, 65000.0);
+    _SdfDiffuseFilteredProbes[address + stride] = clamp(sh.g0 * invCovered, -65000.0, 65000.0);
+    _SdfDiffuseFilteredProbes[address + 2u * stride] = clamp(sh.b0 * invCovered, -65000.0, 65000.0);
+    _SdfDiffuseFilteredProbes[address + 3u * stride] = clamp(sh.r1 * invCovered, -65000.0, 65000.0);
+    _SdfDiffuseFilteredProbes[address + 4u * stride] = clamp(sh.g1 * invCovered, -65000.0, 65000.0);
+    _SdfDiffuseFilteredProbes[address + 5u * stride] = clamp(sh.b1 * invCovered, -65000.0, 65000.0);
+    _SdfDiffuseFilteredProbes[address + 6u * stride] = float4(clamp(sh.c * invCovered, -65000.0, 65000.0), coverage);
 }
 
 [numthreads(8, 8, 1)]
@@ -574,8 +682,11 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
 
     float4 geometry = _SdfDiffuseGeometry[id.xy];
     SdfProbeIrradiance sh = (SdfProbeIrradiance)0;
+    SdfProbeIrradiance unfilteredSh = (SdfProbeIrradiance)0;
+    float unfilteredCovered = 0.0;
     float covered = 0.0;
     float4 anchorLighting = 0.0;
+    float4 rawAnchor = 0.0;
     if (geometry.w >= 0.0)
     {
         float3 normal = UnpackProbeNormal(geometry.w);
@@ -588,6 +699,15 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
             uint2 address = DirectionalGatherAddress(id.xy, bin);
             float4 traced = _SdfDirectionalComposite.Load(int3(address, 0));
             anchorLighting += float4(traced.rgb * traced.a, traced.a);
+            if (_SdfProbeAnchorDiagnostics != 0u)
+            {
+                float4 unfiltered = _SdfDirectionalTemporal.Load(int3(address, 0));
+                float weight = (float(RaysPerProbe) / float(DirectionalGatherBinCount)) * max(unfiltered.a, 0.0);
+                float3 direction = DirectionalGatherDirection(bin, basis);
+                ProjectSdfProbeIrradiance(unfilteredSh,
+                    unfiltered.rgb * weight / max(dot(normal, direction), 0.25), direction);
+                unfilteredCovered += weight;
+            }
             float4 filtered = _SdfDirectionalFiltered.Load(int3(address, 0));
             // The cosine chart has equal-mass cells. Integrate each reconstructed
             // direction once, including validated temporal samples in undrawn cells.
@@ -611,7 +731,12 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
         }
         anchorLighting.rgb /= max(anchorLighting.a, 1e-5);
         anchorLighting.a = saturate(anchorLighting.a / RaysPerProbe);
-        anchorLighting = AccumulateDirectionalProbeAnchor(anchorLighting, geometry.xyz, normal);
+        rawAnchor = anchorLighting;
+        anchorLighting = _SdfSpatialProbeAnchor != 0u
+            ? _SdfPreparedProbeAnchor.Load(int3(id.xy, 0))
+            : AccumulateDirectionalProbeAnchor(anchorLighting, geometry.xyz, normal);
+        float4 calibrationAnchor = _SdfSpatialProbeAnchor != 0u
+            ? ReconstructProbeAnchor(id.xy, geometry, normal, anchorLighting) : anchorLighting;
         if (any(borrowedAnchor > 0.0))
         {
             // Redistribute directional shape without creating energy or trace coverage.
@@ -624,14 +749,17 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
             sh.b1 *= scale.b;
             sh.c *= scale;
         }
+        if (_SdfProbeAnchorDiagnostics != 0u)
+            StoreProbeAnchorDiagnostics(id.xy + uint2(7u * grid.x, 0u), uint2(grid.x, 0u),
+                sh, rcp(max(covered, 1e-5)), covered > 0.0 ? anchorLighting.a : 0.0);
         // SH truncation and a sparse cosine chart can shift the anchor energy.
-        // Preserve the traced irradiance at the probe normal exactly.
-        float3 correction = anchorLighting.rgb * covered - EvaluateSdfProbeIrradiance(sh, normal);
+        // Preserve the selected temporal or spatial energy anchor at the probe normal.
+        float3 correction = calibrationAnchor.rgb * covered - EvaluateSdfProbeIrradiance(sh, normal);
         sh.r0.w += correction.r;
         sh.g0.w += correction.g;
         sh.b0.w += correction.b;
     }
-    _SdfDiffuseProbes[id.xy] = anchorLighting;
+    _SdfDiffuseProbes[id.xy] = RoundSdfAnchorHistory(anchorLighting);
 
     float invCovered = rcp(max(covered, 1e-5));
     uint2 stride = uint2(grid.x, 0u);
@@ -643,4 +771,12 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
     _SdfDiffuseFilteredProbes[id.xy + 5u * stride] = clamp(sh.b1 * invCovered, -65000.0, 65000.0);
     _SdfDiffuseFilteredProbes[id.xy + 6u * stride] = float4(clamp(sh.c * invCovered, -65000.0, 65000.0),
         covered > 0.0 ? anchorLighting.a : 0.0);
+    if (_SdfProbeAnchorDiagnostics != 0u)
+    {
+        if (geometry.w < 0.0)
+            StoreProbeAnchorDiagnostics(id.xy + 7u * stride, stride, (SdfProbeIrradiance)0, 1.0, 0.0);
+        StoreProbeAnchorDiagnostics(id.xy + 14u * stride, stride, unfilteredSh,
+            rcp(max(unfilteredCovered, 1e-5)), saturate(unfilteredCovered / RaysPerProbe));
+        _SdfDiffuseFilteredProbes[id.xy + 21u * stride] = rawAnchor;
+    }
 }

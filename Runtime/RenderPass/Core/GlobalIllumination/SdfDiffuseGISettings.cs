@@ -78,6 +78,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Additional diffuse bounce orders propagated through the Surface Cache. Zero uses direct light and emission at SDF hits.")]
         public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 8);
 
+        [Tooltip("Cosine rays per radiosity texel and bounce sweep. Higher counts reduce fixed Surface Cache sampling error; use a smaller card update budget for expensive reference solves.")]
+        public ClampedIntParameter surfaceCacheRadiositySamples = new(16, 16, 4096);
+
         [Tooltip("Maximum cards updated per frame in a large Surface Cache. Each complete sweep publishes one additional diffuse bounce order.")]
         public ClampedIntParameter surfaceCacheCardsPerFrame = new(16, 1, 4096);
 
@@ -137,6 +140,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [Tooltip("Probe-grid filter footprint. Adaptive 5x5 adds an outer ring for weak probes. The ray-pair hit-distance filter uses the cross footprint.")]
         public SdfScreenProbeSpatialKernelParameter screenProbeSpatialKernel = new(SdfScreenProbeSpatialKernel.Neighborhood3x3);
+
+        [Tooltip("Experimental conservative reconstruction of the SH energy anchor on connected coplanar screen probes. Keeps coverage and unfiltered temporal history separate. Screen Probe Gather only.")]
+        public BoolParameter screenProbeSpatialAnchor = new(false);
 
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
         public BoolParameter screenProbeHitDistanceFilter = new(false);

@@ -173,6 +173,169 @@ MonoBehaviour:
   enabled:
     m_OverrideState: 1
     m_Value: 1
+--- !u!114 &-8840588382285274512
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cc0f780af89674e8dbee2c2a909e84, type: 3}
+  m_Name: CascadedShadowSettingsVolume
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.CascadedShadowSettingsVolume
+  active: 1
+  enableCSM:
+    m_OverrideState: 1
+    m_Value: 1
+  enableVirtualShadowMapPrototype:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapResolution:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapPhysicalPageBudget:
+    m_OverrideState: 1
+    m_Value: 256
+  virtualShadowMapCacheInvalidateUseHZB:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapCacheDeformableMeshesInvalidate:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapCacheFramesStaticThreshold:
+    m_OverrideState: 1
+    m_Value: 100
+  virtualShadowMapPageUpdateBudget:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapRasterVertexBudget:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapFirstLevel:
+    m_OverrideState: 1
+    m_Value: 2
+  virtualShadowMapViewCoverage:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapClipmapFirstLevel:
+    m_OverrideState: 1
+    m_Value: 6
+  virtualShadowMapClipmapLastLevel:
+    m_OverrideState: 1
+    m_Value: 22
+  virtualShadowMapClipmapZRangeScale:
+    m_OverrideState: 1
+    m_Value: 1000
+  virtualShadowMapScreenDensity:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapPagePressure:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapCullBackfacingPixels:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapTargetTexelPixels:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapResolutionLodBias:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapThrottleLoadBudget:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapThrottleHistoryWeight:
+    m_OverrideState: 1
+    m_Value: 0.9
+  virtualShadowMapThrottleMaxBias:
+    m_OverrideState: 1
+    m_Value: 99999
+  virtualShadowMapPCF:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapStochasticFiltering:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapSMRT:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapSMRTJointSampling:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapSMRTTemporalDenoise:
+    m_OverrideState: 1
+    m_Value: 0
+  virtualShadowMapSMRTAdaptiveRays:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapSMRTRayCount:
+    m_OverrideState: 1
+    m_Value: 7
+  virtualShadowMapSMRTSamplesPerRay:
+    m_OverrideState: 1
+    m_Value: 8
+  virtualShadowMapSMRTMaxRayLength:
+    m_OverrideState: 1
+    m_Value: 10
+  virtualShadowMapSMRTRayLengthScale:
+    m_OverrideState: 1
+    m_Value: 1.5
+  virtualShadowMapSMRTExtrapolateMaxSlope:
+    m_OverrideState: 1
+    m_Value: 5
+  virtualShadowMapSMRTTexelDitherScale:
+    m_OverrideState: 1
+    m_Value: 2
+  virtualShadowMapSMRTAdaptiveRayCount:
+    m_OverrideState: 1
+    m_Value: 1
+  virtualShadowMapTransition:
+    m_OverrideState: 1
+    m_Value: 0.2
+  virtualShadowMapCoverageTransition:
+    m_OverrideState: 1
+    m_Value: 0.2
+  cascadeCount:
+    m_OverrideState: 1
+    m_Value: 4
+  maxShadowDistance:
+    m_OverrideState: 1
+    m_Value: 150
+  cascadeSplit1:
+    m_OverrideState: 1
+    m_Value: 0.067
+  cascadeSplit2:
+    m_OverrideState: 1
+    m_Value: 0.2
+  cascadeSplit3:
+    m_OverrideState: 1
+    m_Value: 0.467
+  cascadeBorder1:
+    m_OverrideState: 1
+    m_Value: 0.2
+  cascadeBorder2:
+    m_OverrideState: 1
+    m_Value: 0.2
+  cascadeBorder3:
+    m_OverrideState: 1
+    m_Value: 0.2
+  cascadeBorder4:
+    m_OverrideState: 1
+    m_Value: 0.2
+  screenSpaceShadowDenoise:
+    m_OverrideState: 1
+    m_Value: 0
+  shadowResolution:
+    m_OverrideState: 1
+    m_Value: 2048
+  depthBias:
+    m_OverrideState: 1
+    m_Value: 1
+  normalBias:
+    m_OverrideState: 1
+    m_Value: 1
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -190,6 +353,7 @@ MonoBehaviour:
   - {fileID: -8971131911773621843}
   - {fileID: 1026728740829597705}
   - {fileID: 8394869654873687230}
+  - {fileID: -8840588382285274512}
 --- !u!114 &1026728740829597705
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -218,6 +382,27 @@ MonoBehaviour:
   surfaceCacheBounceOrders:
     m_OverrideState: 1
     m_Value: 8
+  surfaceCacheRadiositySamples:
+    m_OverrideState: 0
+    m_Value: 16
+  surfaceCacheRadiosityAccumulate:
+    m_OverrideState: 0
+    m_Value: 0
+  surfaceCacheProgressiveRadiosity:
+    m_OverrideState: 0
+    m_Value: 1
+  surfaceCacheLightingTolerance:
+    m_OverrideState: 0
+    m_Value: 0.005
+  surfaceCacheUpdateBoost:
+    m_OverrideState: 0
+    m_Value: 4
+  surfaceCacheRelightSweeps:
+    m_OverrideState: 0
+    m_Value: 8
+  surfaceCacheRadiosityBatchLimit:
+    m_OverrideState: 0
+    m_Value: 64
   surfaceCacheCardsPerFrame:
     m_OverrideState: 1
     m_Value: 16
@@ -278,6 +463,9 @@ MonoBehaviour:
   screenProbeSpatialKernel:
     m_OverrideState: 1
     m_Value: 2
+  screenProbeSpatialAnchor:
+    m_OverrideState: 0
+    m_Value: 0
   screenProbeHitDistanceFilter:
     m_OverrideState: 0
     m_Value: 0

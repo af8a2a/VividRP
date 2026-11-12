@@ -106,6 +106,7 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
         {
             uint oldBin = DirectionalGatherBin(direction, previousBasis);
             float4 previous = _SdfDirectionalPrevious.Load(int3(DirectionalGatherAddress(previousTile, oldBin), 0));
+            previous.rgb *= _SdfHistoryLightScale.rgb;
             weight = max(0.0, dot(previous.rgb, float3(0.2126, 0.7152, 0.0722)) * previous.a);
         }
         else
@@ -248,6 +249,7 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
         {
             uint oldBin = DirectionalGatherBin(DirectionalBinDirection(bin, 0.5, basis), previousBasis);
             float4 previous = _SdfDirectionalPrevious.Load(int3(DirectionalGatherAddress(previousTile, oldBin), 0));
+            previous.rgb *= _SdfHistoryLightScale.rgb;
             // Diffuse BRDF times cosine has equal integral in each base cell.
             // Multiply that measure by reprojected, coverage-weighted luminance.
             float weight = max(0.0, dot(previous.rgb, float3(0.2126, 0.7152, 0.0722)) * previous.a);

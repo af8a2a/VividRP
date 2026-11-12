@@ -79,6 +79,7 @@ float4 _SdfDiffuseScreenSize;
 float4 _SdfProbeCameraForward;
 float4 _SdfDiffuseLightPositionRange;
 float4 _SdfDiffuseLightColorShadow;
+float4 _SdfHistoryLightScale;
 float _SdfDiffuseMaxDistance;
 float _SdfDiffuseSkyTraceDistance;
 float _SdfFarTraceDistance;

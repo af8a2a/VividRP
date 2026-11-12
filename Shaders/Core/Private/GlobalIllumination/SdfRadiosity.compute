@@ -1,10 +1,50 @@
 #pragma kernel UpdateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
 #pragma kernel AccumulateSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER VIVID_SDF_RADIOSITY_ACCUMULATION
 #pragma kernel PublishSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
+#pragma kernel PublishSdfSurfaceRadiosityCards VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
+#pragma kernel ClearSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
+#pragma kernel RescaleSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
+#pragma kernel ClearSdfSkyRadianceBound VIVID_SDF_SCREEN_ONLY
+#pragma kernel MeasureSdfSkyRadianceBound VIVID_SDF_SCREEN_ONLY
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfScreenProbeReceiver.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
+
+RWStructuredBuffer<uint> _SdfSkyRadianceBound;
+uint _SdfSkyRadianceBoundSize;
+groupshared uint SkyRadianceBound[64];
+
+[numthreads(1, 1, 1)]
+void ClearSdfSkyRadianceBound(uint3 id : SV_DispatchThreadID)
+{
+    _SdfSkyRadianceBound[0] = 0u;
+}
+
+[numthreads(8, 8, 1)]
+void MeasureSdfSkyRadianceBound(uint3 id : SV_DispatchThreadID, uint lane : SV_GroupIndex)
+{
+    float peak = 0.0;
+    if (all(id.xy < _SdfSkyRadianceBoundSize))
+    {
+        float2 uv = (float2(id.xy) + 0.5) / float(_SdfSkyRadianceBoundSize);
+        float3 direction = CubemapTexelToDirection(uv * 2.0 - 1.0, id.z);
+        float3 value = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_PointClamp, direction, 0.0).rgb;
+        // Non-finite content cannot establish an unsaturated transport bound.
+        peak = all(isfinite(value)) ? max(0.0, max(value.x, max(value.y, value.z))) : 3.402823466e+38;
+    }
+    SkyRadianceBound[lane] = asuint(peak);
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint stride = 32u; stride > 0u; stride >>= 1u)
+    {
+        if (lane < stride)
+            SkyRadianceBound[lane] = max(SkyRadianceBound[lane], SkyRadianceBound[lane + stride]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (lane == 0u)
+        InterlockedMax(_SdfSkyRadianceBound[0], SkyRadianceBound[0]);
+}
 
 #if defined(VIVID_SDF_RADIOSITY_UPDATE)
 RWTexture2D<float4> _SdfRadiosityOutput;
@@ -13,6 +53,9 @@ uint _SdfRadiositySamples;
 uint _SdfRadiositySeed;
 uint _SdfRadiosityBatch;
 uint _SdfRadiosityBounce;
+uint _SdfRadiosityCardCount;
+float _SdfRadiosityPublishBlend;
+float4 _SdfRadiosityHistoryScale;
 
 float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
 {
@@ -124,5 +167,44 @@ void AccumulateSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
 void PublishSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
 {
     _SdfRadiosityOutput[id.xy] = _SdfRadiosityInput.Load(int3(id.xy, 0));
+}
+
+[numthreads(8, 8, 1)]
+void PublishSdfSurfaceRadiosityCards(uint3 id : SV_DispatchThreadID)
+{
+    uint card = _SdfRadiosityFirstCard + id.z;
+    if (card >= _SdfRadiosityCardCount)
+        return;
+    uint2 pixel = RadiosityAtlasPixel(card, id.xy);
+    float4 sample = _SdfRadiosityInput.Load(int3(pixel, 0));
+    if (_SdfRadiosityPublishBlend < 1.0 && sample.a > 0.0)
+    {
+        float4 old = _SdfRadiosityOutput[pixel];
+        if (old.a > 0.0)
+            sample.rgb = lerp(old.rgb, sample.rgb, _SdfRadiosityPublishBlend);
+        sample = SdfRoundToNearestHalf(sample);
+    }
+    // Uncovered cells replace old coverage immediately, including moving silhouettes.
+    _SdfRadiosityOutput[pixel] = sample;
+}
+
+[numthreads(8, 8, 1)]
+void ClearSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
+{
+    _SdfRadiosityOutput[id.xy] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void RescaleSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
+{
+    if (id.z >= _SdfRadiosityCardCount)
+        return;
+    uint2 pixel = RadiosityAtlasPixel(id.z, id.xy);
+    float4 old = _SdfRadiosityOutput[pixel];
+    if (old.a > 0.0)
+        old.rgb = clamp(old.rgb * _SdfRadiosityHistoryScale.rgb, 0.0, 65000.0);
+    else
+        old = 0.0;
+    _SdfRadiosityOutput[pixel] = SdfRoundToNearestHalf(old);
 }
 #endif

@@ -209,6 +209,7 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
             continue;
 
         float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+        sample.rgb *= _SdfHistoryLightScale.rgb;
         #if defined(VIVID_SDF_RESTIR_PIXEL_HISTORY)
         if (abs(sample.a) > 0.0 && (sample.a < 0.0) == openPbr)
         {
@@ -419,6 +420,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
 
         geometryWeight += weight;
         float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+        sample.rgb *= _SdfHistoryLightScale.rgb;
         if (sample.a <= 0.0)
             continue;
 

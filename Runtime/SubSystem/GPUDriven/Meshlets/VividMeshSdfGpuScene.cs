@@ -60,6 +60,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public readonly bool Equals(DiffuseSurface other) =>
                 AlbedoAndValid.Equals(other.AlbedoAndValid) && Emission.Equals(other.Emission)
                 && CardMinAndFirst.Equals(other.CardMinAndFirst) && CardExtent.Equals(other.CardExtent);
+
+            public readonly bool HasSameTransport(DiffuseSurface other) =>
+                AlbedoAndValid.Equals(other.AlbedoAndValid) && CardMinAndFirst.Equals(other.CardMinAndFirst)
+                && CardExtent.Equals(other.CardExtent);
         }
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -95,6 +99,18 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public readonly bool Equals(InstanceSource other) =>
                 EntityId == other.EntityId && FieldIndex == other.FieldIndex && LayerMask == other.LayerMask
                 && LocalToWorld.Equals(other.LocalToWorld) && WorldToLocal.Equals(other.WorldToLocal);
+        }
+
+        private struct RadiosityCardIdentity : IEquatable<RadiosityCardIdentity>
+        {
+            public ulong Entity;
+            public FieldSource Field;
+            public Vector4 CardMinAndFirst, CardExtent;
+            public int Slot;
+
+            public readonly bool Equals(RadiosityCardIdentity other) => Entity == other.Entity && Slot == other.Slot
+                && Field.Equals(other.Field) && CardMinAndFirst.Equals(other.CardMinAndFirst)
+                && CardExtent.Equals(other.CardExtent);
         }
 
         private struct Leaf
@@ -140,6 +156,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private GraphicsBuffer m_SurfaceLightingInstanceBuffer;
         private readonly List<uint> m_NextSurfaceLightingInstances;
         private readonly List<uint> m_RadiosityWork = new();
+        private List<RadiosityCardIdentity> m_RadiosityIdentities = new();
+        private List<RadiosityCardIdentity> m_NextRadiosityIdentities = new();
         private GraphicsBuffer m_RadiosityWorkBuffer;
         private VividSdfSurfaceCache m_RadiosityCache;
         private uint m_RadiosityRevision;
@@ -163,6 +181,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal int SurfaceLightingInstanceCount { get; private set; }
         internal GraphicsBuffer RadiosityWork => m_RadiosityWorkBuffer;
         internal int RadiosityCardCount { get; private set; }
+        internal uint RadiosityLayoutVersion { get; private set; }
+        internal uint RadiosityDiscontinuityVersion { get; private set; }
+        internal uint TransportVersion { get; private set; }
+        internal uint EmissionVersion { get; private set; }
+        private Vector4 m_EmissionMaximum, m_PreviousEmissionMaximum;
+        private bool m_LinearEmissionChange;
+        internal bool HasEmissiveSurfaces { get; private set; }
         internal VividSdfSurfaceCache SurfaceCache { get; set; }
 
         internal void CopyInstanceIndices(Dictionary<ulong, uint> destination)
@@ -208,13 +233,39 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
             bool fieldsChanged = NodeCount == 0 || !SameSources(m_Fields, m_NextFields);
             bool instancesChanged = fieldsChanged || !SameSources(m_Instances, m_NextInstances);
+            bool smallTransform = instancesChanged && !fieldsChanged && HasSameInstanceOrder() && HasSmallTransformChanges();
             if (instancesChanged && !UpdateGeometry(fieldsChanged))
                 return;
 
             bool surfacesChanged = m_NextDiffuseSurfaces != null
                 && (m_DiffuseSurfaceBuffer == null || !SameSources(m_DiffuseSurfaces, m_NextDiffuseSurfaces));
+            bool transportChanged = instancesChanged;
             if (surfacesChanged)
             {
+                bool sameTransport = m_DiffuseSurfaces.Count == m_NextDiffuseSurfaces.Count;
+                bool emissionChanged = !sameTransport;
+                bool linearEmission = sameTransport;
+                Vector4 emissionScale = Vector4.one;
+                int emissionChannels = 0;
+                m_PreviousEmissionMaximum = m_EmissionMaximum;
+                m_EmissionMaximum = Vector4.zero;
+                for (int i = 0; i < m_NextDiffuseSurfaces.Count; i++)
+                {
+                    var next = m_NextDiffuseSurfaces[i];
+                    m_EmissionMaximum = Vector4.Max(m_EmissionMaximum, next.Emission);
+                    if (i >= m_DiffuseSurfaces.Count)
+                        continue;
+                    var old = m_DiffuseSurfaces[i];
+                    sameTransport &= old.HasSameTransport(next);
+                    emissionChanged |= !old.Emission.Equals(next.Emission);
+                    linearEmission &= TryMergeEmissionScale(old.Emission, next.Emission, ref emissionScale, ref emissionChannels);
+                }
+                transportChanged |= !sameTransport;
+                if (emissionChanged)
+                {
+                    EmissionVersion++;
+                    m_LinearEmissionChange = linearEmission && sameTransport;
+                }
                 Upload(ref m_DiffuseSurfaceBuffer, m_NextDiffuseSurfaces, "Mesh SDF Diffuse Surfaces");
                 SurfaceLightingInstanceCount = m_NextSurfaceLightingInstances.Count;
                 if (SurfaceLightingInstanceCount != 0)
@@ -226,9 +277,78 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 }
                 (m_DiffuseSurfaces, m_NextDiffuseSurfaces) = (m_NextDiffuseSurfaces, m_DiffuseSurfaces);
                 m_NextDiffuseSurfaces.Clear();
+                HasEmissiveSurfaces = false;
+                for (int i = 0; i < m_DiffuseSurfaces.Count; i++)
+                {
+                    Vector4 emission = m_DiffuseSurfaces[i].Emission;
+                    // Non-finite/unknown emission is not a sun-only lighting source.
+                    if (!(emission.x <= 0f && emission.y <= 0f && emission.z <= 0f))
+                    {
+                        HasEmissiveSurfaces = true;
+                        break;
+                    }
+                }
             }
             if (instancesChanged || surfacesChanged)
+            {
                 Revision++;
+                if (transportChanged)
+                    TransportVersion++;
+                if (!smallTransform || surfacesChanged)
+                    RadiosityDiscontinuityVersion++;
+            }
+        }
+
+        // Only emission may change. Albedo, coverage, card identity and geometry still
+        // invalidate transport. A skipped emission revision cannot be reconstructed here.
+        internal bool TryGetEmissionChange(uint previousVersion, out Vector4 previous, out Vector4 current)
+        {
+            current = m_EmissionMaximum;
+            previous = previousVersion == EmissionVersion ? current : m_PreviousEmissionMaximum;
+            return previousVersion == EmissionVersion
+                || previousVersion + 1u == EmissionVersion && m_LinearEmissionChange;
+        }
+
+        internal static bool TryMergeEmissionScale(Vector4 previous, Vector4 current, ref Vector4 scale, ref int channels)
+        {
+            for (int channel = 0; channel < 3; channel++)
+            {
+                float a = previous[channel], b = current[channel];
+                if (!float.IsFinite(a) || !float.IsFinite(b) || a < 0f || b < 0f || a == 0f && b > 0f)
+                    return false;
+                if (a == 0f)
+                    continue;
+                float ratio = b / a;
+                int bit = 1 << channel;
+                if (!float.IsFinite(ratio) || ratio > 8f
+                    || (channels & bit) != 0 && Mathf.Abs(ratio - scale[channel]) > 1e-5f * Mathf.Max(1f, ratio))
+                    return false;
+                if ((channels & bit) == 0)
+                    scale[channel] = ratio;
+                channels |= bit;
+            }
+            return true;
+        }
+
+        private bool HasSmallTransformChanges()
+        {
+            for (int i = 0; i < m_Instances.Count; i++)
+            {
+                var previous = m_Instances[i];
+                var current = m_NextInstances[i];
+                if (previous.LayerMask != current.LayerMask
+                    || !IsSmallRadiosityTransformChange(previous.LocalToWorld, current.LocalToWorld))
+                    return false;
+            }
+            return true;
+        }
+
+        internal static bool IsSmallRadiosityTransformChange(Matrix4x4 previous, Matrix4x4 current)
+        {
+            for (int column = 0; column < 3; column++)
+                if (!previous.GetColumn(column).Equals(current.GetColumn(column)))
+                    return false;
+            return (previous.GetColumn(3) - current.GetColumn(3)).sqrMagnitude <= 0.0025f; // Five cm; unchanged basis.
         }
 
         private bool UpdateGeometry(bool fieldsChanged)
@@ -262,6 +382,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             // compact work list. Each work item stores an SDF instance and its card slot.
             int count = SurfaceLightingInstanceCount;
             m_RadiosityWork.Clear();
+            m_NextRadiosityIdentities.Clear();
             m_RadiosityWork.Add((uint)(count + 1));
             for (int i = 0; i < count; i++)
                 m_RadiosityWork.Add(uint.MaxValue);
@@ -277,6 +398,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 {
                     m_RadiosityWork.Add(instance);
                     m_RadiosityWork.Add((uint)slot);
+                    var source = m_Instances[(int)instance];
+                    var surface = m_DiffuseSurfaces[(int)instance];
+                    m_NextRadiosityIdentities.Add(new RadiosityCardIdentity
+                    {
+                        Entity = source.EntityId, Field = m_Fields[(int)source.FieldIndex], Slot = slot,
+                        CardMinAndFirst = surface.CardMinAndFirst, CardExtent = surface.CardExtent
+                    });
                 }
                 cards += slots;
             }
@@ -284,6 +412,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (cards != 0)
                 Upload(ref m_RadiosityWorkBuffer, m_RadiosityWork, "Mesh SDF Radiosity Card Work");
             RadiosityCardCount = cards;
+            // A transform or material edit may reuse old incident lighting temporarily.
+            // A removed/reordered/rebaked card must never inherit another card's texels.
+            if (!SameSources(m_RadiosityIdentities, m_NextRadiosityIdentities))
+                RadiosityLayoutVersion++;
+            (m_RadiosityIdentities, m_NextRadiosityIdentities) = (m_NextRadiosityIdentities, m_RadiosityIdentities);
+            m_NextRadiosityIdentities.Clear();
             m_RadiosityCache = cache;
             m_RadiosityRevision = Revision;
             m_RadiosityCardVersion = cardVersion;
@@ -635,10 +769,19 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_RadiosityWorkBuffer?.Dispose();
             m_RadiosityWorkBuffer = null;
             m_RadiosityCache = null;
+            m_RadiosityIdentities.Clear();
+            m_NextRadiosityIdentities.Clear();
+            RadiosityLayoutVersion++;
+            RadiosityDiscontinuityVersion++;
+            TransportVersion++;
+            EmissionVersion++;
             RadiosityCardCount = 0;
             m_SurfaceLightingInstanceBuffer = null;
             m_DiffuseSurfaceBuffer = null;
             SurfaceLightingInstanceCount = 0;
+            HasEmissiveSurfaces = false;
+            m_EmissionMaximum = m_PreviousEmissionMaximum = Vector4.zero;
+            m_LinearEmissionChange = false;
             m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_NodeBuffer = m_LeafInstanceBuffer = null;
             NodeCount = 0;
             m_FieldIndices.Clear();

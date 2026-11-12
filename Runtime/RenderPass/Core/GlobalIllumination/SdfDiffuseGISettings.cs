@@ -81,13 +81,25 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Cosine rays per radiosity texel and bounce sweep. Higher counts reduce fixed Surface Cache sampling error; use a smaller card update budget for expensive reference solves.")]
         public ClampedIntParameter surfaceCacheRadiositySamples = new(16, 16, 4096);
 
-        [Tooltip("Experimental: keep a separate estimate for each bounce order and refine it with new sample batches. A complete target-order sweep publishes atomically; lighting changes restart all batches.")]
+        [Tooltip("Keep a separate estimate for each bounce order and refine it with new sample batches. Lighting changes restart sample accumulation; progressive publishing can retain compatible incident lighting during the rebuild.")]
         public BoolParameter surfaceCacheRadiosityAccumulate = new(false);
+
+        [Tooltip("Retain compatible incident lighting while rebuilding. Cold starts and large changes publish low orders progressively; small changes retain higher bounces until fresh target-order cards arrive. Later sample batches publish at target order. Incompatible card identities discard history.")]
+        public BoolParameter surfaceCacheProgressiveRadiosity = new(true);
+
+        [Tooltip("Relative RGB energy deadband for cached lighting (0.005 = 0.5%). Compare radiosity to the last accepted lighting input so a gradual change eventually triggers an update. Sky content and card identities still invalidate explicitly.")]
+        public ClampedFloatParameter surfaceCacheLightingTolerance = new(0.005f, 0f, 0.01f);
+
+        [Tooltip("Temporary card-budget multiplier after lighting/geometry changes or fast camera motion. One disables the boost. Small-scene full updates and the remaining-card limit still apply.")]
+        public ClampedIntParameter surfaceCacheUpdateBoost = new(4, 1, 4);
+
+        [Tooltip("Maximum bounce sweeps in a relighting frame for a compatible small scene. One retains incremental rebuilding. Only the first sample batch is accelerated; the existing card limit and a bounded ray-work budget still apply.")]
+        public ClampedIntParameter surfaceCacheRelightSweeps = new(8, 1, 8);
 
         [Tooltip("Independent sample batches per bounce order before the static radiosity cache stops updating. Rays per texel are samples per batch times this limit.")]
         public ClampedIntParameter surfaceCacheRadiosityBatchLimit = new(64, 1, 4096);
 
-        [Tooltip("Maximum cards updated per frame in a large Surface Cache. One sweep updates a bounce order; accumulation publishes after a complete target-order batch.")]
+        [Tooltip("Base cards updated per frame in a large Surface Cache. Dynamic boost can temporarily raise this budget. One complete sweep updates a bounce order.")]
         public ClampedIntParameter surfaceCacheCardsPerFrame = new(16, 1, 4096);
 
         [Tooltip("Update a complete bounce sweep per frame when the scene has at most this many cards. Zero disables the small-scene fast fill. Large scenes retain the per-frame card budget.")]

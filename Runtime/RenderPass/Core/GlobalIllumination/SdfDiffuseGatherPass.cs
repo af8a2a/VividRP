@@ -69,6 +69,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int FarProbesPerFrame = 64;
         private const float FarCellSize = 2.5f;
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
+        private static readonly CameraHistoryId AnchorStatisticsHistoryId = CameraHistoryId.Create("SdfProbeAnchorStatistics");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
         private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalTemporalRadianceHistory");
         private static readonly CameraHistoryId DirectionalGuideHistoryId = CameraHistoryId.Create("SdfDirectionalFilteredHistory");
@@ -123,6 +124,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SunVisibilityOutputId = Shader.PropertyToID("_SdfSunVisibilityOutput");
         private static readonly int SunCacheHitsId = Shader.PropertyToID("_SdfSunCacheHits");
         private static readonly ProfilingSampler RadiositySampler = new("Surface Cache Radiosity");
+        private static readonly ProfilingSampler RadiosityRescaleSampler = new("Surface Cache Light Rescale");
         private static readonly CameraHistoryId RadiosityAId = CameraHistoryId.Create("SdfRadiosityA");
         private static readonly CameraHistoryId RadiosityBId = CameraHistoryId.Create("SdfRadiosityB");
         private static readonly CameraHistoryId RadiosityPublishedId = CameraHistoryId.Create("SdfRadiosityAccumulatedPublished");
@@ -140,6 +142,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RadiositySeedId = Shader.PropertyToID("_SdfRadiositySeed");
         private static readonly int RadiosityBatchId = Shader.PropertyToID("_SdfRadiosityBatch");
         private static readonly int RadiosityBounceId = Shader.PropertyToID("_SdfRadiosityBounce");
+        private static readonly int RadiosityCardCountId = Shader.PropertyToID("_SdfRadiosityCardCount");
+        private static readonly int RadiosityPublishBlendId = Shader.PropertyToID("_SdfRadiosityPublishBlend");
+        private static readonly int RadiosityHistoryScaleId = Shader.PropertyToID("_SdfRadiosityHistoryScale");
+        private static readonly int HistoryLightScaleId = Shader.PropertyToID("_SdfHistoryLightScale");
+        private static readonly int SkyRadianceBoundId = Shader.PropertyToID("_SdfSkyRadianceBound");
+        private static readonly int SkyRadianceBoundSizeId = Shader.PropertyToID("_SdfSkyRadianceBoundSize");
         private static readonly int RadiosityInputId = Shader.PropertyToID("_SdfRadiosityInput");
         private static readonly int RadiosityOutputId = Shader.PropertyToID("_SdfRadiosityOutput");
         private static readonly CameraHistoryId FarHistoryId = CameraHistoryId.Create("SdfFarRadiance");
@@ -235,6 +243,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SpatialAnchorId = Shader.PropertyToID("_SdfSpatialProbeAnchor");
         private static readonly int PreparedAnchorId = Shader.PropertyToID("_SdfPreparedProbeAnchor");
         private static readonly int PreparedAnchorOutputId = Shader.PropertyToID("_SdfPreparedProbeAnchorOutput");
+        private static readonly int PreviousAnchorStatisticsId = Shader.PropertyToID("_SdfPreviousAnchorStatistics");
+        private static readonly int AnchorStatisticsOutputId = Shader.PropertyToID("_SdfAnchorStatisticsOutput");
+        private static readonly int AnchorStatisticsId = Shader.PropertyToID("_SdfAnchorStatistics");
+        private static readonly int AnchorStatisticsValidId = Shader.PropertyToID("_SdfAnchorStatisticsHistoryValid");
+        private static readonly int PreparedAnchorEnabledId = Shader.PropertyToID("_SdfPreparedAnchorEnabled");
         private static readonly int HitFilterEnabledId = Shader.PropertyToID("_SdfDiffuseHitFilterEnabled");
         private static readonly int HitSamplesId = Shader.PropertyToID("_SdfDiffuseHitSamples");
         private static readonly int HitSamplesInputId = Shader.PropertyToID("_SdfDiffuseHitSamplesInput");
@@ -339,6 +352,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal Vector2 ScreenJitterUv;
             internal Vector4 LightPositionRange, LightColorShadow;
             internal uint SceneRevision;
+            internal uint SceneTransportVersion;
             internal int Width, Height, LayerMask, LightLayerMask;
             internal float MaxDistance, RayBias;
             internal float SkyTraceDistance;
@@ -353,6 +367,18 @@ namespace VividRP.Runtime.RenderPass.Core
             internal int RadiositySamples, RadiositySeed;
             internal bool RadiosityAccumulate;
             internal int RadiosityBatchLimit, RadiosityBatch, RadiosityBounce;
+            internal int RadiosityPublishedOrder, RadiosityBoostFrames;
+            internal bool RadiosityProgressive, RadiosityRestarting;
+            internal uint RadiosityLayoutVersion;
+            internal uint RadiosityInputSceneRevision;
+            internal uint RadiosityInputDiscontinuityVersion;
+            internal uint RadiosityInputTransportVersion, RadiosityEmissionVersion;
+            internal bool RadiosityFastRelight;
+            internal Vector4 RadiosityLightPositionRange, RadiosityLightColorShadow;
+            internal Vector4 RadiositySkyTextureParams, RadiositySkyTextureTint;
+            internal int RadiositySkyContentHash;
+            internal float RadiosityTransitionBlend;
+            internal Vector3 RadiosityCameraPosition, RadiosityCameraForward;
             internal Vector3Int[] FarKeys;
             internal Vector3Int FarWindow;
             internal bool FarPending;
@@ -389,6 +415,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Temporal Probe Anchor", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_PreparedAnchor = CreateScratch("Screen Probe Temporal Anchor", ProbeFormat);
+        private readonly RenderGraphTexture m_PreviousAnchorStatistics = RenderGraphTexture.CreateInput("Previous Probe Anchor Statistics", ProbeFormat);
+        private readonly RenderGraphTexture m_CurrentAnchorStatistics = CreateScratch("Probe Anchor Statistics", ProbeFormat);
         [RenderGraphResource(Name = "Directional Probe Guide", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_DirectionalGuideTexture = CreateScratch("Screen Probe Directional Guide", ProbeFormat);
@@ -464,6 +492,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DirectionalGuideKernel = -1, m_DirectionalCompositeKernel = -1, m_DirectionalTemporalKernel = -1;
         private int m_DirectionalFilterKernel = -1, m_DirectionalIntegrateKernel = -1, m_DirectionalResolveKernel = -1;
         private int m_PrepareAnchorKernel = -1;
+        private int m_PrepareAnchorNoPixelKernel = -1;
+        private CameraHistoryTexture m_AnchorStatisticsHistory;
+        private bool m_AnchorStatisticsHistoryValid;
         private bool m_DirectionalCache, m_DirectionalGuide, m_DirectionalHistoryValid, m_DirectionalGuideHistoryValid;
         private bool m_DirectionalHierarchicalGuide;
         private CameraHistoryTexture m_RestirHistory;
@@ -476,6 +507,25 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_RadiosityTargetOrders, m_RadiosityOrder, m_RadiosityCursor, m_RadiosityUpdateCards;
         private int m_RadiositySamples, m_RadiositySeed;
         private int m_RadiosityAccumulationKernel = -1, m_RadiosityPublishKernel = -1;
+        private int m_RadiosityPublishCardsKernel = -1, m_RadiosityClearKernel = -1;
+        private int m_RadiosityRescaleKernel = -1;
+        private bool m_RadiosityProgressive, m_RadiosityClear, m_RadiosityRestarting;
+        private bool m_RadiosityRescale;
+        private Vector4 m_RadiosityHistoryScale;
+        private bool m_RadiosityFastRelight;
+        private int m_RadiosityRelightSweepLimit, m_RadiositySweeps;
+        private readonly TextureHandle[] m_RadiositySweepOutputs = new TextureHandle[8];
+        private GraphicsBuffer m_SkyRadianceBoundBuffer;
+        private readonly System.Action<AsyncGPUReadbackRequest> m_SkyRadianceBoundReadback;
+        private readonly System.Action<ScriptableRenderContext, Camera> m_SkyBoundAfterSubmit;
+        private Camera m_SkyBoundCamera;
+        private bool m_SkyBoundAwaitSubmit;
+        private int m_SkyBoundClearKernel = -1, m_SkyBoundMeasureKernel = -1;
+        private int m_SkyBoundHash, m_SkyBoundRequestHash, m_SkyBoundSize;
+        private bool m_SkyBoundValid, m_SkyBoundPending;
+        private float m_SkyRadianceBound;
+        private int m_RadiosityPublishedOrder, m_RadiosityBoostFrames, m_RadiosityBudgetBoost;
+        private float m_LightingTolerance, m_RadiosityTransitionBlend;
         private bool m_RadiosityAccumulate;
         private int m_RadiosityBatchLimit, m_RadiosityBatch, m_RadiosityBounce;
         private readonly CameraHistoryTexture[] m_RadiosityOrderHistories = new CameraHistoryTexture[8];
@@ -545,6 +595,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public SdfDiffuseGatherPass()
         {
+            m_SkyRadianceBoundReadback = OnSkyRadianceBoundReadback;
+            m_SkyBoundAfterSubmit = OnSkyBoundAfterSubmit;
             profilingSampler = new ProfilingSampler(nameof(SdfDiffuseGatherPass));
             m_ScreenHzb = m_LocalHzb;
             m_ScreenMotion = m_LocalMotion;
@@ -590,6 +642,22 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_RadiosityAccumulationKernel = m_RadiosityCompute.FindKernel("AccumulateSdfSurfaceRadiosity");
                 m_RadiosityPublishKernel = m_RadiosityCompute.FindKernel("PublishSdfSurfaceRadiosity");
+            }
+            if (HasKernel(m_RadiosityCompute, "PublishSdfSurfaceRadiosityCards")
+                && HasKernel(m_RadiosityCompute, "ClearSdfSurfaceRadiosity"))
+            {
+                m_RadiosityPublishCardsKernel = m_RadiosityCompute.FindKernel("PublishSdfSurfaceRadiosityCards");
+                m_RadiosityClearKernel = m_RadiosityCompute.FindKernel("ClearSdfSurfaceRadiosity");
+            }
+            if (HasKernel(m_RadiosityCompute, "RescaleSdfSurfaceRadiosity"))
+                m_RadiosityRescaleKernel = m_RadiosityCompute.FindKernel("RescaleSdfSurfaceRadiosity");
+            if (SystemInfo.supportsAsyncGPUReadback && HasKernel(m_RadiosityCompute, "MeasureSdfSkyRadianceBound")
+                && HasKernel(m_RadiosityCompute, "ClearSdfSkyRadianceBound"))
+            {
+                m_SkyBoundMeasureKernel = m_RadiosityCompute.FindKernel("MeasureSdfSkyRadianceBound");
+                m_SkyBoundClearKernel = m_RadiosityCompute.FindKernel("ClearSdfSkyRadianceBound");
+                RenderPipelineManager.endCameraRendering -= m_SkyBoundAfterSubmit;
+                RenderPipelineManager.endCameraRendering += m_SkyBoundAfterSubmit;
             }
             if (SystemInfo.IsFormatSupported(GeometryFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
                 && HasKernel(m_FarCompute, "UpdateSdfFarRadiance"))
@@ -645,6 +713,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             if (HasKernel(m_FilterCompute, "ScreenProbePrepareAnchorCS"))
                 m_PrepareAnchorKernel = m_FilterCompute.FindKernel("ScreenProbePrepareAnchorCS");
+            if (HasKernel(m_FilterCompute, "ScreenProbePrepareAnchorNoPixelHistoryCS"))
+                m_PrepareAnchorNoPixelKernel = m_FilterCompute.FindKernel("ScreenProbePrepareAnchorNoPixelHistoryCS");
             if (HasKernel(m_RestirCompute, "ResampleSdfRestirTemporal") && HasKernel(m_RestirCompute, "ResampleSdfRestirSpatial"))
             {
                 m_RestirTemporalKernel = m_RestirCompute.FindKernel("ResampleSdfRestirTemporal");
@@ -681,6 +751,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReceiverVisibility = default;
             m_CorrectReceiverSelfHits = m_ScreenCardLightingRequested = false;
             m_ProbeHistory = m_GeometryHistory = null;
+            m_AnchorStatisticsHistory = null;
+            m_AnchorStatisticsHistoryValid = false;
             m_DirectionalHistory = m_DirectionalGuideHistory = null;
             m_DirectionalHistoryValid = m_DirectionalGuideHistoryValid = false;
             m_RestirHistory = m_RestirVarianceHistory = null;
@@ -694,6 +766,12 @@ namespace VividRP.Runtime.RenderPass.Core
             System.Array.Clear(m_RadiosityOrderHistories, 0, m_RadiosityOrderHistories.Length);
             m_RadiosityTargetOrders = m_RadiosityOrder = m_RadiosityCursor = m_RadiosityUpdateCards = 0;
             m_RadiosityCardVersion = 0;
+            m_RadiosityPublishedOrder = m_RadiosityBoostFrames = 0;
+            m_RadiosityClear = m_RadiosityRestarting = false;
+            m_RadiosityRescale = false;
+            m_RadiosityHistoryScale = Vector4.one;
+            m_RadiosityFastRelight = false;
+            m_RadiositySweeps = 1;
             m_FarHistory = null;
             m_FarHitIdsHistory = null;
             m_FarAtlas = default;
@@ -729,6 +807,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_RadiosityAccumulationKernel >= 0 && m_RadiosityPublishKernel >= 0;
             m_RadiosityBatchLimit = useSettings ? settings.surfaceCacheRadiosityBatchLimit.value : 64;
             m_RadiosityBatch = m_RadiosityBounce = 0;
+            m_RadiosityProgressive = useSettings && settings.surfaceCacheProgressiveRadiosity.value
+                && m_RadiosityPublishCardsKernel >= 0 && m_RadiosityClearKernel >= 0;
+            m_LightingTolerance = useSettings ? settings.surfaceCacheLightingTolerance.value : 0.005f;
+            m_RadiosityBudgetBoost = useSettings ? settings.surfaceCacheUpdateBoost.value : 4;
+            m_RadiosityRelightSweepLimit = useSettings ? settings.surfaceCacheRelightSweeps.value : 1;
 #if UNITY_EDITOR
             m_RecordProbeAnchorDiagnostics = EditorRecordProbeAnchorDiagnostics && EditorTraceCapture != null;
             m_RadiositySeed = EditorRadiositySeed;
@@ -811,7 +894,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalGuide = m_DirectionalCache && m_DirectionalGuideKernel >= 0 && settings.screenProbeSamplingGuide.value;
             m_DirectionalHierarchicalGuide = m_DirectionalGuide && settings.screenProbeHierarchicalGuide.value;
             m_SpatialAnchor = m_DirectionalCache && m_PrepareAnchorKernel >= 0 && settings.screenProbeSpatialAnchor.value;
-            m_PreparedAnchor.Resize(m_SpatialAnchor ? m_ProbeWidth : 1, m_SpatialAnchor ? m_AtlasHeight : 1);
+            bool prepareAnchor = m_DirectionalCache && m_PrepareAnchorKernel >= 0 && m_PrepareAnchorNoPixelKernel >= 0;
+            m_PreparedAnchor.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
+            m_CurrentAnchorStatistics.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
             bool fullPrecisionAnchor = false;
 #if UNITY_EDITOR
             fullPrecisionAnchor = EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & 32) != 0;
@@ -936,6 +1021,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_PreviousGeometry, m_Geometry, m_Geometry.desc, out m_GeometryHistory);
             if (m_DirectionalCache)
             {
+                if (prepareAnchor)
+                    m_AnchorStatisticsHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera,
+                        AnchorStatisticsHistoryId, m_PreviousAnchorStatistics, m_CurrentAnchorStatistics,
+                        m_CurrentAnchorStatistics.desc, out m_AnchorStatisticsHistory);
                 int gatherWidth = DirectionalGatherBins * m_ProbeWidth;
                 m_CurrentDirectional.Resize(gatherWidth, DirectionalTracePlanes * m_AtlasHeight);
                 m_DirectionalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalHistoryId,
@@ -944,7 +1033,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DirectionalGuideHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalGuideHistoryId,
                     m_PreviousDirectionalFiltered, m_CurrentDirectionalFiltered, m_CurrentDirectionalFiltered.desc, out m_DirectionalGuideHistory);
             }
-            m_HasHistory = probesValid && geometryValid && m_State.SceneRevision == m_Scene.Revision
+            m_HasHistory = probesValid && geometryValid
+                && (m_State.SceneRevision == m_Scene.Revision
+                    || PreserveRelitHistory && m_State.SceneTransportVersion == m_Scene.TransportVersion)
                 && ReferenceEquals(m_State.Cache, m_Scene.SurfaceCache)
                 && m_State.OffscreenOnly == m_OffscreenOnly && m_State.TraceMode == m_TraceMode
                 && m_State.DirectionalProbes == m_DirectionalProbes
@@ -959,7 +1050,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.RestirPixelIntegration == m_RestirPixelIntegration
                 && m_State.SunConfigured == (m_SunHistory != null)
                 && (m_SunHistory == null || m_State.SunCardVersion == m_SunCardVersion)
-                && m_State.GatherRadiosityOrder == m_RadiosityOrder
+                && m_State.GatherRadiosityOrder == PublishedRadiosityOrder
                 && m_State.RadiositySamples == m_RadiositySamples && m_State.RadiositySeed == m_RadiositySeed
                 && m_State.RadiosityAccumulate == m_RadiosityAccumulate
                 && m_State.RadiosityCardVersion == m_RadiosityCardVersion
@@ -968,9 +1059,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
                 && m_State.MeshDetailDistance == m_MeshDetailDistance
-                && m_State.SkyTraceDistance == m_SkyTraceDistance && m_State.SkyContentHash == m_SkyContentHash
-                && m_State.SkyTextureParams.Equals(m_SkyTextureParams) && m_State.SkyTextureTint.Equals(m_SkyTextureTint)
-                && m_State.LightPositionRange.Equals(m_LightPositionRange) && m_State.LightColorShadow.Equals(m_LightColorShadow)
+                && m_State.SkyTraceDistance == m_SkyTraceDistance
+                && (MatchesEnvironmentLighting(m_State.SkyContentHash, m_State.SkyTextureParams, m_State.SkyTextureTint)
+                    || PreserveRelitHistory)
+                && (MatchesPreviousDirectionalLighting() || PreserveRelitHistory)
                 && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
         }
 
@@ -988,6 +1080,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyTextureParams = DeferredLightingPass.BuildSkyTextureParams(0, sky.exposure, sky.rotation, true);
             m_SkyTextureTint = sky.tint;
             m_SkyContentHash = sky.skyContentHash;
+            m_SkyBoundSize = sky.specularCubemap.width;
         }
 
         private void PrepareReceiverEntities(VividGPUDrivenSceneData scene)
@@ -1078,10 +1171,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var cmd = context.cmd;
+            RecordSkyRadianceBound(context);
             var cache = m_UseSdf ? m_Scene.SurfaceCache : null;
             bool useScreenRays = m_HasScreenHistory && m_ScreenRays.innerHandle.IsValid()
                 && m_ScreenHzb.innerHandle.IsValid() && m_ScreenMotion.innerHandle.IsValid();
-            bool validScreenRadiance = useScreenRays && (!m_UseSdf || MatchesPreviousDirectionalLighting());
+            bool validScreenRadiance = useScreenRays && (!m_UseSdf || HasCurrentScreenLighting());
             bool repairScreenRays = m_RealtimeOnly && validScreenRadiance && !m_OffscreenOnly;
             bool useSunCache = m_SunAtlas.IsValid() && m_SunCacheHits.innerHandle.IsValid();
             int traceKernel = !m_UseSdf ? m_ScreenGatherKernel : cache != null ? m_CachedTraceKernel : m_TraceKernel;
@@ -1299,6 +1393,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
 #endif
             m_ProbeHistory?.MarkWritten();
+            m_AnchorStatisticsHistory?.MarkWritten();
             m_GeometryHistory.MarkWritten();
             m_DirectionalHistory?.MarkWritten();
             m_DirectionalGuideHistory?.MarkWritten();
@@ -1329,6 +1424,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.GlobalClipmapUsed = useGlobalClipmap;
             m_State.ScreenJitterUv = m_ScreenJitterUv;
             m_State.SceneRevision = m_Scene.Revision;
+            m_State.SceneTransportVersion = m_Scene.TransportVersion;
             m_State.Width = m_Width;
             m_State.Height = m_Height;
             m_State.LayerMask = m_LayerMask;
@@ -1348,7 +1444,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.RadiositySeed = m_RadiositySeed;
             m_State.RadiosityAccumulate = m_RadiosityAccumulate;
             m_State.RadiosityBatchLimit = m_RadiosityBatchLimit;
-            m_State.GatherRadiosityOrder = m_RadiosityOrder;
+            m_State.GatherRadiosityOrder = PublishedRadiosityOrder;
+            m_State.RadiosityProgressive = m_RadiosityProgressive;
+            m_State.RadiosityPublishedOrder = m_RadiosityPublishedOrder;
+            m_State.RadiosityLayoutVersion = m_Scene.RadiosityLayoutVersion;
+            m_State.RadiosityBoostFrames = Mathf.Max(0, m_RadiosityBoostFrames - 1);
+            var cameraTransform = context.Get<VividCameraData>().camera.transform;
+            m_State.RadiosityCameraPosition = cameraTransform.position;
+            m_State.RadiosityCameraForward = cameraTransform.forward;
             int cursor = m_RadiosityCursor + m_RadiosityUpdateCards;
             bool finishedSweep = m_RadiosityUpdateCards > 0 && cursor == m_Scene.RadiosityCardCount;
             m_State.RadiosityCursor = finishedSweep ? 0 : cursor;
@@ -1359,9 +1462,17 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? (finishedBatch ? 0 : m_RadiosityBounce + 1) : m_RadiosityBounce;
                 m_State.RadiosityBatch = m_RadiosityBatch + (finishedBatch ? 1 : 0);
                 m_State.RadiosityOrder = finishedBatch ? m_RadiosityTargetOrders : m_RadiosityOrder;
+                if (finishedBatch)
+                    m_RadiosityRestarting = false;
             }
             else
+            {
                 m_State.RadiosityOrder = m_RadiosityOrder + (finishedSweep ? 1 : 0);
+                if (m_State.RadiosityOrder >= m_RadiosityTargetOrders)
+                    m_RadiosityRestarting = false;
+            }
+            m_State.RadiosityRestarting = m_RadiosityRestarting;
+            m_State.RadiosityFastRelight = m_RadiosityFastRelight && m_RadiosityRestarting;
             m_State.FarDistance = m_FarDistance;
             m_State.FarCardVersion = m_FarCardVersion;
             m_State.FarPending = m_FarPending;
@@ -1380,6 +1491,17 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReceiverLookupRevision = uint.MaxValue;
             m_Scene?.Dispose();
             m_Scene = null;
+            m_SkyRadianceBoundBuffer?.Dispose();
+            m_SkyRadianceBoundBuffer = null;
+            RenderPipelineManager.endCameraRendering -= m_SkyBoundAfterSubmit;
+            // An already issued readback retains its pending flag until its callback.
+            // This prevents reuse of its request identity if this pass is recreated.
+            if (m_SkyBoundAwaitSubmit)
+                m_SkyBoundPending = false;
+            m_SkyBoundAwaitSubmit = false;
+            m_SkyBoundCamera = null;
+            m_SkyBoundValid = false;
+            m_SkyBoundClearKernel = m_SkyBoundMeasureKernel = -1;
             m_TraceCompute = m_GatherCompute = m_ImportanceSamplingCompute = m_FilterCompute = m_GatherTemporalCompute = null;
             m_RestirCompute = m_SunCompute = m_RadiosityCompute = m_FarCompute = m_NearOcclusionCompute = null;
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
@@ -1387,12 +1509,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
             m_RadiosityKernel = -1;
             m_RadiosityAccumulationKernel = m_RadiosityPublishKernel = -1;
+            m_RadiosityPublishCardsKernel = m_RadiosityClearKernel = -1;
+            m_RadiosityRescaleKernel = -1;
             m_FarKernel = m_NearOcclusionKernel = -1;
             m_OpenPbrResolveKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_DirectionalGuideKernel = m_DirectionalCompositeKernel = m_DirectionalTemporalKernel = -1;
             m_DirectionalFilterKernel = m_DirectionalIntegrateKernel = m_DirectionalResolveKernel = -1;
             m_PrepareAnchorKernel = -1;
+            m_PrepareAnchorNoPixelKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
             m_AtrousKernel = m_AtrousFinalKernel = -1;
@@ -1480,6 +1605,150 @@ namespace VividRP.Runtime.RenderPass.Core
             return Mathf.Min(remaining, budget);
         }
 
+        internal static int GetRadiosityUpdateCount(int cards, int cursor, int cardsPerFrame,
+            int fullUpdateCardLimit, int boost)
+        {
+            int budget = Mathf.Clamp(cardsPerFrame, 1, RadiosityCardLimit) * Mathf.Clamp(boost, 1, 4);
+            return GetRadiosityUpdateCount(cards, cursor, budget, fullUpdateCardLimit);
+        }
+
+        internal static bool IsFastRadiosityCameraMotion(Vector3 previousPosition, Vector3 previousForward,
+            Vector3 position, Vector3 forward) => (position - previousPosition).sqrMagnitude > 0.0625f
+            || Vector3.Dot(previousForward, forward) < 0.9961947f; // 0.25 m or five degrees per frame.
+
+        private int PublishedRadiosityOrder => m_RadiosityProgressive ? m_RadiosityPublishedOrder : m_RadiosityOrder;
+
+        private bool PreserveRelitHistory
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & 131072) != 0)
+                    return false;
+#endif
+                // Reservoir weights and variance require separate rescaling rules.
+                // The native path stores only radiance and invariant geometric metadata.
+                return m_RadiosityRescale && m_DirectionalCache && !m_RestirGather;
+            }
+        }
+
+        internal static bool TryGetRadiosityLightScale(Vector4 previous, Vector4 current, int orders, out Vector4 scale) =>
+            TryGetRadiositySourceScale(previous, current, Vector4.zero, Vector4.zero, orders, out scale);
+
+        internal static bool TryGetRadiositySourceScale(Vector4 previousSun, Vector4 sun,
+            Vector4 previousEmission, Vector4 emission, int orders, out Vector4 scale) =>
+            TryGetRadiosityLightingScale(previousSun, sun, previousEmission, emission,
+                Vector4.zero, Vector4.zero, 0f, orders, out scale);
+
+        internal static bool TryGetRadiosityLightingScale(Vector4 previousSun, Vector4 sun,
+            Vector4 previousEmission, Vector4 emission, Vector4 previousSky, Vector4 sky,
+            float skyRadianceBound, int orders, out Vector4 scale)
+        {
+            scale = Vector4.one;
+            if (previousSun.w != sun.w || orders <= 0 || orders > 8
+                || !float.IsFinite(skyRadianceBound) || skyRadianceBound < 0f)
+                return false;
+            int channels = 0;
+            if (!VividMeshSdfGpuScene.TryMergeEmissionScale(previousSun, sun, ref scale, ref channels)
+                || !VividMeshSdfGpuScene.TryMergeEmissionScale(previousEmission, emission, ref scale, ref channels)
+                || !VividMeshSdfGpuScene.TryMergeEmissionScale(previousSky, sky, ref scale, ref channels))
+                return false;
+            float maximum = 0f;
+            for (int i = 0; i < 3; i++)
+                maximum = Mathf.Max(maximum, Mathf.Max(previousSun[i] + previousEmission[i] + previousSky[i] * skyRadianceBound,
+                    sun[i] + emission[i] + sky[i] * skyRadianceBound));
+            // Includes direct emission and the measured sky peak. No /PI reduction.
+            return channels != 0 && maximum * (orders + 1) <= 60000f;
+        }
+
+        private void OnSkyRadianceBoundReadback(AsyncGPUReadbackRequest request)
+        {
+            m_SkyBoundPending = false;
+            if (m_SkyRadianceBoundBuffer == null || request.hasError)
+                return;
+            m_SkyRadianceBound = System.BitConverter.Int32BitsToSingle((int)request.GetData<uint>()[0]);
+            m_SkyBoundHash = m_SkyBoundRequestHash;
+            m_SkyBoundValid = float.IsFinite(m_SkyRadianceBound) && m_SkyRadianceBound < float.MaxValue;
+        }
+
+        private void OnSkyBoundAfterSubmit(ScriptableRenderContext context, Camera camera)
+        {
+            if (!m_SkyBoundAwaitSubmit || camera != m_SkyBoundCamera || m_SkyRadianceBoundBuffer == null)
+                return;
+            // VividRenderPipeline submits this camera before EndCameraRendering.
+            // Request on the same graphics queue, after the bound dispatch is submitted.
+            m_SkyBoundAwaitSubmit = false;
+            m_SkyBoundCamera = null;
+            AsyncGPUReadback.Request(m_SkyRadianceBoundBuffer, m_SkyRadianceBoundReadback);
+        }
+
+        private void RecordSkyRadianceBound(ComputePassContext context)
+        {
+            // Full texel coverage is required for a bound; never downsample a larger sky.
+            // Reuse the buffer/delegate and do no work for stable sky content.
+            if (m_SkyTraceDistance <= 0f || m_SkyBoundMeasureKernel < 0 || !m_SkyTexture.IsValid()
+                || m_SkyBoundSize <= 0 || m_SkyBoundSize > 1024 || m_SkyBoundPending
+                || m_SkyBoundValid && m_SkyBoundHash == m_SkyContentHash)
+                return;
+            m_SkyRadianceBoundBuffer ??= new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
+            var cmd = context.cmd;
+            cmd.SetComputeBufferParam(m_RadiosityCompute, m_SkyBoundClearKernel, SkyRadianceBoundId, m_SkyRadianceBoundBuffer);
+            cmd.DispatchCompute(m_RadiosityCompute, m_SkyBoundClearKernel, 1, 1, 1);
+            cmd.SetComputeBufferParam(m_RadiosityCompute, m_SkyBoundMeasureKernel, SkyRadianceBoundId, m_SkyRadianceBoundBuffer);
+            cmd.SetComputeTextureParam(m_RadiosityCompute, m_SkyBoundMeasureKernel, SkyTextureId, m_SkyTexture);
+            cmd.SetComputeIntParam(m_RadiosityCompute, SkyRadianceBoundSizeId, m_SkyBoundSize);
+            cmd.DispatchCompute(m_RadiosityCompute, m_SkyBoundMeasureKernel,
+                CoreUtils.DivRoundUp(m_SkyBoundSize, 8), CoreUtils.DivRoundUp(m_SkyBoundSize, 8), 6);
+            m_SkyBoundRequestHash = m_SkyContentHash;
+            m_SkyBoundPending = true;
+            m_SkyBoundAwaitSubmit = true;
+            m_SkyBoundCamera = context.Get<VividCameraData>().camera;
+        }
+
+        private bool HasCompatibleRadiosityTransport() => !m_State.RadiosityRestarting
+            && m_State.RadiosityPublishedOrder == m_RadiosityTargetOrders
+            && m_State.RadiosityOrder >= m_RadiosityTargetOrders
+            && m_State.RadiosityInputTransportVersion == m_Scene.TransportVersion
+            && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
+            && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
+            && m_State.RadiositySamples == m_RadiositySamples && m_State.RadiositySeed == m_RadiositySeed
+            && m_State.RadiosityAccumulate == m_RadiosityAccumulate
+            && m_State.RadiosityBatchLimit == m_RadiosityBatchLimit;
+
+        private bool CanRescaleRadiosityHistory()
+        {
+#if UNITY_EDITOR
+            if (EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & 65536) != 0)
+                return false;
+#endif
+            return m_RadiosityRescaleKernel >= 0 && HasCompatibleRadiosityTransport()
+                && m_SkyTraceDistance == m_State.SkyTraceDistance
+                && (m_SkyTraceDistance == 0f || m_SkyBoundValid && m_SkyBoundHash == m_SkyContentHash
+                    && m_SkyBoundSize > 0 && m_SkyBoundSize <= 1024
+                    && m_State.RadiositySkyContentHash == m_SkyContentHash
+                    && m_State.RadiositySkyTextureParams.y == m_SkyTextureParams.y
+                    && m_State.RadiositySkyTextureParams.z == m_SkyTextureParams.z
+                    && m_State.RadiositySkyTextureParams.w == m_SkyTextureParams.w)
+                && m_LightPositionRange.w <= 0f && m_State.RadiosityLightPositionRange.Equals(m_LightPositionRange)
+                && m_Scene.TryGetEmissionChange(m_State.RadiosityEmissionVersion, out var previousEmission, out var emission)
+                && TryGetRadiosityLightingScale(m_State.RadiosityLightColorShadow, m_LightColorShadow,
+                    previousEmission, emission,
+                    m_SkyTraceDistance > 0f ? m_State.RadiositySkyTextureTint * m_State.RadiositySkyTextureParams.x : Vector4.zero,
+                    m_SkyTraceDistance > 0f ? m_SkyTextureTint * m_SkyTextureParams.x : Vector4.zero,
+                    m_SkyTraceDistance > 0f ? m_SkyRadianceBound : 0f,
+                    m_RadiosityTargetOrders, out m_RadiosityHistoryScale);
+        }
+
+        internal static int GetRadiosityRelightSweepCount(int cards, int fullUpdateLimit, int samples,
+            int remainingOrders, int requestedSweeps)
+        {
+            if (cards <= 0 || cards > fullUpdateLimit || remainingOrders <= 0)
+                return 1;
+            // Bound burst work as well as dispatch count, including high-sample references.
+            int budget = (int)System.Math.Max(1L, 65536L / ((long)cards * Mathf.Max(16, samples)));
+            return Mathf.Clamp(Mathf.Min(remainingOrders, budget), 1, Mathf.Clamp(requestedSweeps, 1, 8));
+        }
+
         private void PrepareRadiosity(Camera camera, VividSdfSurfaceCache cache, int targetOrders,
             int cardsPerFrame, int fullUpdateCardLimit)
         {
@@ -1501,7 +1770,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityCardVersion = cache.CardVersion;
             if (m_RadiosityAccumulate)
             {
-                PrepareRadiosityAccumulation(history, cache, descriptor, cards, cardsPerFrame, fullUpdateCardLimit);
+                PrepareRadiosityAccumulation(history, cache, descriptor, camera, cards, cardsPerFrame, fullUpdateCardLimit);
                 return;
             }
             var atlasA = history.GetOrCreateTexture(RadiosityAId, 1, descriptor);
@@ -1509,36 +1778,144 @@ namespace VividRP.Runtime.RenderPass.Core
             bool stable = atlasA.IsValid(0) && atlasB.IsValid(0)
                 && MatchesRadiosityInputs(cache);
             m_RadiosityOrder = stable ? m_State.RadiosityOrder : 0;
-            m_RadiosityCursor = stable ? m_State.RadiosityCursor : 0;
+            PrepareRadiosityTransition(history, cache, descriptor, camera, stable);
+            m_RadiosityCursor = stable || CanContinueFirstRadiositySweep(cache)
+                ? m_State.RadiosityCursor : 0;
             bool writeA = (m_RadiosityOrder & 1) == 0;
             m_RadiosityReadHistory = writeA ? atlasB : atlasA;
             m_RadiosityWriteHistory = writeA ? atlasA : atlasB;
             if (m_RadiosityOrder > 0)
-                m_RadiosityInput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityReadHistory, 0, AccessFlags.Read);
+                m_RadiosityBounceInput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityReadHistory, 0, AccessFlags.Read);
+            if (!m_RadiosityProgressive)
+                m_RadiosityInput = m_RadiosityBounceInput;
             if (m_RadiosityOrder < targetOrders)
             {
-                m_RadiosityOutput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityWriteHistory, 0, AccessFlags.Write);
+                if (m_RadiosityFastRelight && m_RadiosityCursor == 0)
+                    m_RadiositySweeps = GetRadiosityRelightSweepCount(cards, fullUpdateCardLimit, m_RadiositySamples,
+                        targetOrders - m_RadiosityOrder, m_RadiosityRelightSweepLimit);
+                m_RadiosityOutput = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityWriteHistory, 0,
+                    m_RadiositySweeps > 1 ? AccessFlags.ReadWrite : AccessFlags.Write);
+                m_RadiositySweepOutputs[0] = m_RadiosityOutput;
+                if (m_RadiositySweeps > 1)
+                {
+                    m_RadiositySweepOutputs[1] = CameraHistoryRenderGraphBridge.ImportForPass(this,
+                        m_RadiosityReadHistory, 0, AccessFlags.ReadWrite);
+                    for (int sweep = 2; sweep < m_RadiositySweeps; ++sweep)
+                        m_RadiositySweepOutputs[sweep] = m_RadiositySweepOutputs[sweep & 1];
+                }
                 m_RadiosityUpdateCards = m_RadiosityOutput.IsValid()
-                    ? GetRadiosityUpdateCount(cards, m_RadiosityCursor, cardsPerFrame, fullUpdateCardLimit) : 0;
+                    ? GetRadiosityUpdateCount(cards, m_RadiosityCursor, cardsPerFrame, fullUpdateCardLimit,
+                        m_RadiosityBoostFrames > 0 ? m_RadiosityBudgetBoost : 1) : 0;
             }
+        }
+
+        private bool CanContinueFirstRadiositySweep(VividSdfSurfaceCache cache) => m_RadiosityProgressive
+            && !m_RadiosityClear && m_State.RadiosityRestarting && m_State.RadiosityOrder == 0
+            && m_State.RadiosityBounce == 0 && ReferenceEquals(m_State.Cache, cache)
+            && m_State.RadiositySamples == m_RadiositySamples && m_State.RadiositySeed == m_RadiositySeed
+            && m_State.RadiosityAccumulate == m_RadiosityAccumulate;
+
+        private void PrepareRadiosityTransition(CameraHistory history, VividSdfSurfaceCache cache,
+            CameraHistoryTextureDescriptor descriptor, Camera camera, bool stable)
+        {
+            bool compatible = false;
+            if (m_RadiosityProgressive)
+            {
+                m_RadiosityPublishedHistory = history.GetOrCreateTexture(RadiosityPublishedId, 1, descriptor);
+                compatible = m_RadiosityPublishedHistory.IsValid(0) && m_State.RadiosityProgressive
+                    && ReferenceEquals(m_State.Cache, cache) && m_State.RadiosityCardVersion == m_RadiosityCardVersion
+                    && m_State.RadiosityLayoutVersion == m_Scene.RadiosityLayoutVersion;
+                m_RadiosityClear = !compatible;
+                m_RadiosityPublishedOrder = compatible ? m_State.RadiosityPublishedOrder : 0;
+                m_RadiosityPublished = CameraHistoryRenderGraphBridge.ImportForPass(this,
+                    m_RadiosityPublishedHistory, 0, AccessFlags.ReadWrite);
+                // Clear before any consumer on cold/incompatible allocations. Fresh
+                // cards can then be sampled immediately, including the first sweep.
+                m_RadiosityInput = m_RadiosityPublished;
+            }
+            m_RadiosityRestarting = !stable || m_State.RadiosityRestarting;
+            m_RadiosityFastRelight = stable && m_State.RadiosityFastRelight;
+            var transform = camera.transform;
+            bool fastMotion = IsFastRadiosityCameraMotion(m_State.RadiosityCameraPosition,
+                m_State.RadiosityCameraForward, transform.position, transform.forward);
+            m_RadiosityBoostFrames = m_RadiosityRestarting || fastMotion ? 8 : m_State.RadiosityBoostFrames;
+            if (!stable)
+            {
+                Vector3 delta = (Vector3)m_LightColorShadow - (Vector3)m_State.RadiosityLightColorShadow;
+                float scale = Mathf.Max(Mathf.Max(((Vector3)m_LightColorShadow).magnitude,
+                    ((Vector3)m_State.RadiosityLightColorShadow).magnitude), 1e-8f);
+                // Small changes retain 75% of the old card per fresh update. A large
+                // lighting change or new sky should replace stale energy promptly.
+                m_RadiosityRescale = compatible && CanRescaleRadiosityHistory();
+                m_RadiosityFastRelight = compatible && !m_RadiosityRescale && HasCompatibleRadiosityTransport();
+#if UNITY_EDITOR
+                if (EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & 65536) != 0)
+                    m_RadiosityFastRelight = false;
+#endif
+                bool keepHigherOrder = m_RadiosityRescale || compatible && m_State.RadiosityPublishedOrder == m_RadiosityTargetOrders
+                    && m_State.RadiosityInputDiscontinuityVersion == m_Scene.RadiosityDiscontinuityVersion
+                    && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
+                    && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
+                    && m_State.SkyTraceDistance == m_SkyTraceDistance
+                    && MatchesEnvironmentLighting(m_State.RadiositySkyContentHash,
+                        m_State.RadiositySkyTextureParams, m_State.RadiositySkyTextureTint, 0.05f)
+                    && LightingWithinTolerance(m_State.RadiosityLightPositionRange, m_State.RadiosityLightColorShadow,
+                        m_LightPositionRange, m_LightColorShadow, 0.05f);
+                // A low-order estimate omits higher bounces. Replacing a nearly
+                // correct high-order cache with it creates an energy sawtooth even
+                // under a smooth light ramp. Hold high order for small changes;
+                // fresh target-order cards still replace it as soon as they arrive.
+                m_State.RadiosityTransitionBlend = keepHigherOrder ? 0f
+                    : compatible && m_State.RadiositySkyContentHash == m_SkyContentHash
+                        ? Mathf.Clamp(delta.magnitude / scale * 8f, 0.25f, 0.75f) : 1f;
+                m_State.RadiosityInputSceneRevision = m_Scene.Revision;
+                m_State.RadiosityInputDiscontinuityVersion = m_Scene.RadiosityDiscontinuityVersion;
+                m_State.RadiosityInputTransportVersion = m_Scene.TransportVersion;
+                m_State.RadiosityEmissionVersion = m_Scene.EmissionVersion;
+                m_State.RadiosityLightPositionRange = m_LightPositionRange;
+                m_State.RadiosityLightColorShadow = m_LightColorShadow;
+                m_State.RadiositySkyContentHash = m_SkyContentHash;
+                m_State.RadiositySkyTextureParams = m_SkyTextureParams;
+                m_State.RadiositySkyTextureTint = m_SkyTextureTint;
+            }
+            m_RadiosityTransitionBlend = m_State.RadiosityTransitionBlend;
         }
 
         private bool MatchesRadiosityInputs(VividSdfSurfaceCache cache)
         {
-            return m_State.RadiositySamples == m_RadiositySamples && m_State.RadiositySeed == m_RadiositySeed
+            bool configuration = m_State.RadiositySamples == m_RadiositySamples && m_State.RadiositySeed == m_RadiositySeed
                 && m_State.RadiosityAccumulate == m_RadiosityAccumulate
+                && m_State.RadiosityProgressive == m_RadiosityProgressive
                 && (!m_RadiosityAccumulate || m_State.RadiosityBatchLimit == m_RadiosityBatchLimit)
-                && m_State.RadiosityTargetOrders == m_RadiosityTargetOrders && m_State.SceneRevision == m_Scene.Revision
+                && m_State.RadiosityTargetOrders == m_RadiosityTargetOrders
                 && ReferenceEquals(m_State.Cache, cache) && m_State.RadiosityCardVersion == m_RadiosityCardVersion
                 && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
-                && m_State.SkyTraceDistance == m_SkyTraceDistance && m_State.SkyContentHash == m_SkyContentHash
-                && m_State.SkyTextureParams.Equals(m_SkyTextureParams) && m_State.SkyTextureTint.Equals(m_SkyTextureTint)
-                && m_State.LightPositionRange.Equals(m_LightPositionRange) && m_State.LightColorShadow.Equals(m_LightColorShadow);
+                && m_State.SkyTraceDistance == m_SkyTraceDistance;
+            if (!configuration)
+                return false;
+            bool unchanged = m_State.RadiosityInputSceneRevision == m_Scene.Revision
+                && MatchesEnvironmentLighting(m_State.RadiositySkyContentHash,
+                    m_State.RadiositySkyTextureParams, m_State.RadiositySkyTextureTint)
+                && LightingWithinTolerance(m_State.RadiosityLightPositionRange, m_State.RadiosityLightColorShadow,
+                    m_LightPositionRange, m_LightColorShadow, m_LightingTolerance);
+            if (unchanged)
+                return true;
+            // Finish an in-flight first batch under small ongoing changes instead
+            // of restarting at order zero every few frames. Keep the accepted input
+            // snapshot unchanged, so a pending change restarts after this target
+            // completes. Large light changes, sky content or card identities restart now.
+            return m_RadiosityProgressive && m_State.RadiosityRestarting
+                && m_State.RadiosityLayoutVersion == m_Scene.RadiosityLayoutVersion
+                && m_State.RadiosityInputDiscontinuityVersion == m_Scene.RadiosityDiscontinuityVersion
+                && MatchesEnvironmentLighting(m_State.RadiositySkyContentHash,
+                    m_State.RadiositySkyTextureParams, m_State.RadiositySkyTextureTint, 0.05f)
+                && LightingWithinTolerance(m_State.RadiosityLightPositionRange, m_State.RadiosityLightColorShadow,
+                    m_LightPositionRange, m_LightColorShadow, 0.05f);
         }
 
         private void PrepareRadiosityAccumulation(CameraHistory history, VividSdfSurfaceCache cache,
-            CameraHistoryTextureDescriptor descriptor, int cards, int cardsPerFrame, int fullUpdateCardLimit)
+            CameraHistoryTextureDescriptor descriptor, Camera camera, int cards, int cardsPerFrame, int fullUpdateCardLimit)
         {
             m_RadiosityPublishedHistory = history.GetOrCreateTexture(RadiosityPublishedId, 1, descriptor);
             bool stable = m_RadiosityPublishedHistory.IsValid(0) && MatchesRadiosityInputs(cache);
@@ -1549,40 +1926,75 @@ namespace VividRP.Runtime.RenderPass.Core
                 stable &= layer.IsValid(0);
             }
             m_RadiosityOrder = stable ? m_State.RadiosityOrder : 0;
-            m_RadiosityCursor = stable ? m_State.RadiosityCursor : 0;
+            PrepareRadiosityTransition(history, cache, descriptor, camera, stable);
+            m_RadiosityCursor = stable || CanContinueFirstRadiositySweep(cache) ? m_State.RadiosityCursor : 0;
             m_RadiosityBatch = stable ? m_State.RadiosityBatch : 0;
             m_RadiosityBounce = stable ? m_State.RadiosityBounce : 0;
             bool updating = m_RadiosityBatch < m_RadiosityBatchLimit;
-            m_RadiosityPublished = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityPublishedHistory,
-                0, updating ? AccessFlags.ReadWrite : AccessFlags.Read);
-            if (m_RadiosityOrder > 0)
-                m_RadiosityInput = m_RadiosityPublished;
+            if (!m_RadiosityProgressive)
+            {
+                m_RadiosityPublished = CameraHistoryRenderGraphBridge.ImportForPass(this, m_RadiosityPublishedHistory,
+                    0, updating ? AccessFlags.ReadWrite : AccessFlags.Read);
+                if (m_RadiosityOrder > 0)
+                    m_RadiosityInput = m_RadiosityPublished;
+            }
             if (updating)
             {
                 if (m_RadiosityBounce > 0)
                     m_RadiosityBounceInput = CameraHistoryRenderGraphBridge.ImportForPass(this,
                         m_RadiosityOrderHistories[m_RadiosityBounce - 1], 0, AccessFlags.Read);
-                m_RadiosityOutput = CameraHistoryRenderGraphBridge.ImportForPass(this,
-                    m_RadiosityOrderHistories[m_RadiosityBounce], 0, AccessFlags.ReadWrite);
-                m_RadiosityUpdateCards = GetRadiosityUpdateCount(cards, m_RadiosityCursor, cardsPerFrame, fullUpdateCardLimit);
+                if (m_RadiosityFastRelight && m_RadiosityBatch == 0 && m_RadiosityCursor == 0)
+                    m_RadiositySweeps = GetRadiosityRelightSweepCount(cards, fullUpdateCardLimit, m_RadiositySamples,
+                        m_RadiosityTargetOrders - m_RadiosityBounce, m_RadiosityRelightSweepLimit);
+                for (int sweep = 0; sweep < m_RadiositySweeps; ++sweep)
+                    m_RadiositySweepOutputs[sweep] = CameraHistoryRenderGraphBridge.ImportForPass(this,
+                        m_RadiosityOrderHistories[m_RadiosityBounce + sweep], 0, AccessFlags.ReadWrite);
+                m_RadiosityOutput = m_RadiositySweepOutputs[0];
+                m_RadiosityUpdateCards = GetRadiosityUpdateCount(cards, m_RadiosityCursor, cardsPerFrame, fullUpdateCardLimit,
+                    m_RadiosityBoostFrames > 0 ? m_RadiosityBudgetBoost : 1);
             }
         }
 
         private void RecordRadiosity(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black)
         {
+            if (m_RadiosityClear)
+            {
+                cmd.SetComputeTextureParam(m_RadiosityCompute, m_RadiosityClearKernel,
+                    RadiosityOutputId, m_RadiosityPublished);
+                cmd.DispatchCompute(m_RadiosityCompute, m_RadiosityClearKernel,
+                    m_RadiosityDesc.desc.Width / GroupSize, m_RadiosityDesc.desc.Height / GroupSize, 1);
+            }
+            if (m_RadiosityRescale)
+            {
+                using var scope = new ProfilingScope(cmd, RadiosityRescaleSampler);
+                cmd.SetComputeTextureParam(m_RadiosityCompute, m_RadiosityRescaleKernel, RadiosityOutputId, m_RadiosityPublished);
+                cmd.SetComputeVectorParam(m_RadiosityCompute, RadiosityHistoryScaleId, m_RadiosityHistoryScale);
+                cmd.SetComputeIntParam(m_RadiosityCompute, RadiosityCardCountId, m_Scene.RadiosityCardCount);
+                cmd.DispatchCompute(m_RadiosityCompute, m_RadiosityRescaleKernel, 1, 1, m_Scene.RadiosityCardCount);
+            }
             bool published = m_RadiosityInput.IsValid();
             var input = published ? m_RadiosityInput : black;
             var work = m_RadiosityTargetOrders > 0 ? m_Scene.RadiosityWork : m_Scene.LeafInstances;
             cmd.SetComputeIntParam(m_TraceCompute, RadiosityLayoutId, published ? m_Scene.RadiosityCardCount : 0);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, RadiosityInputId, input);
             cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, RadiosityWorkId, work);
-            if (m_RadiosityUpdateCards > 0)
+            for (int sweep = 0; m_RadiosityUpdateCards > 0 && sweep < m_RadiositySweeps; ++sweep)
             {
+                if (sweep > 0)
+                {
+                    // Each sweep consumes only the freshly computed previous order.
+                    // Never feed retained high-order published lighting into a low order.
+                    m_RadiosityBounceInput = m_RadiosityOutput;
+                    m_RadiosityOutput = m_RadiositySweepOutputs[sweep];
+                    if (m_RadiosityAccumulate)
+                        ++m_RadiosityBounce;
+                    else
+                        ++m_RadiosityOrder;
+                }
                 using var scope = new ProfilingScope(cmd, RadiositySampler);
                 int kernel = m_RadiosityAccumulate ? m_RadiosityAccumulationKernel : m_RadiosityKernel;
-                bool bounceInputValid = m_RadiosityAccumulate ? m_RadiosityBounceInput.IsValid() : published;
-                var bounceInput = m_RadiosityAccumulate
-                    ? (bounceInputValid ? m_RadiosityBounceInput : black) : input;
+                bool bounceInputValid = m_RadiosityBounceInput.IsValid();
+                var bounceInput = bounceInputValid ? m_RadiosityBounceInput : black;
                 BindSdfTraceConstants(cmd, m_RadiosityCompute);
                 BindSunLighting(cmd, m_RadiosityCompute);
                 BindOccludedSky(cmd, m_RadiosityCompute, kernel);
@@ -1604,7 +2016,29 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeIntParam(m_RadiosityCompute, RadiosityBounceId, m_RadiosityBounce);
                 }
                 cmd.DispatchCompute(m_RadiosityCompute, kernel, 1, 1, m_RadiosityUpdateCards);
-                if (m_RadiosityAccumulate && m_RadiosityBounce + 1 == m_RadiosityTargetOrders
+                bool finishedSweep = m_RadiosityCursor + m_RadiosityUpdateCards == m_Scene.RadiosityCardCount;
+                int order = (m_RadiosityAccumulate ? m_RadiosityBounce : m_RadiosityOrder) + 1;
+                bool firstBatch = !m_RadiosityAccumulate || m_RadiosityBatch == 0;
+                bool publishCards = firstBatch && (m_RadiosityTransitionBlend > 0f || order == m_RadiosityTargetOrders);
+                if (m_RadiosityProgressive && (publishCards || !firstBatch && order == m_RadiosityTargetOrders && finishedSweep))
+                {
+                    // The first batch replaces cards as soon as fresh low-order light
+                    // exists. Subsequent sample batches only replace the target order.
+                    int first = m_RadiosityAccumulate && m_RadiosityBatch > 0 ? 0 : m_RadiosityCursor;
+                    int count = m_RadiosityAccumulate && m_RadiosityBatch > 0
+                        ? m_Scene.RadiosityCardCount : m_RadiosityUpdateCards;
+                    int publishKernel = m_RadiosityPublishCardsKernel;
+                    cmd.SetComputeTextureParam(m_RadiosityCompute, publishKernel, RadiosityInputId, m_RadiosityOutput);
+                    cmd.SetComputeTextureParam(m_RadiosityCompute, publishKernel, RadiosityOutputId, m_RadiosityPublished);
+                    cmd.SetComputeIntParam(m_RadiosityCompute, RadiosityFirstCardId, first);
+                    cmd.SetComputeIntParam(m_RadiosityCompute, RadiosityCardCountId, m_Scene.RadiosityCardCount);
+                    cmd.SetComputeFloatParam(m_RadiosityCompute, RadiosityPublishBlendId,
+                        order == m_RadiosityTargetOrders ? 1f : m_RadiosityTransitionBlend);
+                    cmd.DispatchCompute(m_RadiosityCompute, publishKernel, 1, 1, count);
+                    if (finishedSweep)
+                        m_RadiosityPublishedOrder = order;
+                }
+                else if (!m_RadiosityProgressive && m_RadiosityAccumulate && m_RadiosityBounce + 1 == m_RadiosityTargetOrders
                     && m_RadiosityCursor + m_RadiosityUpdateCards == m_Scene.RadiosityCardCount)
                 {
                     // Publish a complete target-order estimate, never a partially updated card sweep.
@@ -1647,10 +2081,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarWindow = center - new Vector3Int(FarGridSize / 2, FarGridSize / 2, FarGridSize / 2);
             m_FarClear = !m_FarHistory.IsValid(0) || !m_FarHitIdsHistory.IsValid(0) || m_State.FarDistance != m_FarDistance
                 || m_State.SceneRevision != m_Scene.Revision || !ReferenceEquals(m_State.Cache, cache)
-                || m_State.FarCardVersion != m_FarCardVersion || m_State.GatherRadiosityOrder != m_RadiosityOrder
+                || m_State.FarCardVersion != m_FarCardVersion || m_State.GatherRadiosityOrder != PublishedRadiosityOrder
                 || m_State.LayerMask != m_LayerMask || m_State.LightLayerMask != m_LightLayerMask
                 || m_State.MaxDistance != m_TraceDistance || m_State.RayBias != m_Bias
-                || !m_State.LightPositionRange.Equals(m_LightPositionRange) || !m_State.LightColorShadow.Equals(m_LightColorShadow);
+                || !MatchesPreviousDirectionalLighting() || m_RadiosityRestarting && !m_State.RadiosityRestarting;
             var keys = m_State.FarKeys ??= new Vector3Int[FarProbeCount];
             if (m_FarClear)
                 System.Array.Fill(keys, new Vector3Int(int.MinValue, int.MinValue, int.MinValue));
@@ -2008,25 +2442,59 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(shader, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
         }
 
-        private bool MatchesPreviousDirectionalLighting()
+        internal static bool LightingWithinTolerance(Vector4 previousPosition, Vector4 previousColor,
+            Vector4 position, Vector4 color, float tolerance)
         {
-            bool directional = m_LightPositionRange.w < 0f;
-            bool previousDirectional = m_State.LightPositionRange.w < 0f;
-            if (!directional && !previousDirectional)
-                return true;
-            if (directional != previousDirectional || m_State.LightLayerMask != m_LightLayerMask)
+            bool directional = position.w < 0f;
+            if (directional != (previousPosition.w < 0f) || !RelativeColorWithinTolerance(previousColor, color, tolerance))
                 return false;
+            if (previousPosition.Equals(position))
+                return true;
+            if (!directional || tolerance <= 0f || previousPosition.w != position.w)
+                return false;
+            Vector3 oldDirection = previousPosition, direction = position;
+            float length = Mathf.Sqrt(oldDirection.sqrMagnitude * direction.sqrMagnitude);
+            return length > 0f && Vector3.Dot(oldDirection, direction) >= 0.9999985f * length; // 0.1 degree.
+        }
 
-            Vector3 color = m_LightColorShadow;
-            Vector3 previousColor = m_State.LightColorShadow;
-            float colorScaleSquared = Mathf.Max(color.sqrMagnitude, previousColor.sqrMagnitude);
-            // Small per-frame changes can still use the one-frame-old screen radiance.
-            const float relativeColorToleranceSquared = 0.01f;
-            const float directionCosineTolerance = 0.9998477f; // One degree.
-            const float shadowStrengthTolerance = 0.1f;
-            return (color - previousColor).sqrMagnitude <= relativeColorToleranceSquared * colorScaleSquared
-                && Vector3.Dot(m_LightPositionRange, m_State.LightPositionRange) >= directionCosineTolerance
-                && Mathf.Abs(m_LightColorShadow.w - m_State.LightColorShadow.w) <= shadowStrengthTolerance;
+        private static bool RelativeColorWithinTolerance(Vector4 previous, Vector4 current, float tolerance)
+        {
+            Vector3 a = previous, b = current;
+            float scaleSquared = Mathf.Max(a.sqrMagnitude, b.sqrMagnitude);
+            return (a - b).sqrMagnitude <= tolerance * tolerance * scaleSquared
+                && Mathf.Abs(previous.w - current.w) <= tolerance;
+        }
+
+        private bool MatchesPreviousDirectionalLighting() => m_State.LightLayerMask == m_LightLayerMask
+            && LightingWithinTolerance(m_State.LightPositionRange, m_State.LightColorShadow,
+                m_LightPositionRange, m_LightColorShadow, m_LightingTolerance);
+
+        private bool HasCurrentScreenLighting()
+        {
+#if UNITY_EDITOR
+            if (EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & 65536) != 0)
+                return MatchesPreviousDirectionalLighting();
+#endif
+            // Previous scene color contains emission, sky and indirect light as well
+            // as the sun. Geometry can still screen-trace while its lighting is stale;
+            // shade the hit through current SDF/cards until the first rebuild completes.
+            return MatchesPreviousDirectionalLighting() && m_State.SceneRevision == m_Scene.Revision
+                && MatchesEnvironmentLighting(m_State.SkyContentHash, m_State.SkyTextureParams, m_State.SkyTextureTint)
+                && !m_RadiosityRestarting;
+        }
+
+        private bool MatchesEnvironmentLighting(int hash, Vector4 parameters, Vector4 tint) =>
+            MatchesEnvironmentLighting(hash, parameters, tint, m_LightingTolerance);
+
+        private bool MatchesEnvironmentLighting(int hash, Vector4 parameters, Vector4 tint, float tolerance)
+        {
+            float scale = Mathf.Max(Mathf.Abs(parameters.x), Mathf.Abs(m_SkyTextureParams.x));
+            // Content identity and orientation are discrete invalidations. Only
+            // physical energy/tint floats use a relative deadband.
+            return hash == m_SkyContentHash && parameters.y == m_SkyTextureParams.y
+                && parameters.z == m_SkyTextureParams.z && parameters.w == m_SkyTextureParams.w
+                && Mathf.Abs(parameters.x - m_SkyTextureParams.x) <= tolerance * scale
+                && RelativeColorWithinTolerance(tint, m_SkyTextureTint, tolerance);
         }
 
         private void RecordDirectionalGuide(ComputeCommandBuffer cmd, TextureHandle placement, TextureHandle black,
@@ -2094,9 +2562,23 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 cmd.SetComputeIntParam(shader, HasHistoryId, hasHistory ? 1 : 0);
                 cmd.SetComputeMatrixParam(shader, PreviousViewProjectionId, m_State.ViewProjection);
-                if (m_SpatialAnchor)
+                bool prepared = m_AnchorStatisticsHistory != null && m_PreparedAnchor.innerHandle.IsValid()
+                    && m_CurrentAnchorStatistics.innerHandle.IsValid();
+                if (prepared)
                 {
-                    kernel = m_PrepareAnchorKernel;
+                    bool pixelGeometry = hasHistory && m_PixelGeometryHistory != null && m_PixelGeometryHistory.IsValid()
+                        && m_PreviousPixelGeometry.innerHandle.IsValid();
+                    kernel = pixelGeometry ? m_PrepareAnchorKernel : m_PrepareAnchorNoPixelKernel;
+                    cmd.SetComputeIntParam(shader, AnchorStatisticsValidId,
+                        hasHistory && m_AnchorStatisticsHistoryValid ? 1 : 0);
+                    cmd.SetComputeTextureParam(shader, kernel, PreviousAnchorStatisticsId,
+                        m_AnchorStatisticsHistoryValid ? m_PreviousAnchorStatistics.innerHandle : black);
+                    cmd.SetComputeTextureParam(shader, kernel, AnchorStatisticsOutputId, m_CurrentAnchorStatistics.innerHandle);
+                    if (pixelGeometry)
+                    {
+                        cmd.SetComputeTextureParam(shader, kernel, PreviousPixelGeometryId, m_PreviousPixelGeometry.innerHandle);
+                        cmd.SetComputeMatrixParam(shader, PreviousInverseVpId, m_State.ViewProjection.inverse);
+                    }
                     cmd.SetComputeTextureParam(shader, kernel, GeometryId, geometry);
                     cmd.SetComputeTextureParam(shader, kernel, DirectionalCompositeId, composite);
                     cmd.SetComputeTextureParam(shader, kernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
@@ -2111,11 +2593,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(shader, kernel, FilteredProbesId, m_FilteredProbes.innerHandle);
                 cmd.SetComputeIntParam(shader, ProbeAnchorDiagnosticsId, m_RecordProbeAnchorDiagnostics ? 1 : 0);
                 cmd.SetComputeIntParam(shader, SpatialAnchorId, m_SpatialAnchor ? 1 : 0);
+                cmd.SetComputeIntParam(shader, PreparedAnchorEnabledId, prepared ? 1 : 0);
+                cmd.SetComputeTextureParam(shader, kernel, AnchorStatisticsId,
+                    prepared ? m_CurrentAnchorStatistics.innerHandle : black);
                 cmd.SetComputeMatrixParam(shader, ViewProjectionId, m_ViewProjection);
                 cmd.SetComputeTextureParam(shader, kernel, DepthId, m_Depth.innerHandle);
                 cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
                 cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
-                cmd.SetComputeTextureParam(shader, kernel, PreparedAnchorId, m_SpatialAnchor ? m_PreparedAnchor.innerHandle : black);
+                cmd.SetComputeTextureParam(shader, kernel, PreparedAnchorId, prepared ? m_PreparedAnchor.innerHandle : black);
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalTemporalId, temporal);
                 cmd.SetComputeTextureParam(shader, kernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
                 cmd.SetComputeTextureParam(shader, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
@@ -2136,6 +2621,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 #endif
             cmd.SetComputeIntParam(shader, GatherHistoryDiagnosticsId, diagnostics);
+            cmd.SetComputeVectorParam(shader, HistoryLightScaleId, PreserveRelitHistory ? m_RadiosityHistoryScale : Vector4.one);
             cmd.SetComputeFloatParam(shader, AnchorHistoryBlendId, anchorBlend);
             cmd.SetComputeMatrixParam(shader, InverseViewProjectionId, m_InverseViewProjection);
             cmd.SetComputeVectorParam(shader, ScreenSizeId, new Vector4(m_Width, m_Height, 1f / m_Width, 1f / m_Height));

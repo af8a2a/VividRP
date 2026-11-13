@@ -80,6 +80,32 @@ float DirectionalRandom(uint value)
     return float(HashProbe(value) >> 8u) * (1.0 / 16777216.0);
 }
 
+float2 DirectionalTemporalSample(uint2 tile, uint ray, uint seed)
+{
+    // Keep independent per-frame sampling by default. Correlated temporal
+    // samples remain an Editor experiment until regional energy is validated.
+    if ((_SdfGatherHistoryDiagnostics & 262144u) == 0u)
+    {
+        uint sampleSeed = seed ^ (0xb5297a4du * (ray + 1u));
+        return float2(DirectionalRandom(sampleSeed), DirectionalRandom(sampleSeed ^ 0x68e31da4u));
+    }
+
+    // A digitally shifted 2D Sobol net stratifies both dimensions over time.
+    // Scramble each probe/ray independently, while sharing the sequence between
+    // screen and SDF tracing. No short frame cycle or per-frame rotation.
+    uint index = _SdfDiffuseFrame ^ (_SdfDiffuseFrame >> 1u);
+    uint second = index;
+    second ^= (second & 0xaaaaaaaau) >> 1u;
+    second ^= (second & 0xccccccccu) >> 2u;
+    second ^= (second & 0xf0f0f0f0u) >> 4u;
+    second ^= (second & 0xff00ff00u) >> 8u;
+    second ^= (second & 0xffff0000u) >> 16u;
+    uint scramble = HashProbe(tile.x + tile.y * 65537u) ^ (0xb5297a4du * (ray + 1u));
+    uint2 sample = uint2(reversebits(index), reversebits(second))
+        ^ uint2(HashProbe(scramble), HashProbe(scramble ^ 0x68e31da4u));
+    return float2(sample >> 8u) * (1.0 / 16777216.0);
+}
+
 float3x3 DiffuseProbeFrame(float3 normal)
 {
     // The guide, tracing, and cache must use the same frame at basis seams.
@@ -146,8 +172,7 @@ float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, ou
     if (_SdfDirectionalCacheEnabled == 0u)
         return ProbeRayDirection(ray, seed, basis);
 
-    uint sampleSeed = seed ^ (0xb5297a4du * (ray + 1u));
-    float2 sampleUv = float2(DirectionalRandom(sampleSeed), DirectionalRandom(sampleSeed ^ 0x68e31da4u));
+    float2 sampleUv = DirectionalTemporalSample(tile, ray, seed);
     if (_SdfDirectionalGuideEnabled != 0u)
     {
         // One draw per disjoint stratum. Its inverse relative PDF is eight

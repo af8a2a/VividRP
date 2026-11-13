@@ -1,0 +1,13 @@
+#pragma kernel ValidateSdfTemporalSampling
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfScreenProbeCommon.hlsl"
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl"
+
+uint _TemporalValidationOffset;
+RWStructuredBuffer<float2> _TemporalValidation;
+
+[numthreads(8, 1, 1)]
+void ValidateSdfTemporalSampling(uint3 id : SV_DispatchThreadID)
+{
+    uint2 tile = uint2(3u, 7u);
+    _TemporalValidation[_TemporalValidationOffset + id.x] = DirectionalTemporalSample(tile, id.x, ProbeSeed(tile));
+}

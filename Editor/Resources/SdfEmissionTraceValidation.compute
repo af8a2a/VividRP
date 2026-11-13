@@ -1,9 +1,12 @@
 #pragma kernel ValidateSdfEmissionTraces VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_FAR_UPDATE
+#pragma kernel FindSdfEmissionReconnectCases VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_FAR_UPDATE
+#pragma kernel ValidateSdfEmissionReconnect VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_FAR_UPDATE
 #include "../../Shaders/Core/Private/GlobalIllumination/SdfScreenProbeCommon.hlsl"
 #include "../../Shaders/Core/Private/GlobalIllumination/SdfSurfaceCacheLighting.hlsl"
 #include "../../Shaders/Core/Private/GlobalIllumination/SdfRadianceCacheCommon.hlsl"
 
 RWStructuredBuffer<float4> _EmissionTraceValidation;
+int4 _EmissionReconnectCases; // Front cell Y / bin, back cell Y / bin.
 
 [numthreads(2, 1, 1)]
 void ValidateSdfEmissionTraces(uint3 id : SV_DispatchThreadID)
@@ -17,4 +20,31 @@ void ValidateSdfEmissionTraces(uint3 id : SV_DispatchThreadID)
     float4 far = TraceFarProbe(origin, direction, instance);
     _EmissionTraceValidation[2u * id.x] = float4(radiosity, float(instance));
     _EmissionTraceValidation[2u * id.x + 1u] = far;
+}
+
+[numthreads(64, 1, 1)]
+void FindSdfEmissionReconnectCases(uint3 id : SV_DispatchThreadID)
+{
+    // Use actual cache-cell centers and production octahedral directions. Only
+    // the emitter is bound as a BVH leaf, as in the direct trace experiment.
+    int3 cell = int3(0, id.x / FarDirections, 0);
+    uint bin = id.x % FarDirections;
+    uint instance;
+    float4 hit = TraceFarProbe(FarProbePosition(cell), FarProbeDirection(bin), instance);
+    _EmissionTraceValidation[2u * id.x] = float4(FarProbeDirection(bin), float(instance));
+    _EmissionTraceValidation[2u * id.x + 1u] = hit;
+}
+
+[numthreads(2, 1, 1)]
+void ValidateSdfEmissionReconnect(uint3 id : SV_DispatchThreadID)
+{
+    int cellY = id.x == 0u ? _EmissionReconnectCases.x : _EmissionReconnectCases.z;
+    uint bin = uint(id.x == 0u ? _EmissionReconnectCases.y : _EmissionReconnectCases.w);
+    float3 direction = FarProbeDirection(bin);
+    float3 origin = FarProbePosition(int3(0, cellY, 0)) - _SdfDiffuseMaxDistance * direction;
+    float3 radiance;
+    float distance;
+    bool valid = TryLoadFarRadiance(origin, direction, radiance, distance);
+    _EmissionTraceValidation[2u * id.x] = float4(radiance, valid ? 1.0 : 0.0);
+    _EmissionTraceValidation[2u * id.x + 1u] = float4(direction, distance);
 }

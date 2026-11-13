@@ -109,3 +109,44 @@ E:/VividRP_GI_Evidence/EmissionTraceConformance-20261113-150649-654/trace-confor
 ```
 
 复验后确认回调为空、诊断 flags=0、强制双面关闭、frame override=-1、bias=0.04，正常 Radiosity 恢复 8 阶 / 32 批，场景未脏。未运行 Unity Test Framework（Editor 正在使用），未测量 GPU 耗时；本次不包含移动机位或旧场景缓存迁移。
+
+## 远场缓存重连补验（2026-11-14）
+
+复核当前工作区的四路实现后，重新完成同机位八组 GPU 对照。仍为 1920×1080、16 px / 8 rays、512 帧预热后采集 8 个样本；使用 Cull Off 作为旧双面语义对照。没有修改生产着色、场景、光强或曝光；保留工作区中尚未提交的方向采样实验，捕帧时诊断 flags=0。
+
+| 条件 | 背面高亮命中：双面 → 单面 | 全图有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,532 / 35,532 | −0.155% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.066% |
+| SDF Only，零阶，5 mm | 1,935 → 0 | 8,737 / 8,737 | 0.000% |
+
+全部 **52,411** 条材质背面黑样本 RGB 为零，保留有效 Screen/SDF 类别及非零探针覆盖。零阶正面发光命中均为 200.000046。默认 4 cm 偏移下，零阶天花板原始命中照明为零，最终重建仍有约 0.000219 的微小残留；5 mm 压力组最终为零。短序列地面均值通过 ±1% 检查，不替代长序列收敛或运动质量验证。
+
+扩展 `EmissionTraceConformance.cs` 和独立 Editor 诊断 shader，进一步直接调用生产 `TryLoadFarRadiance`。从真实 Cornell SDF 中选择实际缓存单元与八面体方向：正面 cell `(0,0,0)` / bin 42，背面 cell `(0,1,0)` / bin 17。诊断 atlas **两侧均预存约 200 的亮值**，用于检查消费端会不会直接复用错误侧的缓存。材质缓冲、BVH 与 atlas 均为独立临时资源，房间其他几何不参与本隔离实验。
+
+| CullMode | 原正面重连 RGB | 原背面重连 RGB | 两侧有效性 |
+|---|---:|---:|---|
+| Off | 200.00006 | 200.00006 | 均为 1，距离为正 |
+| Front | 0 | 200.00006 | 均为 1，距离为正 |
+| Back | 200.00006 | 0 | 均为 1，距离为正 |
+
+Radiosity 与 Far Probe 原始追踪入口的三模式矩阵也通过；黑命中保留实例 ID 9，远场命中距离约 1.95209 / 2.02209 m，实时场景发光材质未改变。新增诊断 kernel 首次因缺少共享函数的编译定义失败，失败输出未计入结果；修正后增加 dispatch 后的 shader 错误检查和方向有限值检查，最终 GPU 运行无 shader 错误。
+
+本次证据：
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-185011-700/capture/capture.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-185011-700/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-185011-700/final-verification.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-185011-700/source-verification.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261113-190324-973/trace-conformance.json
+```
+
+源码校验和记录于捕帧运行中，不能声称首帧前已冻结；记录时点至结束生产渲染源码一致，仅独立 Editor 诊断 shader 在此期间扩展。`EmissionSidednessState.cs` 已实际运行，确认回调为空、flags=0、强制双面关闭、frame override=-1、bias=0.04、正常 8 阶 / 32 批、两个 Cornell 场景均未脏。该脚本只检查并等待正常缓存收敛，不保存资产：
+
+```powershell
+unity command script eval --project-path E:/VividRP_Reborn --file E:/VividRP_Reborn/Packages/VividRP/Tools~/Diagnostics/EmissionSidednessState.cs --timeout 240 --format json
+```
+
+本轮补齐远场缓存消费的回归证据，没有测量 GPU 耗时，也未运行 Unity Test Framework（Editor 正在使用）。旧卡片仍需重捕获才能启用完整原法线契约，移动时跨材质侧的历史验证仍属于后续工作。

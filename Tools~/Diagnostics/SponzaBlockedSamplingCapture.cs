@@ -11,6 +11,7 @@ using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
     string experiment = "sponza-blocked";
+    bool inspectAnchors = experiment == "sponza-anchor";
     const string candidate = "blocked";
     bool inspectHistory = experiment == "sponza-reprojection";
     const int warmup = 512, measuredFrames = 256, frameBase = 1733;
@@ -23,7 +24,8 @@ using VividRP.Editor.Tools;
     if (pipeline == null || pipeline.RenderGraphAsset != AssetDatabase.LoadAssetAtPath<RenderGraphData>(graphPath))
         throw new InvalidOperationException("Activate the Sponza realtime GI graph first.");
     string output = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..", "VividRP_GI_Evidence",
-        (inspectHistory ? "SponzaReprojection-" : "SponzaBlockedSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"), "capture"));
+        (inspectHistory ? "SponzaReprojection-" : inspectAnchors ? "SponzaAnchorDiagnostics-" : "SponzaBlockedSampling-")
+        + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"), "capture"));
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags priv = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
     if (System.IO.Directory.Exists(output)) throw new InvalidOperationException("Refusing to overwrite " + output);
@@ -197,6 +199,13 @@ using VividRP.Editor.Tools;
                 ReadPixels(cmd, Resolve("m_CurrentPixelGeometry"), "geometry");
             }
             if (inspectHistory) InspectHistory(context, cmd);
+            if (inspectAnchors)
+            {
+                Read(cmd, Resolve("m_CurrentAnchorStatistics"), "anchor-statistics");
+                Read(cmd, Resolve("m_PreparedAnchor"), "temporal-anchor");
+                Read(cmd, geometry, "probe-geometry");
+                ReadRegion(cmd, Resolve("m_FilteredProbes"), "raw-anchor", 21*120, 0, 120, 136);
+            }
             if (frame == warmup || frame == warmup + (measuredFrames-1)/captureStride*captureStride)
             {
                 Read(cmd, Resolve("m_RadiosityInput"), "radiosity");
@@ -213,6 +222,7 @@ using VividRP.Editor.Tools;
                 frozenProposal = Field("m_FrozenGuideActive"), proposalHistoryValid = Field("m_ProposalHistoryValid"),
                 spatialKernel = Field("m_ProbeSpatialKernel").ToString(), spatialAnchor = Field("m_SpatialAnchor"),
                 samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
+                anchorKernel = Field("m_PrepareAnchorKernel"),
                 rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
         };
         Action<ComputePassContext, Texture, Texture, Texture, Texture> linear = (context, lighting, depth, rt0, rt1) => {
@@ -299,10 +309,10 @@ using VividRP.Editor.Tools;
             if (!inspectHistory)
             {
                 await Run("white-hybrid", SdfDiffuseTraceMode.Hybrid, true);
-                await Run("blocked-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+                await Run(candidate + "-hybrid", SdfDiffuseTraceMode.Hybrid, false);
             }
             await Run("white-motion", SdfDiffuseTraceMode.Hybrid, true, true);
-            await Run("blocked-motion", SdfDiffuseTraceMode.Hybrid, false, true);
+            await Run(candidate + "-motion", SdfDiffuseTraceMode.Hybrid, false, true);
             complete = true;
             return new { success = true, output, errors };
         }
@@ -331,6 +341,7 @@ using VividRP.Editor.Tools;
                 System.IO.Directory.CreateDirectory(output);
                 System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
                     experiment, candidate, frameBase, complete,
+                    inspectAnchors,
                     inspection = new {enabled = inspectHistory, pixelStride = inspectStride, width = inspectWidth,
                         height = inspectHeight, slots = inspectSlots, halo = inspectHalo},
                     scenePath, lightPath, original_scene_dirty = wasDirty, original_lights_dirty = lightsWereDirty,

@@ -44,3 +44,44 @@ python -B Tools~/Diagnostics/ScreenProbeHistoryReplay.py <capture 返回的目�
 ```
 
 实际 D3D12 dispatch、回读及 CPU 重放成功，错误清单为空；未运行 Unity Test Framework。未测量 GPU 耗时。本次加入诊断入口，生产拒绝规则、正常内存预算与默认采样不变。
+
+## Scalar anchor 消融：两个原型均撤回
+
+随后固定相同的 16 px / 8 rays、2 阶 / 64 samples / 32 batches，分别以白噪声原路径对照两个独立原型。每批仍有静止及移动四组，各预热 512 帧、测量 256 帧；**只在各自同一冻结源批次内配对**，不跨批比较绝对能量。
+
+1. 窗口原型：通过严格共面、当前帧三段连接路径和原有全分辨率可见性检查后，将移动 anchor 上限逐渐由 8 提到最多 16，保留静止上限 32。没有改变 donor 几何权重。
+2. 置信度原型：在上述验证范围内，以原 `ProbeGeometryWeight` 乘连接路径的有界距离权重，补充原线性欧氏距离衰减；同时保留窗口原型。其余区域使用原权重，新露出拒绝不变。
+
+原型使用独立 compute 入口，由 Editor 捕帧临时选择；额外的当前 depth / GBuffer / VP 绑定也仅用于该实验。首个窗口尝试在补齐绑定前由 owner 取消，`complete=false`，未纳入统计。两次完整捕获均成功，GPU 错误记录为空。
+
+| 指标 | 窗口原型：对照 → 原型 | 置信度原型：对照 → 原型 |
+|---|---:|---:|
+| 移动 anchor 平均有效 age | 5.886 → 6.140 | 5.885 → 7.437 |
+| 最终重复机位差值 RMS | 239.017 → 238.987 | 238.673 → 238.449 |
+| RMS 相对变化 | −0.0126% | −0.0940% |
+| 绝对差值 P99 | 1056.051 → 1055.960 | 1052.556 → 1052.217 |
+| 新露出 anchor 数（每组） | 43,059 | 43,029 |
+| 新露出 age=1、blend=0 且保留当前样本 | 全部通过 | 全部通过 |
+
+新露出 anchor 的当前样本比较允许一个 FP16 ULP（另含 1e−6 绝对计算容差），覆盖原始诊断纹理写入与显式 nearest-even 的差别，不把量化误差当作历史继承。两批各约 3,533 万个精确匹配几何的重复机位样本参与 RMS。
+
+窗口原型的三个静止 ROI 最终均值与时间方差均不变；实际最终改善太小，没有保留理由。置信度原型虽使移动 age 增加约 26%，但静止左 / 右 ROI 短序列均值分别变化 **+1.306% / +1.518%**，中部 −0.261%；左侧方差增加约 **5.96%**。这些是本批 256 帧结果，不冒充长期能量漂移证明。
+
+置信度原型 RMS 变化的 paired block-8 条件 95% 区间为 −0.116～−0.073%，仅描述本次 80 个重复机位的块离散程度。很小的统计差异不足以抵消上述画质问题。两个原型的 shader 入口和 C# 实验绑定均已撤回，生产源码恢复原实现；不通过增益、曝光或更长历史补偿。
+
+精确原型、patch、SHA-256、完整输入和结果保留在项目外：
+
+```text
+E:/VividRP_GI_Evidence/SponzaPlanarAnchor-20261113-175547-778/analysis.json
+E:/VividRP_GI_Evidence/SponzaPlanarAnchor-20261113-175547-778/source-window-only/
+E:/VividRP_GI_Evidence/SponzaPlanarAnchor-20261113-180918-964/analysis.json
+E:/VividRP_GI_Evidence/SponzaPlanarAnchor-20261113-180918-964/source-confidence/
+```
+
+原型基于 `0886fc72`，复现应在独立 checkout 应用对应 snapshot 的 patch，并使用对应 capture 源码，不能只在当前主路径打开一个已删除的实验入口。分析器保留 `candidate=planar` 的历史数据读取能力。
+
+恢复检查确认 prototype kernel 不存在、原入口索引恢复 5、hooks 为空、flags=0、frame override=−1，原两个 Cornell 场景均未脏。过滤 shader 无 Error；保留现有 `plane` 同名和潜在未初始化 Warning，详见第二批的 `restoration.json`。生产 C# 和过滤 shader 与原实现的 diff 为空。
+
+后续 `sponza-anchor` 模式只记录正常路径的 raw / temporal anchor、GPU age / separation / rejection、探针几何，不修改 kernel 选择。重放与消融共同说明：当前证据支持继续分离命中辐亮度、方向采样和重建方差，不支持继续扩大 scalar 历史作为主要解决途径。
+
+本机 UE 5.7.4 的 `LumenScreenProbeImportanceSampling.usf` 使用带 SourceLevel 的 RayInfo、多级细分和 BRDF×Lighting PDF。VividRP 目前的 `BuildDirectionalOctGuide` 仍在固定 4×4 格内用八个矩形叶子分区。下一次重要性采样实验应明确区分更细方向提案和现有重建的影响，继续验证完整支持、逆 PDF、长期能量及运动稳定性；上述原型结果不构成这项功能已完成的证据。

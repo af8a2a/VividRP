@@ -50,12 +50,14 @@ def analyze(root):
     frames = list(range(manifest["warmup"], manifest["warmup"]+manifest["measuredFrames"]))
     assert len(frames) == 256
     records = manifest["records"]
+    candidate = manifest.get("candidate", "blocked")
+    assert candidate in ("blocked", "planar")
     files = {(r["arm"], r["frame"], r["tag"]): r for r in records if "tag" in r}
     matrices = {(r["arm"], r["frame"]): np.asarray(r["vp"]).reshape(4, 4) for r in records if "vp" in r}
-    arms = ["white-hybrid", "blocked-hybrid", "white-motion", "blocked-motion"]
+    arms = ["white-hybrid", candidate+"-hybrid", "white-motion", candidate+"-motion"]
     hashes = []
     report = {"scope": "256-frame current renderer A/B, fixed camera plus two repeated 128-frame cycles; not GI ground truth",
-              "arms": {}, "static_pairs": {}, "motion": {}}
+              "candidate": candidate, "arms": {}, "static_pairs": {}, "motion": {}}
     for arm in arms:
         states = [r["state"] for r in records if r["arm"] == arm and "state" in r]
         assert len(states) == len(frames)
@@ -63,16 +65,20 @@ def analyze(root):
             assert s["order"] == 2 and s["batch"] == 32 and s["radioSamples"] == 64
             assert s["directionalCache"] and not s["restir"] and s["guide"] and s["hierarchical"]
             assert s["spatialKernel"] == "Adaptive5x5" and s["spatialAnchor"]
-            assert s["samplingFlags"] == (8388608 if arm.startswith("blocked") else 0)
+            expected = (8388608 if candidate == "blocked" else 16777216) if arm.startswith(candidate) else 0
+            assert s["samplingFlags"] == expected
             assert s["frozenProposal"] == arm.startswith("blocked")
+            if candidate == "planar":
+                assert s["anchorKernel"] == manifest["anchorKernels"]["planar" if arm.startswith(candidate) else "control"]
         source = [r for r in records if r["arm"] == arm and r.get("tag") == "radiosity"]
         assert len(source) == 2
         hashes.extend(digest(r) for r in source)
     assert len(set(hashes)) == 1, "Radiosity changed between arms or during a capture"
     report["radiosity_sha256"] = hashes[0]
-    report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms)
+    if candidate == "blocked":
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms)
     for mode in ("hybrid", "motion"):
-        assert all(np.array_equal(matrices["white-"+mode, f], matrices["blocked-"+mode, f]) for f in frames)
+        assert all(np.array_equal(matrices["white-"+mode, f], matrices[candidate+"-"+mode, f]) for f in frames)
     static_y = {}
     for region in ("left", "right", "center"):
         baseline_geometry = None
@@ -113,11 +119,32 @@ def analyze(root):
         "normal_encoding_mismatch_pixels_total": sum(mismatch_counts),
         "normal_encoding_mismatch_pixels_per_frame_max": max(mismatch_counts),
         "cycle_comparison": "Only exactly matching geometry pixels common to both arms and both cycles; no normal tolerance"}
+    if candidate == "planar" or manifest.get("inspectAnchors", False):
+        report["anchors"] = {}
+        for arm in arms:
+            ages, rejections = [], 0
+            for f in frames:
+                statistics = read(files[arm, f, "anchor-statistics"])
+                anchor = read(files[arm, f, "temporal-anchor"])
+                raw = read(files[arm, f, "raw-anchor"])
+                geometry = read(files[arm, f, "probe-geometry"])
+                valid = (geometry[..., 3] >= 0) & (anchor[..., 3] > 0)
+                ages.append(statistics[..., 0][valid])
+                rejected = valid & (statistics[..., 3] == 3)
+                rejections += int(rejected.sum())
+                assert np.all(statistics[..., 0][rejected] == 1) and np.all(statistics[..., 2][rejected] == 0)
+                ulp = np.nextafter(raw.astype("<f2"), np.float16(np.inf)).astype(float)-raw
+                assert np.all(np.abs(anchor-raw)[rejected] <= 1.01*ulp[rejected]+1e-6), "A newly visible anchor retained old lighting"
+            age = np.concatenate(ages)
+            report["anchors"][arm] = {"effective_age_mean": float(age.mean()), "effective_age_p95": float(np.quantile(age, .95)),
+                "age_over_eight_percent": float(100*np.mean(age > 8)), "newly_visible_anchor_samples": rejections,
+                "newly_visible_age_one_and_current_sample": True}
     for arm in arms[2:]:
         previous = None
         exposed_count = inherited = accepted = 0
         errors = []
         cycle_errors = []
+        cycle_sums, cycle_counts = [], []
         excluded_cycle_pixels = 0
         first_cycle = {}
         for i, f in enumerate(frames):
@@ -136,7 +163,10 @@ def analyze(root):
                 assert all(np.array_equal(four[0] & 65535, g & 65535) for g in four[1:]), "Repeated motion depth differs"
                 exact = np.logical_and.reduce([four[0] == g for g in four[1:]])
                 excluded_cycle_pixels += int((~exact).sum())
-                cycle_errors.append((final_y-first_cycle[i-128])[exact])
+                cycle_delta = (final_y-first_cycle[i-128])[exact]
+                cycle_errors.append(cycle_delta)
+                cycle_sums.append(float(np.sum(cycle_delta.astype(float)**2)))
+                cycle_counts.append(int(cycle_delta.size))
             if previous is not None:
                 yy, xx = np.mgrid[g["y"]:g["y"]+g["height"], g["x"]:g["x"]+g["width"]]
                 pixels = np.stack([xx, yy], -1)
@@ -172,7 +202,20 @@ def analyze(root):
             "temporal_minus_current_p99": float(np.quantile(error, .99)) if len(error) else None,
             "temporal_minus_current_max": float(error.max()) if len(error) else None,
             "matched_pose_cycle_delta_rms": float(np.sqrt(np.mean(cycle**2))),
-            "matched_pose_cycle_delta_absolute_p99": float(np.quantile(np.abs(cycle), .99))}
+            "matched_pose_cycle_delta_absolute_p99": float(np.quantile(np.abs(cycle), .99)),
+            "cycle_sum_squared_error_per_frame": cycle_sums, "cycle_sample_count_per_frame": cycle_counts}
+    b, a = (report["motion"][arm] for arm in arms[2:])
+    assert a["cycle_sample_count_per_frame"] == b["cycle_sample_count_per_frame"]
+    draw = np.random.default_rng(20261114).integers(0, 10, (4096, 10))
+    def resample_rms(arm):
+        sums = np.asarray(arm["cycle_sum_squared_error_per_frame"]).reshape(10, 8).sum(1)
+        counts = np.asarray(arm["cycle_sample_count_per_frame"]).reshape(10, 8).sum(1)
+        return np.sqrt(sums[draw].sum(1)/counts[draw].sum(1))
+    report["motion_comparison"] = {
+        "rms_change_percent": 100*(a["matched_pose_cycle_delta_rms"]/b["matched_pose_cycle_delta_rms"]-1),
+        "block8_conditional_rms_change_95_percent": np.quantile(100*(resample_rms(a)/resample_rms(b)-1), [.025, .975]).tolist(),
+        "absolute_p99_change_percent": 100*(a["matched_pose_cycle_delta_absolute_p99"]/b["matched_pose_cycle_delta_absolute_p99"]-1),
+        "scope": "Paired block-8 dispersion of this 80-pose repeated trajectory; not an independent dynamic GI reference"}
     (root.parent/"analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     plot(report, root.parent)
     print(json.dumps({"static_pairs": report["static_pairs"], "motion": report["motion"]}, indent=2))
@@ -187,21 +230,25 @@ def plot(report, root):
     noise = [report["static_pairs"][k]["variance_reduction_percent"] for k in keys]
     energy = [report["static_pairs"][k]["mean_change_percent"] for k in keys]
     fig, axes = plt.subplots(1, 3, figsize=(13, 4), layout="constrained")
-    axes[0].bar(labels, noise, color="#3e877a")
-    axes[0].set_ylim(0, 100); axes[0].set_ylabel("Final temporal variance reduction (%)")
+    axes[0].bar(labels, noise, color=["#3e877a" if v >= 0 else "#bb7752" for v in noise])
+    axes[0].axhline(0, color="gray", linewidth=.7)
+    axes[0].set_ylim(min(0, min(noise)-5) if min(noise) < 0 else 0, 100)
+    axes[0].set_ylabel("Final temporal variance reduction (%)")
     axes[0].set_title("Fixed camera, 256 frames")
     axes[1].bar(labels, energy, color="#547ca7")
     axes[1].axhline(0, color="gray", linewidth=.7)
     axes[1].set_ylabel("Short-sequence mean change (%)")
     axes[1].set_title("Not a long-sequence energy reference")
-    motion = [report["motion"][a]["matched_pose_cycle_delta_rms"] for a in ("white-motion", "blocked-motion")]
-    axes[2].bar(["White", "Blocked"], motion, color=["#547ca7", "#bb7752"])
+    candidate = report.get("candidate", "blocked")
+    motion = [report["motion"][a]["matched_pose_cycle_delta_rms"] for a in ("white-motion", candidate+"-motion")]
+    bars = axes[2].bar(["White", candidate.title()], motion, color=["#547ca7", "#bb7752"])
+    axes[2].bar_label(bars, fmt="%.3f", padding=3, fontsize=9)
     axes[2].set_ylabel("Matched-pose difference RMS, linear E/pi")
-    axes[2].set_title("Motion benefit not established")
+    axes[2].set_title("Matched-pose motion comparison")
     for ax in axes:
         ax.grid(axis="y", alpha=.2); ax.tick_params(axis="x", labelsize=8)
-    fig.suptitle("Sponza - 16 px / 8 rays, identical converged Surface Cache")
-    fig.savefig(root/"sponza-blocked-quality.png", dpi=150)
+    fig.suptitle("Sponza - " + candidate + ", 16 px / 8 rays, identical converged Surface Cache")
+    fig.savefig(root/("sponza-"+candidate+"-quality.png"), dpi=150)
     plt.close(fig)
 
 

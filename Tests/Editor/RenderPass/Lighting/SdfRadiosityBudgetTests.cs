@@ -199,8 +199,11 @@ namespace VividRP.Editor.Tests
                 CardExtent = UnityEngine.Vector4.one,
             };
             var changed = original;
-            changed.Emission = UnityEngine.Vector4.one;
+            changed.Emission = new UnityEngine.Vector4(1, 1, 1, original.Emission.w);
             Assert.That(original.HasSameTransport(changed), Is.True);
+            changed.Emission.w = (float)UnityEngine.Rendering.CullMode.Back;
+            Assert.That(original.HasSameTransport(changed), Is.False, "Material sidedness changes invalidate cached transport.");
+            changed = original;
             changed.AlbedoAndValid.x = .5f;
             Assert.That(original.HasSameTransport(changed), Is.False);
             changed = original;

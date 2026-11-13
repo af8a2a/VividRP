@@ -57,31 +57,6 @@ uint _SdfRadiosityCardCount;
 float _SdfRadiosityPublishBlend;
 float4 _SdfRadiosityHistoryScale;
 
-float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
-{
-    VividMeshSdfHit hit;
-    bool advancedReceiver, incomplete;
-    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
-        _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver, incomplete);
-    if (incomplete)
-        return 0.0;
-    if (!traced)
-        return HasSkyTexture() && ResolveSdfSkyMiss(origin, direction, _SdfDiffuseMaxDistance, false, 0u,
-            (VividMeshSdfReceiver)0) == RaySkyVisible
-            ? clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0) : 0.0;
-
-    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
-    if (surface.albedoAndValid.a == 0.0 || dot(hit.normalWS, direction) >= 0.0)
-        return 0.0;
-    float3 position = origin + direction * hit.distance;
-    float3 normal;
-    uint3 texel;
-    float error;
-    if (!VividTrySampleSdfSurface(hit, position, surface, normal, texel, error))
-        return 0.0;
-    return TraceHitLighting(position, normal, hit, surface, -1.0) + LoadCardIndirect(surface, hit, texel);
-}
-
 float4 GatherCardIndirect(uint card, uint2 cell)
 {
     uint work = _SdfRadiosityWork[0] + 2u * card;

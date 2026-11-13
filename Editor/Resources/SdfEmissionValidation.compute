@@ -1,0 +1,16 @@
+#pragma kernel ValidateSdfEmissionSidedness
+#include "../../Shaders/Core/Public/GPUDriven/SdfMaterialSidedness.hlsl"
+
+RWStructuredBuffer<float4> _EmissionValidation;
+
+[numthreads(6, 1, 1)]
+void ValidateSdfEmissionSidedness(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint id = dispatchId.x;
+    // Off, Front, Back; each with original front and original back outgoing rays.
+    float mode = float(id / 2u);
+    float3 normal = float3(0.0, -1.0, 0.0);
+    float3 outgoing = (id & 1u) == 0u ? normal : -normal;
+    float emission = VividSdfMaterialSideVisible(mode, normal, outgoing) ? 200.0 : 0.0;
+    _EmissionValidation[id] = float4(emission.xxx, dot(normal, outgoing));
+}

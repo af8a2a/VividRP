@@ -29,6 +29,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         [SerializeField] private Texture2DArray m_NormalCoverage;
         [SerializeField] private Entry[] m_Entries;
         [SerializeField, HideInInspector] private LocalCard[] m_LocalCards;
+        [SerializeField, HideInInspector] private int m_OriginalNormalVersion;
         // Kept for assets baked with the single-local-card layout.
         [SerializeField] private int m_LocalCardEntry = -1;
         [SerializeField] private int m_LocalCardFace;
@@ -41,6 +42,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal RTHandle AlbedoDepthHandle => m_AlbedoDepthHandle ??= RTHandles.Alloc(m_AlbedoDepth);
         internal RTHandle NormalCoverageHandle => m_NormalCoverageHandle ??= RTHandles.Alloc(m_NormalCoverage);
         internal Vector2Int CardSize => new(m_AlbedoDepth.width, m_AlbedoDepth.height);
+        internal bool HasOriginalNormals => m_OriginalNormalVersion >= 1;
         internal ulong CardVersion => ((ulong)m_AlbedoDepth.updateCount << 32) | m_NormalCoverage.updateCount;
         private bool HasLegacyLocalCard => m_LocalCardEntry >= 0 && m_LocalCardEntry < m_Entries.Length
             && (uint)m_LocalCardFace < CardsPerMesh && IsValidLocalCardBounds(m_LocalCardBounds)
@@ -67,8 +69,23 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NormalCoverage = normalCoverage;
             m_LocalCards = localCards;
             m_LocalCardEntry = -1;
+            m_OriginalNormalVersion = 1;
             m_Indices = null;
         }
+
+#if UNITY_EDITOR
+        internal void GetRecaptureData(out Entry[] entries, out LocalCard[] cards,
+            out Texture2DArray albedo, out Texture2DArray normals)
+        {
+            entries = m_Entries;
+            cards = new LocalCard[LocalCardCount];
+            for (int i = 0; i < cards.Length; i++) cards[i] = ReadLocalCard(i);
+            albedo = m_AlbedoDepth;
+            normals = m_NormalCoverage;
+        }
+
+        internal void MarkOriginalNormalsCaptured() => m_OriginalNormalVersion = 1;
+#endif
 
         internal static bool IsValidLocalCardBounds(Bounds bounds)
         {

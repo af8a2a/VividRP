@@ -1,0 +1,20 @@
+#pragma kernel ValidateSdfEmissionTraces VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_FAR_UPDATE
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfScreenProbeCommon.hlsl"
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfSurfaceCacheLighting.hlsl"
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfRadianceCacheCommon.hlsl"
+
+RWStructuredBuffer<float4> _EmissionTraceValidation;
+
+[numthreads(2, 1, 1)]
+void ValidateSdfEmissionTraces(uint3 id : SV_DispatchThreadID)
+{
+    // The diagnostic binds only the real Cornell emitter as a BVH leaf. This
+    // isolates front/back emission from the enclosing ceiling and other walls.
+    float3 origin = float3(0.0, id.x == 0u ? 1.0 : 5.0, 1.85);
+    float3 direction = float3(0.0, id.x == 0u ? 1.0 : -1.0, 0.0);
+    float3 radiosity = TraceCardRadiance(origin, direction, (VividMeshSdfReceiver)0);
+    uint instance;
+    float4 far = TraceFarProbe(origin, direction, instance);
+    _EmissionTraceValidation[2u * id.x] = float4(radiosity, float(instance));
+    _EmissionTraceValidation[2u * id.x + 1u] = far;
+}

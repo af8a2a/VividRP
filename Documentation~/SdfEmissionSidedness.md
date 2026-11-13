@@ -1,0 +1,79 @@
+# Screen Hit / Mesh SDF / Radiosity / 远场的材质单面判定
+
+2026-11-13；Unity 7000.0.0a16 / DX12。Cornell Box 保持原机位、1920×1080、16 px 网格、每探针 8 条射线；默认追踪偏移仍为 0.04 m。
+
+## 实现契约
+
+- `SdfMaterialSidedness.hlsl` 统一使用 Unity `CullMode`：Off=0、Front=1、Back=2。判定采用原表面法线与出射方向；不把人工 SDF 壳梯度当作材质朝向。
+- `DiffuseSurface.Emission.rgb` 保持原线性辐亮度，原先未使用的 `.w` 传递 CullMode。结构仍为 64 字节，各 float4 偏移为 0/16/32/48，CullMode 位于字节 28。材质朝向变化会使 transport 失效，不能进入普通发光强度同比缩放。
+- 卡片仍保留原有朝向捕获面的着色法线，`NormalCoverage.a` 非零表示覆盖，额外用约 0.5 标记原法线被翻转，1 表示未翻转。消费者只按非零判断覆盖，不把这个标记当作半覆盖。运行时可恢复原法线，同时保留原着色与滤波法线。
+- Screen Hit 在可用时从匹配的 Meshlet 几何重建三角形平面，避免法线贴图改变发光侧；Cull Front 对应反向原面。无 Meshlet 材质映射的屏幕兜底继续按单面处理。
+- Mesh SDF、Radiosity、远场共用 `TraceSdfSurfaceRadiance`。远场缓存重连也复核原材质侧，防止正面缓存被背面消费。
+- 被材质剔除的一侧是**有效黑命中**：保留几何遮挡、命中距离、实例及覆盖率；不会作为 miss 继续穿过薄壳。诊断状态新增 `RayMaterialBackface`，低三位仍保留 Screen/SDF 的有效命中类别。
+
+没有修改光强、Albedo、积分 π、曝光、每探针射线数或默认 bias。单面材质的背面出射照明整体置黑，包含直接发光和该侧的卡片反射；双面材质保留两侧出射。
+
+## 已有缓存的兼容与 Cornell 更新
+
+旧卡片捕获时已丢失原法线正反面信息，无法从原纹理准确恢复。`m_OriginalNormalVersion` 区分新数据；未升级的缓存保留旧双面兼容行为，不凭猜测改变其他场景的照明。**需要重捕获后才能使用完整单面契约。** 新烘焙数据自动带版本。
+
+新增 `VividSdfSurfaceCacheBaker.Recapture(cache)`，保留资产身份、现有条目和局部卡片布局。本次通过 Unity API 更新了 Cornell 的 `Emissive Ceiling Surface Cache.asset`，没有手改 `.asset` 或 `.meta`；更新前备份在：
+
+```text
+E:/VividRP_Reborn/Logs/EmissionSidedness-20261113/surface-cache-before.asset
+```
+
+备份与新资产的二进制纹理比对确认：Albedo/Depth 全部不变，法线 RGB 全部不变，只有发光面片背面卡片的 **4,096 个 alpha 标记**改变。当前 R8 存储的标记值为 0、127、255；运行时按 `<0.75` 恢复翻转符号。
+
+## 实测
+
+数据根目录：`E:/VividRP_Reborn/Logs/EmissionSidedness-20261113/`。
+
+使用相同采样序列：每组预热 512 帧，随后 32 帧中每隔 4 帧采集一次，共 8 个样本；太阳／天空均为 0。8 阶 Radiosity 固定每批 64 样本、32 批。旧语义对照通过 Editor 开关强制 Cull Off，使用相同新链路和卡片数据，**不是旧二进制的重放**。
+
+| 条件 | 背面高亮命中：旧语义 → 修正 | 地面最终线性均值变化 |
+|---|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | −0.179% |
+| SDF Only，零阶，4 cm | 9 → 0 | 0.000% |
+| Hybrid，8 阶，4 cm | 14 → 0 | −0.174% |
+| SDF Only，零阶，5 mm 压力条件 | 1,935 → 0 | 0.000% |
+
+零阶原始天花板命中光照均归零。默认偏移下，最终像素仍约有 0.000217 的极小重建残留；没有将这一项宣称为完全清零。5 mm 压力条件下最终天花板均值从 4.17668 降为 0。
+
+地面正面发光命中的辐亮度在两组中均为约 **200.000046**，没有出现强度缩放或重复 π。汇总线性均值的 1% 检查线仅用于本次短序列诊断，所有组均通过；它不等于长序列收敛证明。
+
+有效黑命中方面，修正后的 Hybrid 零阶 **6,872** 条、SDF Only 零阶 **689** 条、8 阶 **514** 条、5 mm 压力组 **2,553** 条材质背面样本全部保持有效命中类别与非零探针覆盖。源计数与实际有效射线数完全对应，未把黑样本转成 miss。天花板最终平均 coverage 仍约为 0.748，包含场景原有的其他不完整覆盖；没有声称全图覆盖率为 100%。
+
+### 真实 Radiosity / 远场入口
+
+`EmissionTraceConformance.cs` 使用 Cornell 实际 GPU SDF、实例、材质和卡片，仅将诊断 BVH 叶子隔离为发光面片，避免房间天花板先遮住背面。它直接调用生产 `TraceCardRadiance` 和 `TraceFarProbe`，没有复制另一套追踪或着色算法：
+
+| 入口 | 正面 RGB | 背面 RGB | 背面有效性 |
+|---|---|---|---|
+| Radiosity | 200.00006 | 0 | 真实命中返回黑 |
+| Far Probe | 200.00006 | 0 | 实例 ID 保留，距离约 2.02209 m |
+
+另有六种 GPU 极性组合检查，覆盖 Off / Front / Back 的原正面与原背面，结果符合预期。此隔离实验验证远场实际追踪入口，不冒充整套移动 Radiance Cache 的场景性能或时域测试。
+
+## 验证与复现
+
+- 实际四路 GPU 着色与捕帧通过；共享布局的 stride 和各字段偏移检查通过。
+- 强度变化保留 transport、CullMode 变化使 transport 失效的检查通过。
+- 预热后连续 128 次 `VividMeshSdfGpuScene.Update`：当前线程托管分配 **0 B**。没有据此宣称整个渲染帧零分配或 GPU 耗时改善。
+- 保留 `SdfScreenProbeTracing.compute` 的编译器警告记录，包含 Receiver 内核寄存器压力及静态分析警告；实际捕帧没有 Shader 错误或运行错误。本轮没有测量 GPU 耗时，不能据此判断新增 GPU 开销。
+- 编辑器运行期间未启动 Unity Test Framework。新增／更新的回归项位于 `SdfRadiosityBudgetTests` 和 `VividGPUDrivenBufferSetTests`，可在允许运行测试的会话中手动执行。
+
+```powershell
+# 重跑前将捕帧脚本 output 改为新的目录。
+unity command script eval --project-path E:/VividRP_Reborn --file E:/VividRP_Reborn/Packages/VividRP/Tools~/Diagnostics/EmissionSidednessCapture.cs --timeout 4500 --format json
+unity command script eval --project-path E:/VividRP_Reborn --file E:/VividRP_Reborn/Packages/VividRP/Tools~/Diagnostics/EmissionTraceConformance.cs --timeout 180 --format json
+python -B Tools~/Diagnostics/EmissionSidednessExperiment.py
+```
+
+`analysis.json` 记录配对能量、背面样本和覆盖率；`cache-diff.json` 记录卡片比对；`trace-conformance.json` 记录实际 Radiosity／远场入口；`final-verification.json` 记录布局、分配及恢复状态。`emission-sidedness.png` 使用相同线性标尺显示零阶顶灯邻域。
+
+最终固定组使用 `capture-fixed-geometry/` 中的几何法线版本，旧语义组保留 `capture/` 中未变的 Cull Off 对照。原始固定组的数据保留，但不混入最终统计。
+
+本轮验证范围是固定机位的短序列。运动时跨材质侧的历史拒绝仍应单独验证；其他旧缓存和 Sponza 本轮未重捕获。
+
+交接时已确认：诊断回调为空、强制双面开关关闭、frame override=-1，配置与有效 bias 均恢复 0.04，原场景保持不脏，正常 Radiosity 已恢复 8 阶／32 批。

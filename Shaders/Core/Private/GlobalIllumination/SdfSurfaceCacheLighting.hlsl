@@ -109,6 +109,8 @@ float LoadCachedSunVisibility(DiffuseSurface surface, uint3 cardTexel, float sur
 }
 #endif
 
+// Direct terms only. Cached surface callers validate the material side through
+// TraceSdfSurfaceRadiance before adding either these terms or indirect lighting.
 float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, DiffuseSurface surface,
     float cachedVisibility)
 {
@@ -244,6 +246,45 @@ float3 LoadCardIndirect(DiffuseSurface surface, VividMeshSdfHit hit, uint3 cardT
     return radiance;
 }
 
+float3 TraceSdfSurfaceRadiance(float3 position, float3 normal, float3 originalNormal, float3 rayDirection,
+    VividMeshSdfHit hit, DiffuseSurface surface, uint3 cardTexel, float cachedVisibility)
+{
+    // The SDF shell remains an occluder on either side. A culled material side
+    // contributes covered black, never a miss or a continuation through the shell.
+    if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
+        return 0.0;
+    return TraceHitLighting(position, normal, hit, surface, cachedVisibility)
+        + LoadCardIndirect(surface, hit, cardTexel);
+}
+
+#if defined(VIVID_SDF_RADIOSITY_UPDATE)
+float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver receiver)
+{
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advancedReceiver, incomplete);
+    if (incomplete)
+        return 0.0;
+    if (!traced)
+        return HasSkyTexture() && ResolveSdfSkyMiss(origin, direction, _SdfDiffuseMaxDistance, false, 0u,
+            (VividMeshSdfReceiver)0) == RaySkyVisible
+            ? clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0) : 0.0;
+
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    if (surface.albedoAndValid.a == 0.0 || dot(hit.normalWS, direction) >= 0.0)
+        return 0.0;
+    float3 position = origin + direction * hit.distance;
+    float3 normal, originalNormal;
+    uint3 texel;
+    float error;
+    if (!VividTrySampleSdfSurface(hit, position, surface, normal, originalNormal, texel, error))
+        return 0.0;
+    return TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel, -1.0);
+}
+
+#endif
+
 #if defined(VIVID_SDF_RECEIVER)
 bool TryLoadScreenCardIndirect(uint2 pixel, float3 position, float3 normal, float3 direction,
     out float3 radiance, inout VividMeshSdfHit matchedHit)
@@ -275,16 +316,17 @@ bool TryLoadScreenCardIndirect(uint2 pixel, float3 position, float3 normal, floa
     // Transform the raster normal by the inverse transpose of world-to-local.
     hit.normalLS = SafeNormalize(float3(dot(c0, normal), dot(c1, normal), dot(c2, normal)) * sign(dot(r0, c0)));
 
-    float3 cardNormal;
+    float3 cardNormal, originalNormal;
     uint3 cardTexel;
     float surfaceError;
-    if (!VividTrySampleSdfSurface(hit, position, surface, cardNormal, cardTexel, surfaceError)
+    if (!VividTrySampleSdfSurface(hit, position, surface, cardNormal, originalNormal, cardTexel, surfaceError)
         || surfaceError > 0.75 * field.originAndVoxelSize.w
-        || dot(cardNormal, normal) < 0.75 || dot(cardNormal, direction) >= -0.05
-        || !TryLoadCardIndirect(surface, hit, cardTexel, radiance))
+        || dot(cardNormal, normal) < 0.75)
         return false;
     matchedHit = hit;
-    return true;
+    if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -direction))
+        return true;
+    return TryLoadCardIndirect(surface, hit, cardTexel, radiance);
 }
 #endif
 #endif

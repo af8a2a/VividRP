@@ -1,0 +1,339 @@
+{
+  "source": "Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox/EmissiveCeiling/CornellBoxEmissiveCeiling.unity",
+  "geometry": [
+    {
+      "name": "Floor",
+      "position": [
+        0.0,
+        -0.1,
+        2.0
+      ],
+      "rotation": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        4.4,
+        0.2,
+        4.2
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Ivory",
+      "baseColorSRGB": [
+        0.78,
+        0.76,
+        0.7
+      ],
+      "baseColorLinear": [
+        0.5704816,
+        0.5382356,
+        0.44798842
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Ceiling",
+      "position": [
+        0.0,
+        3.1,
+        2.0
+      ],
+      "rotation": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        4.4,
+        0.2,
+        4.2
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Ivory",
+      "baseColorSRGB": [
+        0.78,
+        0.76,
+        0.7
+      ],
+      "baseColorLinear": [
+        0.5704816,
+        0.5382356,
+        0.44798842
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Back",
+      "position": [
+        0.0,
+        1.5,
+        4.1
+      ],
+      "rotation": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        4.4,
+        3.0,
+        0.2
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Ivory",
+      "baseColorSRGB": [
+        0.78,
+        0.76,
+        0.7
+      ],
+      "baseColorLinear": [
+        0.5704816,
+        0.5382356,
+        0.44798842
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Left Red",
+      "position": [
+        -2.1,
+        1.5,
+        2.0
+      ],
+      "rotation": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.2,
+        3.0,
+        4.0
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Cornell Red",
+      "baseColorSRGB": [
+        0.72,
+        0.11999995,
+        0.079999976
+      ],
+      "baseColorLinear": [
+        0.47699985,
+        0.013411741,
+        0.0071944054
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Right Green",
+      "position": [
+        2.1,
+        1.5,
+        2.0
+      ],
+      "rotation": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.2,
+        3.0,
+        4.0
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Cornell Green",
+      "baseColorSRGB": [
+        0.089999996,
+        0.6399999,
+        0.19999996
+      ],
+      "baseColorLinear": [
+        0.00854038,
+        0.36724645,
+        0.03310476
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Short White Block",
+      "position": [
+        -0.75,
+        0.55,
+        1.25
+      ],
+      "rotation": [
+        -0.0,
+        342.0,
+        0.0
+      ],
+      "scale": [
+        1.05,
+        1.1,
+        1.05
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Ivory",
+      "baseColorSRGB": [
+        0.78,
+        0.76,
+        0.7
+      ],
+      "baseColorLinear": [
+        0.5704816,
+        0.5382356,
+        0.44798842
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Tall White Block",
+      "position": [
+        0.75,
+        0.95,
+        2.55
+      ],
+      "rotation": [
+        -0.0,
+        17.0,
+        -0.0
+      ],
+      "scale": [
+        1.0500001,
+        1.9,
+        1.0500001
+      ],
+      "meshBounds": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "Ivory",
+      "baseColorSRGB": [
+        0.78,
+        0.76,
+        0.7
+      ],
+      "baseColorLinear": [
+        0.5704816,
+        0.5382356,
+        0.44798842
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Ceiling Emitter - Downward Only",
+      "position": [
+        0.0,
+        2.965,
+        1.85
+      ],
+      "rotation": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "meshBounds": [
+        1.6,
+        0.0,
+        1.2
+      ],
+      "material": "Ceiling Emitter",
+      "baseColorSRGB": [
+        0.78,
+        0.78,
+        0.78
+      ],
+      "baseColorLinear": [
+        0.5704816,
+        0.5704816,
+        0.5704816
+      ],
+      "roughness": 0.8,
+      "emissionLinear": [
+        200.00006,
+        200.00006,
+        200.00006
+      ]
+    }
+  ],
+  "camera": {
+    "position": [
+      0.0,
+      1.5,
+      -3.8
+    ],
+    "euler": [
+      -0.0,
+      0.0,
+      0.0
+    ],
+    "verticalFov": 42.0,
+    "aspect": 1.7777778
+  }
+}

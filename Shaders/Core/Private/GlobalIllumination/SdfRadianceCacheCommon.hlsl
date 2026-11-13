@@ -42,6 +42,31 @@ uint FarDirectionBin(float3 direction)
 #if defined(VIVID_SDF_SURFACE_CACHE)
 StructuredBuffer<uint> _SdfFarHitIds;
 
+#if defined(VIVID_SDF_FAR_UPDATE)
+float4 TraceFarProbe(float3 origin, float3 direction, out uint instance)
+{
+    instance = 0u;
+    VividMeshSdfHit hit;
+    bool advancedReceiver, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfFarTraceDistance - _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, (VividMeshSdfReceiver)0, hit, advancedReceiver, incomplete);
+    if (!traced || incomplete || hit.distance < 0.5 * FarCellSize || dot(hit.normalWS, direction) >= -0.05)
+        return 0.0;
+
+    float3 position = origin + direction * hit.distance;
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    float3 normal, originalNormal;
+    uint3 texel;
+    float error;
+    if (surface.albedoAndValid.a == 0.0 || !VividTrySampleSdfSurface(hit, position, surface, normal, originalNormal, texel, error))
+        return 0.0;
+    float3 radiance = TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel, -1.0);
+    instance = hit.instanceIndex + 1u;
+    return float4(clamp(radiance, 0.0, 65000.0), hit.distance);
+}
+
+#endif
+
 bool TryLoadFarRadiance(float3 origin, float3 direction, out float3 radiance, out float distance)
 {
     radiance = 0.0;
@@ -74,7 +99,14 @@ bool TryLoadFarRadiance(float3 origin, float3 direction, out float3 radiance, ou
     if (!traced || incomplete || abs(hit.distance - travel) > tolerance
         || dot(hit.normalWS, reconnect) >= -0.05 || dot(hit.normalWS, cacheDirection) >= -0.05)
         return false;
-    radiance = cached.rgb;
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    float3 normal, originalNormal;
+    uint3 texel;
+    float error;
+    if (!VividTrySampleSdfSurface(hit, start + reconnect * hit.distance, surface,
+        normal, originalNormal, texel, error))
+        return false;
+    radiance = VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -reconnect) ? cached.rgb : 0.0;
     distance = travel + _SdfDiffuseMaxDistance;
     return true;
 }

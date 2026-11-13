@@ -19,9 +19,36 @@ bool LoadScreenHitGeometry(uint2 pixel, float depth, out float3 position, out fl
     return depth != UNITY_RAW_FAR_CLIP_VALUE && VividIsSurfaceSummaryGBufferABIValid(packedNormal.a);
 }
 
-bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float thickness, out float3 radiance)
+bool ScreenMaterialSideVisible(uint2 pixel, float3 position, float3 normal, float3 rayDirection)
+{
+    float cullMode = 2.0; // Raster geometry without a Meshlet material lookup is single-sided.
+    #if defined(VIVID_SDF_RECEIVER)
+        uint index = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+        if (index < _SdfReceiverCount)
+        {
+            uint instance = _SdfReceiverEntities[index].z;
+            if (instance != 0xffffffffu)
+                cullMode = _SdfDiffuseSurfaces[instance].emission.w;
+            if (cullMode != 0.0)
+            {
+                // Normal maps must not change the emitting side. Reconstruct the
+                // visible Meshlet triangle plane; Cull Front reverses its original side.
+                VividMeshSdfReceiver geometry = LoadSdfReceiver(pixel, position, normal);
+                if (dot(geometry.normalWS, geometry.normalWS) > 0.5)
+                    normal = cullMode == 1.0 ? -geometry.normalWS : geometry.normalWS;
+            }
+        }
+    #endif
+    return VividSdfMaterialSideVisible(cullMode, normal, -rayDirection);
+}
+
+bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float3 rayDirection, float thickness, out float3 radiance)
 {
     radiance = 0.0;
+    // A current geometric hit on a culled side is resolved black, independent
+    // of history availability. Do not turn it into an uncovered SDF fallback.
+    if (!ScreenMaterialSideVisible(pixel, position, normal, rayDirection))
+        return true;
     float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
         return false;
@@ -128,7 +155,6 @@ bool TraceScreenGeometry(float3 origin, float3 direction, float maxDistance, out
         hit.thickness = clamp(1.25 * distance(footprint, hit.position), 0.02, 0.15);
         float travel = dot(hit.position - origin, direction);
         if (travel <= _SdfDiffuseRayBias || travel > maxDistance
-            || dot(hit.normal, direction) >= -0.05
             || distance(hit.position, origin + direction * travel) > hit.thickness)
             return false;
 

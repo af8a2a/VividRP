@@ -1,0 +1,41 @@
+// Diagnostic only: no exposure, display transform, receiving BRDF, or artistic gain.
+#pragma kernel ExportLinearGI
+#include "../../Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+
+Texture2D<float4> _LinearGI;
+Texture2D<float> _LinearDepth;
+Texture2D<float4> _LinearGBuffer0;
+Texture2D<float4> _LinearGBuffer1;
+RWTexture2D<float4> _LinearTransport;
+RWTexture2D<float4> _LinearConditional;
+RWTexture2D<float4> _LinearAlbedo;
+RWTexture2D<float4> _LinearGeometry;
+float4x4 _LinearInverseVP;
+float4 _LinearCameraForward;
+float4 _LinearSize;
+float _LinearFarDepth;
+
+[numthreads(8, 8, 1)]
+void ExportLinearGI(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_LinearSize.xy))) return;
+    float depth = _LinearDepth.Load(int3(id.xy, 0));
+    float4 rt0 = _LinearGBuffer0.Load(int3(id.xy, 0));
+    float4 rt1 = _LinearGBuffer1.Load(int3(id.xy, 0));
+    uint surfaceClass = VividGetDeferredExportClass(VividDecodeDeferredExportHeader(rt0.a));
+    bool valid = depth != _LinearFarDepth && VividIsSurfaceSummaryGBufferABIValid(rt1.a)
+        && (surfaceClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
+            || surfaceClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
+            || surfaceClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE);
+    float4 gi = valid ? _LinearGI.Load(int3(id.xy, 0)) : 0.0;
+    gi.a = saturate(gi.a);
+    _LinearConditional[id.xy] = gi;
+    // RealtimeOnly consumes RGB * coverage, including covered black.
+    _LinearTransport[id.xy] = float4(gi.rgb * gi.a, gi.a);
+    // The controlled Cornell fixture is nonmetallic. SRV loads decode sRGB once.
+    _LinearAlbedo[id.xy] = float4(valid ? rt0.rgb : 0.0, valid ? 1.0 : 0.0);
+    float2 uv = (float2(id.xy) + 0.5) * _LinearSize.zw;
+    float3 position = ComputeWorldSpacePosition(uv, depth, _LinearInverseVP);
+    _LinearGeometry[id.xy] = valid ? float4(VividDecodeSurfaceSummaryNormal(rt1.xy),
+        dot(float4(position, 1.0), _LinearCameraForward)) : 0.0;
+}

@@ -36,6 +36,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
 #if UNITY_EDITOR
         internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
+        internal static System.Action<ComputePassContext, Texture, Texture, Texture, Texture> EditorLinearCapture;
         internal static bool EditorRecordProbeAnchorDiagnostics;
         internal static int EditorRadiositySeed;
         internal static int EditorGatherFrameOverride = -1;
@@ -193,6 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReceiverCountId = Shader.PropertyToID("_SdfReceiverCount");
         private static readonly int CorrectReceiverId = Shader.PropertyToID("_SdfCorrectReceiverSelfHits");
         private static readonly int ScreenCardLightingId = Shader.PropertyToID("_SdfScreenCardLighting");
+        private static readonly int ScreenMaterialLookupId = Shader.PropertyToID("_SdfScreenMaterialLookup");
         private static readonly int RecordRayDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRecordRayDiagnostics");
         private static readonly int RecordFirstHitDiagnosticsId = Shader.PropertyToID("_SdfDiffuseRecordFirstHitDiagnostics");
         private static readonly int CurrentResolvedId = Shader.PropertyToID("_SdfDiffuseCurrentResolved");
@@ -563,7 +565,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector2 m_ScreenJitterUv, m_ScreenJitterDelta;
         private Vector4 m_LightPositionRange, m_LightColorShadow;
         private int m_TraceKernel = -1, m_CachedTraceKernel = -1, m_ResolveKernel = -1;
-        private int m_ScreenTraceKernel = -1, m_ScreenGatherKernel = -1;
+        private int m_ScreenTraceKernel = -1, m_ScreenReceiverTraceKernel = -1, m_ScreenGatherKernel = -1;
         private int m_CachedSunTraceKernel = -1, m_SunUpdateKernel = -1;
         private int m_PlacementKernel = -1, m_FilterKernel = -1, m_HitFilterKernel = -1;
         private int m_RestirTemporalKernel = -1, m_RestirSpatialKernel = -1;
@@ -737,6 +739,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && HasKernel(m_TraceCompute, "TraceDiffuseScreenRays") && HasKernel(m_TraceCompute, "GatherScreenDiffuseProbes"))
             {
                 m_ScreenTraceKernel = m_TraceCompute.FindKernel("TraceDiffuseScreenRays");
+                if (HasKernel(m_TraceCompute, "TraceReceiverDiffuseScreenRays"))
+                    m_ScreenReceiverTraceKernel = m_TraceCompute.FindKernel("TraceReceiverDiffuseScreenRays");
                 m_ScreenGatherKernel = m_TraceCompute.FindKernel("GatherScreenDiffuseProbes");
             }
             m_Scene = new VividMeshSdfGpuScene(Shader.Find("VividRP/Material/StandardLit"));
@@ -1182,10 +1186,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (useSunCache)
                 traceKernel = m_CachedSunTraceKernel;
             int receiverKernel = useSunCache ? m_ReceiverCachedSunKernel : cache != null ? m_ReceiverCachedKernel : m_ReceiverTraceKernel;
-            bool hasReceiverSource = m_UseSdf && m_ReceiverVisibility.IsValid() && receiverKernel >= 0;
+            bool hasReceiverSource = m_UseSdf && m_ReceiverVisibility.IsValid() && receiverKernel >= 0 && m_ReceiverCount > 0;
             bool correctReceiver = hasReceiverSource && m_CorrectReceiverSelfHits;
             bool screenCardLighting = hasReceiverSource && useScreenRays && m_ScreenCardLightingRequested && m_RadiosityInput.IsValid();
-            if (correctReceiver || screenCardLighting)
+            if (hasReceiverSource)
             {
                 traceKernel = receiverKernel;
                 cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ReceiverVisibilityId, m_ReceiverVisibility);
@@ -1194,6 +1198,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             cmd.SetComputeIntParam(m_TraceCompute, CorrectReceiverId, correctReceiver ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, ScreenCardLightingId, screenCardLighting ? 1 : 0);
+            cmd.SetComputeIntParam(m_TraceCompute, ScreenMaterialLookupId, hasReceiverSource ? 1 : 0);
             BindReceiver(cmd, m_TraceCompute, traceKernel);
             TextureHandle probeTarget = m_Probes.innerHandle;
             if (m_DirectionalCache)
@@ -1391,6 +1396,9 @@ namespace VividRP.Runtime.RenderPass.Core
 #if UNITY_EDITOR
             EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
                 m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
+            if (EditorLinearCapture != null)
+                EditorLinearCapture(context, m_Output.innerHandle.ResolveTexture(), m_Depth.innerHandle.ResolveTexture(),
+                    m_GBuffer0.innerHandle.ResolveTexture(), m_GBuffer1.innerHandle.ResolveTexture());
 #endif
             m_ProbeHistory?.MarkWritten();
             m_AnchorStatisticsHistory?.MarkWritten();
@@ -1505,7 +1513,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TraceCompute = m_GatherCompute = m_ImportanceSamplingCompute = m_FilterCompute = m_GatherTemporalCompute = null;
             m_RestirCompute = m_SunCompute = m_RadiosityCompute = m_FarCompute = m_NearOcclusionCompute = null;
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
-            m_ScreenTraceKernel = m_ScreenGatherKernel = -1;
+            m_ScreenTraceKernel = m_ScreenReceiverTraceKernel = m_ScreenGatherKernel = -1;
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
             m_RadiosityKernel = -1;
             m_RadiosityAccumulationKernel = m_RadiosityPublishKernel = -1;
@@ -2416,8 +2424,17 @@ namespace VividRP.Runtime.RenderPass.Core
             TextureHandle black, bool validScreenRadiance)
         {
             using var scope = new ProfilingScope(cmd, ScreenTraceSampler);
-            int kernel = m_ScreenTraceKernel;
+            bool materialLookup = m_UseSdf && m_ScreenReceiverTraceKernel >= 0
+                && m_ReceiverVisibility.IsValid() && m_ReceiverEntities != null && m_ReceiverCount > 0;
+            int kernel = materialLookup ? m_ScreenReceiverTraceKernel : m_ScreenTraceKernel;
             BindReceiver(cmd, m_TraceCompute, kernel);
+            if (materialLookup)
+            {
+                cmd.SetComputeTextureParam(m_TraceCompute, kernel, ReceiverVisibilityId, m_ReceiverVisibility);
+                cmd.SetComputeBufferParam(m_TraceCompute, kernel, ReceiverEntitiesId, m_ReceiverEntities);
+                cmd.SetComputeIntParam(m_TraceCompute, ReceiverCountId, m_ReceiverCount);
+                cmd.SetComputeBufferParam(m_TraceCompute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+            }
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, PlacementId, placement);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, DirectionalGuideId, m_DirectionalGuide ? m_DirectionalGuideTexture.innerHandle : black);
             BindScreenTraceHistory(cmd, m_TraceCompute, kernel, true, black);

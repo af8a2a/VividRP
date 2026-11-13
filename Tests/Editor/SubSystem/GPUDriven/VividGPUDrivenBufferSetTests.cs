@@ -126,6 +126,8 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.DiffuseSurface>(), Is.EqualTo(64));
             AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.AlbedoAndValid), 0);
             AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.Emission), 16);
+            Assert.That(Marshal.OffsetOf<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.Emission)).ToInt32()
+                + Marshal.OffsetOf<Vector4>(nameof(Vector4.w)).ToInt32(), Is.EqualTo(28), "Emission.w carries material CullMode.");
             AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.CardMinAndFirst), 32);
             AssertFieldOffset<VividMeshSdfGpuScene.DiffuseSurface>(nameof(VividMeshSdfGpuScene.DiffuseSurface.CardExtent), 48);
         }

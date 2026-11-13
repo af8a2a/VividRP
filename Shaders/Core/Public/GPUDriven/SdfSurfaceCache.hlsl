@@ -2,11 +2,12 @@
 #define VIVID_SDF_SURFACE_CACHE_INCLUDED
 
 #include "MeshSdfTrace.hlsl"
+#include "SdfMaterialSidedness.hlsl"
 
 struct DiffuseSurface
 {
     float4 albedoAndValid;
-    float4 emission;
+    float4 emission; // RGB radiance, W Unity CullMode (0 off, 1 front, 2 back).
     float4 cardMinAndFirst;
     float4 cardExtent; // w is the 1-based runtime lighting instance slot.
 };
@@ -33,6 +34,7 @@ struct VividSdfCardSample
 {
     float score;
     float3 normalLS;
+    float originalNormalSign;
     float3 albedo;
     uint3 texel;
     float depthError;
@@ -75,6 +77,7 @@ void VividSampleSdfCard(VividMeshSdfHit hit, float3 relative, uint axis, float f
         {
             best.score = score;
             best.normalLS = normal;
+            best.originalNormalSign = packedNormal.a < 0.75 ? -1.0 : 1.0;
             best.albedo = texelData.rgb;
             best.texel = uint3(pixel, slot);
             best.depthError = depthError;
@@ -83,9 +86,10 @@ void VividSampleSdfCard(VividMeshSdfHit hit, float3 relative, uint axis, float f
 }
 
 bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
-    out float3 normalWS, out uint3 cardTexel, out float surfaceError, bool diagnose, out uint rejection)
+    out float3 normalWS, out float3 originalNormalWS, out uint3 cardTexel, out float surfaceError, bool diagnose, out uint rejection)
 {
     normalWS = hit.normalWS;
+    originalNormalWS = hit.normalWS;
     cardTexel = 0u;
     surfaceError = 0.0;
     rejection = VividSdfCardMissing;
@@ -144,9 +148,25 @@ bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout Diff
     surface.albedoAndValid.rgb = best.albedo;
     normalWS = SafeNormalize(best.normalLS.x * instance.worldToLocal0.xyz
         + best.normalLS.y * instance.worldToLocal1.xyz + best.normalLS.z * instance.worldToLocal2.xyz);
+    originalNormalWS = normalWS * best.originalNormalSign;
     return true;
 }
 
+bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
+    out float3 normalWS, out uint3 cardTexel, out float surfaceError, bool diagnose, out uint rejection)
+{
+    float3 originalNormal;
+    return VividTrySampleSdfSurface(hit, positionWS, surface, normalWS, originalNormal,
+        cardTexel, surfaceError, diagnose, rejection);
+}
+
+bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
+    out float3 normalWS, out float3 originalNormalWS, out uint3 cardTexel, out float surfaceError)
+{
+    uint rejection;
+    return VividTrySampleSdfSurface(hit, positionWS, surface, normalWS, originalNormalWS,
+        cardTexel, surfaceError, false, rejection);
+}
 
 bool VividTrySampleSdfSurface(VividMeshSdfHit hit, float3 positionWS, inout DiffuseSurface surface,
     out float3 normalWS, out uint3 cardTexel, out float surfaceError)

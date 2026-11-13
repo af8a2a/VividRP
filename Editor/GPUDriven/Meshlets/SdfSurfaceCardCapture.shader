@@ -67,9 +67,12 @@ Shader "Hidden/VividRP/SDF Surface Card Capture"
                 uint face = (uint)_CardMinAndFace.w;
                 float3 normal = SafeNormalize(input.normalLS);
                 float sign = (face & 1u) == 0u ? -1.0 : 1.0;
-                normal *= normal[face >> 1u] * sign < 0.0 ? -1.0 : 1.0;
+                bool flipped = normal[face >> 1u] * sign < 0.0;
+                normal *= flipped ? -1.0 : 1.0;
                 albedoDepth = float4(saturate(albedo) * (1.0 - saturate(metallic)), saturate(input.depth));
-                normalCoverage = float4(normal * 0.5 + 0.5, 1.0);
+                // Nonzero still means covered. Preserve original mesh facing without
+                // changing the face-oriented normal used by existing lighting filters.
+                normalCoverage = float4(normal * 0.5 + 0.5, flipped ? 0.5 : 1.0);
             }
             ENDHLSL
         }

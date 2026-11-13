@@ -39,6 +39,7 @@ static const uint RayScreenCardIndirect = 128u;
 static const uint RayTraceIncomplete = 256u;
 static const uint RayGlobalCandidate = 512u;
 static const uint RayFarSegment = 1024u;
+static const uint RayMaterialBackface = 2048u; // Accepted geometric hit, covered black.
 
 Texture2D<float> _SdfDiffuseDepth;
 Texture2D<float4> _SdfDiffuseGBuffer0;
@@ -103,6 +104,7 @@ uint _SdfDiffuseHitFilterEnabled;
 uint _SdfDiffuseOffscreenOnly;
 uint _SdfDiffuseUseScreenRays;
 uint _SdfScreenCardLighting;
+uint _SdfScreenMaterialLookup;
 uint _SdfDiffuseRecordRayDiagnostics;
 uint _SdfDiffuseRecordFirstHitDiagnostics;
 // Editor ablations. Bits 128/256/512 restore legacy stores/centers/fine-only bounds.

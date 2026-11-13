@@ -12,6 +12,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     internal sealed class VividMeshSdfGpuScene : IDisposable
     {
+#if UNITY_EDITOR
+        internal static bool EditorForceTwoSidedEmission;
+#endif
         private static readonly int VoxelsId = Shader.PropertyToID("_MeshSdfVoxels");
         private static readonly int FieldsId = Shader.PropertyToID("_MeshSdfFields");
         private static readonly int InstancesId = Shader.PropertyToID("_MeshSdfInstances");
@@ -53,7 +56,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal struct DiffuseSurface : IEquatable<DiffuseSurface>
         {
             public Vector4 AlbedoAndValid;
-            public Vector4 Emission;
+            public Vector4 Emission; // RGB radiance; W is Unity CullMode when original card normals are available.
             public Vector4 CardMinAndFirst;
             public Vector4 CardExtent; // w is the 1-based runtime lighting instance slot.
 
@@ -62,7 +65,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 && CardMinAndFirst.Equals(other.CardMinAndFirst) && CardExtent.Equals(other.CardExtent);
 
             public readonly bool HasSameTransport(DiffuseSurface other) =>
-                AlbedoAndValid.Equals(other.AlbedoAndValid) && CardMinAndFirst.Equals(other.CardMinAndFirst)
+                AlbedoAndValid.Equals(other.AlbedoAndValid) && Emission.w == other.Emission.w
+                && CardMinAndFirst.Equals(other.CardMinAndFirst)
                 && CardExtent.Equals(other.CardExtent);
         }
 
@@ -70,6 +74,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
         private static readonly int SurfaceId = Shader.PropertyToID("_Surface");
         private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
+        private static readonly int CullId = Shader.PropertyToID("_Cull");
 
         private const int MaxLeafInstances = 4;
         private const VividMeshletRendererFlags VisibleFlags = VividMeshletRendererFlags.ActiveInHierarchy
@@ -252,7 +257,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 for (int i = 0; i < m_NextDiffuseSurfaces.Count; i++)
                 {
                     var next = m_NextDiffuseSurfaces[i];
-                    m_EmissionMaximum = Vector4.Max(m_EmissionMaximum, next.Emission);
+                    m_EmissionMaximum = Vector4.Max(m_EmissionMaximum,
+                        new Vector4(next.Emission.x, next.Emission.y, next.Emission.z, 0f));
                     if (i >= m_DiffuseSurfaces.Count)
                         continue;
                     var old = m_DiffuseSurfaces[i];
@@ -518,8 +524,17 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             var surface = new DiffuseSurface
             {
                 AlbedoAndValid = new Vector4(baseColor.x * diffuse, baseColor.y * diffuse, baseColor.z * diffuse, 1f),
-                Emission = new Vector4(emission.x, emission.y, emission.z, 0f),
+                // Legacy cards discarded original facing. Retain their old two-sided
+                // behavior until explicitly recaptured instead of inventing a side.
+                Emission = new Vector4(emission.x, emission.y, emission.z,
+                    SurfaceCache != null && SurfaceCache.HasOriginalNormals
+                        ? (float)(proxy != null ? proxy.CullMode : material.HasProperty(CullId)
+                            ? (CullMode)Mathf.RoundToInt(material.GetFloat(CullId)) : CullMode.Back)
+                        : (float)CullMode.Off),
             };
+#if UNITY_EDITOR
+            if (EditorForceTwoSidedEmission) surface.Emission.w = (float)CullMode.Off;
+#endif
             if (SurfaceCache == null)
                 return surface;
             if (!SurfaceCache.TryGetCards(renderer.sourceMesh, material, out var bounds, out int firstCard))

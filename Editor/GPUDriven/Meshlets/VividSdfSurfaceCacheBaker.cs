@@ -130,6 +130,21 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             }
         }
 
+        public static void Recapture(VividSdfSurfaceCache cache)
+        {
+            if (cache == null || !cache.IsUsable)
+                throw new ArgumentException("A usable surface cache is required.", nameof(cache));
+            var shader = Shader.Find("Hidden/VividRP/SDF Surface Card Capture");
+            if (shader == null) throw new InvalidOperationException("Surface card capture shader unavailable.");
+            cache.GetRecaptureData(out var entries, out var cards, out var albedo, out var normals);
+            Capture(new List<VividSdfSurfaceCache.Entry>(entries), shader, albedo.width, albedo, normals, cards);
+            cache.MarkOriginalNormalsCaptured();
+            EditorUtility.SetDirty(albedo);
+            EditorUtility.SetDirty(normals);
+            EditorUtility.SetDirty(cache);
+            AssetDatabase.SaveAssetIfDirty(cache);
+        }
+
         private static List<VividSdfSurfaceCache.Entry> CollectEntries(IReadOnlyList<MeshletRenderer> renderers)
         {
             var seen = new HashSet<(Mesh, Material)>();

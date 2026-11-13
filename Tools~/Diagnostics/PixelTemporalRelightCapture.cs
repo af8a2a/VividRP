@@ -11,9 +11,14 @@ using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-    const string experiment = "temporal-relight";
+    string experiment = "temporal-relight";
+    bool skyShift = experiment == "blocked-skyshift";
+    bool blockedComparison = experiment == "blocked-relight" || skyShift;
     bool scroll = false;
-    string output = "E:/VividRP_Reborn/Logs/PixelTemporalEnergy-20261113/" + experiment;
+    string output = blockedComparison ? System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..",
+        "VividRP_GI_Evidence", (skyShift ? "BlockedTemporalSkyShift-" : "BlockedTemporalRelight-")
+        + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"), "capture"))
+        : "E:/VividRP_Reborn/Logs/PixelTemporalEnergy-20261113/" + experiment;
     const int warmup = 512, captureStride = 1;
     int measuredFrames = 256;
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
@@ -36,6 +41,23 @@ using VividRP.Runtime.GPUDriven.Meshlets;
     profile.TryGet<SdfDiffuseGISettings>(out var gi);
     profile.TryGet<AutoExposure>(out var exposure);
     if (gi == null || exposure == null) throw new InvalidOperationException("Missing Cornell profile.");
+    SkySettingsVolume skySettings = null;
+    HDRISkyVolume hdri = null;
+    Cubemap skyCube = null;
+    if (skyShift)
+    {
+        if (!profile.TryGet(out skySettings)) skySettings = profile.Add<SkySettingsVolume>(true);
+        if (!profile.TryGet(out hdri)) hdri = profile.Add<HDRISkyVolume>(true);
+        hdri.active = true;
+        skyCube = new Cubemap(16, TextureFormat.RGBAHalf, true) {name = "Directional distribution step sky", hideFlags = HideFlags.DontSave};
+        var pixels = Enumerable.Repeat(new Color(200, 240, 280, 1), 256).ToArray();
+        for (int face = 0; face < 6; face++) skyCube.SetPixels(pixels, (CubemapFace)face);
+        skyCube.Apply(true, false);
+        hdri.skyCubemap.Override(skyCube); hdri.skyIntensityMode.Override(SkyIntensityMode.Multiplier); hdri.multiplier.Override(1f);
+        skySettings.updateMode.Override(SkyUpdateMode.OnChanged); skySettings.includeSunInBaking.Override(false);
+        skySettings.skyType.Override(SkyType.None);
+        gi.occludedSky.Override(true); gi.skyTraceDistance.Override(64f);
+    }
     var type = typeof(SdfDiffuseGatherPass);
     var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics", "EditorGatherHistoryDiagnostics" }
         .ToDictionary(n => n, n => type.GetField(n, stat));
@@ -95,6 +117,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         if (!active || current != camera) return;
         hooks["EditorGatherFrameOverride"].SetValue(null, 1733 + frame);
         float level = frame >= warmup + 32 ? targetLevel : 1f;
+        if (skyShift) skySettings.skyType.Override(frame >= warmup + 32 ? SkyType.HDRI : SkyType.None);
         Color linear = QualitySettings.activeColorSpace == ColorSpace.Linear ? originalEmission.linear : originalEmission;
         linear = new Color(linear.r*level, linear.g*level, linear.b*level, 1f);
         Color requested = level == 1f ? originalEmission
@@ -125,6 +148,8 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
         ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
         ReadRegion(cmd, Resolve("m_FilteredProbes"), "sh", 0, 59, 2640, 7);
+        if (blockedComparison && (bool)Field("m_FrozenGuideActive"))
+            ReadRegion(cmd, Resolve("m_CurrentProposal"), "proposal", 48 * 8, 59, 24 * 8, 7);
         ReadPixels(cmd, Resolve("m_CurrentPixelLighting"), "history");
         if (scroll) ReadPixels(cmd, Resolve("m_CurrentPixelGeometry"), "geometry");
         if (frame == warmup || frame == warmup + measuredFrames - 1)
@@ -139,12 +164,15 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         var emission = (Vector4)gpuScene.GetType().GetField("m_EmissionMaximum", priv).GetValue(gpuScene);
         var lightScale = (Vector4)Field("m_RadiosityHistoryScale");
         records.Add(new {arm, frame, emission = new[]{emission.x, emission.y, emission.z},
-            historyScale = new[]{lightScale.x, lightScale.y, lightScale.z}, rescale = Field("m_RadiosityRescale")});
+            historyScale = new[]{lightScale.x, lightScale.y, lightScale.z}, rescale = Field("m_RadiosityRescale"),
+            skyBound = Field("m_SkyRadianceBound"), skyBoundValid = Field("m_SkyBoundValid")});
         records.Add(new { arm, frame, state = new { order = Field("m_RadiosityPublishedOrder"), batch = Field("m_RadiosityBatch"),
             rays = 8, spacing = 16, traceMode = gi.traceMode.value.ToString(), radioSamples = Field("m_RadiositySamples"),
             radioTargetOrders = Field("m_RadiosityTargetOrders"), radioCursor = Field("m_RadiosityCursor"),
             directionalCache = Field("m_DirectionalCache"), restir = Field("m_RestirGather"),
             guide = Field("m_DirectionalGuide"), hierarchical = Field("m_DirectionalHierarchicalGuide"),
+            samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
+            frozenProposal = Field("m_FrozenGuideActive"), proposalHistoryValid = Field("m_ProposalHistoryValid"),
             rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
     Action<ComputePassContext, Texture, Texture, Texture, Texture> linear = (context, lighting, depth, rt0, rt1) => {
@@ -202,11 +230,13 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         Application.logMessageReceived += Log;
         const int legacy = 2097152 | 4194304;
         gi.screenProbeSamplingGuide.Override(true);
-        foreach (var step in new[]{("up",4f),("down",.25f),("off",0f)})
+        foreach (var step in skyShift ? new[]{("skyshift",0f)} : new[]{("up",4f),("down",.25f),("off",0f)})
         {
             targetLevel = step.Item2;
-            await Run("legacy-light-"+step.Item1, SdfDiffuseTraceMode.Hybrid, legacy);
-            await Run("corrected-light-"+step.Item1, SdfDiffuseTraceMode.Hybrid, 0);
+            await Run((blockedComparison ? "white" : "legacy") + "-light-" + step.Item1,
+                SdfDiffuseTraceMode.Hybrid, blockedComparison ? 0 : legacy);
+            await Run((blockedComparison ? "blocked" : "corrected") + "-light-" + step.Item1,
+                SdfDiffuseTraceMode.Hybrid, blockedComparison ? 8388608 : 0);
         }
         return new { success = true, output, errors };
     }
@@ -225,9 +255,12 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         if (previousScene.isLoaded) SceneManager.SetActiveScene(previousScene);
         foreach (var component in profile.components) UnityEngine.Object.DestroyImmediate(component);
         UnityEngine.Object.DestroyImmediate(profile);
+        if (skyCube != null) UnityEngine.Object.DestroyImmediate(skyCube);
         try
         {
+            System.IO.Directory.CreateDirectory(output);
             System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
+                experiment, blockedComparison, skyShift,
                 width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
                 scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
                 row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

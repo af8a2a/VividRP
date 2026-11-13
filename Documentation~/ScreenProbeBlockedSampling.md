@@ -31,7 +31,7 @@ Unity 7000.0.0a16 / DX12，Cornell 顶部单面自发光场景，1920×1080、16
 
 固定轨迹下 A/B 几何与 VP 逐位一致，28,104 个明确新露出样本均未继承 age>1 的旧像素历史；Temporal 相对当前 Resolve 的 P99/max 均为 0。同姿态往返差值 RMS 从 0.656511 降为 0.455109，绝对 P99 从 2.22659 降为 1.67166。这个检查不代表所有探针层历史或动态物体已验证。
 
-## 能量门槛：仍待确认
+## 独立长序列能量门槛
 
 独立帧相位的 2,048 帧长序列结果：
 
@@ -44,23 +44,40 @@ Unity 7000.0.0a16 / DX12，Cornell 顶部单面自发光场景，1920×1080、16
 | SDF Only / 地面 | +0.277% | −0.724～+1.259% | 未证实 |
 | SDF Only / 右墙 | −0.368% | −0.655～−0.060% | 通过 |
 
-六组点估计都在 ±1% 内，但两个地面区间还不够窄，**不能宣布能量等价或改成默认**。另外预先设定独立相位 15,731、每组 8,192 帧的四组确认实验，保留相同 ±1% 点估计及区间门槛。
+六组点估计都在 ±1% 内，但两个地面区间还不够窄，不能仅根据这一批宣布能量等价。随后执行预先设定的独立相位 15,731、每组 8,192 帧四组确认实验，保留相同 ±1% 点估计及区间门槛。
 
-8,192 帧确认实验的 Hybrid 两组现已完成，VP 逐位相同，源缓存首尾和两组之间的 SHA-256 相同；三个区域均通过原门槛：
+8,192 帧确认实验的四组全部完成，VP 逐位相同，源缓存首尾和四组之间的 SHA-256 相同；六个区域均通过原门槛：
 
-| Hybrid 区域 | 最终均值变化 | block-128 条件 95% 区间 |
+| 路径 / 区域 | 最终均值变化 | block-128 条件 95% 区间 |
 |---|---:|---:|
-| 天花板 | −0.075% | −0.203～+0.049% |
-| 地面 | +0.344% | +0.017～+0.672% |
-| 右墙 | −0.071% | −0.309～+0.163% |
+| Hybrid / 天花板 | −0.075% | −0.203～+0.049% |
+| Hybrid / 地面 | +0.344% | +0.017～+0.672% |
+| Hybrid / 右墙 | −0.071% | −0.309～+0.163% |
+| SDF Only / 天花板 | −0.003% | −0.137～+0.136% |
+| SDF Only / 地面 | +0.007% | −0.422～+0.420% |
+| SDF Only / 右墙 | +0.162% | −0.072～+0.383% |
 
-这是已完成 Hybrid 对的结果，不代表尚在运行的 SDF Only 两组已通过；默认行为继续保持不变。
+这是本机位、冻结源条件下对当前滤波后白噪声参考的验证，不是物理真值或跨场景保证。默认行为继续保持不变，仍需 Sponza 和有效 GPU 计时。
+
+## 光照变化与资源验证
+
+相机独立 proposal history 在预热后连续轮转 4,096 次：当前线程托管分配 0 B，两张 owned texture 保持不变且不互相别名。测量范围仅为 CameraHistory 获取/轮转，不包含 RenderGraph 注册或整个渲染帧。
+
+纯自发光保持同机位、相同采样相位，分别在第 32 个测量帧升至 4 倍、降至 1/4 和关灯。每组预热 512 帧，测量 256 帧；实际 GPU 材质发光输入及相机矩阵配对一致。三块区域的 90% 响应均在改变后的首帧达到，且连续保持四帧；分块路径没有增加响应帧数。升光首帧响应为 99.02% / 99.04% / 98.11%，32 帧内的最大过冲为 0.32%；降光最大过冲为 0.49%。关灯后三块区域的最终输出均为 0，未检测到旧光照残留。
+
+这些短序列的末 64 帧不能替代长期能量验证：例如降光地面均值相对白噪声为 −2.35%，当前 Resolve 已有相应差异；没有把这一结果称为动态情况下的能量等价。分块路径的 Temporal 相对当前 Resolve 的末段偏差在 ±0.50% 内。
+
+额外执行顶部发光关闭、常量 HDRI 开启的方向分布切换。两组最终三块区域均在请求帧达到 90%，末段最终均值差为 −0.17% / +0.48% / +0.14%。但 CPU 天空辐亮度 bound 的就绪时间相差 3 帧，且它不等于 GPU 天空纹理的发布时间；因此本批不能作为严格的源延迟 A/B。分块天花板首 32 帧过冲约 7.14%，白噪声约 2.42%，仍需在匹配天空就绪条件下复验，不能据此启用默认。
+
+实际分区检查继续拒绝块内自适应重建。光照使方向历史失效时，只允许 shader 已定义的固定余弦分区重置，仍检查完整半球支持及逆 PDF 质量和；静态验证不放宽任何重置条件。
 
 ## 计时与剩余检查
 
-首次无纹理回读的 GPU ABBA 计时不可用：原始数据包含约 `1.794e12 ms` 的未校准时间戳及跨大量脚本帧不更新的旧值。分析器拒绝没有有效 profiler publication index、计数不为 1、数据不新鲜的记录；本次没有可报告的 GPU 性能变化。后续计时工具显式开启并恢复 GPU profiler publication，尚需实际复验。
+首次无纹理回读的 GPU ABBA 计时不可用：原始数据包含约 `1.794e12 ms` 的未校准时间戳及跨大量脚本帧不更新的旧值。分析器拒绝没有有效 profiler publication index、计数不为 1、数据不新鲜的记录。显式启用 GPU profiler publication 的复验仍无有效 GPU sample：1,024 条记录均为零；开启 Editor profiling 后 publication index 前进，但 GPU sample 仍为零。所有临时 profiler 设置均已恢复。
 
-相机独立 proposal history 的稳定分配/轮转检查、8,192 帧能量确认、有效 GPU 计时、灯光变化响应以及 Sponza 帘边/侧廊验证仍未完成。Editor 运行期间未启动 Unity Test Framework。目标“稳定无噪点并对齐 Lumen”尚未达到。
+本会话为 Edit Mode、DX12、Graphics Jobs 开启。[Unity 7000 文档](https://docs.unity.com/en-us/engine/7000.0/manual/analysis/graphics-performance-profiling/profile-rendering/profiler-gpu) 限定 GPU Profiler 用于 Play Mode / Player，且 Graphics Jobs 开启时仅支持 Vulkan。未为计时改变项目配置或启动另一 Editor。PIX 只读预检也发现 native capture module 缺失，尚未捕获。**没有有效 GPU 耗时结果，不能宣称 guide 或 GI 性能改善。**
+
+相机独立 history 分配、8,192 帧能量确认和纯发光响应检查已完成。有效 GPU 计时、匹配天空就绪条件的切换复验以及 Sponza 帘边/侧廊验证仍未完成。Editor 运行期间未启动 Unity Test Framework。目标“稳定无噪点并对齐 Lumen”尚未达到。
 
 ## 数据与复现
 
@@ -75,6 +92,12 @@ E:/VividRP_GI_Evidence/BlockedTemporalSampling-20261113/blocked-sampling-quality
 E:/VividRP_GI_Evidence/BlockedTemporalGpu-20261113-152436-253/analysis.json
 E:/VividRP_GI_Evidence/BlockedTemporalConfirmation-20261113/reference-confirm-blocked/
 E:/VividRP_GI_Evidence/BlockedTemporalConfirmation-20261113/hybrid-confirmation-partial.json
+E:/VividRP_GI_Evidence/BlockedTemporalConfirmation-20261113/confirmation.json
+E:/VividRP_GI_Evidence/ProposalHistoryValidation-20261113-162559-238/history-validation.json
+E:/VividRP_GI_Evidence/BlockedTemporalRelight-20261113-164900-745/temporal-relight-analysis.json
+E:/VividRP_GI_Evidence/BlockedTemporalSkyShift-20261113-165728-395/skyshift-analysis.json
+E:/VividRP_GI_Evidence/BlockedTemporalGpu-20261113-162643-462/analysis.json
+E:/VividRP_GI_Evidence/GpuPublicationProbe-20261113-163823-415/samples.json
 ```
 
 `TemporalSamplingCapture.cs` 的 `blocked` 模式采集六组短序列，`reference-blocked` 采集两组 2,048 帧候选，`reference-confirm-blocked` 采集四组 8,192 帧确认数据。使用新目录重跑，脚本拒绝覆盖；`cancel.txt` 可请求结束并恢复现场。参考阶段只读回最终区域及首尾源缓存，减少诊断 I/O，渲染算法与逐帧采样预算相同。

@@ -24,14 +24,14 @@ using VividRP.Runtime.RenderPass.Core;
     pair = history.GetOrCreateTexture(id, 2, descriptor);
     if (!pair.IsValid()) throw new InvalidOperationException("Proposal history did not become valid.");
     var first = pair.GetCurrent(); var second = pair.GetPrevious();
-    if (ReferenceEquals(first, second)) throw new InvalidOperationException("Proposal read/write resources alias.");
+    if (System.Object.ReferenceEquals(first, second)) throw new InvalidOperationException("Proposal read/write resources alias.");
     pair.MarkWritten(); history.CommitFrame();
     long before = GC.GetAllocatedBytesForCurrentThread();
     for (int i = 0; i < 4096; i++) step();
     long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
     history.BeginFrame(1920, 1080);
     pair = history.GetOrCreateTexture(id, 2, descriptor);
-    bool stable = ReferenceEquals(first, pair.GetPrevious()) && ReferenceEquals(second, pair.GetCurrent());
+    bool stable = System.Object.ReferenceEquals(first, pair.GetPrevious()) && System.Object.ReferenceEquals(second, pair.GetCurrent());
     history.AbortFrame();
     if (!stable || allocated != 0) throw new InvalidOperationException("Proposal history reallocated: " + allocated + " bytes.");
     string root = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..", "VividRP_GI_Evidence",

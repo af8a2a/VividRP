@@ -57,11 +57,11 @@ def probe_hash(value):
     return value ^ (value >> 16)
 
 
-def verify_blocked_proposals(manifest, files, frames, arms):
+def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_resets=False):
     report = {}
     for arm in (a for a in arms if a.startswith("blocked-")):
         previous = None
-        fixed = changed = octahedral = descriptors = 0
+        fixed = changed = octahedral = descriptors = resets = 0
         for frame in frames:
             record = files[arm, frame, "proposal"]
             data = read(record).reshape(record["height"], record["width"] // 8, 8, 4)
@@ -91,11 +91,22 @@ def verify_blocked_proposals(manifest, files, frames, arms):
             base = manifest.get("frameBase", 1733)
             boundary = ((base + frame + phase) & 31) == 0
             if previous is not None:
-                assert np.array_equal(data[~boundary], previous[~boundary]), "Proposal changed within a QMC block"
-                fixed += int((~boundary).sum())
-                changed += int((np.any(data != previous, axis=(-1, -2)) & boundary).sum())
+                modified = np.any(data != previous, axis=(-1, -2))
+                # Lighting changes can invalidate directional guide history. The
+                # shader then uses a fixed cosine partition until the boundary;
+                # an adaptive within-block rebuild remains an error.
+                cosine = np.zeros((8, 4), dtype=data.dtype)
+                cosine[:, 0] = np.arange(8)
+                reset = ~boundary & modified & np.all(data == cosine, axis=(-1, -2))
+                if not allow_fixed_cosine_resets:
+                    assert not np.any(reset), "Unexpected proposal reset in a static experiment"
+                assert not np.any(~boundary & modified & ~reset), "Adaptive proposal changed within a QMC block"
+                resets += int(reset.sum())
+                fixed += int((~boundary & ~reset).sum())
+                changed += int((modified & boundary).sum())
             previous = data
         report[arm] = {"fixed_probe_frames_checked": fixed, "boundary_updates": changed,
+                       "fixed_cosine_reset_probe_frames": resets,
                        "octahedral_probe_frames": octahedral, "probe_frames": descriptors,
                        "full_support_and_mass": True}
     assert report, "Blocked proposal data was not captured"

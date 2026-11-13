@@ -75,9 +75,39 @@ Unity 7000.0.0a16 / DX12，Cornell 顶部单面自发光场景，1920×1080、16
 
 首次无纹理回读的 GPU ABBA 计时不可用：原始数据包含约 `1.794e12 ms` 的未校准时间戳及跨大量脚本帧不更新的旧值。分析器拒绝没有有效 profiler publication index、计数不为 1、数据不新鲜的记录。显式启用 GPU profiler publication 的复验仍无有效 GPU sample：1,024 条记录均为零；开启 Editor profiling 后 publication index 前进，但 GPU sample 仍为零。所有临时 profiler 设置均已恢复。
 
-本会话为 Edit Mode、DX12、Graphics Jobs 开启。[Unity 7000 文档](https://docs.unity.com/en-us/engine/7000.0/manual/analysis/graphics-performance-profiling/profile-rendering/profiler-gpu) 限定 GPU Profiler 用于 Play Mode / Player，且 Graphics Jobs 开启时仅支持 Vulkan。未为计时改变项目配置或启动另一 Editor。PIX 只读预检也发现 native capture module 缺失，尚未捕获。**没有有效 GPU 耗时结果，不能宣称 guide 或 GI 性能改善。**
+本会话为 Edit Mode、DX12、Graphics Jobs 开启。[Unity 7000 文档](https://docs.unity.com/en-us/engine/7000.0/manual/analysis/graphics-performance-profiling/profile-rendering/profiler-gpu) 限定 GPU Profiler 用于 Play Mode / Player，且 Graphics Jobs 开启时仅支持 Vulkan。未为计时改变项目配置或启动另一 Editor。PIX 插件和 analyzer 已安装，预检的 `ERROR_MOD_NOT_FOUND` 来自当前进程未注入 **WinPixGpuCapturer.dll**，不是 VividPixCapture 插件文件缺失。源码检查确认此模块必须在 D3D12 device 创建前注入，尚未捕获。另在新的 owned build 目录重建工具：native CTest、35 项 session、24 项 M1、31 项 M2 独立检查通过；没有部署覆盖已加载 DLL，也没有重启 Editor。**没有有效 GPU 耗时结果，不能宣称 guide 或 GI 性能改善。**
 
-相机独立 history 分配、8,192 帧能量确认和纯发光响应检查已完成。有效 GPU 计时、匹配天空就绪条件的切换复验以及 Sponza 帘边/侧廊验证仍未完成。Editor 运行期间未启动 Unity Test Framework。目标“稳定无噪点并对齐 Lumen”尚未达到。
+相机独立 history 分配、8,192 帧能量确认和纯发光响应检查已完成。有效 GPU 计时、匹配天空就绪条件的切换复验以及 Sponza 运动稳定性/独立侧廊验证仍未完成。Editor 运行期间未启动 Unity Test Framework。目标“稳定无噪点并对齐 Lumen”尚未达到。
+
+## Sponza 扩展验证：静止降噪，运动收益未证实
+
+2026-11-14，运行时实现仍为 `28745d84`（之后 `0a268a52` 仅增加验证工具和记录）。通过 Unity API 临时以 Additive 载入 Sponza Noon 及其照明场景，使用原 `Camera_1`，保留 1920×1080、16 px / 8 rays、相同采样相位。临时 Profile 使用原生 Gather、Adaptive 5×5、spatial anchor、32 帧像素历史和两轮 À-trous；关闭相机 AA、使用固定 EV10，避免显示 AA 混入 GI 测量。原资产均未保存修改。
+
+先等待 2 阶 Radiosity、64 samples / batch、32 batches 收敛，再为四组分别预热 512 帧、连续采集 256 帧。四组源缓存首尾 SHA-256 完全相同；静止和运动的 A/B VP 逐位一致。静止 ROI 的几何在组内、组间均逐位相同。
+
+| 静止区域（底部原点） | 最终时间方差下降 | 短序列最终均值变化 |
+|---|---:|---:|
+| 左侧 (430,300)，160×240 | 67.71% | −0.049% |
+| 右侧 (1330,300)，160×240 | 69.92% | −0.221% |
+| 中部 (880,380)，160×160 | 70.62% | +0.653% |
+| 左侧几何边缘三像素带 | 55.36% | −0.435% |
+| 右侧几何边缘三像素带 | 58.85% | −0.407% |
+
+边缘按深度/法线不连续生成，不等同于精确的帘子材质掩码；这些统计不证明跨帘串色已消失，也不是 Sponza 长序列能量等价验证。中部 ROI 没有几何边缘样本，不输出空掩码的误导统计。
+
+轨迹为当前 Camera_1 附近两次 128 帧正弦往返（横移 0.28 m、前后 0.06 m、yaw −7°）。这是本轮明确记录的新轨迹，没有冒充原始历史数据中的缺失轨迹。A/B 深度逐位相同，但全部 256 帧中存在 21 个像素帧的法线编码差异，单帧最多一个；原因尚未定位。重复机位差值仅采用两组、两周期中几何编码完全相同的交集：35,327,985 个像素样本，排除 15 个。
+
+| 固定往返 | 白噪声 | 分块采样 |
+|---|---:|---:|
+| 同姿态差值 RMS，线性 consumed E/π | 238.269 | 244.199 |
+| 同姿态绝对差值 P99 | 1050.356 | 1090.727 |
+| 几何诊断带中 age>1 的比例 | 1.451% | 1.435% |
+
+RMS 点估计增加 2.49%、P99 增加 3.84%；本批未建立运动收益，也未测得该差异的独立长序列置信区间。几何诊断带使用前景深度、双法线平面差 >0.075 m、位置差 >0.10 m 和当前非零覆盖筛选，A/B 样本数分别为 333,658 / 333,172。这不是逐射线遮挡真值，且阈值并不完全等于 GPU 四 tap 历史拒绝规则；其 P99 不能直接解读为物理照明误差或严格配对抗鬼影结论。下一步应记录实际 motion 与四 tap 重投影条件，分离误分类、历史继承和当前帧 Gather 方差，再改动拒绝/重建规则。
+
+实际 proposal 纹理在静止/运动中各检查 94,856 个块内探针帧，均未改变，没有固定余弦重置；分区支持和逆 PDF 质量和通过。源缓存固定、静止收益明确仍不足以覆盖运动边界，**本候选继续保留为诊断选项，默认不变**。
+
+捕帧结束后原两个 Cornell 场景仍加载且未脏，活动相机恢复 Emissive Cornell Camera，Sponza 的两个自有临时场景已关闭；hooks 为空、flags=0、frame override=-1。没有修改共享 graph。
 
 ## 数据与复现
 
@@ -98,6 +128,10 @@ E:/VividRP_GI_Evidence/BlockedTemporalRelight-20261113-164900-745/temporal-relig
 E:/VividRP_GI_Evidence/BlockedTemporalSkyShift-20261113-165728-395/skyshift-analysis.json
 E:/VividRP_GI_Evidence/BlockedTemporalGpu-20261113-162643-462/analysis.json
 E:/VividRP_GI_Evidence/GpuPublicationProbe-20261113-163823-415/samples.json
+E:/VividRP_GI_Evidence/SponzaBlockedSampling-20261113-171221-274/capture/capture.json
+E:/VividRP_GI_Evidence/SponzaBlockedSampling-20261113-171221-274/analysis.json
+E:/VividRP_GI_Evidence/SponzaBlockedSampling-20261113-171221-274/geometry-diagnostic.json
+E:/VividRP_GI_Evidence/SponzaBlockedSampling-20261113-171221-274/sponza-blocked-quality.png
 ```
 
 `TemporalSamplingCapture.cs` 的 `blocked` 模式采集六组短序列，`reference-blocked` 采集两组 2,048 帧候选，`reference-confirm-blocked` 采集四组 8,192 帧确认数据。使用新目录重跑，脚本拒绝覆盖；`cancel.txt` 可请求结束并恢复现场。参考阶段只读回最终区域及首尾源缓存，减少诊断 I/O，渲染算法与逐帧采样预算相同。

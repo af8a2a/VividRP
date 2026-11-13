@@ -59,9 +59,11 @@ def probe_hash(value):
 
 def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_resets=False):
     report = {}
-    for arm in (a for a in arms if a.startswith("blocked-")):
+    for arm in (a for a in arms if a.startswith(("blocked-", "fine-"))):
         previous = None
-        fixed = changed = octahedral = descriptors = resets = 0
+        fixed = changed = octahedral = fine_count = descriptors = resets = 0
+        maximum_mass = 0.0
+        crossed_faces = 0
         for frame in frames:
             record = files[arm, frame, "proposal"]
             data = read(record).reshape(record["height"], record["width"] // 8, 8, 4)
@@ -69,10 +71,23 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
             oct_ray = subdivision <= -3
             oct_probe = oct_ray.all(-1)
             assert np.all(oct_probe | ~oct_ray.any(-1)), "Mixed proposal charts"
+            fine_ray = subdivision <= -5
+            fine_probe = fine_ray.all(-1)
+            assert np.all(fine_probe | ~fine_ray.any(-1)), "Mixed octahedral chart resolutions"
+            assert np.all(data[..., :2] == np.floor(data[..., :2])), "Non-integer proposal payload"
+            extent = data[..., 1].astype(int)
+            fine_w, fine_h = (extent & 7) + 1, (extent >> 3) + 1
+            fine_x, fine_y = code & 7, code >> 3
+            assert np.all(~fine_ray | ((fine_x >= 0) & (fine_y >= 0) & (fine_x + fine_w <= 8) & (fine_y + fine_h <= 8))), "Fine rectangle escaped chart"
+            fine_count += int(fine_probe.sum())
             octahedral += int(oct_probe.sum())
             descriptors += int(oct_probe.size)
             area = (1 << ((code >> 4) & 1)) * (1 << ((code >> 5) & 1))
             mass = np.where(oct_ray, .5 * area, np.where(subdivision < 0, .5, np.where(subdivision > 0, 2., 1.)))
+            mass = np.where(fine_ray, fine_w * fine_h / 8., mass)
+            maximum_mass = max(maximum_mass, float(mass.max()))
+            crossed_faces += int((fine_ray & (((fine_x // 4) != ((fine_x + fine_w - 1) // 4))
+                                                        | ((fine_y // 4) != ((fine_y + fine_h - 1) // 4)))).sum())
             assert np.all(mass.sum(-1) == 8), "Inverse PDF mass drift"
             occupancy = np.zeros((*oct_probe.shape, 16), int)
             for ray in range(8):
@@ -83,7 +98,13 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
                     legacy = np.where(s < 0, (cell == 2*c + (-s-1)),
                                       (cell//2 == c) | ((s > 0) & (cell//2 == s-1)))
                     occupancy[..., cell] += np.where(oct_probe, covered, legacy)
-            assert np.all(occupancy == 1), "Proposal overlap or lost hemisphere support"
+            assert np.all(occupancy[~fine_probe] == 1), "Proposal overlap or lost hemisphere support"
+            fine_occupancy = np.zeros((*fine_probe.shape, 64), int)
+            for ray in range(8):
+                for cell in range(64):
+                    fine_occupancy[..., cell] += ((cell % 8 >= fine_x[..., ray]) & (cell % 8 < fine_x[..., ray] + fine_w[..., ray])
+                                                 & (cell // 8 >= fine_y[..., ray]) & (cell // 8 < fine_y[..., ray] + fine_h[..., ray]))
+            assert np.all(fine_occupancy[fine_probe] == 1), "Fine proposal overlap or lost hemisphere support"
             yy, xx = np.mgrid[record["y"]:record["y"]+record["height"],
                               record["x"]//8:(record["x"]+record["width"])//8]
             phase = probe_hash(xx + yy * 65537) & 31
@@ -108,6 +129,8 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
         report[arm] = {"fixed_probe_frames_checked": fixed, "boundary_updates": changed,
                        "fixed_cosine_reset_probe_frames": resets,
                        "octahedral_probe_frames": octahedral, "probe_frames": descriptors,
+                       "fine_probe_frames": fine_count,
+                       "maximum_inverse_pdf": maximum_mass, "fine_rectangles_crossing_faces": crossed_faces,
                        "full_support_and_mass": True}
     assert report, "Blocked proposal data was not captured"
     return report
@@ -115,6 +138,8 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
 
 def analyze(root, linear, candidate="sobol"):
     manifest = json.loads((root / "capture.json").read_text())
+    assert manifest.get("complete", True), "Incomplete capture"
+    control = manifest.get("control", "white")
     assert not manifest["errors"] and manifest["spacing"] == 16 and manifest["rays"] == 8
     records = manifest["records"]
     files = {(r["arm"], r["frame"], r["tag"]): r for r in records if "tag" in r}
@@ -130,6 +155,10 @@ def analyze(root, linear, candidate="sobol"):
             expected = record["arm"].startswith("blocked-")
             assert s["frozenProposal"] == expected and s["samplingFlags"] == (8388608 if expected else 0)
             if expected: assert s["proposalHistoryValid"]
+        elif candidate == "fine":
+            expected = record["arm"].startswith("fine-")
+            assert s["frozenProposal"] and s["proposalHistoryValid"] and s["guide"] and s["hierarchical"]
+            assert s["fineGuide"] == expected and s["samplingFlags"] == (41943040 if expected else 8388608)
     get = lambda a, f, tag: read(files[a, f, tag])
     stack = lambda a, tag: np.stack([get(a, f, tag) for f in frames])
     ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
@@ -172,13 +201,16 @@ def analyze(root, linear, candidate="sobol"):
             report["arms"][arm]["probes"][stage] = metrics(y_values[:, valid])
     assert len(set(source_hashes.values())) == 1, "Source differs between arms"
     for mode in ["hybrid", "sdf"]:
-        b, a = "white-" + mode, candidate + "-" + mode
+        b, a = control + "-" + mode, candidate + "-" + mode
         assert all(np.array_equal(matrices[b, f], matrices[a, f]) for f in frames)
+        assert all(np.array_equal(get(b, f, "probe-geometry"), get(a, f, "probe-geometry")) for f in frames), "Static A/B probe geometry differs"
         report["pairs"][mode] = {stage + "-" + region: paired(y, all_y[a, stage, region])
                                   for (arm, stage, region), y in all_y.items() if arm == b}
     report["motion"] = {}
+    report["motion_scope"] = "Matched-pose cycle noise plus nearest-depth exposure diagnostic; not native four-tap rejection replay or dynamic ground truth"
     motion_geometry = []
-    for arm in ["white-motion", candidate + "-motion"]:
+    cycle_errors = {}
+    for arm in [control + "-motion", candidate + "-motion"]:
         vp = np.stack([matrices[arm, f] for f in frames])
         inverse = np.linalg.inv(vp)
         geometry = stack(arm, "geometry-motion")[..., 0]
@@ -215,6 +247,7 @@ def analyze(root, linear, candidate="sobol"):
         final = stack(arm, "final-motion")
         final_y = (final[..., :3] * np.abs(final[..., 3:4])) @ LUMA
         cycle_delta = final_y[176:] - final_y[48:128]
+        cycle_errors[arm] = cycle_delta
         report["motion"][arm] = {"newly_exposed_samples": int(exposed.sum()),
                                   "age_over_one_percent": float(100*np.mean(age[exposed] > 1)),
                                   "accepted_history_percent": float(100*np.mean(status[exposed] == 1)),
@@ -224,12 +257,114 @@ def analyze(root, linear, candidate="sobol"):
                                   "matched_pose_cycle_delta_absolute_p99": float(np.quantile(np.abs(cycle_delta), .99)),
                                   "matched_pose_cycle_delta_mean": float(cycle_delta.mean())}
     assert np.array_equal(*motion_geometry), "A/B motion geometry differs"
-    assert all(np.array_equal(matrices["white-motion", f], matrices[candidate + "-motion", f]) for f in frames)
-    if candidate == "blocked":
+    assert all(np.array_equal(matrices[control + "-motion", f], matrices[candidate + "-motion", f]) for f in frames)
+    # Compare the same 80 poses; eight-pose blocks retain short-range correlation.
+    before = cycle_errors[control + "-motion"]
+    after = cycle_errors[candidate + "-motion"]
+    b = np.mean(before**2, axis=(1, 2)).reshape(10, 8).mean(1)
+    a = np.mean(after**2, axis=(1, 2)).reshape(10, 8).mean(1)
+    draws = np.random.default_rng(20261114).integers(0, 10, (4096, 10))
+    report["motion_comparison"] = {"cycle_rms_change_percent": float(100 * (np.sqrt(a.mean()/b.mean()) - 1)),
+        "paired_block8_conditional_95_percent": np.quantile(100 * (np.sqrt(a[draws].mean(1)/b[draws].mean(1)) - 1), [.025, .975]).tolist()}
+    if candidate in ("blocked", "fine"):
         report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms)
     (root.parent / "analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    plot_quality(root.parent, report, control, candidate)
     print(json.dumps(report["pairs"], indent=2))
     print(json.dumps(report["motion"], indent=2))
+
+
+def plot_quality(root, report, control, candidate):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    rows = [(mode + " " + region, report["pairs"][mode]["final-" + region])
+            for mode in report["pairs"] for region in ["ceiling", "floor", "right"]]
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4), layout="constrained")
+    for axis, key, interval, title in [
+        (axes[0], "variance_reduction_percent", "block_bootstrap_variance_reduction_95_percent", "Final variance reduction (%)"),
+        (axes[1], "mean_change_percent", "block_bootstrap_mean_change_95_percent", "Short-sequence mean change (%)")]:
+        for y, (label, row) in enumerate(rows):
+            value = row[key]
+            axis.hlines(y, *row[interval], color="#777777", linewidth=2)
+            axis.scatter(value, y, color=("#238b45" if value >= 0 else "#c33f35") if key.startswith("variance") else "#2c7fb8")
+        axis.set_yticks(range(len(rows)), [label for label, _ in rows]); axis.invert_yaxis()
+        axis.axvline(0, color="black", linewidth=.8); axis.grid(axis="x", alpha=.2); axis.set_title(title)
+    if "motion_comparison" in report:
+        motion = report["motion_comparison"]
+        axes[2].hlines(0, *motion["paired_block8_conditional_95_percent"], color="#777777", linewidth=2)
+        axes[2].scatter(motion["cycle_rms_change_percent"], 0, color="#2c7fb8")
+        axes[2].axvline(0, color="black", linewidth=.8); axes[2].set_yticks([0], ["80 matched poses"])
+        axes[2].set_title("Motion cycle RMS change (%)\nnegative is lower noise"); axes[2].grid(axis="x", alpha=.2)
+    else:
+        axes[2].axis("off"); axes[2].text(.5, .5, "Rejected at static quality gate\nNo completed motion comparison", ha="center", va="center")
+    fig.suptitle(f"{control} vs {candidate}: 16 px / 8 rays, fixed source; conditional 95% intervals")
+    fig.savefig(root / "sampling-quality.png", dpi=160); plt.close(fig)
+
+
+def analyze_static_prefix(root, linear, candidate):
+    """Analyze only fully completed static pairs after an intentional early rejection."""
+    manifest = json.loads((root / "capture.json").read_text())
+    assert not manifest["errors"] and manifest["spacing"] == 16 and manifest["rays"] == 8
+    control = manifest.get("control", "white")
+    frames = list(range(manifest["warmup"], manifest["warmup"] + manifest["measuredFrames"]))
+    assert len(frames) == 256, "Static spectral bands require a 256-frame capture"
+    files = {(r["arm"], r["frame"], r["tag"]): r for r in manifest["records"] if "tag" in r}
+    matrices = {(r["arm"], r["frame"]): r["vp"] for r in manifest["records"] if "vp" in r}
+    ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
+    report = {"scope": "Completed static pairs only; no motion or physical-reference claim",
+              "capture_complete": manifest.get("complete", True), "pairs": {}, "sources": {}, "spectra": {}}
+    completed_arms = []
+    for mode in ["hybrid", "sdf"]:
+        before, after = control + "-" + mode, candidate + "-" + mode
+        if not all((arm, frame, "final-ceiling") in files for arm in [before, after] for frame in frames):
+            continue
+        for arm in [before, after]:
+            completed_arms.append(arm)
+            states = [r["state"] for r in manifest["records"] if r.get("arm") == arm and "state" in r]
+            assert len(states) == len(frames)
+            assert all(s["order"] == 8 and s["batch"] == 32 and s["radioSamples"] == 64 and s["directionalCache"] and not s["restir"] for s in states)
+            assert all(s["sun"][:3] == [0, 0, 0] and s["sky"] == 0 for s in states)
+            if candidate == "fine":
+                expected = arm.startswith("fine-")
+                assert all(s["frozenProposal"] and s["proposalHistoryValid"] and s["fineGuide"] == expected
+                           and s["samplingFlags"] == (41943040 if expected else 8388608) for s in states)
+            first = Path(files[arm, frames[0], "radiosity"]["path"]).read_bytes()
+            assert first == Path(files[arm, frames[-1], "radiosity"]["path"]).read_bytes()
+            report["sources"][arm] = hashlib.sha256(first).hexdigest()
+        assert all(matrices[before, f] == matrices[after, f] for f in frames)
+        assert all(np.array_equal(read(files[before, f, "probe-geometry"]), read(files[after, f, "probe-geometry"])) for f in frames)
+        report["pairs"][mode] = {}
+        report["spectra"][mode] = {}
+        for region, object_id in [("ceiling", 2), ("floor", 1), ("right", 5)]:
+            meta = files[before, frames[0], "final-" + region]
+            mask = ids[meta["y"]:meta["y"]+meta["height"], meta["x"]:meta["x"]+meta["width"]] == object_id
+            assert mask.any()
+            for stage in ["resolved", "pixel-temporal", "final"]:
+                values = []
+                for arm in [before, after]:
+                    rgba = np.stack([read(files[arm, f, stage + "-" + region]) for f in frames])
+                    values.append(((rgba[..., :3] * np.abs(rgba[..., 3:4])) @ LUMA)[:, mask])
+                report["pairs"][mode][stage + "-" + region] = paired(*values)
+                bands = []
+                for y in values:
+                    signal = y.astype(np.float64) - y.mean(0, dtype=np.float64)
+                    power = np.mean(np.abs(np.fft.rfft(signal, axis=0))**2, axis=1) / len(frames)**2
+                    power[1:-1] *= 2
+                    # 256-frame captures: >=32, 8..32, and <8 frame periods.
+                    bands.append({"period_at_least_32_frames": float(power[1:9].sum()),
+                                  "period_8_to_32_frames": float(power[9:33].sum()),
+                                  "period_below_8_frames": float(power[33:].sum()),
+                                  "total_variance": float(power[1:].sum())})
+                    assert np.isclose(power[1:].sum(), np.var(y, axis=0, dtype=np.float64).mean()), "Spectral variance normalization mismatch"
+                report["spectra"][mode][stage + "-" + region] = dict(zip([control, candidate], bands))
+    assert report["pairs"], "No completed static pair"
+    assert len(set(report["sources"].values())) == 1, "A/B source differs"
+    if candidate in ("fine", "blocked"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms)
+    (root.parent / "static-analysis.json").write_text(json.dumps(report, indent=2))
+    plot_quality(root.parent, report, control, candidate)
+    print(json.dumps({mode: {key: row for key, row in rows.items() if key.startswith("final-")} for mode, rows in report["pairs"].items()}, indent=2))
 
 
 def analyze_references(root, linear, candidate="sobol", control_root=None):
@@ -347,10 +482,13 @@ if __name__ == "__main__":
     parser.add_argument("--linear", type=Path, default=Path("E:/VividRP_Reborn/Logs/LinearGI-20261113/linear"))
     parser.add_argument("--reference-only", action="store_true")
     parser.add_argument("--uniform-only", action="store_true")
-    parser.add_argument("--candidate", choices=["sobol", "blocked"], default="sobol")
+    parser.add_argument("--static-only", action="store_true", help="Completed static pairs from an intentionally rejected, incomplete capture")
+    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine"], default="sobol")
     parser.add_argument("--control-root", type=Path, help="Frozen-source white reference root from a previous capture")
     args = parser.parse_args()
-    if args.uniform_only:
+    if args.static_only:
+        analyze_static_prefix(args.capture, args.linear, args.candidate)
+    elif args.uniform_only:
         analyze_uniform(args.capture, args.linear)
     elif args.reference_only:
         analyze_references(args.capture, args.linear, args.candidate, args.control_root)

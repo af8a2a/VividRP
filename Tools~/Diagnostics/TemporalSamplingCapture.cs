@@ -9,17 +9,23 @@ using VividRP.Runtime.RenderPass.Core;
 using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-    // compare, blocked, reference, reference-sdf, reference-sobol, reference-blocked, or uniform-isolation.
+    // fine compares 8x8 against 4x4 with the same blocked samples; legacy modes remain available.
     string experiment = "blocked";
-    bool blocked = experiment.Contains("blocked", StringComparison.Ordinal);
+    bool fine = experiment == "fine";
+    if (fine && typeof(SdfDiffuseGatherPass).GetField("m_FineGuideActive",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) == null)
+        throw new InvalidOperationException("Fine experiment was rejected and withdrawn. Apply the archived FineDirectional-FourFaces.patch in an isolated checkout to replay it.");
+    bool blocked = fine || experiment.Contains("blocked", StringComparison.Ordinal);
     bool confirmation = experiment == "reference-confirm-blocked";
-    string candidate = blocked ? "blocked" : "sobol";
+    string candidate = fine ? "fine" : blocked ? "blocked" : "sobol";
+    string control = fine ? "blocked" : "white";
     bool reference = experiment.StartsWith("reference", StringComparison.Ordinal);
     bool referenceSdf = experiment == "reference-sdf";
     bool referenceSobol = experiment == "reference-sobol" || experiment == "reference-blocked";
     bool isolateUniform = experiment == "uniform-isolation";
     bool scroll = false;
-    string output = "E:/VividRP_GI_Evidence/" + (confirmation ? "BlockedTemporalConfirmation-20261113/"
+    string output = fine ? "E:/VividRP_GI_Evidence/FineDirectionalSampling-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
+        : "E:/VividRP_GI_Evidence/" + (confirmation ? "BlockedTemporalConfirmation-20261113/"
         : blocked ? "BlockedTemporalSampling-20261113/" : "TemporalSamplingCovered-20261113/")
         + (experiment == "compare" ? "capture-imported" : experiment);
     const int warmup = 512, captureStride = 1;
@@ -50,13 +56,15 @@ using VividRP.Editor.Tools;
     var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics", "EditorGatherHistoryDiagnostics" }
         .ToDictionary(n => n, n => type.GetField(n, stat));
     var previousHooks = hooks.ToDictionary(p => p.Key, p => p.Value.GetValue(null));
+    foreach (string name in new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture" })
+        if (previousHooks[name] != null) throw new InvalidOperationException("Another GI capture is active: " + name);
     var nativeCmd = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", priv);
     var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
     var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
     var records = new List<object>();
     var errors = new List<string>();
     int frame = 0, pending = 0;
-    bool active = false;
+    bool active = false, complete = false;
     string arm = "";
     object pass = null;
 
@@ -154,6 +162,7 @@ using VividRP.Editor.Tools;
             directionalCache = Field("m_DirectionalCache"), restir = Field("m_RestirGather"),
             guide = Field("m_DirectionalGuide"), hierarchical = Field("m_DirectionalHierarchicalGuide"),
             frozenProposal = Field("m_FrozenGuideActive"), proposalHistoryValid = Field("m_ProposalHistoryValid"),
+            fineGuide = type.GetField("m_FineGuideActive", priv)?.GetValue(pass) ?? false,
             samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
             rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
@@ -165,7 +174,7 @@ using VividRP.Editor.Tools;
     async System.Threading.Tasks.Task Run(string name, SdfDiffuseTraceMode mode, bool legacy, bool moving = false)
     {
         arm = name; frame = 0; scroll = moving;
-        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, legacy ? 0 : blocked ? 8388608 : 262144);
+        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, legacy ? (fine ? 8388608 : 0) : fine ? 41943040 : blocked ? 8388608 : 262144);
         System.IO.Directory.CreateDirectory(output + "/" + arm);
         gi.traceMode.Override(mode);
         gi.surfaceCacheBounceOrders.Override(8);
@@ -232,13 +241,14 @@ using VividRP.Editor.Tools;
         else if (reference) await Run("white-reference", referenceSdf ? SdfDiffuseTraceMode.SdfOnly : SdfDiffuseTraceMode.Hybrid, true);
         else
         {
-            await Run("white-hybrid", SdfDiffuseTraceMode.Hybrid, true);
+            await Run(control + "-hybrid", SdfDiffuseTraceMode.Hybrid, true);
             await Run(candidate + "-hybrid", SdfDiffuseTraceMode.Hybrid, false);
-            await Run("white-sdf", SdfDiffuseTraceMode.SdfOnly, true);
+            await Run(control + "-sdf", SdfDiffuseTraceMode.SdfOnly, true);
             await Run(candidate + "-sdf", SdfDiffuseTraceMode.SdfOnly, false);
-            await Run("white-motion", SdfDiffuseTraceMode.Hybrid, true, true);
+            await Run(control + "-motion", SdfDiffuseTraceMode.Hybrid, true, true);
             await Run(candidate + "-motion", SdfDiffuseTraceMode.Hybrid, false, true);
         }
+        complete = true;
         return new { success = true, output, errors };
     }
     finally
@@ -258,7 +268,7 @@ using VividRP.Editor.Tools;
         {
             System.IO.Directory.CreateDirectory(output);
             System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-                experiment, candidate, frameBase,
+                complete, experiment, candidate, control, frameBase,
                 width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
                 scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
                 row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

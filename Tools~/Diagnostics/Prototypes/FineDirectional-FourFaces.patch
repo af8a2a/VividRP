@@ -1,0 +1,319 @@
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+@@ -102,0 +103,2 @@
++        private static readonly int DirectionalTraceHistoryId = Shader.PropertyToID("_SdfDirectionalTraceHistory");
++        private static readonly int DirectionalHasTraceHistoryId = Shader.PropertyToID("_SdfDirectionalHasTraceHistory");
+@@ -500 +502,2 @@
+-        private bool m_FrozenGuideActive, m_ProposalHistoryValid;
++        private bool m_FrozenGuideActive, m_ProposalHistoryValid, m_FineGuideActive;
++        private int m_FineGuideKernel = -1;
+@@ -710,0 +714,2 @@
++            if (HasKernel(m_ImportanceSamplingCompute, "PrepareSdfFineDirectionalGuide"))
++                m_FineGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfFineDirectionalGuide");
+@@ -768 +773 @@
+-            m_FrozenGuideActive = m_ProposalHistoryValid = false;
++            m_FrozenGuideActive = m_ProposalHistoryValid = m_FineGuideActive = false;
+@@ -910,0 +916,2 @@
++            m_FineGuideActive = m_FrozenGuideActive && m_DirectionalHierarchicalGuide && m_FineGuideKernel >= 0
++                && (EditorGatherHistoryDiagnostics & 33554432) != 0;
+@@ -1546,0 +1554 @@
++            m_FineGuideKernel = -1;
+@@ -2547 +2555 @@
+-            int kernel = m_DirectionalGuideKernel;
++            int kernel = m_FineGuideActive ? m_FineGuideKernel : m_DirectionalGuideKernel;
+@@ -2557,0 +2566,7 @@
++            if (m_FineGuideActive)
++            {
++                bool traceHistory = hasHistory && m_DirectionalHistoryValid && m_PreviousDirectional.innerHandle.IsValid();
++                cmd.SetComputeIntParam(m_ImportanceSamplingCompute, DirectionalHasTraceHistoryId, traceHistory ? 1 : 0);
++                cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, DirectionalTraceHistoryId,
++                    traceHistory ? m_PreviousDirectional.innerHandle : black);
++            }
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl b/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
+--- a/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
++++ b/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
+@@ -146,0 +147,10 @@
++static const uint DirectionalFineOctSize = 8u;
++static const int DirectionalFineOctScreen = -5;
++static const int DirectionalFineOctWorld = -6;
++
++// Fine descriptors use two exact FP16 integer payloads: XY offset and WH-1.
++uint4 UnpackDirectionalFineRect(float2 packed)
++{
++    uint2 code = uint2(packed);
++    return uint4(code.x & 7u, code.x >> 3u, (code.y & 7u) + 1u, (code.y >> 3u) + 1u);
++}
+@@ -196,0 +207,9 @@
++        if (subdivision <= DirectionalFineOctScreen)
++        {
++            uint4 rect = UnpackDirectionalFineRect(stratum.xy);
++            float2 uv = (float2(rect.xy) + float2(rect.zw) * clamp(sampleUv, 1e-5, 1.0 - 1e-5)) / DirectionalFineOctSize;
++            float3 direction = DirectionalOctDirection(uv, basis);
++            bin = DirectionalBin(direction, basis);
++            inverseRelativePdf = float(rect.z * rect.w) / 8.0;
++            return direction;
++        }
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+--- a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
++++ b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+@@ -1,0 +2,3 @@
++#pragma kernel PrepareSdfFineDirectionalGuide VIVID_SDF_FINE_IMPORTANCE
++#pragma kernel InspectSdfFineDirectionalProposalsCS VIVID_SDF_FINE_IMPORTANCE
++#pragma kernel InspectSdfFineDirectionalSamplesCS VIVID_SDF_FINE_IMPORTANCE
+@@ -13,0 +17,112 @@
++
++#if defined(VIVID_SDF_FINE_IMPORTANCE)
++uint _SdfDirectionalHasTraceHistory;
++Texture2D<float4> _SdfDirectionalTraceHistory;
++
++float2 FineDirectionalUV(float3 local)
++{
++    float radius = length(local.xy);
++    if (radius < 1e-5)
++        return 0.5;
++    bool horizontal = abs(local.x) > abs(local.y);
++    float dominant = horizontal ? local.x : local.y;
++    float secondary = horizontal ? local.y : local.x;
++    float signDominant = dominant >= 0.0 ? 1.0 : -1.0;
++    float a = radius * signDominant;
++    float b = a * atan2(secondary * signDominant, abs(dominant)) * (8.0 / TWO_PI);
++    return saturate(0.5 + 0.5 * (horizontal ? float2(a, b) : float2(b, a)));
++}
++
++float2 FineRectMoments(float2 prefix[64], uint4 rect)
++{
++    uint2 end = rect.xy + rect.zw - 1u;
++    float2 sum = prefix[end.y * 8u + end.x];
++    if (rect.x > 0u)
++        sum -= prefix[end.y * 8u + rect.x - 1u];
++    if (rect.y > 0u)
++        sum -= prefix[(rect.y - 1u) * 8u + end.x];
++    if (rect.x > 0u && rect.y > 0u)
++        sum += prefix[(rect.y - 1u) * 8u + rect.x - 1u];
++    return max(sum, 0.0);
++}
++
++float FineRectVariance(float2 moments, float area, float explorationVariance)
++{
++    return max(0.0, area * moments.y - moments.x * moments.x) + explorationVariance * area * area;
++}
++
++bool BuildFineDirectionalPartition(inout float2 prefix[64], float total, float peak, out uint4 rects[8])
++{
++    // Normalize HDR priorities before squared moments, independently of the
++    // actual radiance returned by tracing. This is only a proposal density.
++    if (peak <= 0.0 || !isfinite(peak))
++        return false;
++    float inversePeak = rcp(peak);
++    float mean = total * inversePeak / 64.0;
++    [loop]
++    for (uint y = 0u; y < 8u; ++y)
++    {
++        float2 row = 0.0;
++        [loop]
++        for (uint x = 0u; x < 8u; ++x)
++        {
++            uint i = y * 8u + x;
++            float value = prefix[i].x * inversePeak;
++            row += float2(value, value * value);
++            prefix[i] = row;
++            if (y > 0u)
++                prefix[i] += prefix[i - 8u];
++        }
++    }
++    float explorationVariance = 0.25 * mean * mean;
++    // Preserve a ray on each upper octahedron face. An unconstrained root can
++    // leave most of the hemisphere in one large, high-weight noisy stratum.
++    [unroll]
++    for (uint face = 0u; face < 4u; ++face)
++        rects[face] = uint4(4u * (face & 1u), 4u * (face >> 1u), 4u, 4u);
++    [loop]
++    for (uint leafCount = 4u; leafCount < 8u; ++leafCount)
++    {
++        float bestGain = -1.0;
++        uint bestLeaf = 8u;
++        uint4 bestA = 0u, bestB = 0u;
++        [loop]
++        for (uint leaf = 0u; leaf < leafCount; ++leaf)
++        {
++            uint4 parent = rects[leaf];
++            float2 moments = FineRectMoments(prefix, parent);
++            float variance = FineRectVariance(moments, float(parent.z * parent.w), explorationVariance);
++            [unroll]
++            for (uint axis = 0u; axis < 2u; ++axis)
++            {
++                uint extent = axis == 0u ? parent.z : parent.w;
++                [loop]
++                for (uint cut = 1u; cut < extent; ++cut)
++                {
++                    uint4 a = parent, b = parent;
++                    if (axis == 0u) { a.z = cut; b.x += cut; b.z -= cut; }
++                    else { a.w = cut; b.y += cut; b.w -= cut; }
++                    float2 left = FineRectMoments(prefix, a);
++                    float2 right = max(0.0, moments - left);
++                    float gain = variance - FineRectVariance(left, float(a.z * a.w), explorationVariance)
++                        - FineRectVariance(right, float(b.z * b.w), explorationVariance);
++                    if (gain > bestGain)
++                    {
++                        bestGain = gain; bestLeaf = leaf; bestA = a; bestB = b;
++                    }
++                }
++            }
++        }
++        if (bestLeaf == 8u)
++            return false;
++        rects[bestLeaf] = bestA;
++        rects[leafCount] = bestB;
++    }
++    return true;
++}
++
++float4 PackFineDirectionalRect(uint4 rect, int source)
++{
++    return float4(rect.x | (rect.y << 3u), (rect.z - 1u) | ((rect.w - 1u) << 3u), 0.0, source);
++}
++#endif
+@@ -186,0 +302,84 @@
++#if defined(VIVID_SDF_FINE_IMPORTANCE)
++bool BuildFineDirectionalGuide(uint2 tile, float3 position, float3 normal, float3x3 basis,
++    bool hasPrevious, uint2 previousTile, float3x3 previousBasis)
++{
++    int3 worldCell = 0;
++    if (!hasPrevious && !FindDirectionalWorldProbe(position, normal, worldCell))
++        return false;
++    float3 offset = FarProbePosition(worldCell) - position;
++    // A cached ray endpoint supplies sub-bin location evidence. Filtered 4x4
++    // radiance alone cannot locate a small bright source inside a coarse cell.
++    float4 cues[16];
++    [loop]
++    for (uint bin = 0u; bin < 16u; ++bin)
++    {
++        cues[bin] = 0.0;
++        if (!hasPrevious || _SdfDirectionalHasTraceHistory == 0u)
++            continue;
++        uint2 address = DirectionalGatherAddress(previousTile, bin);
++        float4 radiance = _SdfDirectionalTraceHistory.Load(int3(address, 0));
++        float4 hit = _SdfDirectionalTraceHistory.Load(int3(address + DirectionalMetadataOffset(DirectionalGrid()), 0));
++        if (radiance.a <= 0.0 || hit.x == 0.0 || hit.y == 0.0)
++            continue;
++        float3 direction = VividDecodeSurfaceSummaryNormal(hit.zw);
++        if (hit.x > 0.0)
++        {
++            float3 oldPosition = _SdfDiffusePreviousGeometry.Load(int3(previousTile, 0)).xyz;
++            direction = SafeNormalize(oldPosition + direction * hit.x - position);
++        }
++        float3 local = mul(basis, direction);
++        if (local.z <= 0.001)
++            continue;
++        float importance = max(0.0, dot(radiance.rgb * _SdfHistoryLightScale.rgb,
++            float3(0.2126, 0.7152, 0.0722)) * radiance.a);
++        // Half a fine cell standard deviation; each old cone has 1/16 cosine mass.
++        const float sigma = 0.5 / 8.0;
++        cues[bin] = float4(FineDirectionalUV(local), importance / (16.0 * TWO_PI * sigma * sigma), 0.5 / (sigma * sigma));
++    }
++    float2 prefix[64];
++    float total = 0.0, peak = 0.0;
++    float coarseTotal = 0.0, coarsePeak = 0.0;
++    [loop]
++    for (uint i = 0u; i < 64u; ++i)
++    {
++        float2 uv = (float2(i & 7u, i >> 3u) + 0.5) / 8.0;
++        float3 direction = DirectionalOctDirection(uv, basis);
++        float coarse;
++        if (hasPrevious)
++        {
++            float4 previous = _SdfDirectionalPrevious.Load(int3(
++                DirectionalGatherAddress(previousTile, DirectionalGatherBin(direction, previousBasis)), 0));
++            coarse = max(0.0, dot(previous.rgb * _SdfHistoryLightScale.rgb,
++                float3(0.2126, 0.7152, 0.0722)) * previous.a);
++        }
++        else
++            coarse = DirectionalWorldImportance(worldCell, offset, direction);
++        coarseTotal += coarse;
++        coarsePeak = max(coarsePeak, coarse);
++        float cueDensity = 0.0;
++        [loop]
++        for (uint cue = 0u; cue < 16u; ++cue)
++        {
++            float2 delta = uv - cues[cue].xy;
++            cueDensity += cues[cue].z * exp2(-1.442695 * dot(delta, delta) * cues[cue].w);
++        }
++        float importance = 0.5 * (coarse + cueDensity);
++        prefix[i] = float2(importance, 0.0);
++        total += importance;
++        peak = max(peak, importance);
++    }
++    // Sparse endpoints can form a sharp KDE peak even under broad lighting.
++    // Only refine when the filtered radiance itself justifies adaptive strata.
++    if (coarsePeak <= 3.0 * coarseTotal / 64.0 || peak <= 3.0 * total / 64.0)
++        return false;
++    uint4 rects[8];
++    if (!BuildFineDirectionalPartition(prefix, total, peak, rects))
++        return false;
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++        _SdfDirectionalGuideOutput[DirectionalAddress(tile, ray)] = PackFineDirectionalRect(rects[ray],
++            hasPrevious ? DirectionalFineOctScreen : DirectionalFineOctWorld);
++    return true;
++}
++#endif
++
+@@ -187,0 +387,3 @@
++#if defined(VIVID_SDF_FINE_IMPORTANCE)
++void PrepareSdfFineDirectionalGuide(uint3 id : SV_DispatchThreadID)
++#else
+@@ -188,0 +391 @@
++#endif
+@@ -253,0 +457,4 @@
++        #if defined(VIVID_SDF_FINE_IMPORTANCE)
++            if (BuildFineDirectionalGuide(id.xy, position, normal, basis, hasPrevious, previousTile, previousBasis))
++                return;
++        #endif
+@@ -324,0 +532,46 @@
++
++#if defined(VIVID_SDF_FINE_IMPORTANCE)
++RWStructuredBuffer<float4> _SdfFineProposalValidation;
++uint _SdfFineValidationProbeCount;
++uint _SdfFineValidationOffset;
++
++[numthreads(4, 1, 1)]
++void InspectSdfFineDirectionalProposalsCS(uint3 id : SV_DispatchThreadID)
++{
++    if (id.x >= 4u)
++        return;
++    float2 prefix[64];
++    float total = 0.0, peak = 0.0;
++    [loop]
++    for (uint i = 0u; i < 64u; ++i)
++    {
++        uint2 cell = uint2(i & 7u, i >> 3u);
++        float value = 1.0;
++        if (id.x == 1u && all(cell == uint2(5u, 2u))) value += 255.0;
++        if (id.x == 2u && cell.x == 2u) value += 100.0;
++        if (id.x == 3u && all(cell == uint2(1u, 5u))) value += 800.0;
++        if (id.x == 3u && all(cell == uint2(6u, 1u))) value += 200.0;
++        prefix[i] = float2(value, 0.0); total += value; peak = max(peak, value);
++    }
++    uint4 rects[8];
++    bool valid = BuildFineDirectionalPartition(prefix, total, peak, rects);
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++        _SdfFineProposalValidation[id.x * 8u + ray] = valid ? PackFineDirectionalRect(rects[ray], DirectionalFineOctScreen) : -100.0;
++}
++
++[numthreads(8, 1, 1)]
++void InspectSdfFineDirectionalSamplesCS(uint3 id : SV_DispatchThreadID)
++{
++    if (id.x >= _SdfFineValidationProbeCount)
++        return;
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++    {
++        uint bin; float inversePdf;
++        float3 direction = SampleDiffuseProbeRay(uint2(id.x, 0u), ray, ProbeSeed(uint2(id.x, 0u)),
++            float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1), bin, inversePdf);
++        _SdfFineProposalValidation[_SdfFineValidationOffset + id.x * 8u + ray] = float4(direction, inversePdf);
++    }
++}
++#endif

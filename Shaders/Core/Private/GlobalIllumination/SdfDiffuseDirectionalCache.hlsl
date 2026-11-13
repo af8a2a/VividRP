@@ -80,11 +80,21 @@ float DirectionalRandom(uint value)
     return float(HashProbe(value) >> 8u) * (1.0 / 16777216.0);
 }
 
+bool DirectionalUsesFrozenProposals()
+{
+    return (_SdfGatherHistoryDiagnostics & 8388608u) != 0u;
+}
+
+uint DirectionalProposalFrame(uint2 tile)
+{
+    return _SdfDiffuseFrame + (HashProbe(tile.x + tile.y * 65537u) & 31u);
+}
+
 float2 DirectionalTemporalSample(uint2 tile, uint ray, uint seed)
 {
     // Keep independent per-frame sampling by default. Correlated temporal
     // samples remain an Editor experiment until regional energy is validated.
-    if ((_SdfGatherHistoryDiagnostics & 262144u) == 0u)
+    if ((_SdfGatherHistoryDiagnostics & 262144u) == 0u && !DirectionalUsesFrozenProposals())
     {
         uint sampleSeed = seed ^ (0xb5297a4du * (ray + 1u));
         return float2(DirectionalRandom(sampleSeed), DirectionalRandom(sampleSeed ^ 0x68e31da4u));
@@ -92,8 +102,10 @@ float2 DirectionalTemporalSample(uint2 tile, uint ray, uint seed)
 
     // A digitally shifted 2D Sobol net stratifies both dimensions over time.
     // Scramble each probe/ray independently, while sharing the sequence between
-    // screen and SDF tracing. No short frame cycle or per-frame rotation.
-    uint index = _SdfDiffuseFrame ^ (_SdfDiffuseFrame >> 1u);
+    // screen and SDF tracing. The blocked experiment renews its digital shift
+    // after each fixed-proposal net, so it never repeats a short frame cycle.
+    uint temporalFrame = DirectionalUsesFrozenProposals() ? DirectionalProposalFrame(tile) & 31u : _SdfDiffuseFrame;
+    uint index = temporalFrame ^ (temporalFrame >> 1u);
     uint second = index;
     second ^= (second & 0xaaaaaaaau) >> 1u;
     second ^= (second & 0xccccccccu) >> 2u;
@@ -101,6 +113,8 @@ float2 DirectionalTemporalSample(uint2 tile, uint ray, uint seed)
     second ^= (second & 0xff00ff00u) >> 8u;
     second ^= (second & 0xffff0000u) >> 16u;
     uint scramble = HashProbe(tile.x + tile.y * 65537u) ^ (0xb5297a4du * (ray + 1u));
+    if (DirectionalUsesFrozenProposals())
+        scramble ^= HashProbe((DirectionalProposalFrame(tile) >> 5u) ^ 0x27d4eb2du);
     uint2 sample = uint2(reversebits(index), reversebits(second))
         ^ uint2(HashProbe(scramble), HashProbe(scramble ^ 0x68e31da4u));
     return float2(sample >> 8u) * (1.0 / 16777216.0);

@@ -9,19 +9,26 @@ using VividRP.Runtime.RenderPass.Core;
 using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-    // compare, reference, reference-sdf, reference-sobol, or uniform-isolation.
-    const string experiment = "compare";
+    // compare, blocked, reference, reference-sdf, reference-sobol, reference-blocked, or uniform-isolation.
+    string experiment = "blocked";
+    bool blocked = experiment.Contains("blocked", StringComparison.Ordinal);
+    bool confirmation = experiment == "reference-confirm-blocked";
+    string candidate = blocked ? "blocked" : "sobol";
     bool reference = experiment.StartsWith("reference", StringComparison.Ordinal);
     bool referenceSdf = experiment == "reference-sdf";
-    bool referenceSobol = experiment == "reference-sobol";
+    bool referenceSobol = experiment == "reference-sobol" || experiment == "reference-blocked";
     bool isolateUniform = experiment == "uniform-isolation";
     bool scroll = false;
-    string output = "E:/VividRP_Reborn/Logs/TemporalSampling-20261113/" + (experiment == "compare" ? "capture-imported" : experiment);
+    string output = "E:/VividRP_GI_Evidence/" + (confirmation ? "BlockedTemporalConfirmation-20261113/"
+        : blocked ? "BlockedTemporalSampling-20261113/" : "TemporalSamplingCovered-20261113/")
+        + (experiment == "compare" ? "capture-imported" : experiment);
     const int warmup = 512, captureStride = 1;
-    int measuredFrames = reference ? 2048 : isolateUniform ? 1024 : 256;
+    int measuredFrames = confirmation ? 8192 : reference ? 2048 : isolateUniform ? 1024 : 256;
+    int frameBase = confirmation ? 15731 : reference ? 7919 : 1733;
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags priv = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
     if (System.IO.Directory.Exists(output)) throw new InvalidOperationException("Refusing to overwrite " + output);
+    System.IO.Directory.CreateDirectory(output);
     var scene = SceneManager.GetSceneByPath(EmissiveCornellBoxSceneBuilder.ScenePath);
     if (!scene.isLoaded) throw new InvalidOperationException("Open the emissive Cornell fixture first.");
     var roots = scene.GetRootGameObjects();
@@ -53,7 +60,7 @@ using VividRP.Editor.Tools;
     string arm = "";
     object pass = null;
 
-    bool Sample() => active && frame >= warmup && (frame - warmup) % captureStride == 0;
+    bool Sample() => active && arm != "prime" && frame >= warmup && (frame - warmup) % captureStride == 0;
     object Field(string name) => type.GetField(name, priv).GetValue(pass);
     Texture Resolve(string name)
     {
@@ -89,7 +96,7 @@ using VividRP.Editor.Tools;
     void Begin(ScriptableRenderContext context, Camera current)
     {
         if (!active || current != camera) return;
-        hooks["EditorGatherFrameOverride"].SetValue(null, (reference ? 7919 : 1733) + frame);
+        hooks["EditorGatherFrameOverride"].SetValue(null, frameBase + frame);
         float t = scroll && frame >= warmup ? Mathf.Sin(2f * Mathf.PI * ((frame - warmup) % 128) / 128f) : 0f;
         camera.transform.SetPositionAndRotation(originalPose.Item1 + originalPose.Item2 * new Vector3(.28f*t, 0f, .06f*t),
             originalPose.Item2 * Quaternion.Euler(0f, -7f*t, 0f));
@@ -102,7 +109,7 @@ using VividRP.Editor.Tools;
         if ((kind == LogType.Error || kind == LogType.Exception || kind == LogType.Assert) && errors.Count < 12) errors.Add(message);
     }
     Action<ComputePassContext, int, Texture> stage = (context, index, texture) => {
-        if (Sample() && context.Get<VividCameraData>().camera == camera)
+        if (!reference && Sample() && context.Get<VividCameraData>().camera == camera)
             ReadPixels((CommandBuffer)nativeCmd.GetValue(context.cmd), texture, index == 0 ? "resolved" : "pixel-temporal");
     };
     Action<ComputePassContext, Texture, Texture, Texture> trace = (context, sources, lighting, geometry) => {
@@ -111,10 +118,15 @@ using VividRP.Editor.Tools;
         var cmd = (CommandBuffer)nativeCmd.GetValue(context.cmd);
         if (geometry.width != 120 || geometry.height != 136 || lighting.width != 1920 || lighting.height != 1080)
             throw new InvalidOperationException("The experiment must remain 16px / 8 rays at 1920x1080.");
-        ReadRegion(cmd, geometry, "probe-geometry", 48, 59, 24, 7);
-        ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
-        ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
-        ReadRegion(cmd, Resolve("m_FilteredProbes"), "sh", 0, 59, 2640, 7);
+        if (!reference)
+        {
+            ReadRegion(cmd, geometry, "probe-geometry", 48, 59, 24, 7);
+            ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
+            ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
+            ReadRegion(cmd, Resolve("m_FilteredProbes"), "sh", 0, 59, 2640, 7);
+            if (blocked && (bool)Field("m_FrozenGuideActive"))
+                ReadRegion(cmd, Resolve("m_CurrentProposal"), "proposal", 48 * 8, 59, 24 * 8, 7);
+        }
         if (isolateUniform)
         {
             foreach (var region in new[] { ("floor", 54, 5, 12, 10), ("right", 87, 28, 10, 12) })
@@ -141,17 +153,19 @@ using VividRP.Editor.Tools;
             radioTargetOrders = Field("m_RadiosityTargetOrders"), radioCursor = Field("m_RadiosityCursor"),
             directionalCache = Field("m_DirectionalCache"), restir = Field("m_RestirGather"),
             guide = Field("m_DirectionalGuide"), hierarchical = Field("m_DirectionalHierarchicalGuide"),
+            frozenProposal = Field("m_FrozenGuideActive"), proposalHistoryValid = Field("m_ProposalHistoryValid"),
+            samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
             rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
     Action<ComputePassContext, Texture, Texture, Texture, Texture> linear = (context, lighting, depth, rt0, rt1) => {
         if (!active || context.Get<VividCameraData>().camera != camera) return;
         if (Sample()) ReadPixels((CommandBuffer)nativeCmd.GetValue(context.cmd), lighting, "final");
-        if (++frame >= warmup + measuredFrames) active = false;
+        if (++frame >= (arm == "prime" ? warmup : warmup + measuredFrames)) active = false;
     };
     async System.Threading.Tasks.Task Run(string name, SdfDiffuseTraceMode mode, bool legacy, bool moving = false)
     {
         arm = name; frame = 0; scroll = moving;
-        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, legacy ? 0 : 262144);
+        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, legacy ? 0 : blocked ? 8388608 : 262144);
         System.IO.Directory.CreateDirectory(output + "/" + arm);
         gi.traceMode.Override(mode);
         gi.surfaceCacheBounceOrders.Override(8);
@@ -170,6 +184,8 @@ using VividRP.Editor.Tools;
         for (int i = 0; pending > 0 && i < 50; i++) await System.Threading.Tasks.Task.Delay(20);
         if (active || pending > 0 || errors.Count > 0) throw new InvalidOperationException(name + " failed at " + frame + ": " + string.Join("\n", errors));
         System.IO.File.WriteAllText(output + "/progress.txt", name + " complete");
+        System.IO.File.WriteAllText(output + "/capture-progress.json", Newtonsoft.Json.JsonConvert.SerializeObject(
+            new { completedArm = name, complete = false, records, errors }, Newtonsoft.Json.Formatting.Indented));
     }
     EditorApplication.LockReloadAssemblies();
     try
@@ -195,25 +211,33 @@ using VividRP.Editor.Tools;
         hooks["EditorRecordProbeAnchorDiagnostics"].SetValue(null, true);
         RenderPipelineManager.beginCameraRendering += Begin;
         Application.logMessageReceived += Log;
+        await Run("prime", SdfDiffuseTraceMode.Hybrid, true);
         if (isolateUniform)
         {
             await Run("white-uniform-sdf", SdfDiffuseTraceMode.SdfOnly, true);
             await Run("sobol-uniform-sdf", SdfDiffuseTraceMode.SdfOnly, false);
         }
+        else if (confirmation)
+        {
+            await Run("white-reference-hybrid", SdfDiffuseTraceMode.Hybrid, true);
+            await Run("blocked-reference-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            await Run("white-reference-sdf", SdfDiffuseTraceMode.SdfOnly, true);
+            await Run("blocked-reference-sdf", SdfDiffuseTraceMode.SdfOnly, false);
+        }
         else if (reference && referenceSobol)
         {
-            await Run("sobol-reference-hybrid", SdfDiffuseTraceMode.Hybrid, false);
-            await Run("sobol-reference-sdf", SdfDiffuseTraceMode.SdfOnly, false);
+            await Run(candidate + "-reference-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            await Run(candidate + "-reference-sdf", SdfDiffuseTraceMode.SdfOnly, false);
         }
         else if (reference) await Run("white-reference", referenceSdf ? SdfDiffuseTraceMode.SdfOnly : SdfDiffuseTraceMode.Hybrid, true);
         else
         {
             await Run("white-hybrid", SdfDiffuseTraceMode.Hybrid, true);
-            await Run("sobol-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            await Run(candidate + "-hybrid", SdfDiffuseTraceMode.Hybrid, false);
             await Run("white-sdf", SdfDiffuseTraceMode.SdfOnly, true);
-            await Run("sobol-sdf", SdfDiffuseTraceMode.SdfOnly, false);
+            await Run(candidate + "-sdf", SdfDiffuseTraceMode.SdfOnly, false);
             await Run("white-motion", SdfDiffuseTraceMode.Hybrid, true, true);
-            await Run("sobol-motion", SdfDiffuseTraceMode.Hybrid, false, true);
+            await Run(candidate + "-motion", SdfDiffuseTraceMode.Hybrid, false, true);
         }
         return new { success = true, output, errors };
     }
@@ -232,7 +256,9 @@ using VividRP.Editor.Tools;
         UnityEngine.Object.DestroyImmediate(profile);
         try
         {
+            System.IO.Directory.CreateDirectory(output);
             System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
+                experiment, candidate, frameBase,
                 width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
                 scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
                 row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

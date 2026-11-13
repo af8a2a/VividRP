@@ -6,6 +6,8 @@
 
 uint _SdfDirectionalWorldGuide;
 uint _SdfDirectionalHasHistory;
+uint _SdfDirectionalHasProposalHistory;
+Texture2D<float4> _SdfDirectionalProposalHistory;
 Texture2D<float4> _SdfDirectionalPrevious;
 
 RWTexture2D<float4> _SdfDirectionalGuideOutput;
@@ -188,6 +190,23 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
     uint2 grid = DirectionalGrid();
     if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
         return;
+
+    // A proposal is fixed before this block's independent digital shift is used.
+    // Retaining a partition is safe across geometry changes: it only steers a
+    // full-support proposal; every ray still traces the current scene.
+    if (DirectionalUsesFrozenProposals() && (DirectionalProposalFrame(id.xy) & 31u) != 0u)
+    {
+        [unroll]
+        for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
+        {
+            uint2 address = DirectionalAddress(id.xy, ray);
+            // A lost history starts with a fixed cosine proposal, never a
+            // freshly adaptive proposal correlated with this block's samples.
+            _SdfDirectionalGuideOutput[address] = _SdfDirectionalHasProposalHistory != 0u
+                ? _SdfDirectionalProposalHistory.Load(int3(address, 0)) : float4(ray, 0.0, 0.0, 0.0);
+        }
+        return;
+    }
 
     float3 position, normal;
     uint2 previousTile = 0u;

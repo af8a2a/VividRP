@@ -50,7 +50,59 @@ def paired(before, after):
             "block_bootstrap_variance_reduction_95_percent": np.quantile(reduction, [.025, .975]).tolist()}
 
 
-def analyze(root, linear):
+def probe_hash(value):
+    value = np.asarray(value, np.uint32)
+    value = (value ^ (value >> 16)) * np.uint32(0x7feb352d)
+    value = (value ^ (value >> 15)) * np.uint32(0x846ca68b)
+    return value ^ (value >> 16)
+
+
+def verify_blocked_proposals(manifest, files, frames, arms):
+    report = {}
+    for arm in (a for a in arms if a.startswith("blocked-")):
+        previous = None
+        fixed = changed = octahedral = descriptors = 0
+        for frame in frames:
+            record = files[arm, frame, "proposal"]
+            data = read(record).reshape(record["height"], record["width"] // 8, 8, 4)
+            code, subdivision = data[..., 0].astype(int), data[..., 3].astype(int)
+            oct_ray = subdivision <= -3
+            oct_probe = oct_ray.all(-1)
+            assert np.all(oct_probe | ~oct_ray.any(-1)), "Mixed proposal charts"
+            octahedral += int(oct_probe.sum())
+            descriptors += int(oct_probe.size)
+            area = (1 << ((code >> 4) & 1)) * (1 << ((code >> 5) & 1))
+            mass = np.where(oct_ray, .5 * area, np.where(subdivision < 0, .5, np.where(subdivision > 0, 2., 1.)))
+            assert np.all(mass.sum(-1) == 8), "Inverse PDF mass drift"
+            occupancy = np.zeros((*oct_probe.shape, 16), int)
+            for ray in range(8):
+                c, s = code[..., ray], subdivision[..., ray]
+                for cell in range(16):
+                    covered = ((cell % 4 >= (c & 3)) & (cell % 4 < (c & 3) + (1 << ((c >> 4) & 1)))
+                               & (cell // 4 >= ((c >> 2) & 3)) & (cell // 4 < ((c >> 2) & 3) + (1 << ((c >> 5) & 1))))
+                    legacy = np.where(s < 0, (cell == 2*c + (-s-1)),
+                                      (cell//2 == c) | ((s > 0) & (cell//2 == s-1)))
+                    occupancy[..., cell] += np.where(oct_probe, covered, legacy)
+            assert np.all(occupancy == 1), "Proposal overlap or lost hemisphere support"
+            yy, xx = np.mgrid[record["y"]:record["y"]+record["height"],
+                              record["x"]//8:(record["x"]+record["width"])//8]
+            phase = probe_hash(xx + yy * 65537) & 31
+            # Older manifests used this fixed phase without recording it explicitly.
+            base = manifest.get("frameBase", 1733)
+            boundary = ((base + frame + phase) & 31) == 0
+            if previous is not None:
+                assert np.array_equal(data[~boundary], previous[~boundary]), "Proposal changed within a QMC block"
+                fixed += int((~boundary).sum())
+                changed += int((np.any(data != previous, axis=(-1, -2)) & boundary).sum())
+            previous = data
+        report[arm] = {"fixed_probe_frames_checked": fixed, "boundary_updates": changed,
+                       "octahedral_probe_frames": octahedral, "probe_frames": descriptors,
+                       "full_support_and_mass": True}
+    assert report, "Blocked proposal data was not captured"
+    return report
+
+
+def analyze(root, linear, candidate="sobol"):
     manifest = json.loads((root / "capture.json").read_text())
     assert not manifest["errors"] and manifest["spacing"] == 16 and manifest["rays"] == 8
     records = manifest["records"]
@@ -63,6 +115,10 @@ def analyze(root, linear):
         s = record["state"]
         assert s["directionalCache"] and not s["restir"] and s["order"] == 8 and s["batch"] == 32, s
         assert s["radioSamples"] == 64 and s["sun"][:3] == [0, 0, 0] and s["sky"] == 0
+        if candidate == "blocked":
+            expected = record["arm"].startswith("blocked-")
+            assert s["frozenProposal"] == expected and s["samplingFlags"] == (8388608 if expected else 0)
+            if expected: assert s["proposalHistoryValid"]
     get = lambda a, f, tag: read(files[a, f, tag])
     stack = lambda a, tag: np.stack([get(a, f, tag) for f in frames])
     ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
@@ -105,13 +161,13 @@ def analyze(root, linear):
             report["arms"][arm]["probes"][stage] = metrics(y_values[:, valid])
     assert len(set(source_hashes.values())) == 1, "Source differs between arms"
     for mode in ["hybrid", "sdf"]:
-        b, a = "white-" + mode, "sobol-" + mode
+        b, a = "white-" + mode, candidate + "-" + mode
         assert all(np.array_equal(matrices[b, f], matrices[a, f]) for f in frames)
         report["pairs"][mode] = {stage + "-" + region: paired(y, all_y[a, stage, region])
                                   for (arm, stage, region), y in all_y.items() if arm == b}
     report["motion"] = {}
     motion_geometry = []
-    for arm in ["white-motion", "sobol-motion"]:
+    for arm in ["white-motion", candidate + "-motion"]:
         vp = np.stack([matrices[arm, f] for f in frames])
         inverse = np.linalg.inv(vp)
         geometry = stack(arm, "geometry-motion")[..., 0]
@@ -157,13 +213,15 @@ def analyze(root, linear):
                                   "matched_pose_cycle_delta_absolute_p99": float(np.quantile(np.abs(cycle_delta), .99)),
                                   "matched_pose_cycle_delta_mean": float(cycle_delta.mean())}
     assert np.array_equal(*motion_geometry), "A/B motion geometry differs"
-    assert all(np.array_equal(matrices["white-motion", f], matrices["sobol-motion", f]) for f in frames)
+    assert all(np.array_equal(matrices["white-motion", f], matrices[candidate + "-motion", f]) for f in frames)
+    if candidate == "blocked":
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms)
     (root.parent / "analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report["pairs"], indent=2))
     print(json.dumps(report["motion"], indent=2))
 
 
-def analyze_references(root, linear):
+def analyze_references(root, linear, candidate="sobol", control_root=None):
     """Long-sequence energy equivalence to the unchanged filtered pipeline.
 
     This is an independent frame sequence, not an independent physical renderer.
@@ -174,8 +232,11 @@ def analyze_references(root, linear):
     report = {"scope": "2048-frame regional means; same frozen Surface Cache, independent frame phase; not physical truth",
               "diagnostic_equivalence_limit_percent": 1.0, "arms": {}, "pairs": {}}
     arrays = {}
-    for folder in ["reference", "reference-sdf", "reference-sobol"]:
-        manifest = json.loads((root / folder / "capture.json").read_text())
+    control_root = control_root or root
+    folders = [("reference", control_root / "reference"), ("reference-sdf", control_root / "reference-sdf"),
+               ("reference-" + candidate, root / ("reference-" + candidate))]
+    for folder, directory in folders:
+        manifest = json.loads((directory / "capture.json").read_text())
         assert not manifest["errors"] and manifest["measuredFrames"] == 2048
         assert manifest["spacing"] == 16 and manifest["rays"] == 8
         assert not manifest["scene_dirty_before"] and not manifest["scene_dirty_after"]
@@ -202,7 +263,7 @@ def analyze_references(root, linear):
     draws = np.random.default_rng(20261113).integers(0, 16, (4096, 16))
     all_passed = True
     for mode, before in [("hybrid", "reference/white-reference"), ("sdf", "reference-sdf/white-reference")]:
-        after = "reference-sobol/sobol-reference-" + mode
+        after = "reference-" + candidate + "/" + candidate + "-reference-" + mode
         report["pairs"][mode] = {}
         for region in ["ceiling", "floor", "right"]:
             b, a = arrays[before, region], arrays[after, region]
@@ -275,10 +336,12 @@ if __name__ == "__main__":
     parser.add_argument("--linear", type=Path, default=Path("E:/VividRP_Reborn/Logs/LinearGI-20261113/linear"))
     parser.add_argument("--reference-only", action="store_true")
     parser.add_argument("--uniform-only", action="store_true")
+    parser.add_argument("--candidate", choices=["sobol", "blocked"], default="sobol")
+    parser.add_argument("--control-root", type=Path, help="Frozen-source white reference root from a previous capture")
     args = parser.parse_args()
     if args.uniform_only:
         analyze_uniform(args.capture, args.linear)
     elif args.reference_only:
-        analyze_references(args.capture, args.linear)
+        analyze_references(args.capture, args.linear, args.candidate, args.control_root)
     else:
-        analyze(args.capture, args.linear)
+        analyze(args.capture, args.linear, args.candidate)

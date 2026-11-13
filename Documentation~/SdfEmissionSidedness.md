@@ -64,10 +64,11 @@ E:/VividRP_Reborn/Logs/EmissionSidedness-20261113/surface-cache-before.asset
 - 编辑器运行期间未启动 Unity Test Framework。新增／更新的回归项位于 `SdfRadiosityBudgetTests` 和 `VividGPUDrivenBufferSetTests`，可在允许运行测试的会话中手动执行。
 
 ```powershell
-# 重跑前将捕帧脚本 output 改为新的目录。
+# 输出到项目外的 VividRP_GI_Evidence/，每次自动创建唯一目录。
 unity command script eval --project-path E:/VividRP_Reborn --file E:/VividRP_Reborn/Packages/VividRP/Tools~/Diagnostics/EmissionSidednessCapture.cs --timeout 4500 --format json
 unity command script eval --project-path E:/VividRP_Reborn --file E:/VividRP_Reborn/Packages/VividRP/Tools~/Diagnostics/EmissionTraceConformance.cs --timeout 180 --format json
-python -B Tools~/Diagnostics/EmissionSidednessExperiment.py
+# 把下一行的路径替换为捕帧返回的 evidenceRoot。
+python -B Tools~/Diagnostics/EmissionSidednessExperiment.py --root E:/VividRP_GI_Evidence/EmissionSidedness-YYYYMMDD-HHmmss-fff
 ```
 
 `analysis.json` 记录配对能量、背面样本和覆盖率；`cache-diff.json` 记录卡片比对；`trace-conformance.json` 记录实际 Radiosity／远场入口；`final-verification.json` 记录布局、分配及恢复状态。`emission-sidedness.png` 使用相同线性标尺显示零阶顶灯邻域。
@@ -77,3 +78,34 @@ python -B Tools~/Diagnostics/EmissionSidednessExperiment.py
 本轮验证范围是固定机位的短序列。运动时跨材质侧的历史拒绝仍应单独验证；其他旧缓存和 Sponza 本轮未重捕获。
 
 交接时已确认：诊断回调为空、强制双面开关关闭、frame override=-1，配置与有效 bias 均恢复 0.04，原场景保持不脏，正常 Radiosity 已恢复 8 阶／32 批。
+
+## 当前版本复验
+
+原 `Logs/EmissionSidedness-20261113/` 中的历史原始数据当前缺失，上述表格保留为当时记录。复验工具现在将原始数据写入项目外的唯一目录，并在每组完成后保存清单；分析器拒绝未完成的捕帧。
+
+复验同时按 Screen Hit / SDF Hit 区分天花板的有效黑命中，检查全图材质背面样本的 RGB、命中类别与覆盖率。`EmissionTraceConformance.cs` 在独立材质缓冲上运行 Cull Off / Front / Back，直接调用生产 Radiosity 和远场追踪入口；验证后确认场景发光值不变。GPU 共享结构逐字段检查仍为节点 48 B、材质 64 B。
+
+复验运行于 `23adf215` 的渲染实现（包含后续的 covered pixel history 修正），未重新修改四路着色或场景资产。仍为原机位、16 px / 8 rays、每组预热 512 帧，32 帧中采集 8 个样本。
+
+| 条件 | 天花板背面高亮命中：双面对照 → 单面 | 全图有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,532 / 35,532 | −0.155% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.066% |
+| SDF Only，零阶，5 mm | 1,935 → 0 | 8,737 / 8,737 | 0.000% |
+
+Hybrid 零阶的全图有效黑命中包含 Screen Hit 31,603 条、SDF Hit 3,929 条；仅天花板区域分别为 6,258 和 617 条。全部材质背面样本 RGB 为零，保留原有效类别与非零覆盖，零阶源计数与有效射线数匹配。正面发光命中辐亮度仍为 200.000046；四组均通过本次短序列的地面均值 ±1% 检查。默认偏移下，零阶最终天花板仍有约 0.000219 的重建残留，原始命中光照为零；5 mm 压力组最终均值为零。
+
+生产 Radiosity / Far Probe 三模式矩阵通过：Off 两侧均为 200.00006；Front 为原正面 0、原背面 200.00006；Back 为原正面 200.00006、原背面 0。黑命中的实例标识仍为 9、远场距离仍为正（约 1.95209 / 2.02209 m）。实际 GPU 数据与布局检查通过，场景发光材质未被更改。诊断 shader 无编译错误，保留两条 `floating point division by zero` 静态分析警告；捕帧无运行错误。
+
+本次原始数据与分析：
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-145618-928/capture/capture.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-145618-928/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-145618-928/emission-sidedness.png
+E:/VividRP_GI_Evidence/EmissionSidedness-20261113-145618-928/final-verification.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261113-150649-654/trace-conformance.json
+```
+
+复验后确认回调为空、诊断 flags=0、强制双面关闭、frame override=-1、bias=0.04，正常 Radiosity 恢复 8 阶 / 32 批，场景未脏。未运行 Unity Test Framework（Editor 正在使用），未测量 GPU 耗时；本次不包含移动机位或旧场景缓存迁移。

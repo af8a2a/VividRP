@@ -15,6 +15,7 @@ MATERIAL_BACKFACE = 2048
 
 def run(root):
     capture = json.loads((root / "capture/capture.json").read_text())
+    assert capture.get("complete", True), "Incomplete capture; see completedArm and errors"
     assert not capture["errors"] and capture["spacing"] == 16 and capture["rays"] == 8
     assert capture["camera"]["position"] == [0, 1.5, -3.8] and capture["camera"]["vertical_fov"] == 42
     fixture = json.loads(FIXTURE.read_text())
@@ -25,6 +26,7 @@ def run(root):
     refined_path = root / "capture-fixed-geometry/capture.json"
     if refined_path.exists():
         refined = json.loads(refined_path.read_text())
+        assert refined.get("complete", True), "Incomplete refined capture"
         assert not refined["errors"] and refined["camera"] == capture["camera"]
         records = [r for r in records if not r["arm"].startswith("fixed-")] + refined["records"]
     files = {(r["arm"], r["frame"], r["tag"]): r for r in records if "tag" in r}
@@ -34,7 +36,9 @@ def run(root):
     def read(arm, frame, tag):
         r = files[(arm, frame, tag)]
         dtype = {"R16G16B16A16_SFloat": "<f2", "R32G32B32A32_SFloat": "<f4"}[r["format"]]
-        return np.fromfile(r["path"], dtype).reshape(r["height"], r["width"], 4).astype(np.float32)
+        value = np.fromfile(r["path"], dtype).reshape(r["height"], r["width"], 4).astype(np.float32)
+        assert np.isfinite(value).all(), (arm, frame, tag, "Non-finite GPU result")
+        return value
 
     report = {"contract": "scene-linear consumed E/pi; no exposure or gain fitting",
               "scope": "fixed camera, eight samples four frames apart after 512 warmup frames",
@@ -49,6 +53,9 @@ def run(root):
         for row in rows:
             s = row["state"]
             assert s["rays"] == 8 and s["spacing"] == 16 and s["forceTwoSided"] == legacy
+            assert s["directionalCache"] and not s["restir"]
+            assert s["traceMode"] == ("SdfOnly" if "sdf" in arm else "Hybrid")
+            assert abs(s["rayBias"] - (.005 if "stress" in arm else .04)) < 1e-6
             assert s["sky"] == 0 and s["sun"][:3] == [0, 0, 0]
             if "order8" in arm: assert s["order"] == 8 and s["batch"] == 32
         buffer = surfaces[arm]
@@ -62,6 +69,8 @@ def run(root):
         probe_values = {key: [] for key in masks}
         mean_image = np.zeros(ids.shape, np.float32)
         bright_back = black_count = black_covered = black_wrong_rgb = 0
+        black_by_path = {"screen": 0, "sdf": 0}
+        all_black_count = all_black_covered = all_black_wrong_rgb = 0
         ray_count = 0
         coverage_mismatch = 0
         front_radiances = []
@@ -93,6 +102,12 @@ def run(root):
             rejected = cm & ((flags & MATERIAL_BACKFACE) != 0)
             black_count += int(rejected.sum())
             valid = ((flags & 7) == 1) | ((flags & 7) == 2)
+            for path, source in [("screen", 1), ("sdf", 2)]:
+                black_by_path[path] += int((rejected & ((flags & 7) == source)).sum())
+            all_rejected = (flags & MATERIAL_BACKFACE) != 0
+            all_black_count += int(all_rejected.sum())
+            all_black_covered += int((all_rejected & valid & (lighting[..., 3:4] > 0)).sum())
+            all_black_wrong_rgb += int((all_rejected & (np.max(abs(rays[..., :3]), -1) != 0)).sum())
             black_covered += int((rejected & valid & (lighting[..., 3:4] > 0)).sum())
             black_wrong_rgb += int((rejected & (np.max(abs(rays[..., :3]), -1) != 0)).sum())
             sources = read(arm, frame, "sources")
@@ -102,6 +117,7 @@ def run(root):
                 front = probe_masks["floor"][..., None] & (ray_y > 100) & (direction[..., 1] > 0)
                 front_radiances.extend(ray_y[front].tolist())
         assert black_wrong_rgb == 0 and black_count == black_covered and coverage_mismatch == 0
+        assert all_black_wrong_rgb == 0 and all_black_count == all_black_covered
         if not legacy: assert bright_back == 0, (arm, bright_back)
         if not legacy and "order0" in arm: assert black_count > 0, "No covered black samples exercised"
         if "order0" in arm:
@@ -112,7 +128,11 @@ def run(root):
                                for key, value in values.items()},
                    "ceiling_rays": ray_count, "bright_back_hits": bright_back,
                    "material_black_hits": black_count, "material_black_valid_and_covered": black_covered,
+                   "ceiling_material_black_hits_by_path": black_by_path,
+                   "all_material_black_hits": all_black_count,
+                   "all_material_black_valid_and_covered": all_black_covered,
                    "source_coverage_mismatches": coverage_mismatch,
+                   "floor_front_radiance_samples": len(front_radiances),
                    "floor_front_radiance_range": [min(front_radiances), max(front_radiances)] if front_radiances else None}
         report["arms"][arm] = summary
         images[arm] = mean_image
@@ -123,6 +143,8 @@ def run(root):
         report["pairs"][kind] = {"final_mean_change_percent": changes,
             "floor_raw_mean_change_percent": 100 * (b["floor"]["probe_raw_mean_y"] / max(a["floor"]["probe_raw_mean_y"], 1e-8) - 1),
             "floor_within_1_percent": abs(changes["floor"]) <= 1.0}
+    assert report["arms"]["fixed-hybrid-order0"]["ceiling_material_black_hits_by_path"]["screen"] > 0
+    assert report["arms"]["fixed-sdf-order0"]["ceiling_material_black_hits_by_path"]["sdf"] > 0
     (root / "analysis.json").write_text(json.dumps(report, indent=2))
     assert all(pair["floor_within_1_percent"] for pair in report["pairs"].values()), "Floor mean energy gate failed; see analysis.json"
     plot(root, images, masks)
@@ -147,5 +169,5 @@ def plot(root, images, masks):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("E:/VividRP_Reborn/Logs/EmissionSidedness-20261113"))
+    parser.add_argument("--root", type=Path, required=True, help="evidenceRoot returned by EmissionSidednessCapture.cs")
     run(parser.parse_args().root)

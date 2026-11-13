@@ -9,7 +9,10 @@ using VividRP.Runtime.RenderPass.Core;
 using VividRP.Editor.Tools;
 {
     float traceBias = 0.04f;
-    const string output = "E:/VividRP_Reborn/Logs/EmissionSidedness-20261113/capture";
+    // Keep evidence outside Unity's disposable Logs/ and use a fresh directory per run.
+    string evidenceRoot = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..",
+        "VividRP_GI_Evidence", "EmissionSidedness-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff")));
+    string output = System.IO.Path.Combine(evidenceRoot, "capture");
     const int warmup = 512, measuredFrames = 32, captureStride = 4;
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags priv = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
@@ -18,31 +21,38 @@ using VividRP.Editor.Tools;
     if (!scene.isLoaded) throw new InvalidOperationException("Open the emissive Cornell fixture first.");
     var roots = scene.GetRootGameObjects();
     var camera = roots.SelectMany(o => o.GetComponentsInChildren<Camera>()).Single();
+    if (Vector3.Distance(camera.transform.position, new Vector3(0, 1.5f, -3.8f)) > 1e-5f
+        || Quaternion.Angle(camera.transform.rotation, Quaternion.identity) > 1e-4f
+        || Mathf.Abs(camera.fieldOfView - 42f) > 1e-5f)
+        throw new InvalidOperationException("The Cornell comparison requires the reference camera pose and 42 degree vertical FOV.");
+    bool wasDirty = scene.isDirty;
     var volume = roots.SelectMany(o => o.GetComponentsInChildren<Volume>()).Single();
     var extra = camera.GetComponent<VividAdditionalCameraData>();
     var previousProfile = volume.HasInstantiatedProfile() ? volume.profile : null;
     var previousScene = SceneManager.GetActiveScene();
     var cameras = Camera.allCameras.Select(c => (camera: c, enabled: c.enabled)).ToArray();
+    var type = typeof(SdfDiffuseGatherPass);
+    var sceneType = type.Assembly.GetType("VividRP.Runtime.GPUDriven.Meshlets.VividMeshSdfGpuScene");
+    var forceSide = sceneType.GetField("EditorForceTwoSidedEmission", stat);
+    var previousForce = forceSide.GetValue(null);
+    var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics", "EditorGatherHistoryDiagnostics" }
+        .ToDictionary(n => n, n => type.GetField(n, stat));
+    var previousHooks = hooks.ToDictionary(p => p.Key, p => p.Value.GetValue(null));
+    foreach (string name in new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture" })
+        if (previousHooks[name] != null) throw new InvalidOperationException("Another GI capture is active: " + name);
     var profile = ScriptableObject.CreateInstance<VolumeProfile>();
     foreach (var component in (previousProfile ?? volume.sharedProfile).components)
         profile.components.Add(UnityEngine.Object.Instantiate(component));
     profile.TryGet<SdfDiffuseGISettings>(out var gi);
     profile.TryGet<AutoExposure>(out var exposure);
     if (gi == null || exposure == null) throw new InvalidOperationException("Missing Cornell profile.");
-    var type = typeof(SdfDiffuseGatherPass);
-    var sceneType = type.Assembly.GetType("VividRP.Runtime.GPUDriven.Meshlets.VividMeshSdfGpuScene");
-    var forceSide = sceneType.GetField("EditorForceTwoSidedEmission", stat);
-    var previousForce = forceSide.GetValue(null);
-    var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics" }
-        .ToDictionary(n => n, n => type.GetField(n, stat));
-    var previousHooks = hooks.ToDictionary(p => p.Key, p => p.Value.GetValue(null));
     var nativeCmd = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", priv);
     var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
     var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
     var records = new List<object>();
     var errors = new List<string>();
     int frame = 0, pending = 0;
-    bool active = false;
+    bool active = false, complete = false;
     string arm = "";
     object pass = null;
     object biasPass = null, previousBias = null;
@@ -144,6 +154,17 @@ using VividRP.Editor.Tools;
         for (int i = 0; pending > 0 && i < 50; i++) await System.Threading.Tasks.Task.Delay(20);
         if (active || pending > 0 || errors.Count > 0) throw new InvalidOperationException(name + " failed at " + frame + ": " + string.Join("\n", errors));
         System.IO.File.WriteAllText(output + "/progress.txt", name + " complete");
+        WriteManifest();
+    }
+    void WriteManifest()
+    {
+        System.IO.Directory.CreateDirectory(output);
+        System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
+            complete, completedArm = arm, width = 1920, height = 1080, spacing = 16, rays = 8,
+            warmup, measuredFrames, captureStride, scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
+            row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",
+            camera = new { position = new[] { camera.transform.position.x, camera.transform.position.y, camera.transform.position.z },
+                vertical_fov = camera.fieldOfView }, records, errors }, Newtonsoft.Json.Formatting.Indented));
     }
     EditorApplication.LockReloadAssemblies();
     try
@@ -166,6 +187,7 @@ using VividRP.Editor.Tools;
         hooks["EditorTraceCapture"].SetValue(null, trace);
         hooks["EditorGatherStageCapture"].SetValue(null, null);
         hooks["EditorRecordProbeAnchorDiagnostics"].SetValue(null, false);
+        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, 0);
         RenderPipelineManager.beginCameraRendering += Begin;
         Application.logMessageReceived += Log;
         await Run("legacy-hybrid-order0", SdfDiffuseTraceMode.Hybrid, 0, true);
@@ -176,7 +198,8 @@ using VividRP.Editor.Tools;
         await Run("fixed-hybrid-order8", SdfDiffuseTraceMode.Hybrid, 8, false);
         await Run("legacy-stress-sdf-order0", SdfDiffuseTraceMode.SdfOnly, 0, true, 0.005f);
         await Run("fixed-stress-sdf-order0", SdfDiffuseTraceMode.SdfOnly, 0, false, 0.005f);
-        return new { success = true, output, errors };
+        complete = true;
+        return new { success = true, evidenceRoot, output, errors };
     }
     finally
     {
@@ -194,11 +217,7 @@ using VividRP.Editor.Tools;
         UnityEngine.Object.DestroyImmediate(profile);
         try
         {
-            System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-                width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
-                row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",
-                camera = new { position = new[] { camera.transform.position.x, camera.transform.position.y, camera.transform.position.z },
-                    vertical_fov = camera.fieldOfView }, records, errors }, Newtonsoft.Json.Formatting.Indented));
+            WriteManifest();
         }
         finally { EditorApplication.UnlockReloadAssemblies(); }
     }

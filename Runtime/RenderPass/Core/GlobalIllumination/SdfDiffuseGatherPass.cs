@@ -76,6 +76,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId DirectionalGuideHistoryId = CameraHistoryId.Create("SdfDirectionalFilteredHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
         private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistoryWithCoverage");
+        private static readonly CameraHistoryId CoveredPixelHistoryId = CameraHistoryId.Create("SdfScreenProbeCoveredPixelHistory");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
         private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenLambertRadianceHistory");
@@ -2369,7 +2370,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_CurrentPixelLighting.Resize(m_Width, m_Height);
             m_CurrentPixelGeometry.Resize(m_Width, m_Height);
-            CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelHistoryId,
+            // Native Screen Probe stores premultiplied energy; other gather
+            // paths retain their existing conditional-radiance history format.
+            var lightingHistoryId = m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0
+                ? CoveredPixelHistoryId : PixelHistoryId;
+            CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, lightingHistoryId,
                 m_PreviousPixelLighting, m_CurrentPixelLighting, m_CurrentPixelLighting.desc, out m_PixelHistory,
                 m_RestirPixelIntegration ? AccessFlags.ReadWrite : AccessFlags.Write);
             CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelGeometryHistoryId,

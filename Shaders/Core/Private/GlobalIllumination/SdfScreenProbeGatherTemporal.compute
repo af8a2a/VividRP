@@ -3,6 +3,7 @@
 #pragma kernel TemporalSdfRestirDiffuseGI VIVID_SDF_RESTIR_PIXEL_HISTORY
 #pragma kernel TemporalSdfRestirVariance VIVID_SDF_RESTIR_PIXEL_HISTORY VIVID_SDF_RESTIR_VARIANCE_HISTORY
 #pragma kernel InspectSdfHistoryQuantizationCS
+#pragma kernel InspectSdfCoveredHistoryEnergyCS VIVID_SDF_SCREEN_PROBE_TEMPORAL
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
@@ -35,6 +36,18 @@ float2 UnpackScreenProbePixelHistory(float packed)
 {
     uint bits = f32tof16(packed) - 0x0400u;
     return float2(1.0 + ((bits >> 8u) & 31u), (bits & 255u) * (1.0 / 255.0));
+}
+
+float3 DecodeScreenProbeCoveredHistory(float3 rgb, float coverage)
+{
+    // Editor control for the old conditional-RGB / quantized-coverage feedback.
+    return (_SdfGatherHistoryDiagnostics & 2097152u) != 0u ? rgb * coverage : rgb;
+}
+
+float3 EncodeScreenProbeCoveredHistory(float3 rgb, float coverage)
+{
+    float3 value = (_SdfGatherHistoryDiagnostics & 2097152u) != 0u ? rgb : rgb * coverage;
+    return RoundSdfHistory(float4(value, 0.0)).rgb;
 }
 #endif
 
@@ -143,9 +156,11 @@ float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 c
     float lumaResidual = max(0.0, abs(delta.x) - extent.x) / lumaScale;
     float coherentChange = smoothstep(0.45, 0.8, lumaResidual)
         * (1.0 - smoothstep(0.05, 0.2, deviation.x / lumaScale));
-    fastUpdate = max(fastUpdate, 0.25 * coherentChange);
+    if ((_SdfGatherHistoryDiagnostics & 524288u) == 0u)
+        fastUpdate = max(fastUpdate, 0.25 * coherentChange);
     // Weak rectification on stable pixels lets the long window absorb sparse trace noise.
-    return lerp(history, bounded, lerp(0.10, 1.0, fastUpdate));
+    return (_SdfGatherHistoryDiagnostics & 1048576u) != 0u
+        ? history : lerp(history, bounded, lerp(0.10, 1.0, fastUpdate));
 }
 
 #if !defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
@@ -426,7 +441,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
 
         float2 ageAndCoverage = UnpackScreenProbePixelHistory(sample.a);
         float covered = weight * ageAndCoverage.y;
-        history.coveredLighting += covered * sample.rgb;
+        history.coveredLighting += weight * DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y);
         history.age += covered * ageAndCoverage.x;
         history.footprint += weight;
         coveredWeight += covered;
@@ -463,7 +478,12 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
             float3 historyLighting = history.coveredLighting / history.coverage;
             float fastUpdate = SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels);
             float3 rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
-            float ageConfidence = (_SdfGatherHistoryDiagnostics & 8u) != 0u ? 1.0 : coverageAgreement;
+            // Trace coverage is a stochastic lighting estimate. It must not
+            // select the current sample's averaging weight on stable geometry.
+            float ageConfidence = (_SdfGatherHistoryDiagnostics & 4194304u) != 0u
+                ? coverageAgreement : saturate(history.footprint);
+            if ((_SdfGatherHistoryDiagnostics & 8u) != 0u)
+                ageConfidence = 1.0;
             age += min(history.age, _SdfPixelHistoryMaxAge - 1.0) * ageConfidence * (1.0 - fastUpdate);
             historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
                 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
@@ -477,9 +497,36 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 
     _SdfDiffusePixelGeometryOutput[id.xy] = geometry;
     float historyAlpha = PackScreenProbePixelHistory(age, result.a, historyStatus);
+    float3 historyRgb = EncodeScreenProbeCoveredHistory(result.rgb, result.a);
     result = RoundSdfHistory(result);
-    _SdfDiffusePixelLightingOutput[id.xy] = float4(result.rgb, historyAlpha);
+    _SdfDiffusePixelLightingOutput[id.xy] = float4(historyRgb, historyAlpha);
     _SdfDiffuseOutput[id.xy] = result;
+}
+#endif
+
+#if defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
+RWStructuredBuffer<float4> _SdfCoveredHistoryValidation;
+
+[numthreads(8, 1, 1)]
+void InspectSdfCoveredHistoryEnergyCS(uint3 id : SV_DispatchThreadID)
+{
+    const float coverages[8] = {0.051, 0.101, 0.331, 0.6877, 0.953, 0.1, 0.5, 0.75};
+    float currentCoverage = coverages[id.x];
+    float3 expected = id.x == 7u ? 0.0 : float3(1.0, 2.0, 0.5);
+    float coverage = currentCoverage;
+    float3 stored = EncodeScreenProbeCoveredHistory(expected / coverage, coverage);
+    float packed = PackScreenProbePixelHistory(32.0, coverage, ScreenProbeHistoryAccepted);
+    float3 energy = expected;
+    [loop]
+    for (uint frame = 0u; frame < 4096u; ++frame)
+    {
+        float previousCoverage = UnpackScreenProbePixelHistory(packed).y;
+        energy = lerp(DecodeScreenProbeCoveredHistory(stored, previousCoverage), expected, 1.0 / 32.0);
+        coverage = lerp(previousCoverage, currentCoverage, 1.0 / 32.0);
+        stored = EncodeScreenProbeCoveredHistory(energy / coverage, coverage);
+        packed = PackScreenProbePixelHistory(32.0, coverage, ScreenProbeHistoryAccepted);
+    }
+    _SdfCoveredHistoryValidation[id.x] = float4(energy, UnpackScreenProbePixelHistory(packed).y);
 }
 #endif
 

@@ -10,8 +10,11 @@ using VividRP.Runtime.RenderPass.Core;
 using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-    const string experiment = "sponza-blocked", candidate = "blocked";
-    const int warmup = 512, measuredFrames = 256, captureStride = 1, frameBase = 1733;
+    string experiment = "sponza-blocked";
+    const string candidate = "blocked";
+    bool inspectHistory = experiment == "sponza-reprojection";
+    const int warmup = 512, measuredFrames = 256, frameBase = 1733;
+    int captureStride = inspectHistory ? 4 : 1;
     bool scroll = false, complete = false;
     const string scenePath = "Assets/ClassicSponza/Scenes/SponzaNoon.unity";
     const string lightPath = "Assets/ClassicSponza/Scenes/SponzaLightingNoon.unity";
@@ -20,7 +23,7 @@ using VividRP.Editor.Tools;
     if (pipeline == null || pipeline.RenderGraphAsset != AssetDatabase.LoadAssetAtPath<RenderGraphData>(graphPath))
         throw new InvalidOperationException("Activate the Sponza realtime GI graph first.");
     string output = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..", "VividRP_GI_Evidence",
-        "SponzaBlockedSampling-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"), "capture"));
+        (inspectHistory ? "SponzaReprojection-" : "SponzaBlockedSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"), "capture"));
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags priv = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
     if (System.IO.Directory.Exists(output)) throw new InvalidOperationException("Refusing to overwrite " + output);
@@ -62,6 +65,8 @@ using VividRP.Editor.Tools;
         var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics", "EditorGatherHistoryDiagnostics" }
             .ToDictionary(n => n, n => type.GetField(n, stat));
         var previousHooks = hooks.ToDictionary(p => p.Key, p => p.Value.GetValue(null));
+        foreach (string hook in new[]{"EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture"})
+            if (previousHooks[hook] != null) throw new InvalidOperationException("Another capture is active: " + hook);
         var nativeCmd = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", priv);
         var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
         var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
@@ -72,6 +77,12 @@ using VividRP.Editor.Tools;
         string arm = "";
         object pass = null;
         Light previousTargetSun = null;
+        const int inspectStride = 4, inspectWidth = 230, inspectHeight = 120, inspectSlots = 6, inspectHalo = 32;
+        ComputeShader inspectShader = null;
+        GraphicsBuffer inspectBuffer = null;
+        int inspectKernel = -1;
+        var bindReceiver = type.GetMethod("BindReceiver", priv);
+        var bindFrame = type.GetMethod("BindProbeFrame", priv);
 
         bool Sample() => active && arm != "prime" && frame >= warmup && (frame - warmup) % captureStride == 0;
         object Field(string name) => type.GetField(name, priv).GetValue(pass);
@@ -96,6 +107,42 @@ using VividRP.Editor.Tools;
             });
         }
         void Read(CommandBuffer cmd, Texture texture, string tag) => ReadRegion(cmd, texture, tag, 0, 0, texture.width, texture.height);
+        void InspectHistory(ComputePassContext context, CommandBuffer cmd)
+        {
+            bindReceiver.Invoke(pass, new object[]{context.cmd, inspectShader, inspectKernel});
+            bindFrame.Invoke(pass, new object[]{context.cmd, inspectShader});
+            var historyState = Field("m_State");
+            var previousVP = (Matrix4x4)historyState.GetType().GetField("ViewProjection", priv).GetValue(historyState);
+            var jitter = (Vector2)Field("m_ScreenJitterDelta");
+            cmd.SetComputeMatrixParam(inspectShader, "_SdfDiffusePreviousVP", previousVP);
+            cmd.SetComputeMatrixParam(inspectShader, "_SdfScreenPreviousInverseVP", previousVP.inverse);
+            cmd.SetComputeVectorParam(inspectShader, "_SdfScreenJitterDelta", new Vector4(jitter.x, jitter.y, 0, 0));
+            cmd.SetComputeTextureParam(inspectShader, inspectKernel, "_SdfScreenMotion", Resolve("m_ScreenMotion"));
+            cmd.SetComputeTextureParam(inspectShader, inspectKernel, "_SdfDiffusePreviousPixelLighting", Resolve("m_PreviousPixelLighting"));
+            cmd.SetComputeTextureParam(inspectShader, inspectKernel, "_SdfDiffusePreviousPixelGeometry", Resolve("m_PreviousPixelGeometry"));
+            cmd.SetComputeVectorParam(inspectShader, "_SdfPixelHistoryInspectRegion", new Vector4(500, 250, inspectStride, 0));
+            cmd.SetComputeVectorParam(inspectShader, "_SdfPixelHistoryInspectSize", new Vector4(inspectWidth, inspectHeight, 0, 0));
+            cmd.SetComputeBufferParam(inspectShader, inspectKernel, "_SdfPixelHistoryInspection", inspectBuffer);
+            cmd.DispatchCompute(inspectShader, inspectKernel, (inspectWidth+7)/8, (inspectHeight+7)/8, 1);
+            string path = output + "/" + arm + "/" + frame.ToString("0000") + "-inspection.bin";
+            records.Add(new {arm, frame, tag = "inspection", x = 500, y = 250, width = inspectWidth*inspectSlots,
+                height = inspectHeight, format = "R32G32B32A32_SFloat", path});
+            pending++;
+            cmd.RequestAsyncReadback(inspectBuffer, request => {
+                try { if (request.hasError) errors.Add("History inspection readback failed");
+                    else System.IO.File.WriteAllBytes(path, request.GetData<byte>().ToArray()); }
+                catch (Exception e) { errors.Add(e.Message); }
+                finally { pending--; }
+            });
+            ReadRegion(cmd, Resolve("m_PreviousPixelGeometry"), "previous-geometry", 500-inspectHalo, 250-inspectHalo,
+                920+2*inspectHalo, 480+2*inspectHalo);
+            ReadRegion(cmd, Resolve("m_PreviousPixelLighting"), "previous-history", 500-inspectHalo, 250-inspectHalo,
+                920+2*inspectHalo, 480+2*inspectHalo);
+            var lightScale = (Vector4)Field("m_RadiosityHistoryScale");
+            records.Add(new {arm, frame, previousVP = Enumerable.Range(0,16).Select(j=>previousVP[j/4,j%4]).ToArray(),
+                jitter = new[]{jitter.x, jitter.y}, historyLightScale = new[]{lightScale.x, lightScale.y, lightScale.z},
+                hasHistory = Field("m_HasHistory")});
+        }
         void ReadPixels(CommandBuffer cmd, Texture texture, string tag)
         {
             if (scroll) ReadRegion(cmd, texture, tag + "-motion", 500, 250, 920, 480);
@@ -149,7 +196,8 @@ using VividRP.Editor.Tools;
                 ReadPixels(cmd, Resolve("m_CurrentPixelLighting"), "history");
                 ReadPixels(cmd, Resolve("m_CurrentPixelGeometry"), "geometry");
             }
-            if (frame == warmup || frame == warmup + measuredFrames - 1)
+            if (inspectHistory) InspectHistory(context, cmd);
+            if (frame == warmup || frame == warmup + (measuredFrames-1)/captureStride*captureStride)
             {
                 Read(cmd, Resolve("m_RadiosityInput"), "radiosity");
                 if (!scroll) Read(cmd, lighting, "full-final");
@@ -200,6 +248,15 @@ using VividRP.Editor.Tools;
         EditorApplication.LockReloadAssemblies();
         try
         {
+            if (inspectHistory)
+            {
+                string packagePath = UnityEditor.PackageManager.PackageInfo.FindForAssembly(type.Assembly).assetPath;
+                var source = AssetDatabase.LoadAssetAtPath<ComputeShader>(packagePath + "/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGatherTemporal.compute");
+                inspectShader = UnityEngine.Object.Instantiate(source);
+                inspectShader.hideFlags = HideFlags.DontSave;
+                inspectKernel = inspectShader.FindKernel("InspectScreenProbeTemporalHistoryCS");
+                inspectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, inspectWidth*inspectHeight*inspectSlots, 16);
+            }
             volume.profile = profile;
             foreach (var entry in hidden) if (entry.root != null) entry.root.SetActive(false);
             SceneManager.SetActiveScene(scene);
@@ -239,8 +296,11 @@ using VividRP.Editor.Tools;
             await Run("prime", SdfDiffuseTraceMode.Hybrid, true);
             if ((int)Field("m_RadiosityPublishedOrder") != 2 || (int)Field("m_RadiosityBatch") != 32)
                 throw new InvalidOperationException("Sponza radiosity did not converge within the prime frame limit.");
-            await Run("white-hybrid", SdfDiffuseTraceMode.Hybrid, true);
-            await Run("blocked-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            if (!inspectHistory)
+            {
+                await Run("white-hybrid", SdfDiffuseTraceMode.Hybrid, true);
+                await Run("blocked-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            }
             await Run("white-motion", SdfDiffuseTraceMode.Hybrid, true, true);
             await Run("blocked-motion", SdfDiffuseTraceMode.Hybrid, false, true);
             complete = true;
@@ -264,11 +324,15 @@ using VividRP.Editor.Tools;
             if (RenderSettings.sun != originalSun) RenderSettings.sun = originalSun;
             foreach (var component in profile.components) UnityEngine.Object.DestroyImmediate(component);
             UnityEngine.Object.DestroyImmediate(profile);
+            inspectBuffer?.Dispose();
+            if (inspectShader != null) UnityEngine.Object.DestroyImmediate(inspectShader);
             try
             {
                 System.IO.Directory.CreateDirectory(output);
                 System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
                     experiment, candidate, frameBase, complete,
+                    inspection = new {enabled = inspectHistory, pixelStride = inspectStride, width = inspectWidth,
+                        height = inspectHeight, slots = inspectSlots, halo = inspectHalo},
                     scenePath, lightPath, original_scene_dirty = wasDirty, original_lights_dirty = lightsWereDirty,
                     lights_dirty_after = lights.isDirty,
                     track = new { periodFrames = 128, lateralMeters = .28, forwardMeters = .06, yawDegrees = -7 },

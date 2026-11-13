@@ -4,6 +4,7 @@
 #pragma kernel TemporalSdfRestirVariance VIVID_SDF_RESTIR_PIXEL_HISTORY VIVID_SDF_RESTIR_VARIANCE_HISTORY
 #pragma kernel InspectSdfHistoryQuantizationCS
 #pragma kernel InspectSdfCoveredHistoryEnergyCS VIVID_SDF_SCREEN_PROBE_TEMPORAL
+#pragma kernel InspectScreenProbeTemporalHistoryCS VIVID_SDF_SCREEN_PROBE_TEMPORAL
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
@@ -501,6 +502,38 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     result = RoundSdfHistory(result);
     _SdfDiffusePixelLightingOutput[id.xy] = float4(historyRgb, historyAlpha);
     _SdfDiffuseOutput[id.xy] = result;
+}
+
+// Explicit Editor diagnostic dispatch only. Reuse the production history reader
+// so a nearest-depth approximation cannot be mistaken for its four-tap decision.
+float4 _SdfPixelHistoryInspectRegion; // offset.xy, pixel stride, unused
+float4 _SdfPixelHistoryInspectSize;   // sampled width, sampled height, unused
+RWStructuredBuffer<float4> _SdfPixelHistoryInspection;
+
+[numthreads(8, 8, 1)]
+void InspectScreenProbeTemporalHistoryCS(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_SdfPixelHistoryInspectSize.xy)))
+        return;
+    uint2 pixel = uint2(_SdfPixelHistoryInspectRegion.xy) + id.xy * uint(_SdfPixelHistoryInspectRegion.z);
+    uint address = (id.y * uint(_SdfPixelHistoryInspectSize.x) + id.x) * 6u;
+    float3 position, normal;
+    bool receiver = LoadReceiver(pixel, position, normal);
+    ScreenProbeTemporalHistory history = (ScreenProbeTemporalHistory)0;
+    bool valid = receiver && ReadScreenProbeTemporalHistory(pixel, position, normal, history);
+    float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
+    float2 motion = _SdfScreenMotion.Load(int3(pixel, 0));
+    float2 previousPixel = float2(pixel) + (_SdfScreenJitterDelta - motion) * _SdfDiffuseScreenSize.xy;
+    float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+    _SdfPixelHistoryInspection[address] = float4(valid ? 1.0 : 0.0, history.footprint,
+        history.foreground, history.objectMotionPixels);
+    _SdfPixelHistoryInspection[address + 1u] = float4(history.coveredLighting, history.coverage);
+    _SdfPixelHistoryInspection[address + 2u] = float4(history.age, receiver ? 1.0 : 0.0,
+        clamp(0.008 * eyeDepth, 0.025, 0.12), clamp(0.006 * eyeDepth, 0.02, 0.10));
+    _SdfPixelHistoryInspection[address + 3u] = float4(position, eyeDepth);
+    _SdfPixelHistoryInspection[address + 4u] = float4(normal, _SdfDiffuseDepth.Load(int3(pixel, 0)));
+    _SdfPixelHistoryInspection[address + 5u] = float4(previousPixel, clip.w != 0.0 ? clip.z / clip.w : 0.0,
+        PixelSetAsNoMotionVectors(float4(motion, 0.0, 0.0)) ? 1.0 : 0.0);
 }
 #endif
 

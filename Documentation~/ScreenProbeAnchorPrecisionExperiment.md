@@ -60,3 +60,5 @@ python -B Tools~/Diagnostics/ScreenProbeAnchorWindowExperiment.py WINDOW_CAPTURE
 128 帧存储对照使用 Unity D3D12，相关实际 kernel 编译及 GPU 读回完成；长窗口对照则如上因 A/A 失败被拒绝。未运行 Unity Test Framework，因为 Editor 正在交互运行。没有本轮 GPU 计时结果，也未验证 Sponza。捕帧仅用临时 Profile，结束后确认场景未脏、相机 / Profile 已恢复，回调为空、override 为 −1、flags 为零。
 
 撤回后 C# 重编译成功，显式导入正常 compute shader，确认已加载程序集不再包含 covered 或 512 原型。两个归档捕帧脚本的最终版本通过 Unity CLI `--dry-run` 仅编译检查；新增长窗口失败记录会同时写入 manifest 的 `errors`，不会只依赖 CLI 的外层异常。Python 分析器实际拒绝本次失败捕帧；这项拒绝检查不表示其未运行的 FP32 / 512 质量比较已验证。
+
+后续 [producer 重复性控制](ScreenProbeProducerRepeatability.md) 已保留新的独立证据。旧存储实验在明确拒绝、检查引用后归档了中间载荷，首尾、汇总图与本文所引报告保留；不能再完整复算原序列。分析器会明确提示重新捕帧，而不将缺失原始数据当作成功。

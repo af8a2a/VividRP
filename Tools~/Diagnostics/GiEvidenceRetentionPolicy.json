@@ -4,8 +4,10 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "CornellLambertReference-20261114-173655-289207",
+    "ScreenProbeProducerSparse-20261114-170522-580442",
+    "ScreenProbeProducerEpoch-20261114-163837-067569",
     "ScreenProbeEpochLong-20261114-144706-279838",
-    "ScreenProbeAnchorStorage-20261114-151333-500182",
     "AnchorPrecisionPrediction-20261114-145555-246221",
     "ScreenProbeEpochControl-20261114-143435-247",
     "ScreenProbeEpochControl-20261114-142048-816",
@@ -30,6 +32,7 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbeAnchorStorage-20261114-151333-500182", "reason": "Rejected standalone precision/storage candidate; final temporal noise worsened and runtime prototype withdrawn. No protected capture/snapshot refers to its raw frames. Reports, exact scripts, source checks and endpoint bundles retained", "requiredFiles": ["analysis.json", "qualification.json", "source-verification.json", "decision.json", "capture.json"] },
     { "run": "ScreenProbeAnchorWindow-20261114-155720-209141", "reason": "Long 6400-render baseline A/A failed; no FP32/512 candidate ran. First observed divergence frame4095 copied to preserved endpoint bundles with a hash mapping; source, CPU, rejection and capture reports retained", "requiredFiles": ["rejection.json", "failure-analysis.json", "first-observed-difference.json", "qualification.json", "source-verification.json", "capture.json"] },
     { "run": "ScalarAnchorAge-20261114-063528-201", "reason": "Historical 32/128 window experiment superseded by accepted guarded anchor-prefilter regression and the current precision study. No other protected capture/snapshot/source manifest references this run; original promotion, input checks and reports retained", "requiredFiles": ["analysis.json", "capture.json", "source-verification.json", "profile-promotion.json", "post-promotion-verification.json"] },
     { "run": "ScreenProbeEpochControl-20261114-134959-695", "reason": "Short 256-frame hash control superseded by two 640-frame CPU+GPU controls. All hashes, exact capture script and source verification retained; complete interior raw reanalysis no longer required", "requiredFiles": ["analysis.json", "qualification.json", "source-verification.json", "capture-script.cs", "capture.json"] },

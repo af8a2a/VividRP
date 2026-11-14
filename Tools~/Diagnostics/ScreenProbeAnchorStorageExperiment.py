@@ -34,6 +34,8 @@ def difference(values, reference):
 
 
 def analyze(root, linear, reference_root):
+    if (root / "raw-retention.json").exists():
+        raise ValueError("Interior readbacks were archived; retain the saved analysis or capture a new run for full reanalysis.")
     manifest = json.loads((root / "capture.json").read_text(encoding="utf-8"))
     assert manifest["schema"] == "screen-probe-anchor-storage.v1"
     assert manifest["complete"] and not manifest["errors"]

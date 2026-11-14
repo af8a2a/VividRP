@@ -4,6 +4,7 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeAnchorWindowMotion-20261114-195008-007",
     "ScreenProbeAnchorWindowRevisit-20261114-183607-958",
     "SdfRayOrigin-20261114-182410-364",
     "CornellLambertReference-20261114-173655-289207",

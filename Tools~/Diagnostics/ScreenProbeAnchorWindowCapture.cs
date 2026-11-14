@@ -9,7 +9,9 @@ using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 using VividRP.Editor.Tools;
 {
-    const int warmup = 4096, measuredFrames = 2304, sampleStride = 9;
+    bool motion = false;
+    const int warmup = 4096;
+    int measuredFrames = motion ? 256 : 2304, sampleStride = motion ? 1 : 9;
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags inst = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
     const string sourceReference = "E:/VividRP_GI_Evidence/ScreenProbeResolveReplay-20261114-112421-783829";
@@ -35,6 +37,7 @@ using VividRP.Editor.Tools;
         || Quaternion.Angle(camera.transform.rotation, Quaternion.identity) > 1e-4 || Mathf.Abs(camera.fieldOfView - 42) > 1e-5)
         throw new InvalidOperationException("Reference camera pose required.");
     var volume = roots.SelectMany(r => r.GetComponentsInChildren<Volume>()).Single();
+    var pose = (camera.transform.position, camera.transform.rotation);
     var previousProfile = volume.HasInstantiatedProfile() ? volume.profile : null;
     var previousScene = SceneManager.GetActiveScene();
     var cameras = Camera.allCameras.Select(c => (camera: c, enabled: c.enabled)).ToArray();
@@ -65,7 +68,8 @@ using VividRP.Editor.Tools;
         if (height == 0) height = texture.height;
         string path = output + "/" + arm + "/" + frame.ToString("0000") + "-" + tag + ".bin";
         string readArm = arm, format = texture.graphicsFormat.ToString(); int readFrame = frame, readWidth = width, readHeight = height;
-        bool saved = (tag != "geometry" && tag != "raw" && tag != "sh") || frame == 0 || frame == warmup-1 || frame == warmup || frame == warmup+measuredFrames-1;
+        bool saved = (tag != "geometry" && tag != "raw" && tag != "sh") || (motion && tag == "geometry")
+            || frame == 0 || frame == warmup-1 || frame == warmup || frame == warmup+measuredFrames-1;
         pending++;
         cmd.RequestAsyncReadback(texture, 0, x, width, y, height, 0, 1, request => {
             try {
@@ -87,6 +91,7 @@ using VividRP.Editor.Tools;
     }
 
     void Pixels(CommandBuffer cmd, Texture texture, string tag) {
+        if (motion) { Read(cmd, texture, tag + "-motion", 800, 350, 320, 256); return; }
         foreach (var r in new[] { ("left", 382, 514, 96, 96), ("right", 1442, 514, 96, 96), ("back", 1132, 612, 96, 96),
             ("ceiling", 912, 970, 96, 48), ("floor", 912, 130, 96, 64) })
             Read(cmd, texture, tag + "-" + r.Item1, r.Item2, r.Item3, r.Item4, r.Item5);
@@ -101,6 +106,11 @@ using VividRP.Editor.Tools;
             resetPending = false; phase = 2; frame = 0;
         }
         hooks["EditorGatherFrameOverride"].SetValue(null, 1733 + (phase == 2 ? frame : 0));
+        if (motion) {
+            float t = phase == 2 && frame >= warmup ? Mathf.Sin(2f * Mathf.PI * ((frame - warmup) % 128) / 128f) : 0f;
+            camera.transform.SetPositionAndRotation(pose.Item1 + pose.Item2 * new Vector3(.28f*t, 0, .06f*t),
+                pose.Item2 * Quaternion.Euler(0, -7f*t, 0));
+        }
     }
     void Log(string message, string stack, LogType kind) {
         if (message.Contains("on dx11") && message.Contains("uav", StringComparison.OrdinalIgnoreCase) && message.Contains("8")) return;
@@ -147,9 +157,10 @@ using VividRP.Editor.Tools;
         Read(cmd, Resolve("m_Probes"), "anchor", 0, 0, 120, 136);
         Read(cmd, Resolve("m_CurrentAnchorStatistics"), "statistics"); Read(cmd, Resolve("m_FilteredProbes"), "sh");
         if (Sample()) Pixels(cmd, Resolve("m_CurrentPixelLighting"), "history");
+        if (motion && Sample()) Pixels(cmd, Resolve("m_CurrentPixelGeometry"), "pixel-geometry");
         if (epoch || frame == warmup || frame == warmup + measuredFrames - 1) {
             Read(cmd, Resolve("m_RadiosityInput"), "radiosity");
-            if (!epoch) Read(cmd, lighting, "full-final");
+            if (!epoch && !motion) Read(cmd, lighting, "full-final");
         }
         var sun = (Vector4)Field("m_LightColorShadow");
         var near = (Vector4)Field("m_NearOcclusion");
@@ -173,9 +184,40 @@ using VividRP.Editor.Tools;
         if (++frame >= warmup + measuredFrames) active = false;
     };
     void WriteManifest() => System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-        schema = "screen-probe-anchor-window.v2", complete, completedArm = arm, width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, sampleStride,
-        sourceReference, scope = "Half128 A/A, Float128, Float512 after 4096 source-settled epoch frames; 2304 measured renders sampled every 9 frames; 512 only at stationary world receivers", cpuFrames, records, errors, variants }, Newtonsoft.Json.Formatting.Indented));
+        schema = motion ? "screen-probe-anchor-window-motion.v1" : "screen-probe-anchor-window.v2", complete, completedArm = arm,
+        width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, sampleStride, motion,
+        recenteredBeforeReset = motion,
+        sourceReference, scope = motion
+            ? "4096 static warm-up + two identical 128-frame camera cycles. Half128 motion A/A then Float512; no default promotion."
+            : "Half128 A/A, Float128, Float512 after 4096 source-settled epoch frames; 2304 measured renders sampled every 9 frames; 512 only at stationary world receivers",
+        cpuFrames, records, errors, variants }, Newtonsoft.Json.Formatting.Indented));
     async System.Threading.Tasks.Task Run(string name, int age, bool precise = false) {
+        if (motion) {
+            // Flush camera data after recentering, before clearing histories. This
+            // avoids capturing a last-pose view matrix from the preceding arm.
+            camera.transform.SetPositionAndRotation(pose.Item1, pose.Item2);
+            hooks["EditorGatherFrameOverride"].SetValue(null, 1733);
+            hooks["EditorGatherHistoryDiagnostics"].SetValue(null, precise ? 32 : 0);
+            hooks["EditorProbeAnchorMaxAgeOverride"].SetValue(null, age);
+            int flushed = 0;
+            void FlushEnd(ScriptableRenderContext context, Camera current) {
+                if (current != camera) return;
+                var currentPass = ((System.Collections.IList)passesField.GetValue(null)).Cast<object>().Single(p => p.GetType() == type);
+                var vp = (Matrix4x4)type.GetField("m_ViewProjection", inst).GetValue(currentPass);
+                bool correct = Mathf.Abs(vp.m00 - 1.4653625f) < 1e-5f && Mathf.Abs(vp.m11 + 2.605089f) < 1e-5f
+                    && Mathf.Abs(vp.m13 - 3.9076333f) < 1e-5f && Mathf.Abs(vp.m32 - 1) < 1e-5f && Mathf.Abs(vp.m33 - 3.8f) < 1e-5f
+                    && Mathf.Abs(vp.m02) < 1e-5f && Mathf.Abs(vp.m30) < 1e-5f;
+                flushed = correct ? flushed + 1 : 0;
+            }
+            RenderPipelineManager.endCameraRendering += FlushEnd;
+            try {
+                double flushDeadline = EditorApplication.timeSinceStartup + 60;
+                while (flushed < 2 && EditorApplication.timeSinceStartup < flushDeadline) {
+                    game.Repaint(); EditorApplication.QueuePlayerLoopUpdate(); await System.Threading.Tasks.Task.Delay(16);
+                }
+                if (flushed < 2) throw new InvalidOperationException("Reference camera data did not flush before reset.");
+            } finally { RenderPipelineManager.endCameraRendering -= FlushEnd; }
+        }
         var owner = type.GetField("m_Cameras", inst).GetValue(pass);
         owner.GetType().GetMethod("CleanupCamera").Invoke(owner, new object[] { camera });
         var historyType = type.Assembly.GetType("VividRP.Runtime.CameraHistorySystem");
@@ -232,7 +274,8 @@ using VividRP.Editor.Tools;
             errors.Add("Anchor window baseline A/A failed; precision/window candidates did not run.");
             throw new InvalidOperationException(errors[errors.Count-1]);
         }
-        await Run("float128", 128, true); await Run("float512", 512, true);
+        if (!motion) await Run("float128", 128, true);
+        await Run("float512", 512, true);
         complete = true; return new { output, complete, errors };
     }
     finally {
@@ -240,6 +283,7 @@ using VividRP.Editor.Tools;
             active = false; foreach (var p in hooks) p.Value.SetValue(null, previousHooks[p.Key]);
             RenderPipelineManager.beginCameraRendering -= Begin; Application.logMessageReceived -= Log;
             AsyncGPUReadback.WaitAllRequests(); volume.profile = previousProfile;
+            if (motion) camera.transform.SetPositionAndRotation(pose.Item1, pose.Item2);
             foreach (var c in cameras) if (c.camera != null) c.camera.enabled = c.enabled;
             if (previousScene.isLoaded) SceneManager.SetActiveScene(previousScene);
             if (profile != null) {

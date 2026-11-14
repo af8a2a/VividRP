@@ -49,6 +49,7 @@ using VividRP.Editor.Tools;
     // Validate the fixture's current denoiser instead of silently testing an older preset.
     var spatialDenoise = gi.spatialDenoise.value;
     int anchorMaxAge = gi.screenProbeAnchorMaxAge.value;
+    bool anchorPreFilter = gi.screenProbeAnchorPreFilter.value;
     var nativeCmd = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", priv);
     var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
     var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
@@ -132,6 +133,7 @@ using VividRP.Editor.Tools;
             directionalCache = Field("m_DirectionalCache"), restir = Field("m_RestirGather"),
             spatialDenoise = gi.spatialDenoise.value.ToString(), atrousIterations = Field("m_AtrousIterations"),
             anchorMaxAge = Field("m_ProbeAnchorMaxAge"),
+            anchorPreFilter = Field("m_AnchorPreFilter"),
             forceTwoSided = forceSide.GetValue(null), rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
     Action<ComputePassContext, Texture, Texture, Texture, Texture> linear = (context, lighting, depth, rt0, rt1) => {
@@ -164,8 +166,8 @@ using VividRP.Editor.Tools;
     {
         System.IO.Directory.CreateDirectory(output);
         System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-            schema = "emission-sidedness.v3", spatialDenoise = spatialDenoise.ToString(),
-            anchorMaxAge,
+            schema = "emission-sidedness.v4", spatialDenoise = spatialDenoise.ToString(),
+            anchorMaxAge, anchorPreFilter,
             complete, completedArm = arm, width = 1920, height = 1080, spacing = 16, rays = 8,
             warmup, measuredFrames, captureStride, scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
             row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

@@ -254,3 +254,29 @@ E:/VividRP_GI_Evidence/ScalarAnchorAge-20261114-063528-201/post-promotion-verifi
 本轮未再次修改四路单面发光生产实现，只复验新历史配置没有破坏契约。未测 GPU 耗时，未在正在使用的 Editor 中启动 Unity Test Framework；旧卡片重捕获和更广动态验证的限制仍适用。
 
 最终 GPU 读回确认 anchor 最大年龄 128、6,059 个探针至少 96 帧；正常原生路径、16 px / 8 rays、四轮、8 阶 / 32 批已恢复。C# 编译通过，51 条 shader 编译消息与前一四轮基线一致，没有错误或新增警告；回调为空、flags=0、frame / Atrous override 为 −1、强制双面关闭、bias=0.04，场景与共享 Profile 未脏。
+
+## Cornell anchor 预滤波配置复验（2026-11-14）
+
+四路单面规则已统一，本轮保留生产着色并复验 `343207d3` 启用的 anchor 预滤波配置。捕帧清单升级为 `emission-sidedness.v4`，记录配置与每个样本实际的 `m_AnchorPreFilter`，分析器逐帧核对。仍为原机位、1920×1080、16 px / 8 rays、128 帧 anchor、四轮 À-Trous；每组预热 512 帧，随后 32 帧中每隔 4 帧采样一次。前后 **2,782 个**受检源码、捕帧脚本和夹具文件校验一致。工作区中的 STBN 插值候选未启用，也未因本次验证晋升默认。
+
+| 条件 | 背面高亮命中：双面 → 单面 | 全图有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,532 / 35,532 | −0.098% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.055% |
+| SDF Only，零阶，5 mm | 1,935 → 0 | 8,737 / 8,737 | 0.000% |
+
+全部 **52,411** 条背面样本 RGB 为零，保留有效 Screen / SDF 类别与非零覆盖；零阶源覆盖计数一致，正面发光命中辐亮度仍为 **200.000046**。地面均值通过短序列 ±1% 检查。默认偏移下，零阶天花板原始命中光照为零，最终重建仍有约 **0.000120** 的残留；5 mm 压力组最终为零。八阶天花板仍应接收真实反弹，不能把其最终亮度也要求为零。
+
+生产 `TraceCardRadiance`、`TraceFarProbe`、`TryLoadFarRadiance` 的 Off / Front / Back GPU 矩阵再次通过：Back 正面约 200.00006、背面 0；黑命中保留实例 ID、正距离与重连 valid=1，即使 atlas 两侧均预存亮值。材质 64 B、节点 48 B 的逐字段布局检查通过，场景发光值未改，独立诊断 shader 无错误或警告。
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-114713-646/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-114713-646/emission-sidedness.png
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-114713-646/source-verification.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-114713-646/final-verification.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-114713-646/current-runtime.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-114640-591/trace-conformance.json
+```
+
+恢复后实际配置为 anchor 预滤波开启、年龄上限 128、四轮、8 阶 / 32 批，STBN 关闭，bias=0.04；诊断回调为空、flags=0、frame / Atrous override 为 −1、强制双面关闭、两个场景未脏。C# 编译通过，渲染 shader 无错误，保留 53 条编译器消息；捕帧无运行错误。未测量 GPU 耗时，未在正在使用的 Editor 中启动 Unity Test Framework。本轮未覆盖运动机位，也没有迁移其他场景的旧 Surface Cache；旧缓存仍须重捕获原法线。

@@ -1,0 +1,141 @@
+diff --git a/Editor/Resources/SdfTemporalSamplingValidation.compute b/Editor/Resources/SdfTemporalSamplingValidation.compute
+index 4e2615c6..fdc6e22d 100644
+--- a/Editor/Resources/SdfTemporalSamplingValidation.compute
++++ b/Editor/Resources/SdfTemporalSamplingValidation.compute
+@@ -1,0 +2 @@
++#pragma kernel ValidateSdfCdfSampling
+@@ -6,0 +8,2 @@ RWStructuredBuffer<float2> _TemporalValidation;
++RWStructuredBuffer<float4> _CdfSamplingValidation;
++uint _CdfValidationCount;
+@@ -13,0 +17,11 @@ void ValidateSdfTemporalSampling(uint3 id : SV_DispatchThreadID)
++
++[numthreads(8, 1, 1)]
++void ValidateSdfCdfSampling(uint3 id : SV_DispatchThreadID)
++{
++    uint2 tile = uint2(id.x / 8u, 0u);
++    if (tile.x >= _CdfValidationCount) return;
++    uint ray = id.x & 7u, bin;
++    float mass;
++    float3 direction = SampleDiffuseProbeRay(tile, ray, ProbeSeed(tile), float3x3(1,0,0,0,1,0,0,0,1), bin, mass);
++    _CdfSamplingValidation[_TemporalValidationOffset + id.x] = float4(direction, mass);
++}
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+index 49e1a636..6efff8f0 100644
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+@@ -500,0 +501,2 @@ namespace VividRP.Runtime.RenderPass.Core
++        private bool m_CdfGuideActive;
++        private int m_DirectionalCdfGuideKernel = -1;
+@@ -710,0 +713,2 @@ namespace VividRP.Runtime.RenderPass.Core
++            if (HasKernel(m_ImportanceSamplingCompute, "PrepareSdfDirectionalCdfGuide"))
++                m_DirectionalCdfGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfDirectionalCdfGuide");
+@@ -768,0 +773 @@ namespace VividRP.Runtime.RenderPass.Core
++            m_CdfGuideActive = false;
+@@ -910,0 +916,5 @@ namespace VividRP.Runtime.RenderPass.Core
++            // Independent sampling only: do not change a distribution within a
++            // frozen QMC block or expose an unqualified sampling mode to players.
++            m_CdfGuideActive = m_DirectionalHierarchicalGuide && !m_FrozenGuideActive && !m_RestirGather
++                && m_DirectionalCdfGuideKernel >= 0 && EditorTraceCapture != null
++                && (EditorGatherHistoryDiagnostics & 134217728) != 0;
+@@ -1546,0 +1557 @@ namespace VividRP.Runtime.RenderPass.Core
++            m_DirectionalCdfGuideKernel = -1;
+@@ -2547 +2558 @@ namespace VividRP.Runtime.RenderPass.Core
+-            int kernel = m_DirectionalGuideKernel;
++            int kernel = m_CdfGuideActive ? m_DirectionalCdfGuideKernel : m_DirectionalGuideKernel;
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl b/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
+index 4c2c8679..94f45063 100644
+--- a/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
++++ b/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
+@@ -146,0 +147 @@ static const int DirectionalOctWorld = -4;
++static const int DirectionalCdfStratum = -7; // -5/-6 remain reserved for archived 8x8 experiments.
+@@ -196,0 +198,13 @@ float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, ou
++        if (subdivision == DirectionalCdfStratum)
++        {
++            // Eight disjoint intervals partition the row-major cosine chart.
++            // Uniform sampling inside each interval preserves a deterministic
++            // total inverse relative PDF of eight, including covered black hits.
++            float t = lerp(stratum.x, stratum.y, clamp(sampleUv.x, 1e-5, 1.0 - 1e-5));
++            uint cell = min(uint(t), DirectionalGatherBinCount - 1u);
++            float2 uv = (float2(cell & 3u, cell >> 2u) + float2(frac(t), sampleUv.y)) / DirectionalOctSize;
++            float3 direction = DirectionalOctDirection(uv, basis);
++            bin = DirectionalBin(direction, basis);
++            inverseRelativePdf = 0.5 * (stratum.y - stratum.x);
++            return direction;
++        }
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+index 28c585f5..57b1cbf5 100644
+--- a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
++++ b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+@@ -1,0 +2,2 @@
++#pragma kernel PrepareSdfDirectionalCdfGuide VIVID_SDF_CDF_PROPOSAL
++#pragma kernel InspectSdfDirectionalCdfGuideCS VIVID_SDF_CDF_PROPOSAL VIVID_SDF_CDF_VALIDATION
+@@ -89,0 +92,57 @@ float DirectionalOctRegionImportance(float importance[16], uint4 rect)
++#if defined(VIVID_SDF_CDF_PROPOSAL)
++float DirectionalCdfBoundary(float importance[16], float total, uint boundary)
++{
++    if (boundary == 0u) return 0.0;
++    if (boundary == DirectionalBinCount) return float(DirectionalGatherBinCount);
++    if (total <= 0.0) return 2.0 * float(boundary);
++
++    // Half uniform exploration, half radiance importance. Quantiles choose
++    // interval boundaries; samples remain uniform in baseline cosine measure.
++    float exploration = total / float(DirectionalGatherBinCount);
++    float target = 2.0 * total * float(boundary) / float(DirectionalBinCount);
++    float cdf = 0.0;
++    [loop]
++    for (uint cell = 0u; cell < DirectionalGatherBinCount; ++cell)
++    {
++        float mass = importance[cell] + exploration;
++        if (target <= cdf + mass)
++            return float(cell) + saturate((target - cdf) / mass);
++        cdf += mass;
++    }
++    return float(DirectionalGatherBinCount);
++}
++
++void StoreDirectionalCdfGuide(uint2 tile, float importance[16], float total, int source)
++{
++    float start = 0.0;
++    [loop]
++    for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
++    {
++        float end = DirectionalCdfBoundary(importance, total, ray + 1u);
++        // Shared endpoints undergo identical RGBA16F quantization. No gap or
++        // overlap is introduced, and the telescoping mass sum remains eight.
++        _SdfDirectionalGuideOutput[DirectionalAddress(tile, ray)] = float4(start, end, source, DirectionalCdfStratum);
++        start = end;
++    }
++}
++#endif
++
++#if defined(VIVID_SDF_CDF_VALIDATION)
++StructuredBuffer<float4> _SdfCdfValidationInput;
++uint _SdfCdfValidationCount;
++[numthreads(8, 1, 1)]
++void InspectSdfDirectionalCdfGuideCS(uint3 id : SV_DispatchThreadID)
++{
++    if (id.x >= _SdfCdfValidationCount) return;
++    float importance[16];
++    float total = 0.0;
++    [unroll]
++    for (uint cell = 0u; cell < DirectionalGatherBinCount; ++cell)
++    {
++        importance[cell] = _SdfCdfValidationInput[4u * id.x + cell / 4u][cell & 3u];
++        total += importance[cell];
++    }
++    StoreDirectionalCdfGuide(uint2(id.x, 0u), importance, total, DirectionalOctScreen);
++}
++#endif
++
+@@ -125,0 +185,3 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
++    #if defined(VIVID_SDF_CDF_PROPOSAL)
++    StoreDirectionalCdfGuide(tile, importance, total, hasPrevious ? DirectionalOctScreen : DirectionalOctWorld);
++    #else
+@@ -183,0 +246 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
++    #endif
+@@ -187,0 +251,3 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
++#if defined(VIVID_SDF_CDF_PROPOSAL)
++void PrepareSdfDirectionalCdfGuide(uint3 id : SV_DispatchThreadID)
++#else
+@@ -188,0 +255 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
++#endif

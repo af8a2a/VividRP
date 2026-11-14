@@ -59,9 +59,9 @@ def probe_hash(value):
 
 def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_resets=False, require_frozen=True):
     report = {}
-    for arm in (a for a in arms if a.startswith(("blocked-", "fine-", "stable-", "atrous3-")) or (not require_frozen and a.startswith("white-"))):
+    for arm in (a for a in arms if a.startswith(("blocked-", "fine-", "stable-", "atrous3-", "cdf-")) or (not require_frozen and a.startswith("white-"))):
         previous = None
-        fixed = changed = octahedral = fine_count = descriptors = resets = 0
+        fixed = changed = octahedral = fine_count = cdf_count = descriptors = resets = 0
         maximum_mass = 0.0
         crossed_faces = 0
         topology_updates = 0
@@ -70,13 +70,24 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
             record = files[arm, frame, "proposal"]
             data = read(record).reshape(record["height"], record["width"] // 8, 8, 4)
             code, subdivision = data[..., 0].astype(int), data[..., 3].astype(int)
-            oct_ray = subdivision <= -3
+            cdf_ray = subdivision == -7
+            cdf_probe = cdf_ray.all(-1)
+            assert np.all(cdf_probe | ~cdf_ray.any(-1)), "Mixed CDF strata"
+            if cdf_probe.any():
+                intervals = data[cdf_probe]
+                assert np.all(intervals[..., 0] >= 0) and np.all(intervals[..., 1] <= 16)
+                assert np.all(intervals[..., 1] > intervals[..., 0]), "Empty CDF interval"
+                assert np.all(intervals[:, 0, 0] == 0) and np.all(intervals[:, -1, 1] == 16)
+                assert np.all(intervals[:, 1:, 0] == intervals[:, :-1, 1]), "CDF overlap or lost hemisphere support"
+                assert np.all(np.isin(intervals[..., 2], [-3, -4])), "Invalid CDF provenance"
+            cdf_count += int(cdf_probe.sum())
+            oct_ray = (subdivision <= -3) & ~cdf_ray
             oct_probe = oct_ray.all(-1)
             assert np.all(oct_probe | ~oct_ray.any(-1)), "Mixed proposal charts"
-            fine_ray = subdivision <= -5
+            fine_ray = np.isin(subdivision, [-5, -6])
             fine_probe = fine_ray.all(-1)
             assert np.all(fine_probe | ~fine_ray.any(-1)), "Mixed octahedral chart resolutions"
-            assert np.all(data[..., :2] == np.floor(data[..., :2])), "Non-integer proposal payload"
+            assert np.all(cdf_ray[..., None] | (data[..., :2] == np.floor(data[..., :2]))), "Non-integer proposal payload"
             extent = data[..., 1].astype(int)
             fine_w, fine_h = (extent & 7) + 1, (extent >> 3) + 1
             fine_x, fine_y = code & 7, code >> 3
@@ -87,6 +98,7 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
             area = (1 << ((code >> 4) & 1)) * (1 << ((code >> 5) & 1))
             mass = np.where(oct_ray, .5 * area, np.where(subdivision < 0, .5, np.where(subdivision > 0, 2., 1.)))
             mass = np.where(fine_ray, fine_w * fine_h / 8., mass)
+            mass = np.where(cdf_ray, .5 * (data[..., 1] - data[..., 0]), mass)
             maximum_mass = max(maximum_mass, float(mass.max()))
             crossed_faces += int((fine_ray & (((fine_x // 4) != ((fine_x + fine_w - 1) // 4))
                                                         | ((fine_y // 4) != ((fine_y + fine_h - 1) // 4)))).sum())
@@ -100,7 +112,7 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
                     legacy = np.where(s < 0, (cell == 2*c + (-s-1)),
                                       (cell//2 == c) | ((s > 0) & (cell//2 == s-1)))
                     occupancy[..., cell] += np.where(oct_probe, covered, legacy)
-            assert np.all(occupancy[~fine_probe] == 1), "Proposal overlap or lost hemisphere support"
+            assert np.all(occupancy[~fine_probe & ~cdf_probe] == 1), "Proposal overlap or lost hemisphere support"
             fine_occupancy = np.zeros((*fine_probe.shape, 64), int)
             for ray in range(8):
                 for cell in range(64):
@@ -117,6 +129,8 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
                                  np.where(oct_ray, -3, subdivision)], axis=-1)
             topology[..., 0] = np.where(oct_ray, topology[..., 0], code)
             topology[..., 1:4] = np.where(oct_ray[..., None], topology[..., 1:4], 0)
+            topology = topology.astype(np.float32)
+            topology[..., :2] = np.where(cdf_ray[..., None], data[..., :2], topology[..., :2])
             if previous_topology is not None:
                 topology_updates += int(np.any(topology != previous_topology, axis=(-1, -2)).sum())
             previous_topology = topology
@@ -146,6 +160,7 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
                        "fixed_cosine_reset_probe_frames": resets,
                        "octahedral_probe_frames": octahedral, "probe_frames": descriptors,
                        "fine_probe_frames": fine_count,
+                       "cdf_probe_frames": cdf_count,
                        "maximum_inverse_pdf": maximum_mass, "fine_rectangles_crossing_faces": crossed_faces,
                        "sampling_topology_updates": topology_updates,
                        "full_support_and_mass": True}
@@ -186,6 +201,10 @@ def analyze(root, linear, candidate="sobol"):
             assert s["frozenProposal"] == frozen and (not frozen or s["proposalHistoryValid"])
             assert s["samplingFlags"] == (8388608 if frozen else 0)
             assert s["atrousIterations"] == (3 if expected else 2)
+        elif candidate == "cdf":
+            expected = record["arm"].startswith("cdf-")
+            assert s["cdfGuide"] == expected and s["samplingFlags"] == (134217728 if expected else 0)
+            assert not s["frozenProposal"] and s["guide"] and s["hierarchical"] and s["atrousIterations"] == 3
     get = lambda a, f, tag: read(files[a, f, tag])
     stack = lambda a, tag: np.stack([get(a, f, tag) for f in frames])
     ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
@@ -311,8 +330,8 @@ def analyze(root, linear, candidate="sobol"):
     draws = np.random.default_rng(20261114).integers(0, 10, (4096, 10))
     report["motion_comparison"] = {"cycle_rms_change_percent": float(100 * (np.sqrt(a.mean()/b.mean()) - 1)),
         "paired_block8_conditional_95_percent": np.quantile(100 * (np.sqrt(a[draws].mean(1)/b[draws].mean(1)) - 1), [.025, .975]).tolist()}
-    if candidate in ("blocked", "fine", "stable", "atrous3"):
-        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms, require_frozen=not(candidate == "atrous3" and control == "white"))
+    if candidate in ("blocked", "fine", "stable", "atrous3", "cdf"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms, require_frozen=candidate != "cdf" and not(candidate == "atrous3" and control == "white"))
     (root.parent / "analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     plot_quality(root.parent, report, control, candidate)
     print(json.dumps(report["pairs"], indent=2))
@@ -385,6 +404,10 @@ def analyze_static_prefix(root, linear, candidate):
                 assert all(s["frozenProposal"] == frozen and (not frozen or s["proposalHistoryValid"])
                            and s["samplingFlags"] == (8388608 if frozen else 0)
                            and s["atrousIterations"] == (3 if expected else 2) for s in states)
+            elif candidate == "cdf":
+                expected = arm.startswith("cdf-")
+                assert all(s["cdfGuide"] == expected and s["samplingFlags"] == (134217728 if expected else 0)
+                           and not s["frozenProposal"] and s["guide"] and s["hierarchical"] and s["atrousIterations"] == 3 for s in states)
             first = Path(files[arm, frames[0], "radiosity"]["path"]).read_bytes()
             assert first == Path(files[arm, frames[-1], "radiosity"]["path"]).read_bytes()
             report["sources"][arm] = hashlib.sha256(first).hexdigest()
@@ -422,8 +445,8 @@ def analyze_static_prefix(root, linear, candidate):
                 report["spectra"][mode][stage + "-" + region] = dict(zip([control, candidate], bands))
     assert report["pairs"], "No completed static pair"
     assert len(set(report["sources"].values())) == 1, "A/B source differs"
-    if candidate in ("fine", "blocked", "stable", "atrous3"):
-        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms, require_frozen=not(candidate == "atrous3" and control == "white"))
+    if candidate in ("fine", "blocked", "stable", "atrous3", "cdf"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms, require_frozen=candidate != "cdf" and not(candidate == "atrous3" and control == "white"))
     (root.parent / "static-analysis.json").write_text(json.dumps(report, indent=2))
     plot_quality(root.parent, report, control, candidate, "static-sampling-quality.png")
     print(json.dumps({mode: {key: row for key, row in rows.items() if key.startswith("final-")} for mode, rows in report["pairs"].items()}, indent=2))
@@ -613,7 +636,7 @@ if __name__ == "__main__":
     parser.add_argument("--uniform-only", action="store_true")
     parser.add_argument("--static-only", action="store_true", help="Completed static pairs from an intentionally rejected, incomplete capture")
     parser.add_argument("--edges-only", action="store_true", help="Denoise-only contact patches with unchanged upstream and coverage")
-    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine", "stable", "atrous3"], default="sobol")
+    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine", "stable", "atrous3", "cdf"], default="sobol")
     parser.add_argument("--control-root", type=Path, help="Frozen-source white reference root from a previous capture")
     args = parser.parse_args()
     if args.edges_only:

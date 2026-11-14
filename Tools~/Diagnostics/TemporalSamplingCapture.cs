@@ -11,11 +11,16 @@ using VividRP.Editor.Tools;
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
     // fine compares 8x8 against 4x4 with the same blocked samples; legacy modes remain available.
     string experiment = "atrous3-white-fresh-hybrid";
+    bool cdfReference = experiment == "reference-cdf";
+    bool cdf = experiment == "cdf" || cdfReference;
+    if (cdf && typeof(SdfDiffuseGatherPass).GetField("m_CdfGuideActive",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) == null)
+        throw new InvalidOperationException("CDF prototype did not pass its quality gates. Apply Prototypes/CdfDirectional-RowMajor.patch with --unidiff-zero to replay it.");
     bool fine = experiment == "fine";
     bool stable = experiment == "stable";
     bool sameModeWarmup = experiment == "atrous3-white-cold";
-    bool freshCameraState = experiment == "atrous3-white-fresh-hybrid";
-    bool qualifyReset = experiment == "atrous3-white-reset" || sameModeWarmup || freshCameraState;
+    bool freshCameraState = experiment == "atrous3-white-fresh-hybrid" || cdf;
+    bool qualifyReset = !cdfReference && (experiment == "atrous3-white-reset" || sameModeWarmup || freshCameraState);
     bool atrousWhite = experiment.StartsWith("atrous3-white", StringComparison.Ordinal);
     bool atrous3 = experiment == "atrous3" || atrousWhite;
     if (stable && typeof(SdfDiffuseGatherPass).GetField("m_StableGuideActive",
@@ -26,14 +31,14 @@ using VividRP.Editor.Tools;
         throw new InvalidOperationException("Fine experiment was rejected and withdrawn. Apply the archived FineDirectional-FourFaces.patch in an isolated checkout to replay it.");
     bool blocked = fine || stable || (atrous3 && !atrousWhite) || experiment.Contains("blocked", StringComparison.Ordinal);
     bool confirmation = experiment == "reference-confirm-blocked";
-    string candidate = atrous3 ? "atrous3" : stable ? "stable" : fine ? "fine" : blocked ? "blocked" : "sobol";
+    string candidate = cdf ? "cdf" : atrous3 ? "atrous3" : stable ? "stable" : fine ? "fine" : blocked ? "blocked" : "sobol";
     string control = !atrousWhite && (fine || stable || atrous3) ? "blocked" : "white";
     bool reference = experiment.StartsWith("reference", StringComparison.Ordinal);
     bool referenceSdf = experiment == "reference-sdf";
     bool referenceSobol = experiment == "reference-sobol" || experiment == "reference-blocked";
     bool isolateUniform = experiment == "uniform-isolation";
     bool scroll = false;
-    string output = fine || stable || atrous3 ? "E:/VividRP_GI_Evidence/" + (atrousWhite ? "Atrous3WhiteSampling-" : atrous3 ? "Atrous3Sampling-" : stable ? "StableDirectionalSampling-" : "FineDirectionalSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
+    string output = fine || stable || atrous3 || cdf ? "E:/VividRP_GI_Evidence/" + (cdf ? "CdfDirectionalSampling-" : atrousWhite ? "Atrous3WhiteSampling-" : atrous3 ? "Atrous3Sampling-" : stable ? "StableDirectionalSampling-" : "FineDirectionalSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
         : "E:/VividRP_GI_Evidence/" + (confirmation ? "BlockedTemporalConfirmation-20261113/"
         : blocked ? "BlockedTemporalSampling-20261113/" : "TemporalSamplingCovered-20261113/")
         + (experiment == "compare" ? "capture-imported" : experiment);
@@ -141,7 +146,7 @@ using VividRP.Editor.Tools;
             ReadRegion(cmd, texture, tag + "-ceiling", 912, 970, 96, 48);
             ReadRegion(cmd, texture, tag + "-floor", 912, 130, 96, 64);
             ReadRegion(cmd, texture, tag + "-right", 1430, 500, 64, 96);
-            if (atrousWhite)
+            if (atrousWhite || cdf)
             {
                 ReadRegion(cmd, texture, tag + "-short-contact", 720, 64, 64, 64);
                 ReadRegion(cmd, texture, tag + "-tall-contact", 1093, 153, 64, 64);
@@ -180,8 +185,15 @@ using VividRP.Editor.Tools;
             ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
             ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
             ReadRegion(cmd, Resolve("m_FilteredProbes"), "sh", 0, 59, 2640, 7);
-            if ((blocked || atrous3) && (bool)Field("m_DirectionalGuide"))
+            if ((blocked || atrous3 || cdf) && (bool)Field("m_DirectionalGuide"))
                 ReadRegion(cmd, Resolve((bool)Field("m_FrozenGuideActive") ? "m_CurrentProposal" : "m_DirectionalGuideTexture"), "proposal", 48 * 8, 59, 24 * 8, 7);
+        }
+        if (cdfReference)
+        {
+            ReadRegion(cmd, geometry, "probe-geometry", 48, 59, 24, 7);
+            ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
+            ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
+            ReadRegion(cmd, Resolve("m_DirectionalGuideTexture"), "proposal", 48 * 8, 59, 24 * 8, 7);
         }
         if (isolateUniform)
         {
@@ -212,6 +224,7 @@ using VividRP.Editor.Tools;
             frozenProposal = Field("m_FrozenGuideActive"), proposalHistoryValid = Field("m_ProposalHistoryValid"),
             fineGuide = type.GetField("m_FineGuideActive", priv)?.GetValue(pass) ?? false,
             stableGuide = type.GetField("m_StableGuideActive", priv)?.GetValue(pass) ?? false,
+            cdfGuide = type.GetField("m_CdfGuideActive", priv)?.GetValue(pass) ?? false,
             atrousIterations = Field("m_AtrousIterations"),
             samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
             rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
@@ -237,11 +250,11 @@ using VividRP.Editor.Tools;
         }
         arm = name; frame = 0; scroll = moving;
         frameLimit = name == "reset" ? sameModeWarmup ? 64 : 1 : name == "prime" ? warmup : warmup + measuredFrames;
-        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, atrousWhite ? 0 : legacy ? (fine || stable || atrous3 ? 8388608 : 0) : stable ? 75497472 : fine ? 41943040 : blocked ? 8388608 : 262144);
+        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, cdf ? legacy ? 0 : 134217728 : atrousWhite ? 0 : legacy ? (fine || stable || atrous3 ? 8388608 : 0) : stable ? 75497472 : fine ? 41943040 : blocked ? 8388608 : 262144);
         System.IO.Directory.CreateDirectory(output + "/" + arm);
         gi.traceMode.Override(mode);
         gi.surfaceCacheBounceOrders.Override(8);
-        gi.spatialDenoise.Override(atrous3 && !legacy ? SdfDiffuseSpatialDenoise.Atrous3 : SdfDiffuseSpatialDenoise.Atrous2);
+        gi.spatialDenoise.Override(cdf || (atrous3 && !legacy) ? SdfDiffuseSpatialDenoise.Atrous3 : SdfDiffuseSpatialDenoise.Atrous2);
         // Probe filters stay fixed: the raw/temporal/final taps isolate pixel reconstruction.
         extra.ResetPostProcessingHistory();
         active = true;
@@ -257,12 +270,13 @@ using VividRP.Editor.Tools;
         if (active || pending > 0 || errors.Count > 0) throw new InvalidOperationException(name + " failed at " + frame + ": " + string.Join("\n", errors));
         System.IO.File.WriteAllText(output + "/progress.txt", name + " complete");
         System.IO.File.WriteAllText(output + "/capture-progress.json", Newtonsoft.Json.JsonConvert.SerializeObject(
-            new { completedArm = name, complete = false, records, errors }, Newtonsoft.Json.Formatting.Indented));
+            new { completedArm = name, complete = false, candidate, control, spacing = 16, rays = 8,
+                warmup, measuredFrames, frameBase, records, errors }, Newtonsoft.Json.Formatting.Indented));
     }
     EditorApplication.LockReloadAssemblies();
     try
     {
-        if (atrous3) ArchiveAtrousVariants();
+        if (atrous3 || cdf) ArchiveAtrousVariants();
         volume.profile = profile;
         SceneManager.SetActiveScene(scene);
         foreach (var c in cameras) c.camera.enabled = c.camera == camera;
@@ -306,7 +320,22 @@ using VividRP.Editor.Tools;
             if (aFiles.Length == 0 || mismatched.Count != 0)
                 throw new InvalidOperationException("SDF A/A reset qualification failed; refusing denoise A/B.");
         }
-        if (freshCameraState)
+        if (cdfReference)
+        {
+            await Run("white-reference-hybrid", SdfDiffuseTraceMode.Hybrid, true);
+            await Run("cdf-reference-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            await Run("white-reference-sdf", SdfDiffuseTraceMode.SdfOnly, true);
+            await Run("cdf-reference-sdf", SdfDiffuseTraceMode.SdfOnly, false);
+        }
+        else if (cdf)
+        {
+            await Run("cdf-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+            await Run("white-sdf", SdfDiffuseTraceMode.SdfOnly, true);
+            await Run("cdf-sdf", SdfDiffuseTraceMode.SdfOnly, false);
+            await Run("white-motion", SdfDiffuseTraceMode.Hybrid, true, true);
+            await Run("cdf-motion", SdfDiffuseTraceMode.Hybrid, false, true);
+        }
+        else if (freshCameraState)
             await Run("atrous3-hybrid", SdfDiffuseTraceMode.Hybrid, false);
         else if (isolateUniform)
         {
@@ -356,7 +385,7 @@ using VividRP.Editor.Tools;
             System.IO.Directory.CreateDirectory(output);
             System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
                 complete, experiment, candidate, control, frameBase, qualifyReset, sameModeWarmup, freshCameraState,
-                requestedPaths = freshCameraState ? "hybrid-static" : "full", compiledVariants,
+                requestedPaths = freshCameraState && !cdf ? "hybrid-static" : "full", compiledVariants,
                 width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
                 scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
                 row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

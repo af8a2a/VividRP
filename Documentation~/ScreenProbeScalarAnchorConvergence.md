@@ -110,3 +110,7 @@ python -B Tools~/Diagnostics/ScalarAnchorAgeOverview.py CAPTURE
 源误差、独立姿态参考与光照变化分别用 `EmissiveRadiosityConvergenceCapture.cs`、`ScalarAnchorPoseReferenceCapture.cs`、`ScalarAnchorRelightCapture.cs`，随后运行各自的 Python 分析器。参考合并仅用于已显式记录的失败后补测，不可绕过有效性检查。`LINEAR_REFERENCE` 需要匹配夹具和机位的 `vivid-ev4/object_id.exr`。证据目录在当前工作区写入权限之外时须使用获授权的执行方式，写入失败的分析不计作完整保存结果。
 
 后续仍需处理静态低频斑块、刚露出与连续移动时的八射线噪声，定位源缓存偶发失效，补齐局部光照 / 几何变化、Sponza、GPU 计时和与 Unreal 的独立质量对照。
+
+## 原始读回归档
+
+2026-11-14 的保留审查确认本节静态 `ScalarAnchorAge-20261114-063528-201` 已由后续 guarded 预滤波回归与精度对照覆盖，且没有其他保护捕帧引用其中间原始帧。该目录的中间 GPU `.bin` 已归档清理；首尾帧、本文所引用的分析、Profile 原始备份、推广和核验清单全部保留。旧长序列不能再完整复算。删除审计及限制见 [GI 证据保留](GiEvidenceRetention.md)，新对照见 [anchor 精度与窗口实验](ScreenProbeAnchorPrecisionExperiment.md)。

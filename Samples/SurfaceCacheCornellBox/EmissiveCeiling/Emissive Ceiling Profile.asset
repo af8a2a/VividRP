@@ -475,7 +475,7 @@ MonoBehaviour:
     m_Value: 32
   spatialDenoise:
     m_OverrideState: 1
-    m_Value: 2
+    m_Value: 3
   correctReceiverSelfHits:
     m_OverrideState: 1
     m_Value: 1

@@ -10,21 +10,30 @@ using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
     // fine compares 8x8 against 4x4 with the same blocked samples; legacy modes remain available.
-    string experiment = "blocked";
+    string experiment = "atrous3-white-fresh-hybrid";
     bool fine = experiment == "fine";
+    bool stable = experiment == "stable";
+    bool sameModeWarmup = experiment == "atrous3-white-cold";
+    bool freshCameraState = experiment == "atrous3-white-fresh-hybrid";
+    bool qualifyReset = experiment == "atrous3-white-reset" || sameModeWarmup || freshCameraState;
+    bool atrousWhite = experiment.StartsWith("atrous3-white", StringComparison.Ordinal);
+    bool atrous3 = experiment == "atrous3" || atrousWhite;
+    if (stable && typeof(SdfDiffuseGatherPass).GetField("m_StableGuideActive",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) == null)
+        throw new InvalidOperationException("Stable proposal experiment was withdrawn. Apply the archived StableDirectional-VarianceGate.patch to replay it.");
     if (fine && typeof(SdfDiffuseGatherPass).GetField("m_FineGuideActive",
         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic) == null)
         throw new InvalidOperationException("Fine experiment was rejected and withdrawn. Apply the archived FineDirectional-FourFaces.patch in an isolated checkout to replay it.");
-    bool blocked = fine || experiment.Contains("blocked", StringComparison.Ordinal);
+    bool blocked = fine || stable || (atrous3 && !atrousWhite) || experiment.Contains("blocked", StringComparison.Ordinal);
     bool confirmation = experiment == "reference-confirm-blocked";
-    string candidate = fine ? "fine" : blocked ? "blocked" : "sobol";
-    string control = fine ? "blocked" : "white";
+    string candidate = atrous3 ? "atrous3" : stable ? "stable" : fine ? "fine" : blocked ? "blocked" : "sobol";
+    string control = !atrousWhite && (fine || stable || atrous3) ? "blocked" : "white";
     bool reference = experiment.StartsWith("reference", StringComparison.Ordinal);
     bool referenceSdf = experiment == "reference-sdf";
     bool referenceSobol = experiment == "reference-sobol" || experiment == "reference-blocked";
     bool isolateUniform = experiment == "uniform-isolation";
     bool scroll = false;
-    string output = fine ? "E:/VividRP_GI_Evidence/FineDirectionalSampling-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
+    string output = fine || stable || atrous3 ? "E:/VividRP_GI_Evidence/" + (atrousWhite ? "Atrous3WhiteSampling-" : atrous3 ? "Atrous3Sampling-" : stable ? "StableDirectionalSampling-" : "FineDirectionalSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
         : "E:/VividRP_GI_Evidence/" + (confirmation ? "BlockedTemporalConfirmation-20261113/"
         : blocked ? "BlockedTemporalSampling-20261113/" : "TemporalSamplingCovered-20261113/")
         + (experiment == "compare" ? "capture-imported" : experiment);
@@ -39,6 +48,9 @@ using VividRP.Editor.Tools;
     if (!scene.isLoaded) throw new InvalidOperationException("Open the emissive Cornell fixture first.");
     var roots = scene.GetRootGameObjects();
     var camera = roots.SelectMany(o => o.GetComponentsInChildren<Camera>()).Single();
+    if (Vector3.Distance(camera.transform.position, new Vector3(0, 1.5f, -3.8f)) > 1e-5f
+        || Quaternion.Angle(camera.transform.rotation, Quaternion.identity) > 1e-4f || Mathf.Abs(camera.fieldOfView - 42f) > 1e-5f)
+        throw new InvalidOperationException("Cornell sampling comparison requires the reference pose and 42 degree vertical FOV.");
     var volume = roots.SelectMany(o => o.GetComponentsInChildren<Volume>()).Single();
     var extra = camera.GetComponent<VividAdditionalCameraData>();
     var originalPose = (camera.transform.position, camera.transform.rotation);
@@ -62,11 +74,41 @@ using VividRP.Editor.Tools;
     var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
     var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
     var records = new List<object>();
+    var compiledVariants = new List<object>();
     var errors = new List<string>();
     int frame = 0, pending = 0;
+    int frameLimit = warmup + measuredFrames;
     bool active = false, complete = false;
     string arm = "";
     object pass = null;
+
+    void ArchiveAtrousVariants()
+    {
+        var actualPass = ((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p => p.GetType() == type);
+        var shader = (ComputeShader)type.GetField("m_GatherCompute", priv).GetValue(actualPass);
+        var compile = typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static
+            | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Single(m => m.Name == "CompileComputeShaderVariant");
+        foreach (string name in new[] { "FilterSdfDiffuseAtrous", "FilterSdfDiffuseAtrousFinal" })
+        {
+            var variant = compile.Invoke(null, new object[] { shader, shader.FindKernel(name), Array.Empty<string>(),
+                UnityEngine.Rendering.GraphicsDeviceType.Direct3D12, BuildTarget.StandaloneWindows64 });
+            var info = variant.GetType();
+            if (!(bool)info.GetProperty("Success").GetValue(variant))
+                throw new InvalidOperationException("Atrous variant compilation failed: " + name);
+            var bytes = (byte[])info.GetProperty("ShaderData").GetValue(variant);
+            using var hash = System.Security.Cryptography.SHA256.Create();
+            string sha256 = BitConverter.ToString(hash.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+            // This exact variant was inspected for the coarsest geometry branch.
+            // Requalify the compiled code before changing this experiment's fingerprint.
+            if (name == "FilterSdfDiffuseAtrousFinal" && sha256 != "31fbe5302c2a893310ee72f0bcd4f53ad81578da0ad5b154326f4f829b3d3148")
+                throw new InvalidOperationException("Unexpected Atrous final bytecode; verify the geometry-guard variant before capturing.");
+            System.IO.Directory.CreateDirectory(output);
+            string path = output + "/compiled-" + name + ".bin";
+            System.IO.File.WriteAllBytes(path, bytes);
+            compiledVariants.Add(new { name, sha256, bytes = bytes.Length, path });
+        }
+    }
 
     bool Sample() => active && arm != "prime" && frame >= warmup && (frame - warmup) % captureStride == 0;
     object Field(string name) => type.GetField(name, priv).GetValue(pass);
@@ -99,6 +141,12 @@ using VividRP.Editor.Tools;
             ReadRegion(cmd, texture, tag + "-ceiling", 912, 970, 96, 48);
             ReadRegion(cmd, texture, tag + "-floor", 912, 130, 96, 64);
             ReadRegion(cmd, texture, tag + "-right", 1430, 500, 64, 96);
+            if (atrousWhite)
+            {
+                ReadRegion(cmd, texture, tag + "-short-contact", 720, 64, 64, 64);
+                ReadRegion(cmd, texture, tag + "-tall-contact", 1093, 153, 64, 64);
+                ReadRegion(cmd, texture, tag + "-wall-corner", 1288, 468, 64, 64);
+            }
         }
     }
     void Begin(ScriptableRenderContext context, Camera current)
@@ -132,8 +180,8 @@ using VividRP.Editor.Tools;
             ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
             ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
             ReadRegion(cmd, Resolve("m_FilteredProbes"), "sh", 0, 59, 2640, 7);
-            if (blocked && (bool)Field("m_FrozenGuideActive"))
-                ReadRegion(cmd, Resolve("m_CurrentProposal"), "proposal", 48 * 8, 59, 24 * 8, 7);
+            if ((blocked || atrous3) && (bool)Field("m_DirectionalGuide"))
+                ReadRegion(cmd, Resolve((bool)Field("m_FrozenGuideActive") ? "m_CurrentProposal" : "m_DirectionalGuideTexture"), "proposal", 48 * 8, 59, 24 * 8, 7);
         }
         if (isolateUniform)
         {
@@ -163,22 +211,37 @@ using VividRP.Editor.Tools;
             guide = Field("m_DirectionalGuide"), hierarchical = Field("m_DirectionalHierarchicalGuide"),
             frozenProposal = Field("m_FrozenGuideActive"), proposalHistoryValid = Field("m_ProposalHistoryValid"),
             fineGuide = type.GetField("m_FineGuideActive", priv)?.GetValue(pass) ?? false,
+            stableGuide = type.GetField("m_StableGuideActive", priv)?.GetValue(pass) ?? false,
+            atrousIterations = Field("m_AtrousIterations"),
             samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
             rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
     Action<ComputePassContext, Texture, Texture, Texture, Texture> linear = (context, lighting, depth, rt0, rt1) => {
         if (!active || context.Get<VividCameraData>().camera != camera) return;
         if (Sample()) ReadPixels((CommandBuffer)nativeCmd.GetValue(context.cmd), lighting, "final");
-        if (++frame >= (arm == "prime" ? warmup : warmup + measuredFrames)) active = false;
+        if (++frame >= frameLimit) active = false;
     };
     async System.Threading.Tasks.Task Run(string name, SdfDiffuseTraceMode mode, bool legacy, bool moving = false)
     {
+        if (qualifyReset && !freshCameraState && name != "prime" && name != "reset")
+            await Run("reset", sameModeWarmup ? mode : mode == SdfDiffuseTraceMode.SdfOnly ? SdfDiffuseTraceMode.Hybrid : SdfDiffuseTraceMode.SdfOnly, true);
+        if (freshCameraState && name != "prime")
+        {
+            AsyncGPUReadback.WaitAllRequests();
+            var actualPass = ((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p => p.GetType() == type);
+            var camerasOwner = type.GetField("m_Cameras", priv).GetValue(actualPass);
+            camerasOwner.GetType().GetMethod("CleanupCamera").Invoke(camerasOwner, new object[] { camera });
+            var historyType = type.Assembly.GetType("VividRP.Runtime.CameraHistorySystem");
+            var historiesOwner = historyType.GetField("s_Histories", stat).GetValue(null);
+            historiesOwner.GetType().GetMethod("CleanupCamera").Invoke(historiesOwner, new object[] { camera });
+        }
         arm = name; frame = 0; scroll = moving;
-        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, legacy ? (fine ? 8388608 : 0) : fine ? 41943040 : blocked ? 8388608 : 262144);
+        frameLimit = name == "reset" ? sameModeWarmup ? 64 : 1 : name == "prime" ? warmup : warmup + measuredFrames;
+        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, atrousWhite ? 0 : legacy ? (fine || stable || atrous3 ? 8388608 : 0) : stable ? 75497472 : fine ? 41943040 : blocked ? 8388608 : 262144);
         System.IO.Directory.CreateDirectory(output + "/" + arm);
         gi.traceMode.Override(mode);
         gi.surfaceCacheBounceOrders.Override(8);
-        gi.spatialDenoise.Override(SdfDiffuseSpatialDenoise.Atrous2);
+        gi.spatialDenoise.Override(atrous3 && !legacy ? SdfDiffuseSpatialDenoise.Atrous3 : SdfDiffuseSpatialDenoise.Atrous2);
         // Probe filters stay fixed: the raw/temporal/final taps isolate pixel reconstruction.
         extra.ResetPostProcessingHistory();
         active = true;
@@ -199,6 +262,7 @@ using VividRP.Editor.Tools;
     EditorApplication.LockReloadAssemblies();
     try
     {
+        if (atrous3) ArchiveAtrousVariants();
         volume.profile = profile;
         SceneManager.SetActiveScene(scene);
         foreach (var c in cameras) c.camera.enabled = c.camera == camera;
@@ -221,7 +285,30 @@ using VividRP.Editor.Tools;
         RenderPipelineManager.beginCameraRendering += Begin;
         Application.logMessageReceived += Log;
         await Run("prime", SdfDiffuseTraceMode.Hybrid, true);
-        if (isolateUniform)
+        if (qualifyReset)
+        {
+            string qa = freshCameraState ? "qualification-hybrid-a" : "qualification-sdf-a";
+            string qb = freshCameraState ? "white-hybrid" : "qualification-sdf-b";
+            var qualificationMode = freshCameraState ? SdfDiffuseTraceMode.Hybrid : SdfDiffuseTraceMode.SdfOnly;
+            await Run(qa, qualificationMode, true);
+            await Run(qb, qualificationMode, true);
+            var aFiles = System.IO.Directory.GetFiles(output + "/" + qa, "*.bin")
+                .Where(p => !p.Contains("full-final", StringComparison.Ordinal)).ToArray();
+            var mismatched = new List<string>();
+            foreach (var aFile in aFiles)
+            {
+                string bFile = output + "/" + qb + "/" + System.IO.Path.GetFileName(aFile);
+                if (!System.IO.File.Exists(bFile) || !System.IO.File.ReadAllBytes(aFile).SequenceEqual(System.IO.File.ReadAllBytes(bFile)))
+                    mismatched.Add(System.IO.Path.GetFileName(aFile));
+            }
+            System.IO.File.WriteAllText(output + "/qualification.json", Newtonsoft.Json.JsonConvert.SerializeObject(
+                new { filesChecked = aFiles.Length, mismatched, exact = mismatched.Count == 0 }, Newtonsoft.Json.Formatting.Indented));
+            if (aFiles.Length == 0 || mismatched.Count != 0)
+                throw new InvalidOperationException("SDF A/A reset qualification failed; refusing denoise A/B.");
+        }
+        if (freshCameraState)
+            await Run("atrous3-hybrid", SdfDiffuseTraceMode.Hybrid, false);
+        else if (isolateUniform)
         {
             await Run("white-uniform-sdf", SdfDiffuseTraceMode.SdfOnly, true);
             await Run("sobol-uniform-sdf", SdfDiffuseTraceMode.SdfOnly, false);
@@ -268,7 +355,8 @@ using VividRP.Editor.Tools;
         {
             System.IO.Directory.CreateDirectory(output);
             System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-                complete, experiment, candidate, control, frameBase,
+                complete, experiment, candidate, control, frameBase, qualifyReset, sameModeWarmup, freshCameraState,
+                requestedPaths = freshCameraState ? "hybrid-static" : "full", compiledVariants,
                 width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
                 scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
                 row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

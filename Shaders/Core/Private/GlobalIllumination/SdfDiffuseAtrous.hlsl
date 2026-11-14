@@ -113,6 +113,9 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
         float totalWeight = kernel[2] * kernel[2];
         float3 sum = center.rgb * totalWeight;
         float varianceNumerator = variance * totalWeight * totalWeight;
+#if defined(VIVID_SDF_ATROUS_GEOMETRY_GUARD)
+        bool coarseGeometryEdge = false;
+#endif
 
         [loop]
         for (int y = -2; y <= 2; ++y)
@@ -128,7 +131,16 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
                 float normalAgreement = SdfAtrousNormalAgreement(guide, tap);
                 float depthError = abs(tap.depth - guide.depth - dot(gradient, float2(offset))) / depthTolerance;
                 if (normalAgreement <= 0.8 || depthError >= 3.0)
+                {
+                    // Keep the already filtered fine-scale result where the
+                    // coarsest footprint crosses a surface boundary. Averaging
+                    // only its surviving plane taps can lift contact shadows.
+#if defined(VIVID_SDF_ATROUS_GEOMETRY_GUARD)
+                    coarseGeometryEdge = coarseGeometryEdge || (_SdfAtrousStep >= 4u
+                        && all(tapPixel >= 0) && all(tapPixel < size));
+#endif
                     continue;
+                }
 
                 float4 lighting = LoadSdfAtrousLighting(tapPixel);
                 if (abs(lighting.a) <= 0.0 || (lighting.a < 0.0) != (center.a < 0.0))
@@ -147,7 +159,10 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
                 varianceNumerator += weight * weight * tapVariance;
             }
         }
-        center.rgb = sum / totalWeight;
+#if defined(VIVID_SDF_ATROUS_GEOMETRY_GUARD)
+        if (!coarseGeometryEdge)
+#endif
+            center.rgb = sum / totalWeight;
         // Neighboring pixels can share a reservoir. Keep a conservative variance floor.
         filteredVariance = max(0.25 * variance, varianceNumerator / (totalWeight * totalWeight));
     }

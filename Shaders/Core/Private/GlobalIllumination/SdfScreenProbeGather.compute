@@ -4,7 +4,7 @@
 #pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
 #pragma kernel PlaceSdfAdaptiveProbes
 #pragma kernel FilterSdfDiffuseAtrous VIVID_SDF_ATROUS
-#pragma kernel FilterSdfDiffuseAtrousFinal VIVID_SDF_ATROUS VIVID_SDF_ATROUS_FINAL
+#pragma kernel FilterSdfDiffuseAtrousFinal VIVID_SDF_ATROUS VIVID_SDF_ATROUS_FINAL VIVID_SDF_ATROUS_GEOMETRY_GUARD
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfScreenProbeTracingCommon.hlsl"

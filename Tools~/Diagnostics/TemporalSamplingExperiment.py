@@ -57,13 +57,15 @@ def probe_hash(value):
     return value ^ (value >> 16)
 
 
-def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_resets=False):
+def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_resets=False, require_frozen=True):
     report = {}
-    for arm in (a for a in arms if a.startswith(("blocked-", "fine-"))):
+    for arm in (a for a in arms if a.startswith(("blocked-", "fine-", "stable-", "atrous3-")) or (not require_frozen and a.startswith("white-"))):
         previous = None
         fixed = changed = octahedral = fine_count = descriptors = resets = 0
         maximum_mass = 0.0
         crossed_faces = 0
+        topology_updates = 0
+        previous_topology = None
         for frame in frames:
             record = files[arm, frame, "proposal"]
             data = read(record).reshape(record["height"], record["width"] // 8, 8, 4)
@@ -105,13 +107,26 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
                     fine_occupancy[..., cell] += ((cell % 8 >= fine_x[..., ray]) & (cell % 8 < fine_x[..., ray] + fine_w[..., ray])
                                                  & (cell // 8 >= fine_y[..., ray]) & (cell // 8 < fine_y[..., ray] + fine_h[..., ray]))
             assert np.all(fine_occupancy[fine_probe] == 1), "Fine proposal overlap or lost hemisphere support"
+            # History coordinates and screen/world source tags do not change
+            # ray directions. Compare actual strata in an 8x8 common chart.
+            coarse_w, coarse_h = 1 << ((code >> 4) & 1), 1 << ((code >> 5) & 1)
+            topology = np.stack([np.where(fine_ray, fine_x, 2 * (code & 3)),
+                                 np.where(fine_ray, fine_y, 2 * ((code >> 2) & 3)),
+                                 np.where(fine_ray, fine_w, 2 * coarse_w),
+                                 np.where(fine_ray, fine_h, 2 * coarse_h),
+                                 np.where(oct_ray, -3, subdivision)], axis=-1)
+            topology[..., 0] = np.where(oct_ray, topology[..., 0], code)
+            topology[..., 1:4] = np.where(oct_ray[..., None], topology[..., 1:4], 0)
+            if previous_topology is not None:
+                topology_updates += int(np.any(topology != previous_topology, axis=(-1, -2)).sum())
+            previous_topology = topology
             yy, xx = np.mgrid[record["y"]:record["y"]+record["height"],
                               record["x"]//8:(record["x"]+record["width"])//8]
             phase = probe_hash(xx + yy * 65537) & 31
             # Older manifests used this fixed phase without recording it explicitly.
             base = manifest.get("frameBase", 1733)
             boundary = ((base + frame + phase) & 31) == 0
-            if previous is not None:
+            if previous is not None and require_frozen:
                 modified = np.any(data != previous, axis=(-1, -2))
                 # Lighting changes can invalidate directional guide history. The
                 # shader then uses a fixed cosine partition until the boundary;
@@ -127,10 +142,12 @@ def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_r
                 changed += int((modified & boundary).sum())
             previous = data
         report[arm] = {"fixed_probe_frames_checked": fixed, "boundary_updates": changed,
+                       "frozen_proposals_checked": require_frozen,
                        "fixed_cosine_reset_probe_frames": resets,
                        "octahedral_probe_frames": octahedral, "probe_frames": descriptors,
                        "fine_probe_frames": fine_count,
                        "maximum_inverse_pdf": maximum_mass, "fine_rectangles_crossing_faces": crossed_faces,
+                       "sampling_topology_updates": topology_updates,
                        "full_support_and_mass": True}
     assert report, "Blocked proposal data was not captured"
     return report
@@ -159,12 +176,23 @@ def analyze(root, linear, candidate="sobol"):
             expected = record["arm"].startswith("fine-")
             assert s["frozenProposal"] and s["proposalHistoryValid"] and s["guide"] and s["hierarchical"]
             assert s["fineGuide"] == expected and s["samplingFlags"] == (41943040 if expected else 8388608)
+        elif candidate == "stable":
+            expected = record["arm"].startswith("stable-")
+            assert s["frozenProposal"] and s["proposalHistoryValid"] and s["guide"] and s["hierarchical"]
+            assert s["stableGuide"] == expected and s["samplingFlags"] == (75497472 if expected else 8388608)
+        elif candidate == "atrous3":
+            expected = record["arm"].startswith("atrous3-")
+            frozen = control != "white"
+            assert s["frozenProposal"] == frozen and (not frozen or s["proposalHistoryValid"])
+            assert s["samplingFlags"] == (8388608 if frozen else 0)
+            assert s["atrousIterations"] == (3 if expected else 2)
     get = lambda a, f, tag: read(files[a, f, tag])
     stack = lambda a, tag: np.stack([get(a, f, tag) for f in frames])
     ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
     report = {"scope": "256 consecutive frames, fixed source; temporal noise and pixel history inheritance, not physical truth",
               "contract": "linear consumed E/pi, no exposure or gain fitting", "arms": {}, "pairs": {}}
     all_y = {}
+    all_rgb = {}
     matrices = {(r["arm"], r["frame"]): np.asarray(r["vp"]).reshape(4, 4) for r in records if "vp" in r}
     source_hashes = {}
     for arm in arms:
@@ -184,6 +212,7 @@ def analyze(root, linear, candidate="sobol"):
                 rgba = stack(arm, stage + "-" + region)
                 y_values = ((rgba[..., :3] * np.abs(rgba[..., 3:4])) @ LUMA)[:, mask]
                 all_y[arm, stage, region] = y_values
+                all_rgb[arm, stage, region] = (rgba[..., :3] * np.abs(rgba[..., 3:4]))[:, mask].mean((0, 1), dtype=np.float64)
                 report["arms"][arm]["pixels"][stage + "-" + region] = metrics(y_values)
         geometry = stack(arm, "probe-geometry").reshape(len(frames), -1, 4)
         normal = normal_from_packed(np.maximum(0, geometry[..., 3]))
@@ -204,12 +233,21 @@ def analyze(root, linear, candidate="sobol"):
         b, a = control + "-" + mode, candidate + "-" + mode
         assert all(np.array_equal(matrices[b, f], matrices[a, f]) for f in frames)
         assert all(np.array_equal(get(b, f, "probe-geometry"), get(a, f, "probe-geometry")) for f in frames), "Static A/B probe geometry differs"
+        if candidate == "atrous3":
+            tags = ["proposal", "hit-lighting", "anchor", "sh"] + [stage + "-" + region
+                    for stage in ["resolved", "pixel-temporal"] for region in ["ceiling", "floor", "right"]]
+            assert all(np.array_equal(get(b, f, tag), get(a, f, tag)) for f in frames for tag in tags), "Denoise-only comparison changed upstream lighting"
         report["pairs"][mode] = {stage + "-" + region: paired(y, all_y[a, stage, region])
                                   for (arm, stage, region), y in all_y.items() if arm == b}
+        for region in ["ceiling", "floor", "right"]:
+            before_rgb, after_rgb = all_rgb[b, "final", region], all_rgb[a, "final", region]
+            report["pairs"][mode]["final-" + region].update({"mean_rgb_before": before_rgb.tolist(), "mean_rgb_after": after_rgb.tolist(),
+                "mean_rgb_change_percent": (100 * (after_rgb - before_rgb) / np.maximum(abs(before_rgb), 1e-8)).tolist()})
     report["motion"] = {}
     report["motion_scope"] = "Matched-pose cycle noise plus nearest-depth exposure diagnostic; not native four-tap rejection replay or dynamic ground truth"
     motion_geometry = []
     cycle_errors = {}
+    motion_upstream = {}
     for arm in [control + "-motion", candidate + "-motion"]:
         vp = np.stack([matrices[arm, f] for f in frames])
         inverse = np.linalg.inv(vp)
@@ -224,6 +262,9 @@ def analyze(root, linear, candidate="sobol"):
         raw = stack(arm, "resolved-motion")
         temporal = stack(arm, "pixel-temporal-motion")
         history = stack(arm, "history-motion")
+        if candidate == "atrous3":
+            motion_upstream[arm] = {tag: hashlib.sha256(value).hexdigest()
+                                    for tag, value in [("resolved", raw), ("pixel-temporal", temporal), ("history", history)]}
         age, _, status = unpack_pixel_history(history[..., 3].astype("<f2"))
         exposed = np.zeros(depth.shape, bool)
         for i in range(1, len(frames)):
@@ -258,6 +299,10 @@ def analyze(root, linear, candidate="sobol"):
                                   "matched_pose_cycle_delta_mean": float(cycle_delta.mean())}
     assert np.array_equal(*motion_geometry), "A/B motion geometry differs"
     assert all(np.array_equal(matrices[control + "-motion", f], matrices[candidate + "-motion", f]) for f in frames)
+    if candidate == "atrous3":
+        assert motion_upstream[control + "-motion"] == motion_upstream[candidate + "-motion"], "Denoise-only comparison changed motion history"
+        report["denoise_upstream_equivalence"] = {"static_and_motion_exact": True,
+            "scope": "Captured static interiors and 320x256 motion ROI", "motion_hashes": motion_upstream}
     # Compare the same 80 poses; eight-pose blocks retain short-range correlation.
     before = cycle_errors[control + "-motion"]
     after = cycle_errors[candidate + "-motion"]
@@ -266,15 +311,15 @@ def analyze(root, linear, candidate="sobol"):
     draws = np.random.default_rng(20261114).integers(0, 10, (4096, 10))
     report["motion_comparison"] = {"cycle_rms_change_percent": float(100 * (np.sqrt(a.mean()/b.mean()) - 1)),
         "paired_block8_conditional_95_percent": np.quantile(100 * (np.sqrt(a[draws].mean(1)/b[draws].mean(1)) - 1), [.025, .975]).tolist()}
-    if candidate in ("blocked", "fine"):
-        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms)
+    if candidate in ("blocked", "fine", "stable", "atrous3"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms, require_frozen=not(candidate == "atrous3" and control == "white"))
     (root.parent / "analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     plot_quality(root.parent, report, control, candidate)
     print(json.dumps(report["pairs"], indent=2))
     print(json.dumps(report["motion"], indent=2))
 
 
-def plot_quality(root, report, control, candidate):
+def plot_quality(root, report, control, candidate, filename="sampling-quality.png"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -297,9 +342,10 @@ def plot_quality(root, report, control, candidate):
         axes[2].axvline(0, color="black", linewidth=.8); axes[2].set_yticks([0], ["80 matched poses"])
         axes[2].set_title("Motion cycle RMS change (%)\nnegative is lower noise"); axes[2].grid(axis="x", alpha=.2)
     else:
-        axes[2].axis("off"); axes[2].text(.5, .5, "Rejected at static quality gate\nNo completed motion comparison", ha="center", va="center")
+        message = "Static-only view\nMotion is reported separately" if report.get("capture_complete") else "Rejected at static quality gate\nNo completed motion comparison"
+        axes[2].axis("off"); axes[2].text(.5, .5, message, ha="center", va="center")
     fig.suptitle(f"{control} vs {candidate}: 16 px / 8 rays, fixed source; conditional 95% intervals")
-    fig.savefig(root / "sampling-quality.png", dpi=160); plt.close(fig)
+    fig.savefig(root / filename, dpi=160); plt.close(fig)
 
 
 def analyze_static_prefix(root, linear, candidate):
@@ -329,6 +375,16 @@ def analyze_static_prefix(root, linear, candidate):
                 expected = arm.startswith("fine-")
                 assert all(s["frozenProposal"] and s["proposalHistoryValid"] and s["fineGuide"] == expected
                            and s["samplingFlags"] == (41943040 if expected else 8388608) for s in states)
+            elif candidate == "stable":
+                expected = arm.startswith("stable-")
+                assert all(s["frozenProposal"] and s["proposalHistoryValid"] and s["stableGuide"] == expected
+                           and s["samplingFlags"] == (75497472 if expected else 8388608) for s in states)
+            elif candidate == "atrous3":
+                expected = arm.startswith("atrous3-")
+                frozen = control != "white"
+                assert all(s["frozenProposal"] == frozen and (not frozen or s["proposalHistoryValid"])
+                           and s["samplingFlags"] == (8388608 if frozen else 0)
+                           and s["atrousIterations"] == (3 if expected else 2) for s in states)
             first = Path(files[arm, frames[0], "radiosity"]["path"]).read_bytes()
             assert first == Path(files[arm, frames[-1], "radiosity"]["path"]).read_bytes()
             report["sources"][arm] = hashlib.sha256(first).hexdigest()
@@ -342,10 +398,16 @@ def analyze_static_prefix(root, linear, candidate):
             assert mask.any()
             for stage in ["resolved", "pixel-temporal", "final"]:
                 values = []
+                rgb_means = []
                 for arm in [before, after]:
                     rgba = np.stack([read(files[arm, f, stage + "-" + region]) for f in frames])
                     values.append(((rgba[..., :3] * np.abs(rgba[..., 3:4])) @ LUMA)[:, mask])
+                    rgb_means.append((rgba[..., :3] * np.abs(rgba[..., 3:4]))[:, mask].mean((0, 1), dtype=np.float64))
                 report["pairs"][mode][stage + "-" + region] = paired(*values)
+                if stage == "final":
+                    before_rgb, after_rgb = rgb_means
+                    report["pairs"][mode][stage + "-" + region].update({"mean_rgb_before": before_rgb.tolist(), "mean_rgb_after": after_rgb.tolist(),
+                        "mean_rgb_change_percent": (100 * (after_rgb - before_rgb) / np.maximum(abs(before_rgb), 1e-8)).tolist()})
                 bands = []
                 for y in values:
                     signal = y.astype(np.float64) - y.mean(0, dtype=np.float64)
@@ -360,11 +422,78 @@ def analyze_static_prefix(root, linear, candidate):
                 report["spectra"][mode][stage + "-" + region] = dict(zip([control, candidate], bands))
     assert report["pairs"], "No completed static pair"
     assert len(set(report["sources"].values())) == 1, "A/B source differs"
-    if candidate in ("fine", "blocked"):
-        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms)
+    if candidate in ("fine", "blocked", "stable", "atrous3"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms, require_frozen=not(candidate == "atrous3" and control == "white"))
     (root.parent / "static-analysis.json").write_text(json.dumps(report, indent=2))
-    plot_quality(root.parent, report, control, candidate)
+    plot_quality(root.parent, report, control, candidate, "static-sampling-quality.png")
     print(json.dumps({mode: {key: row for key, row in rows.items() if key.startswith("final-")} for mode, rows in report["pairs"].items()}, indent=2))
+
+
+def analyze_denoise_edges(root, linear):
+    from scipy.ndimage import minimum_filter, maximum_filter
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    manifest = json.loads((root / "capture.json").read_text())
+    assert manifest["complete"] and not manifest["errors"] and manifest["candidate"] == "atrous3"
+    assert manifest["spacing"] == 16 and manifest["rays"] == 8 and manifest["measuredFrames"] == 256
+    frames = range(manifest["warmup"], manifest["warmup"] + manifest["measuredFrames"])
+    files = {(r["arm"], r["frame"], r["tag"]): r for r in manifest["records"] if "tag" in r}
+    control = manifest["control"]
+    ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
+    edge = minimum_filter(ids, 3) != maximum_filter(ids, 3)
+    edge = maximum_filter(edge, 9)
+    report = {"scope": "Contact and wall-corner patches; signal change relative to two-pass mean, not physical ground truth",
+              "display_scale": 20, "pairs": {}}
+    images = []
+    for mode in ["hybrid", "sdf"]:
+        before, after = control + "-" + mode, "atrous3-" + mode
+        report["pairs"][mode] = {}
+        for region in ["short-contact", "tall-contact", "wall-corner"]:
+            meta = files[before, frames.start, "final-" + region]
+            y, x, h, w = (meta[k] for k in ["y", "x", "height", "width"])
+            labels, boundary = ids[y:y+h, x:x+w], edge[y:y+h, x:x+w]
+            for f in frames:
+                for stage in ["resolved", "pixel-temporal"]:
+                    assert np.array_equal(read(files[before, f, stage + "-" + region]), read(files[after, f, stage + "-" + region])), "Edge input differs"
+            a = np.stack([read(files[before, f, "final-" + region]) for f in frames])
+            b = np.stack([read(files[after, f, "final-" + region]) for f in frames])
+            assert np.array_equal(a[..., 3], b[..., 3]), "Denoising changed edge coverage"
+            a, b = a[..., :3] * abs(a[..., 3:4]), b[..., :3] * abs(b[..., 3:4])
+            ay, by = a @ LUMA, b @ LUMA
+            am, bm = a.mean(0, dtype=np.float64), b.mean(0, dtype=np.float64)
+            delta = (bm - am) @ LUMA
+            row = {"coverage_exact": True, "upstream_exact": True, "objects": {}}
+            for object_id in np.unique(labels):
+                mask = labels == object_id
+                if object_id <= 0 or mask.sum() < 8:
+                    continue
+                mean_a, mean_b = am[mask].mean(0), bm[mask].mean(0)
+                values = paired(ay[:, mask], by[:, mask])
+                values.update({"pixels": int(mask.sum()), "mean_rgb_before": mean_a.tolist(), "mean_rgb_after": mean_b.tolist(),
+                    "mean_rgb_change_percent": (100 * (mean_b - mean_a) / np.maximum(abs(mean_a), 1e-8)).tolist(),
+                    "pixel_mean_delta_abs_p99": float(np.quantile(abs(delta[mask]), .99))})
+                selected = mask & boundary
+                if selected.any():
+                    values["geometry_edge_mean_delta_y"] = float(delta[selected].mean())
+                    values["geometry_edge_abs_delta_p99"] = float(np.quantile(abs(delta[selected]), .99))
+                row["objects"][str(int(object_id))] = values
+            report["pairs"][mode][region] = row
+            if mode == "hybrid": images.append((region, am, bm, delta))
+    fig, axes = plt.subplots(3, 3, figsize=(9, 8), layout="constrained")
+    bound = max(float(np.quantile(abs(row[3]), .995)) for row in images)
+    for index, (region, am, bm, delta) in enumerate(images):
+        axes[index, 0].imshow(np.clip(am[::-1] / 20, 0, 1)**(1/2.2), interpolation="nearest")
+        axes[index, 1].imshow(np.clip(bm[::-1] / 20, 0, 1)**(1/2.2), interpolation="nearest")
+        shown = axes[index, 2].imshow(delta[::-1], cmap="coolwarm", vmin=-bound, vmax=bound, interpolation="nearest")
+        for axis in axes[index]: axis.set_xticks([]); axis.set_yticks([])
+        axes[index, 0].set_ylabel(region)
+    for axis, title in zip(axes[0], ["2-pass mean", "3-pass mean", "Signed delta E/pi luminance"]): axis.set_title(title)
+    fig.colorbar(shown, ax=axes[:, 2], shrink=.8)
+    fig.suptitle("Hybrid contact patches: shared display scale 20, no brightness fitting")
+    fig.savefig(root.parent / "denoise-edges.png", dpi=160); plt.close(fig)
+    (root.parent / "denoise-edges.json").write_text(json.dumps(report, indent=2))
+    print(json.dumps({"coverage_and_upstream_exact": True, "modes": list(report["pairs"])}, indent=2))
 
 
 def analyze_references(root, linear, candidate="sobol", control_root=None):
@@ -483,10 +612,13 @@ if __name__ == "__main__":
     parser.add_argument("--reference-only", action="store_true")
     parser.add_argument("--uniform-only", action="store_true")
     parser.add_argument("--static-only", action="store_true", help="Completed static pairs from an intentionally rejected, incomplete capture")
-    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine"], default="sobol")
+    parser.add_argument("--edges-only", action="store_true", help="Denoise-only contact patches with unchanged upstream and coverage")
+    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine", "stable", "atrous3"], default="sobol")
     parser.add_argument("--control-root", type=Path, help="Frozen-source white reference root from a previous capture")
     args = parser.parse_args()
-    if args.static_only:
+    if args.edges_only:
+        analyze_denoise_edges(args.capture, args.linear)
+    elif args.static_only:
         analyze_static_prefix(args.capture, args.linear, args.candidate)
     elif args.uniform_only:
         analyze_uniform(args.capture, args.linear)

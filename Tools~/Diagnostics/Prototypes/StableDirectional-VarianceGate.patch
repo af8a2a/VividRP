@@ -1,0 +1,136 @@
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+@@ -500 +500,2 @@
+-        private bool m_FrozenGuideActive, m_ProposalHistoryValid;
++        private bool m_FrozenGuideActive, m_ProposalHistoryValid, m_StableGuideActive;
++        private int m_StableGuideKernel = -1;
+@@ -710,0 +712,2 @@
++            if (HasKernel(m_ImportanceSamplingCompute, "PrepareSdfStableDirectionalGuide"))
++                m_StableGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfStableDirectionalGuide");
+@@ -768 +771 @@
+-            m_FrozenGuideActive = m_ProposalHistoryValid = false;
++            m_FrozenGuideActive = m_ProposalHistoryValid = m_StableGuideActive = false;
+@@ -910,0 +914,2 @@
++            m_StableGuideActive = m_FrozenGuideActive && m_DirectionalHierarchicalGuide && m_StableGuideKernel >= 0
++                && (EditorGatherHistoryDiagnostics & 67108864) != 0;
+@@ -1546,0 +1552 @@
++            m_StableGuideKernel = -1;
+@@ -2547 +2553 @@
+-            int kernel = m_DirectionalGuideKernel;
++            int kernel = m_StableGuideActive ? m_StableGuideKernel : m_DirectionalGuideKernel;
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+--- a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
++++ b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+@@ -1,0 +2,2 @@
++#pragma kernel PrepareSdfStableDirectionalGuide VIVID_SDF_STABLE_PROPOSAL
++#pragma kernel InspectSdfStableDirectionalGuideCS VIVID_SDF_STABLE_PROPOSAL
+@@ -89,0 +92,65 @@
++#if defined(VIVID_SDF_STABLE_PROPOSAL)
++float DirectionalPartitionVariance(float importance[16], uint4 rects[8])
++{
++    float peak = 0.0;
++    [unroll]
++    for (uint i = 0u; i < 16u; ++i)
++        peak = max(peak, importance[i]);
++    float inversePeak = rcp(max(peak, 1e-10));
++    float variance = 0.0;
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++    {
++        uint4 rect = rects[ray];
++        float sum = 0.0, squares = 0.0;
++        [unroll]
++        for (uint y = 0u; y < 2u; ++y)
++        {
++            [unroll]
++            for (uint x = 0u; x < 2u; ++x)
++            {
++                if (x < rect.z && y < rect.w)
++                {
++                    float value = importance[(rect.y + y) * 4u + rect.x + x] * inversePeak;
++                    sum += value; squares += value * value;
++                }
++            }
++        }
++        // The common 1/16^2 factor cancels when comparing partitions.
++        variance += max(0.0, float(rect.z * rect.w) * squares - sum * sum);
++    }
++    return variance;
++}
++
++bool TryRetainDirectionalPartition(uint2 tile, float importance[16], uint4 candidate[8], out float2 costs)
++{
++    costs = 0.0;
++    if (_SdfDirectionalHasProposalHistory == 0u)
++        return false;
++    uint4 previous[8];
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++    {
++        float4 descriptor = _SdfDirectionalProposalHistory.Load(int3(DirectionalAddress(tile, ray), 0));
++        if ((descriptor.w != DirectionalOctScreen && descriptor.w != DirectionalOctWorld)
++            || descriptor.x < 0.0 || descriptor.x > 63.0)
++            return false;
++        previous[ray] = UnpackDirectionalOctRect(uint(descriptor.x));
++        if (any(previous[ray].xy + previous[ray].zw > 4u))
++            return false;
++    }
++    costs = float2(DirectionalPartitionVariance(importance, previous), DirectionalPartitionVariance(importance, candidate));
++    // Editor experiment: change topology only for a predicted reduction >20%.
++    // Every retained stratum still traces the current scene with its exact PDF.
++    if (costs.y < 0.8 * costs.x)
++        return false;
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++    {
++        uint2 address = DirectionalAddress(tile, ray);
++        _SdfDirectionalGuideOutput[address] = _SdfDirectionalProposalHistory.Load(int3(address, 0));
++    }
++    return true;
++}
++#endif
++
+@@ -180,0 +248,5 @@
++    #if defined(VIVID_SDF_STABLE_PROPOSAL)
++        float2 partitionCosts;
++        if (hasPrevious && TryRetainDirectionalPartition(tile, importance, rects, partitionCosts))
++            return true;
++    #endif
+@@ -187,0 +260,3 @@
++#if defined(VIVID_SDF_STABLE_PROPOSAL)
++void PrepareSdfStableDirectionalGuide(uint3 id : SV_DispatchThreadID)
++#else
+@@ -188,0 +264 @@
++#endif
+@@ -324,0 +401,30 @@
++
++#if defined(VIVID_SDF_STABLE_PROPOSAL)
++StructuredBuffer<float4> _SdfStableValidationInput; // Four importance vectors, eight candidate descriptors per case.
++RWStructuredBuffer<float4> _SdfStableValidationResult;
++uint _SdfStableValidationCount;
++
++[numthreads(8, 1, 1)]
++void InspectSdfStableDirectionalGuideCS(uint3 id : SV_DispatchThreadID)
++{
++    if (id.x >= _SdfStableValidationCount)
++        return;
++    float importance[16];
++    uint4 candidate[8];
++    [unroll]
++    for (uint i = 0u; i < 16u; ++i)
++        importance[i] = _SdfStableValidationInput[id.x * 12u + i / 4u][i & 3u];
++    [unroll]
++    for (uint ray = 0u; ray < 8u; ++ray)
++        candidate[ray] = UnpackDirectionalOctRect(uint(_SdfStableValidationInput[id.x * 12u + 4u + ray].x));
++    float2 costs;
++    bool retained = TryRetainDirectionalPartition(uint2(id.x, 0u), importance, candidate, costs);
++    if (!retained)
++    {
++        [unroll]
++        for (uint ray = 0u; ray < 8u; ++ray)
++            _SdfDirectionalGuideOutput[DirectionalAddress(uint2(id.x, 0u), ray)] = _SdfStableValidationInput[id.x * 12u + 4u + ray];
++    }
++    _SdfStableValidationResult[id.x] = float4(costs, retained ? 1.0 : 0.0, 1.0);
++}
++#endif

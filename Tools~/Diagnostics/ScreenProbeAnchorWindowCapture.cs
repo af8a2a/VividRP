@@ -1,4 +1,4 @@
-// Requires Patches/ScreenProbeAnchorPrecision.patch. Fixed 16px/8 rays; no saved assets.
+// Uses the Editor-only anchor-age override. Fixed 16px/8 rays; no saved assets.
 // Factorial scalar-anchor precision/window experiment with a source-settled history epoch. No assets saved.
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -46,6 +46,7 @@ using VividRP.Editor.Tools;
     string output = "E:/VividRP_GI_Evidence/ScreenProbeAnchorWindow-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
     System.IO.Directory.CreateDirectory(output);
     var cpuFrames = new List<object>();
+    var baselineHashes = new Dictionary<string, string>();
     var records = new List<object>(); var errors = new List<string>(); var variants = new List<object>();
     string arm = "";
     int frame = 0, phase = 0, ready = 0, pending = 0;
@@ -72,9 +73,13 @@ using VividRP.Editor.Tools;
                 var bytes = request.GetData<byte>().ToArray();
                 using var hash = System.Security.Cryptography.SHA256.Create();
                 string sha256 = BitConverter.ToString(hash.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
-                if (saved) System.IO.File.WriteAllBytes(path, bytes);
+                string key = readFrame + "-" + tag;
+                if (readArm == "half128-a") baselineHashes.Add(key, sha256);
+                bool mismatch = readArm == "half128-b" && baselineHashes.TryGetValue(key, out string expected) && expected != sha256;
+                if (mismatch && errors.Count == 0) errors.Add("Anchor window A/A first observed mismatch: " + key);
+                if (saved || mismatch) System.IO.File.WriteAllBytes(path, bytes);
                 records.Add(new { arm = readArm, frame = readFrame, tag, x, y, width = readWidth, height = readHeight,
-                    format, sha256, saved, path = saved ? path : null });
+                    format, sha256, saved = saved || mismatch, path = saved || mismatch ? path : null });
             }
             catch (Exception e) { errors.Add(e.Message); }
             finally { pending--; }
@@ -114,8 +119,19 @@ using VividRP.Editor.Tools;
             phase = 1; resetPending = true; return;
         }
         bool epoch = phase == 2 && frame == 0;
-        if (phase == 2) cpuFrames.Add(new { arm, frame, hasHistory = Field("m_HasHistory"), order = Field("m_RadiosityPublishedOrder"),
-            batch = Field("m_RadiosityBatch"), updateCards = Field("m_RadiosityUpdateCards"), age = Field("m_ProbeAnchorMaxAge"), fullPrecision });
+        if (phase == 2) {
+            var sceneState = Field("m_Scene");
+            var versions = new Dictionary<string, object>();
+            foreach (string name in new[] { "Revision", "TransportVersion", "EmissionVersion", "RadiosityDiscontinuityVersion", "RadiosityLayoutVersion" })
+                versions.Add(name, sceneState.GetType().GetProperty(name, inst | System.Reflection.BindingFlags.Public).GetValue(sceneState));
+            var temporal = context.Get<VividTemporalData>();
+            cpuFrames.Add(new { arm, frame, hasHistory = Field("m_HasHistory"), order = Field("m_RadiosityPublishedOrder"),
+                batch = Field("m_RadiosityBatch"), updateCards = Field("m_RadiosityUpdateCards"), age = Field("m_ProbeAnchorMaxAge"), fullPrecision,
+                versions, temporal.isFirstFrame, temporal.resetPostProcessingHistory,
+                configuredFrame = hooks["EditorGatherFrameOverride"].GetValue(null),
+                screenHistory = Field("m_HasScreenHistory"), directionalHistory = Field("m_DirectionalHistoryValid"),
+                guideHistory = Field("m_DirectionalGuideHistoryValid"), anchorStatisticsHistory = Field("m_AnchorStatisticsHistoryValid") });
+        }
         if (!Sample() && !epoch && frame != warmup-1 && frame != warmup+measuredFrames-1) return;
         if ((int)Field("m_RadiosityPublishedOrder") != 8 || (int)Field("m_RadiosityBatch") != 32
             || !(bool)Field("m_AnchorPreFilter") || (int)Field("m_ProbeAnchorMaxAge") != requestedAge || (int)Field("m_AtrousIterations") != 4 || (bool)Field("m_RestirGather"))
@@ -157,7 +173,7 @@ using VividRP.Editor.Tools;
         if (++frame >= warmup + measuredFrames) active = false;
     };
     void WriteManifest() => System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-        schema = "screen-probe-anchor-window.v1", complete, completedArm = arm, width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, sampleStride,
+        schema = "screen-probe-anchor-window.v2", complete, completedArm = arm, width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, sampleStride,
         sourceReference, scope = "Half128 A/A, Float128, Float512 after 4096 source-settled epoch frames; 2304 measured renders sampled every 9 frames; 512 only at stationary world receivers", cpuFrames, records, errors, variants }, Newtonsoft.Json.Formatting.Indented));
     async System.Threading.Tasks.Task Run(string name, int age, bool precise = false) {
         var owner = type.GetField("m_Cameras", inst).GetValue(pass);

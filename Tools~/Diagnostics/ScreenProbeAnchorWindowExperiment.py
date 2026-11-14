@@ -21,6 +21,12 @@ AGES = dict(zip(ARMS, (128, 128, 128, 512)))
 FRAMES = list(range(4096, 6400, 9))
 
 
+def mean_rgb(values):
+    # Interleaved float32 RGB reductions can drift when summing millions of
+    # pixels. Match the double-precision luminance and variance reductions.
+    return np.asarray(values).mean((0, 1), dtype=np.float64)
+
+
 def paired(before, after):
     """Conditional block dispersion, with 576 rendered frames per block."""
     b, a = metrics(before), metrics(after)
@@ -37,13 +43,47 @@ def paired(before, after):
                 block_rendered_frames=576, blocks=4)
 
 
+def static_decision(report, gates):
+    checks = []
+
+    def check(name, value, limit, at_least=False):
+        passed = np.isfinite(value) and (value >= limit if at_least else value <= limit)
+        checks.append(dict(name=name, value=float(value), limit=limit, comparison=">=" if at_least else "<=", passed=bool(passed)))
+
+    ceiling = report["pixels"]["ceiling"]["final"]["float512VsBaseline"]
+    check("Ceiling final variance reduction percent", ceiling["variance_reduction_percent"],
+          gates["finalCeilingMinimumVarianceReductionPercent"], True)
+    lower = ceiling["conditional_block_variance_reduction_95_percent"][0]
+    # The recorded requirement says above zero, rather than greater than or equal.
+    checks.append(dict(name="Ceiling conditional variance reduction lower bound", value=lower,
+        limit=gates["finalCeilingConditionalVarianceReduction95LowerBoundAbovePercent"], comparison=">",
+        passed=bool(np.isfinite(lower) and lower > gates["finalCeilingConditionalVarianceReduction95LowerBoundAbovePercent"])))
+    for plane in report["pixels"]:
+        comparison = report["pixels"][plane]["final"]["float512VsBaseline"]
+        check(plane + " final mean Y drift percent", abs(comparison["mean_change_percent"]),
+              gates["maximumAbsolutePlaneMeanChangePercent"])
+        for channel, change in zip("RGB", comparison["meanRgbChangePercent"]):
+            check(plane + " final mean " + channel + " drift percent", abs(change), gates["maximumAbsolutePlaneMeanChangePercent"])
+        if plane != "ceiling":
+            check(plane + " final variance increase percent", -comparison["variance_reduction_percent"],
+                  gates["maximumOtherPlaneVarianceIncreasePercent"])
+        reference = report["probePlanes"][plane]
+        before = reference["half128-b"]["fromIndependentReference"]["rms"]
+        after = reference["float512"]["fromIndependentReference"]["rms"]
+        increase = 100*(after/before-1) if before > 0 else (0 if after == 0 else np.inf)
+        check(plane + " probe reference RMS increase percent", increase, gates["maximumProbeReferenceRmsRegressionPercent"])
+    return dict(staticGatePassed=all(c["passed"] for c in checks), checks=checks,
+        nextStep="Only a passing static gate permits motion, disocclusion, relight and cost validation; no automatic default promotion",
+        uncertainty=report["uncertainty"])
+
+
 def analyze(root, linear, reference_root):
     manifest = json.loads((root / "capture.json").read_text(encoding="utf-8"))
-    assert manifest["schema"] == "screen-probe-anchor-window.v1"
+    assert manifest["schema"] == "screen-probe-anchor-window.v2"
     assert manifest["complete"] and not manifest["errors"]
     assert (manifest["spacing"], manifest["rays"], manifest["warmup"], manifest["measuredFrames"], manifest["sampleStride"]) == (16, 8, 4096, 2304, 9)
     source = json.loads((root / "source-verification.json").read_text(encoding="utf-8"))
-    assert source["unchanged"] and source["files"] > 0 and source["inputs"] == 2
+    assert source["unchanged"] and source["files"] > 0 and source["inputs"] == 2 and source["scripts"] == 1
     qualification = json.loads((root / "qualification.json").read_text(encoding="utf-8"))
     assert qualification["files"] > 0 and not qualification["mismatch"]
     rows = {(r["arm"], r["frame"], r["tag"]): r for r in manifest["records"] if "tag" in r}
@@ -75,7 +115,14 @@ def analyze(root, linear, reference_root):
         assert [r["frame"] for r in cpu] == list(range(6400))
         assert all(r["hasHistory"] == (r["frame"] != 0) and r["order"] == 8 and r["batch"] == 32
                    and r["updateCards"] == 0 and r["age"] == AGES[arm]
-                   and r["fullPrecision"] == arm.startswith("float") for r in cpu)
+                   and r["fullPrecision"] == arm.startswith("float")
+                   and not r["isFirstFrame"] and not r["resetPostProcessingHistory"]
+                   and r["configuredFrame"] == 1733+r["frame"] for r in cpu)
+        assert all(r["versions"] == cpu[0]["versions"] for r in cpu), "Scene changed within an arm"
+        assert all(r["versions"] == manifest["cpuFrames"][0]["versions"] for r in cpu), "Scene changed between arms"
+        baseline_cpu = [r for r in manifest["cpuFrames"] if r["arm"] == "half128-a"]
+        for before, after in zip(baseline_cpu, cpu):
+            assert all(before[k] == after[k] for k in ("screenHistory", "directionalHistory", "guideHistory", "anchorStatisticsHistory")), "History validity differs"
         for frame in (0, 4096, 6399):
             assert rows[arm, frame, "radiosity"]["sha256"] == source_hash
             read(rows[arm, frame, "radiosity"])
@@ -135,18 +182,24 @@ def analyze(root, linear, reference_root):
                 rgb[arm] = (v[..., :3] * abs(v[..., 3:4]))[:, mask]
                 ys[arm] = rgb[arm] @ LUMA
             result = {}
+            means = {arm: mean_rgb(v) for arm, v in rgb.items()}
             for arm, v in ys.items():
                 residual = v - v.mean(0)
                 quarter = v.reshape(4, 64, -1).mean((1, 2))
-                result[arm] = dict(metrics(v), meanRgb=rgb[arm].mean((0, 1)).tolist(),
+                result[arm] = dict(metrics(v), meanRgb=means[arm].tolist(),
                     quarterMeanY=quarter.tolist(), quarterMeanRangePercent=float(100*np.ptp(quarter)/v.mean()),
                     lag9FrameCorrelation=float(np.sum(residual[1:]*residual[:-1])/np.sqrt(np.sum(residual[1:]**2)*np.sum(residual[:-1]**2))))
             for arm in ARMS[2:]:
                 result[arm+"VsBaseline"] = dict(paired(ys["half128-b"], ys[arm]),
-                    meanRgbChangePercent=(100*(rgb[arm].mean((0, 1))/rgb["half128-b"].mean((0, 1))-1)).tolist())
+                    meanRgbChangePercent=(100*(means[arm]/means["half128-b"]-1)).tolist())
             result["float512VsFloat128"] = paired(ys["float128"], ys["float512"])
             report["pixels"][name][stage] = result
     (root / "analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    gates_path = root / "decision-gates.json"
+    if gates_path.exists():
+        decision = static_decision(report, json.loads(gates_path.read_text(encoding="utf-8-sig")))
+        decision["gateDefinitionSha256"] = hashlib.sha256(gates_path.read_bytes()).hexdigest()
+        (root / "decision.json").write_text(json.dumps(decision, indent=2), encoding="utf-8")
     return report
 
 

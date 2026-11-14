@@ -925,7 +925,11 @@ float4 AccumulateDirectionalProbeAnchor(float4 current, float3 position, float3 
     separation /= total;
     float limit = 8.0;
     #if defined(VIVID_SDF_ANCHOR_PIXEL_HISTORY)
-        limit = lerp(8.0, _SdfProbeAnchorMaxAge, exp2(-separation * separation / 0.000036));
+        // Longer windows are only for the same world-space receiver. Preserve
+        // the existing moving-window response, including sub-centimeter motion.
+        limit = lerp(8.0, min(_SdfProbeAnchorMaxAge, 128.0), exp2(-separation * separation / 0.000036));
+        if (_SdfProbeAnchorMaxAge > 128.0 && separation <= 0.0001)
+            limit = _SdfProbeAnchorMaxAge;
     #endif
     float acceptedAge = min(ageSum / total, limit - 1.0) * saturate(total);
     float age = 1.0 + acceptedAge;

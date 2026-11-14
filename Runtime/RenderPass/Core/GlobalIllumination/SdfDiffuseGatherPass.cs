@@ -42,6 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static int EditorGatherFrameOverride = -1;
         internal static int EditorGatherHistoryDiagnostics;
         internal static float EditorProbeAnchorHistoryBlend = 0.85f;
+        internal static int EditorProbeAnchorMaxAgeOverride = -1;
         internal static System.Action<ComputePassContext, int, Texture> EditorGatherStageCapture;
         // Diagnostic-only input binding after the normal probe binding, before dispatch.
         internal static System.Action<ComputePassContext, ComputeShader, int> EditorBindResolveProbe;
@@ -852,6 +853,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsEnabledForGather(settings.pixelTemporal, legacyGather);
             m_PixelHistoryMaxAge = pixelTemporal ? Mathf.Clamp(settings.pixelHistoryMaxAge.value, 8, 32) : 8;
             m_ProbeAnchorMaxAge = useSettings ? Mathf.Clamp(settings.screenProbeAnchorMaxAge.value, 32, 128) : 32;
+#if UNITY_EDITOR
+            if (EditorTraceCapture != null && EditorProbeAnchorMaxAgeOverride >= 32)
+                m_ProbeAnchorMaxAge = Mathf.Clamp(EditorProbeAnchorMaxAgeOverride, 32, 512);
+#endif
             m_SunCacheHits.Resize(1, 1);
             if (m_TraceKernel < 0 || camera == null || camera.cullingMask == 0 || camera.stereoEnabled
                 || DebugPassCameraUtility.ShouldSkipExecution(camera))

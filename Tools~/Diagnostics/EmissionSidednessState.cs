@@ -1,8 +1,10 @@
 // Live post-capture state check, not a Unity Test Framework test. No assets are saved.
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEditor;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using VividRP.Editor.Tools;
 {
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags priv = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
@@ -12,8 +14,20 @@ using VividRP.Runtime.RenderPass.Core;
     object Field(string name) => type.GetField(name, priv).GetValue(pass);
     var sceneType = type.Assembly.GetType("VividRP.Runtime.GPUDriven.Meshlets.VividMeshSdfGpuScene");
     var game = Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
+    var fixture = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(EmissiveCornellBoxSceneBuilder.ScenePath);
+    if (!fixture.isLoaded) throw new InvalidOperationException("The emissive Cornell fixture is not loaded.");
+    var volume = fixture.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<Volume>()).Single();
+    var profile = volume.HasInstantiatedProfile() ? volume.profile : volume.sharedProfile;
+    if (!profile.TryGet<SdfDiffuseGISettings>(out var gi)) throw new InvalidOperationException("Missing normal GI profile.");
+    int expectedAnchorMaxAge = Mathf.Clamp(gi.screenProbeAnchorMaxAge.value, 32, 128);
+    var anchorOverrideField = type.GetField("EditorProbeAnchorMaxAgeOverride", stat);
+    int anchorAgeOverride = anchorOverrideField == null ? -1 : (int)anchorOverrideField.GetValue(null);
+    if (anchorAgeOverride != -1) throw new InvalidOperationException("An anchor age diagnostic is still active.");
     double deadline = EditorApplication.timeSinceStartup + 180;
-    while ((int)Field("m_RadiosityPublishedOrder") != 8 || (int)Field("m_RadiosityBatch") != 32)
+    // The capture can release its callbacks while the pass still holds the last
+    // diagnostic frame's cached settings. Observe a normal render, not only idle flags.
+    while ((int)Field("m_RadiosityPublishedOrder") != 8 || (int)Field("m_RadiosityBatch") != 32
+        || (int)Field("m_ProbeAnchorMaxAge") != expectedAnchorMaxAge)
     {
         if (EditorApplication.timeSinceStartup > deadline)
             throw new InvalidOperationException("Normal radiosity did not finish restoring.");
@@ -29,10 +43,10 @@ using VividRP.Runtime.RenderPass.Core;
     int atrousOverride = (int)type.GetField("EditorAtrousIterationOverride", stat).GetValue(null);
     bool forceTwoSided = (bool)sceneType.GetField("EditorForceTwoSidedEmission", stat).GetValue(null);
     float configuredBias = (float)type.GetField("m_RayBias", priv).GetValue(pass), effectiveBias = (float)Field("m_Bias");
-    if (!callbacksNull || frameOverride != -1 || atrousOverride != -1 || diagnostics != 0 || forceTwoSided || scenes.Any(s => s.isDirty)
+    if (!callbacksNull || frameOverride != -1 || atrousOverride != -1 || anchorAgeOverride != -1 || diagnostics != 0 || forceTwoSided || scenes.Any(s => s.isDirty)
         || Mathf.Abs(configuredBias - .04f) > 1e-6 || Mathf.Abs(effectiveBias - .04f) > 1e-6)
         throw new InvalidOperationException("Emission validation left altered editor state.");
-    return new { callbacksNull, frameOverride, atrousOverride, diagnostics, forceTwoSided,
+    return new { callbacksNull, frameOverride, atrousOverride, anchorAgeOverride, expectedAnchorMaxAge, diagnostics, forceTwoSided,
         scenes = scenes.Select(s => new { s.path, s.isDirty }).ToArray(), configuredBias, effectiveBias,
         order = Field("m_RadiosityPublishedOrder"), batch = Field("m_RadiosityBatch"),
         spacing = type.GetField("ProbeSpacing", stat).GetRawConstantValue(),

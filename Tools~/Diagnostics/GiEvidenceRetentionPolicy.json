@@ -1,0 +1,40 @@
+{
+  "root": "E:/VividRP_GI_Evidence",
+  "reviewAfterEveryCompletedExperiment": true,
+  "softLimitGiB": 125,
+  "minimumFreeGiB": 64,
+  "protectedRuns": [
+    "TemporalSamplingCovered-20261113",
+    "ScalarAnchorGridReference-20261114-082442-577",
+    "ScalarAnchorPoseReferenceCombined-20261114-072002-644163",
+    "ScalarAnchorPoseReference-20261114-064947-630",
+    "ScalarAnchorPoseReference-20261114-071412-091",
+    "ScalarAnchorPreFilterCombined-20261114-102230-265945",
+    "ScalarAnchorPreFilterGuarded-20261114-090305-272",
+    "ScalarAnchorPreFilterMotion-20261114-101331-294",
+    "ScalarAnchorPreFilterRelightSettled-20261114-103852-758",
+    "ProbePlaneSnapshot-20261114-060209-436",
+    "ScalarAnchorAge-20261114-063528-201",
+    "Atrous4Sampling-20261114-052735-802",
+    "EmissionSidedness-20261114-114713-646",
+    "EmissionTraceConformance-20261114-114640-591",
+    "ScreenProbeStbn-20261114-113230-540",
+    "ScreenProbeResolveReplay-20261114-111531-719223",
+    "ScreenProbeResolveReplay-20261114-112421-783829"
+  ],
+  "archiveRuns": [
+    { "run": "EmissionSidedness-20261113-145618-928", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
+    { "run": "EmissionSidedness-20261113-185011-700", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
+    { "run": "EmissionSidedness-20261114-010323-368", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
+    { "run": "EmissionSidedness-20261114-031949-475", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
+    { "run": "EmissionSidedness-20261114-054440-297", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
+    { "run": "EmissionSidedness-20261114-080255-446", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
+    { "run": "ScalarAnchorPreFilter-20261114-083712-837", "reason": "Unguarded filter rejected for contact light bleed; guarded accepted capture retained", "requiredFiles": ["analysis.json", "rejection.json"] },
+    { "run": "ScalarAnchorPreFilterGuarded-20261114-085545-828", "reason": "Owner-cancelled attempt; accepted guarded static source 090305 retained", "requiredFiles": ["cancel.txt", "capture.json"] },
+    { "run": "ScalarAnchorPreFilterMotion-20261114-092821-631", "reason": "Failed motion input qualification; qualified replacement 101331 retained", "requiredFiles": ["qualification.json", "capture.json"] },
+    { "run": "ScalarAnchorPreFilterRelight-20261114-102610-369", "reason": "Pre-step down-light input mismatch; source-settled replacement 103852 retained", "requiredFiles": ["invalid-input-analysis.json", "capture.json"] },
+    { "run": "ScalarAnchorRelight-20261114-073213-475", "reason": "Previous anchor-age lighting sweep; current prefilter settled sweep retained", "requiredFiles": ["analysis.json", "capture.json"] },
+    { "run": "ScreenProbeResolveReplay-20261114-110848-505790", "reason": "Replay serialization failed; valid frozen-input replay 111531 retained", "requiredFiles": ["failure.json"] },
+    { "run": "ScreenProbeResolveReplay-20261114-111224-476597", "reason": "Incorrect late Resolve tap; corrected stage-tap replay 111531 retained", "requiredFiles": ["qualification-failure.json", "capture.json"] }
+  ]
+}

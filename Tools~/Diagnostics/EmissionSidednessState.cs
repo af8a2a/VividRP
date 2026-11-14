@@ -20,7 +20,7 @@ using VividRP.Runtime.RenderPass.Core;
         game.Repaint(); EditorApplication.QueuePlayerLoopUpdate();
         await System.Threading.Tasks.Task.Delay(16);
     }
-    bool callbacksNull = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorAtrousDispatchCapture" }
+    bool callbacksNull = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorAtrousDispatchCapture", "EditorBindResolveProbe" }
         .All(n => type.GetField(n, stat).GetValue(null) == null);
     var scenes = Enumerable.Range(0, UnityEngine.SceneManagement.SceneManager.sceneCount)
         .Select(i => UnityEngine.SceneManagement.SceneManager.GetSceneAt(i)).ToArray();
@@ -37,5 +37,8 @@ using VividRP.Runtime.RenderPass.Core;
         order = Field("m_RadiosityPublishedOrder"), batch = Field("m_RadiosityBatch"),
         spacing = type.GetField("ProbeSpacing", stat).GetRawConstantValue(),
         rays = type.GetField("RaysPerProbe", stat).GetRawConstantValue(),
+        anchorPreFilter = Field("m_AnchorPreFilter"), anchorMaxAge = Field("m_ProbeAnchorMaxAge"),
+        atrousIterations = Field("m_AtrousIterations"), restir = Field("m_RestirGather"),
+        stbnPrototypeAbsent = type.GetField("m_BlueNoiseInterpolation", priv) == null,
         graphicsApi = SystemInfo.graphicsDeviceType.ToString() };
 }

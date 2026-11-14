@@ -15,7 +15,7 @@ from ProbeAnchorCalibration import evaluate_sh, normal_from_packed
 from TemporalSamplingExperiment import LUMA, metrics, read
 
 
-def connections(geometry, vp):
+def connections(geometry, vp, radius_scale=1.0):
     g = geometry[:68, :120]
     h, w = g.shape[:2]
     normal = normal_from_packed(np.maximum(g[..., 3], 0))
@@ -44,7 +44,7 @@ def connections(geometry, vp):
             tolerance = .002+.008*distance
             alignment = np.sum(normal*on, -1)
             plane = np.maximum(abs(np.sum(delta*normal, -1)), abs(np.sum(delta*on, -1)))
-            radius = np.clip(.08*np.minimum(g[..., 2]+3.8, other[..., 2]+3.8), .08, .35)
+            radius = np.clip(.08*np.minimum(g[..., 2]+3.8, other[..., 2]+3.8), .08, .35)*radius_scale
             valid = inside & (g[..., 3] >= 0) & (other[..., 3] >= 0) & (alignment >= .995) & (plane < tolerance) & (distance < radius)
             for fraction in [.25, .5, .75]:
                 point = uv*(1-fraction) + uv[oy, ox]*fraction

@@ -18,9 +18,9 @@
     "Atrous4Sampling-20261114-052735-802",
     "EmissionSidedness-20261114-114713-646",
     "EmissionTraceConformance-20261114-114640-591",
-    "ScreenProbeStbn-20261114-113230-540",
     "ScreenProbeResolveReplay-20261114-111531-719223",
-    "ScreenProbeResolveReplay-20261114-112421-783829"
+    "ScreenProbeResolveReplay-20261114-112421-783829",
+    "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
     { "run": "EmissionSidedness-20261113-145618-928", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
@@ -35,6 +35,7 @@
     { "run": "ScalarAnchorPreFilterRelight-20261114-102610-369", "reason": "Pre-step down-light input mismatch; source-settled replacement 103852 retained", "requiredFiles": ["invalid-input-analysis.json", "capture.json"] },
     { "run": "ScalarAnchorRelight-20261114-073213-475", "reason": "Previous anchor-age lighting sweep; current prefilter settled sweep retained", "requiredFiles": ["analysis.json", "capture.json"] },
     { "run": "ScreenProbeResolveReplay-20261114-110848-505790", "reason": "Replay serialization failed; valid frozen-input replay 111531 retained", "requiredFiles": ["failure.json"] },
-    { "run": "ScreenProbeResolveReplay-20261114-111224-476597", "reason": "Incorrect late Resolve tap; corrected stage-tap replay 111531 retained", "requiredFiles": ["qualification-failure.json", "capture.json"] }
+    { "run": "ScreenProbeResolveReplay-20261114-111224-476597", "reason": "Incorrect late Resolve tap; corrected stage-tap replay 111531 retained", "requiredFiles": ["qualification-failure.json", "capture.json"] },
+    { "run": "ScreenProbeStbn-20261114-113230-540", "reason": "STBN prototype withdrawn after qualified static analysis; motion input failed qualification. Patch and source reports retained", "requiredFiles": ["rejection.json", "static-qualified-analysis.json", "invalid-input-analysis.json", "capture.json"] }
   ]
 }

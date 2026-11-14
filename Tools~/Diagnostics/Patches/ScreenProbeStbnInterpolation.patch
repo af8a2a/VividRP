@@ -1,0 +1,153 @@
+diff --git a/Runtime/Core/Utility/BlueNoise/BlueNoise.cs b/Runtime/Core/Utility/BlueNoise/BlueNoise.cs
+index a7982eb0..79af18e1 100644
+--- a/Runtime/Core/Utility/BlueNoise/BlueNoise.cs
++++ b/Runtime/Core/Utility/BlueNoise/BlueNoise.cs
+@@ -12,6 +12,8 @@ namespace VividRP.Runtime
+         static BlueNoise s_Instance;
+ 
+         public static BlueNoise Instance => s_Instance;
++        internal bool SupportsStbnVec2 => m_StbnVec2DimensionsValid && m_VSMSTBNVec2 != null;
++        internal TextureHandle StbnVec2Texture => m_VSMSTBNVec2Handle;
+         public bool SupportsBnd256 =>
+             m_ScramblingTile != null
+             && m_RankingTile != null
+@@ -33,6 +35,7 @@ namespace VividRP.Runtime
+         TextureHandle m_VSMSTBNScalarHandle;
+         static readonly int s_VSMSTBNVec2Id = Shader.PropertyToID("_VSMSTBNVec2");
+         RTHandle m_VSMSTBNVec2;
++        bool m_StbnVec2DimensionsValid;
+         TextureHandle m_VSMSTBNVec2Handle;
+         RTHandle m_ScramblingTile1SPP;
+         RTHandle m_RankingTile1SPP;
+@@ -61,6 +64,8 @@ namespace VividRP.Runtime
+             var resources = PipelineResourceManager.Get<BlueNoiseResources>();
+ 
+             var instance = new BlueNoise();
++            instance.m_StbnVec2DimensionsValid = resources.VSMSTBNVec2 != null
++                && resources.VSMSTBNVec2.width == 128 && resources.VSMSTBNVec2.height == 8192;
+             if (resources.VSMSTBNVec2 != null) instance.m_VSMSTBNVec2 = RTHandles.Alloc(resources.VSMSTBNVec2);
+             if (resources.VSMSTBNScalar != null) instance.m_VSMSTBNScalar = RTHandles.Alloc(resources.VSMSTBNScalar);
+ 
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGISettings.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGISettings.cs
+index 5888b549..f0828cd7 100644
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGISettings.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGISettings.cs
+@@ -166,6 +166,9 @@ namespace VividRP.Runtime.RenderPass.Core
+         [Tooltip("Add a half-strength connected-plane reconstruction. Preserves unfiltered probe history and trace coverage; geometry edges retain the original reconstruction. Screen Probe Gather only.")]
+         public BoolParameter screenProbeAnchorPreFilter = new(false);
+ 
++        [Tooltip("Use the shared spatiotemporal blue-noise sequence for full-resolution probe interpolation. Keeps the same footprint and geometry checks. Screen Probe Gather only.")]
++        public BoolParameter screenProbeBlueNoiseInterpolation = new(false);
++
+         [Tooltip("Maximum effective age of stable screen-probe energy anchors. World displacement shortens it to eight; newly exposed receivers reject history. Screen Probe Gather only.")]
+         public ClampedIntParameter screenProbeAnchorMaxAge = new(32, 32, 128);
+ 
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+index 9f14acab..a418f639 100644
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+@@ -255,6 +255,8 @@ namespace VividRP.Runtime.RenderPass.Core
+         private static readonly int SpatialAnchorInputId = Shader.PropertyToID("_SdfSpatialProbeAnchorInput");
+         private static readonly int SpatialAnchorOutputId = Shader.PropertyToID("_SdfSpatialProbeAnchorOutput");
+         private static readonly int SpatialAnchorPrefilteredId = Shader.PropertyToID("_SdfSpatialProbeAnchorPrefiltered");
++        private static readonly int BlueNoiseInterpolationId = Shader.PropertyToID("_SdfScreenProbeBlueNoiseInterpolation");
++        private static readonly int ScreenProbeStbnId = Shader.PropertyToID("_SdfScreenProbeStbnVec2");
+         private static readonly int PreparedAnchorId = Shader.PropertyToID("_SdfPreparedProbeAnchor");
+         private static readonly int PreparedAnchorOutputId = Shader.PropertyToID("_SdfPreparedProbeAnchorOutput");
+         private static readonly int PreviousAnchorStatisticsId = Shader.PropertyToID("_SdfPreviousAnchorStatistics");
+@@ -359,7 +361,7 @@ namespace VividRP.Runtime.RenderPass.Core
+             internal int PixelHistoryMaxAge, ProbeAnchorMaxAge;
+             internal bool CorrectReceiverSelfHits;
+             internal bool ScreenCardLighting;
+-            internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide, SpatialAnchor, AnchorPreFilter;
++            internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide, SpatialAnchor, AnchorPreFilter, BlueNoiseInterpolation;
+             internal float MeshDetailDistance;
+             internal bool GlobalClipmapUsed;
+             internal Vector4 NearOcclusion;
+@@ -611,7 +613,8 @@ namespace VividRP.Runtime.RenderPass.Core
+         private bool m_RecordRayDiagnostics;
+         private bool m_RecordFirstHitDiagnostics;
+         private bool m_RecordProbeAnchorDiagnostics;
+-        private bool m_SpatialAnchor, m_AnchorPreFilter;
++        private bool m_SpatialAnchor, m_AnchorPreFilter, m_BlueNoiseInterpolation;
++        private TextureHandle m_ScreenProbeStbn;
+         private SdfDiffuseTraceMode m_TraceMode;
+ 
+         public SdfDiffuseGatherPass()
+@@ -927,6 +930,9 @@ namespace VividRP.Runtime.RenderPass.Core
+             m_SpatialAnchor = m_DirectionalCache && m_PrepareAnchorKernel >= 0 && settings.screenProbeSpatialAnchor.value;
+             bool prepareAnchor = m_DirectionalCache && m_PrepareAnchorKernel >= 0 && m_PrepareAnchorNoPixelKernel >= 0;
+             m_AnchorPreFilter = m_SpatialAnchor && prepareAnchor && m_AnchorPreFilterKernel >= 0 && settings.screenProbeAnchorPreFilter.value;
++            m_BlueNoiseInterpolation = m_DirectionalCache && settings.screenProbeBlueNoiseInterpolation.value
++                && BlueNoise.Instance?.SupportsStbnVec2 == true;
++            m_ScreenProbeStbn = default;
+             m_PreparedAnchor.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
+             m_ReconstructedAnchor.Resize(m_AnchorPreFilter ? m_ProbeWidth : 1, m_AnchorPreFilter ? m_AtlasHeight : 1);
+             m_CurrentAnchorStatistics.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
+@@ -1093,6 +1099,7 @@ namespace VividRP.Runtime.RenderPass.Core
+                 && m_State.ProbeSpatialKernel == m_ProbeSpatialKernel
+                 && m_State.SpatialAnchor == m_SpatialAnchor
+                 && m_State.AnchorPreFilter == m_AnchorPreFilter
++                && m_State.BlueNoiseInterpolation == m_BlueNoiseInterpolation
+                 && m_State.ProbeAnchorMaxAge == m_ProbeAnchorMaxAge
+                 && m_State.RestirGather == m_RestirGather && m_State.RestirCardVersion == m_RestirCardVersion
+                 && m_State.RestirPixelIntegration == m_RestirPixelIntegration
+@@ -1182,6 +1189,13 @@ namespace VividRP.Runtime.RenderPass.Core
+ 
+         public void PrepareRenderGraph(ContextContainer frameData)
+         {
++            if (m_BlueNoiseInterpolation)
++            {
++                m_ScreenProbeStbn = BlueNoise.Instance.StbnVec2Texture;
++                m_BlueNoiseInterpolation = m_ScreenProbeStbn.IsValid();
++                if (m_BlueNoiseInterpolation)
++                    PassRecorder.RegisterImportedTextureForPass(this, m_ScreenProbeStbn);
++            }
+             if (m_ReceiverVisibilitySource != null)
+             {
+                 m_ReceiverVisibility = m_ReceiverVisibilitySource.innerHandle;
+@@ -1477,6 +1491,7 @@ namespace VividRP.Runtime.RenderPass.Core
+             m_State.ScreenCardLighting = screenCardLighting;
+             m_State.SpatialAnchor = m_SpatialAnchor;
+             m_State.AnchorPreFilter = m_AnchorPreFilter;
++            m_State.BlueNoiseInterpolation = m_BlueNoiseInterpolation;
+             m_State.MeshDetailDistance = m_MeshDetailDistance;
+             m_State.GlobalClipmapUsed = useGlobalClipmap;
+             m_State.ScreenJitterUv = m_ScreenJitterUv;
+@@ -2345,6 +2360,9 @@ namespace VividRP.Runtime.RenderPass.Core
+                 jitter &= EditorTraceCapture == null || (EditorGatherHistoryDiagnostics & 2) == 0;
+ #endif
+                 cmd.SetComputeIntParam(m_GatherCompute, IntegrationJitterId, jitter ? 1 : 0);
++                cmd.SetComputeIntParam(m_GatherCompute, BlueNoiseInterpolationId, m_BlueNoiseInterpolation ? 1 : 0);
++                cmd.SetComputeTextureParam(m_GatherCompute, kernel, ScreenProbeStbnId,
++                    m_BlueNoiseInterpolation ? m_ScreenProbeStbn : black);
+             }
+             BindReceiver(cmd, m_GatherCompute, kernel);
+             BindScreenTraceHistory(cmd, m_GatherCompute, kernel, repairScreenRays, black);
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute
+index 84db81a3..b701f334 100644
+--- a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute
++++ b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute
+@@ -522,6 +522,8 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
+ 
+ #if defined(VIVID_SDF_PROBE_IRRADIANCE)
+ uint _SdfScreenProbeIntegrationJitter;
++uint _SdfScreenProbeBlueNoiseInterpolation;
++Texture2D<float2> _SdfScreenProbeStbnVec2;
+ 
+ float2 GetScreenProbeInterpolationPixel(uint2 pixel, uint2 size, float3 position, float3 normal, float eyeDepth)
+ {
+@@ -530,6 +532,13 @@ float2 GetScreenProbeInterpolationPixel(uint2 pixel, uint2 size, float3 position
+ 
+     uint seed = HashProbe(pixel.x + pixel.y * 65537u + _SdfDiffuseFrame * 0x9e3779b9u);
+     float2 noise = (float2(seed & 65535u, seed >> 16u) + 0.5) / 32768.0 - 1.0;
++    if (_SdfScreenProbeBlueNoiseInterpolation != 0u)
++    {
++        uint3 wrapped = uint3(pixel, _SdfDiffuseFrame) & uint3(127u, 127u, 63u);
++        // The shared UE-style atlas is imported bottom-up by Unity.
++        uint2 address = uint2(wrapped.x, 8191u - (wrapped.z * 128u + wrapped.y));
++        noise = _SdfScreenProbeStbnVec2.Load(int3(address, 0)) * 2.0 - 1.0;
++    }
+     float radius = 0.25 * ProbeSpacing * lerp(1.0, 0.5, saturate((eyeDepth - 5.0) / 5.0));
+     float2 candidate = clamp(float2(pixel) + noise * radius, 0.0, float2(size - 1u));
+     float3 otherPosition, otherNormal;

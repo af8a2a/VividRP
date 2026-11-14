@@ -43,6 +43,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static int EditorGatherHistoryDiagnostics;
         internal static float EditorProbeAnchorHistoryBlend = 0.85f;
         internal static System.Action<ComputePassContext, int, Texture> EditorGatherStageCapture;
+        // Diagnostic-only input binding after the normal probe binding, before dispatch.
+        internal static System.Action<ComputePassContext, ComputeShader, int> EditorBindResolveProbe;
         internal static int EditorAtrousIterationOverride = -1;
         internal static System.Action<ComputePassContext, int, Texture, Texture, Texture, Texture> EditorAtrousDispatchCapture;
 #endif
@@ -1412,7 +1414,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, FilteredProbesId, m_FilteredProbes.innerHandle);
                     cmd.DispatchCompute(m_FilterCompute, m_FilterKernel, groupsX, groupsY, 1);
                 }
-                RecordResolve(cmd, placement, pixelTemporal, repairScreenRays, black);
+                RecordResolve(context, placement, pixelTemporal, repairScreenRays, black);
 #if UNITY_EDITOR
                 if (m_DirectionalCache && pixelTemporal)
                     EditorGatherStageCapture?.Invoke(context, 0, m_RawResolved.innerHandle.ResolveTexture());
@@ -2332,9 +2334,10 @@ namespace VividRP.Runtime.RenderPass.Core
             && ReferenceEquals(m_OpenPbrParameters, parameters) && ReferenceEquals(m_OpenPbrAux0, aux0)
             && ReferenceEquals(m_OpenPbrAux1, aux1);
 
-        private void RecordResolve(ComputeCommandBuffer cmd, TextureHandle placement, bool pixelTemporal,
+        private void RecordResolve(ComputePassContext context, TextureHandle placement, bool pixelTemporal,
             bool repairScreenRays, TextureHandle black)
         {
+            var cmd = context.cmd;
             using var scope = new ProfilingScope(cmd, m_RestirGather ? RestirResolveSampler : ResolveSampler);
             int kernel = m_DirectionalCache ? m_DirectionalResolveKernel
                 : m_RestirOpenPbrDiffuse ? m_OpenPbrResolveKernel : m_ResolveKernel;
@@ -2359,6 +2362,10 @@ namespace VividRP.Runtime.RenderPass.Core
             bool useScratch = m_DirectionalCache || m_RestirPixelIntegration || (m_SpatialFilter && !m_HitDistanceFilter && !m_RestirGather);
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, ProbeInputId,
                 useScratch ? m_FilteredProbes.innerHandle : m_Probes.innerHandle);
+#if UNITY_EDITOR
+            if (m_DirectionalCache && EditorTraceCapture != null)
+                EditorBindResolveProbe?.Invoke(context, m_GatherCompute, kernel);
+#endif
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, RestirSpatialId, m_SpatialRestir.innerHandle);
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, RestirVarianceOutputId, m_RestirVariance.innerHandle);
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, OutputId,

@@ -43,6 +43,7 @@ def run(root):
 
     report = {"contract": "scene-linear consumed E/pi; no exposure or gain fitting",
               "scope": "fixed camera, eight samples four frames apart after 512 warmup frames",
+              "spatial_denoise": capture.get("spatialDenoise", "historical Atrous2"),
               "floor_mean_gate_percent": 1.0, "arms": {}, "pairs": {}}
     report["capture_sources"] = [str(root / "capture/capture.json")] + ([str(refined_path)] if refined_path.exists() else [])
     images = {}
@@ -55,6 +56,10 @@ def run(root):
             s = row["state"]
             assert s["rays"] == 8 and s["spacing"] == 16 and s["forceTwoSided"] == legacy
             assert s["directionalCache"] and not s["restir"]
+            if capture.get("schema") == "emission-sidedness.v2":
+                assert s["spatialDenoise"] == capture["spatialDenoise"]
+                expected_iterations = {"Atrous2": 2, "Atrous3": 3}.get(capture["spatialDenoise"], 0)
+                assert s["atrousIterations"] == expected_iterations, (arm, s["atrousIterations"])
             assert s["traceMode"] == ("SdfOnly" if "sdf" in arm else "Hybrid")
             assert abs(s["rayBias"] - (.005 if "stress" in arm else .04)) < 1e-6
             assert s["sky"] == 0 and s["sun"][:3] == [0, 0, 0]

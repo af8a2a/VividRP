@@ -46,6 +46,8 @@ using VividRP.Editor.Tools;
     profile.TryGet<SdfDiffuseGISettings>(out var gi);
     profile.TryGet<AutoExposure>(out var exposure);
     if (gi == null || exposure == null) throw new InvalidOperationException("Missing Cornell profile.");
+    // Validate the fixture's current denoiser instead of silently testing an older preset.
+    var spatialDenoise = gi.spatialDenoise.value;
     var nativeCmd = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", priv);
     var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
     var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
@@ -127,6 +129,7 @@ using VividRP.Editor.Tools;
             rays = 8, spacing = 16, traceMode = gi.traceMode.value.ToString(), radioSamples = Field("m_RadiositySamples"),
             radioTargetOrders = Field("m_RadiosityTargetOrders"), radioCursor = Field("m_RadiosityCursor"),
             directionalCache = Field("m_DirectionalCache"), restir = Field("m_RestirGather"),
+            spatialDenoise = gi.spatialDenoise.value.ToString(), atrousIterations = Field("m_AtrousIterations"),
             forceTwoSided = forceSide.GetValue(null), rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
     Action<ComputePassContext, Texture, Texture, Texture, Texture> linear = (context, lighting, depth, rt0, rt1) => {
@@ -140,7 +143,6 @@ using VividRP.Editor.Tools;
         System.IO.Directory.CreateDirectory(output + "/" + arm);
         gi.traceMode.Override(mode);
         gi.surfaceCacheBounceOrders.Override(orders);
-        gi.spatialDenoise.Override(SdfDiffuseSpatialDenoise.Atrous2);
         // Probe filters stay fixed: the raw/temporal/final taps isolate pixel reconstruction.
         extra.ResetPostProcessingHistory();
         active = true;
@@ -160,6 +162,7 @@ using VividRP.Editor.Tools;
     {
         System.IO.Directory.CreateDirectory(output);
         System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
+            schema = "emission-sidedness.v2", spatialDenoise = spatialDenoise.ToString(),
             complete, completedArm = arm, width = 1920, height = 1080, spacing = 16, rays = 8,
             warmup, measuredFrames, captureStride, scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
             row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

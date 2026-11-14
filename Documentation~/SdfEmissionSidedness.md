@@ -176,3 +176,29 @@ E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-010146-130/trace-confor
 ```
 
 分析器现在要求清单显式标记 `complete=true`，并检查完整 1920×1080 分辨率，避免把缺少完成标记的捕帧当作有效证据。捕帧无运行错误；恢复检查确认回调为空、flags=0、强制双面关闭、frame override=-1、bias=0.04、正常 8 阶 / 32 批、两个场景均未脏。本轮未测量 GPU 耗时，未启动 Unity Test Framework。
+
+## 当前 Cornell 三轮滤波配置复验（2026-11-14）
+
+四路单面规则已在现有实现中统一，本轮没有再次修改生产着色。修正捕帧工具原先固定覆盖为 Atrous2 的行为，改为保留夹具当前的空间滤波设置；清单新增 `emission-sidedness.v2`、配置名称与逐帧实际迭代数，分析器核对配置与实际 dispatch 路径一致。本次使用 `c7f7cc43` 的护边 Atrous3，仍为原机位、1920×1080、16 px / 8 rays；每组预热 512 帧后采集 8 帧。捕帧前后 **2,837 个**受检源码、诊断及 Cornell 夹具文件的校验和一致。
+
+| 条件 | 背面高亮命中：双面 → 单面 | 有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,532 / 35,532 | −0.157% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.067% |
+| SDF Only，零阶，5 mm | 1,933 → 0 | 8,728 / 8,728 | −0.102% |
+
+全部 **52,402** 条材质背面样本 RGB 为零，保留有效 Screen/SDF 类别与非零探针覆盖；零阶源计数检查通过。地面正面发光命中的辐亮度仍为 **200.000046**。四组地面最终均值均在本次 ±1% 检查线内；该短序列不等于长序列能量收敛证明。默认偏移下，零阶天花板原始命中照明为零，最终重建仍有约 **0.000218** 的微小残留；5 mm 压力组最终均值为零。
+
+重新执行生产 Radiosity、Far Probe 和远场缓存重连的 Off / Front / Back GPU 矩阵。Back 下正面均为约 200.00006、背面均为 0；远场黑命中保留有效性与正距离，即使诊断 atlas 两侧都预存亮值也不会错误复用。材质 64 B、节点 48 B 的逐字段布局检查通过，原场景发光值不变，独立诊断 shader 无错误或警告。
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-031949-475/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-031949-475/emission-sidedness.png
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-031949-475/source-before-capture.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-031949-475/source-verification.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-031949-475/final-verification.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-031916-377/trace-conformance.json
+```
+
+捕帧无运行错误。恢复检查确认诊断回调为空、flags=0、强制双面关闭、frame override=-1、bias=0.04、正常 Radiosity 为 8 阶 / 32 批，两个场景均未脏。未运行 Unity Test Framework（Editor 正在使用），未测量 GPU 耗时；旧卡片的原法线版本迁移与移动机位验证仍不在本轮范围内。

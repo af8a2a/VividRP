@@ -23,6 +23,7 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbeAnchorPrecision-20261114-132744-210", "reason": "Precision/window experiment stopped at failed baseline A/A. No candidate ran. Source verification, rejection and first/last complete bundles preserve the qualified scope", "requiredFiles": ["rejection.json", "qualification.json", "source-verification.json", "capture.json"] },
     { "run": "EmissionSidedness-20261113-145618-928", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
     { "run": "EmissionSidedness-20261113-185011-700", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },
     { "run": "EmissionSidedness-20261114-010323-368", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },

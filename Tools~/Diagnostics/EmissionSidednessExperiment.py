@@ -15,7 +15,8 @@ MATERIAL_BACKFACE = 2048
 
 def run(root):
     capture = json.loads((root / "capture/capture.json").read_text())
-    assert capture.get("complete", True), "Incomplete capture; see completedArm and errors"
+    assert capture.get("complete") is True, "Incomplete capture; see completedArm and errors"
+    assert capture["width"] == 1920 and capture["height"] == 1080
     assert not capture["errors"] and capture["spacing"] == 16 and capture["rays"] == 8
     assert capture["camera"]["position"] == [0, 1.5, -3.8] and capture["camera"]["vertical_fov"] == 42
     fixture = json.loads(FIXTURE.read_text())
@@ -26,7 +27,7 @@ def run(root):
     refined_path = root / "capture-fixed-geometry/capture.json"
     if refined_path.exists():
         refined = json.loads(refined_path.read_text())
-        assert refined.get("complete", True), "Incomplete refined capture"
+        assert refined.get("complete") is True, "Incomplete refined capture"
         assert not refined["errors"] and refined["camera"] == capture["camera"]
         records = [r for r in records if not r["arm"].startswith("fixed-")] + refined["records"]
     files = {(r["arm"], r["frame"], r["tag"]): r for r in records if "tag" in r}

@@ -150,3 +150,29 @@ unity command script eval --project-path E:/VividRP_Reborn --file E:/VividRP_Reb
 ```
 
 本轮补齐远场缓存消费的回归证据，没有测量 GPU 耗时，也未运行 Unity Test Framework（Editor 正在使用）。旧卡片仍需重捕获才能启用完整原法线契约，移动时跨材质侧的历史验证仍属于后续工作。
+
+## 默认采样版本完整复验（2026-11-14）
+
+在 `56247693` 的生产实现上重新完成八组捕帧，未重复修改已统一的四路着色。默认独立采样、诊断 flags=0；保持同一机位、1920×1080、16 px / 8 rays、512 帧预热和随后 8 次采样。捕帧前记录的 **219 个**受检 GI 源码及 Cornell 夹具文件在捕帧后全部校验一致；未混入工作区中另行开展的采样／三轮去噪候选。
+
+| 条件 | 背面高亮命中：双面 → 单面 | 有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,578 / 35,578 | −0.010% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.066% |
+| SDF Only，零阶，5 mm | 1,935 → 0 | 8,737 / 8,737 | 0.000% |
+
+共 **52,457** 条材质背面样本 RGB 为零，全部保留有效命中类别与非零覆盖。零阶地面正面发光命中仍为 **200.000046**；短序列地面均值均通过 ±1% 检查。默认偏移下，零阶天花板原始命中照明为零，最终重建仍约有 **0.000219** 的残留；不将其描述为最终图像完全归零，也不以短序列代替长序列收敛或运动验证。
+
+再次在当前 Editor 中执行生产 Radiosity、Far Probe 和远场缓存重连的 Off / Front / Back GPU 矩阵。Back 模式原正面均为 200.00006、原背面均为 0；背面重连有效性仍为 1，命中距离为正。原场景发光值未改变，诊断 shader 无错误或警告；材质 64 B 与 BVH 节点 48 B 的逐字段布局检查通过。
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-010323-368/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-010323-368/emission-sidedness.png
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-010323-368/source-before-capture.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-010323-368/source-verification.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-010323-368/final-verification.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-010146-130/trace-conformance.json
+```
+
+分析器现在要求清单显式标记 `complete=true`，并检查完整 1920×1080 分辨率，避免把缺少完成标记的捕帧当作有效证据。捕帧无运行错误；恢复检查确认回调为空、flags=0、强制双面关闭、frame override=-1、bias=0.04、正常 8 阶 / 32 批、两个场景均未脏。本轮未测量 GPU 耗时，未启动 Unity Test Framework。

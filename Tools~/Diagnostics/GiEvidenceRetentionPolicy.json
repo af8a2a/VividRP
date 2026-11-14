@@ -4,6 +4,7 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeAnchorWindowRelight-20261114-205334-330163",
     "ScreenProbeAnchorWindowMotion-20261114-195008-007",
     "ScreenProbeAnchorWindowRevisit-20261114-183607-958",
     "SdfRayOrigin-20261114-182410-364",
@@ -35,6 +36,7 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbeProducerCold-20261114-094512-788", "reason": "Historical 96-frame cold producer control superseded by qualified 4608/6400-frame dense and sparse controls. Protected metadata refers to it only in a storage inventory, with no raw dependency. Capture, source fingerprints, kernel binaries, archival review and endpoint bundles retained; full interior reanalysis no longer available", "requiredFiles": ["capture.json", "source-verification.json", "archive-review.json"] },
     { "run": "ScreenProbeAnchorStorage-20261114-151333-500182", "reason": "Rejected standalone precision/storage candidate; final temporal noise worsened and runtime prototype withdrawn. No protected capture/snapshot refers to its raw frames. Reports, exact scripts, source checks and endpoint bundles retained", "requiredFiles": ["analysis.json", "qualification.json", "source-verification.json", "decision.json", "capture.json"] },
     { "run": "ScreenProbeAnchorWindow-20261114-155720-209141", "reason": "Long 6400-render baseline A/A failed; no FP32/512 candidate ran. First observed divergence frame4095 copied to preserved endpoint bundles with a hash mapping; source, CPU, rejection and capture reports retained", "requiredFiles": ["rejection.json", "failure-analysis.json", "first-observed-difference.json", "qualification.json", "source-verification.json", "capture.json"] },
     { "run": "ScalarAnchorAge-20261114-063528-201", "reason": "Historical 32/128 window experiment superseded by accepted guarded anchor-prefilter regression and the current precision study. No other protected capture/snapshot/source manifest references this run; original promotion, input checks and reports retained", "requiredFiles": ["analysis.json", "capture.json", "source-verification.json", "profile-promotion.json", "post-promotion-verification.json"] },

@@ -1,4 +1,4 @@
-"""Independent long-sequence energy and temporal-noise gates for CDF proposals."""
+"""Independent long-sequence energy and temporal-noise gates for directional proposals."""
 import argparse
 import hashlib
 import json
@@ -73,16 +73,20 @@ def aligned_footprint(probe_record, pixel_record, spacing=16):
             & (yy < int(np.ceil((pixel_record['y'] + pixel_record['height']) / spacing))))
 
 
-def run(capture, linear, short):
+def run(capture, linear, short, candidate='cdf'):
     m = json.loads((capture / 'capture.json').read_text())
-    assert m['complete'] is True and not m['errors'] and m['experiment'] == 'reference-cdf'
+    control = m.get('control', 'white')
+    frozen = control == 'blocked'
+    assert candidate in ('cdf', 'compact')
+    assert control in ('white', 'blocked') and (not frozen or candidate == 'compact')
+    assert m['complete'] is True and not m['errors'] and m['experiment'] == 'reference-' + candidate + ('-blocked' if frozen else '')
     assert (m['width'], m['height'], m['spacing'], m['rays'], m['measuredFrames'], m['frameBase']) == (1920, 1080, 16, 8, 2048, 7919)
     assert m['warmup'] == 512 and not m['scene_dirty_before'] and not m['scene_dirty_after']
     assert m['camera']['position'] == [0, 1.5, -3.8] and m['camera']['vertical_fov'] == 42
     assert {v['sha256'] for v in m['compiledVariants'] if v['name'] == 'FilterSdfDiffuseAtrousFinal'} == {'31fbe5302c2a893310ee72f0bcd4f53ad81578da0ad5b154326f4f829b3d3148'}
     records = m['records']
     frames = list(range(512, 2560))
-    arms = [prefix + '-reference-' + mode for mode in ['hybrid', 'sdf'] for prefix in ['white', 'cdf']]
+    arms = [prefix + '-reference-' + mode for mode in ['hybrid', 'sdf'] for prefix in [control, candidate]]
     states = [r for r in records if 'state' in r]
     assert {r['arm'] for r in states} == set(arms)
     for arm in arms:
@@ -90,11 +94,12 @@ def run(capture, linear, short):
         assert [r['frame'] for r in values] == frames
         for record in values:
             s = record['state']
-            expected = arm.startswith('cdf-')
+            expected = arm.startswith(candidate + '-')
             assert s['order'] == 8 and s['batch'] == 32 and s['radioSamples'] == 64
-            assert s['directionalCache'] and not s['restir'] and not s['frozenProposal']
+            assert s['directionalCache'] and not s['restir'] and s['frozenProposal'] == frozen
+            assert not frozen or (s['proposalHistoryValid'] and s.get('compactVersion', 1) == 2)
             assert s['guide'] and s['hierarchical'] and s['atrousIterations'] == 3
-            assert s['cdfGuide'] == expected and s['samplingFlags'] == (134217728 if expected else 0)
+            assert s[candidate + 'Guide'] == expected and s['samplingFlags'] == (({'cdf': 134217728, 'compact': 268435456}[candidate] if expected else 0) | (8388608 if frozen else 0))
             assert s['sun'][:3] == [0, 0, 0] and s['sky'] == 0
     ids = exr_read(linear / 'vivid-ev4/object_id.exr')[::-1]
     files = {(r['arm'], r['frame'], r['tag']): r for r in records if 'tag' in r}
@@ -102,6 +107,8 @@ def run(capture, linear, short):
     canonical = {r['radiosity_sha256'] for r in json.loads(short.read_text())['arms'].values()}
     assert len(canonical) == 1
     report = {'scope': 'Independent 2048-frame phase; conditional block128 intervals, not physical truth',
+              'candidate': candidate,
+              'control': control,
               'probe_scope': 'Broad ceiling window and aligned 16px grid footprint; not exact bilateral interpolation weights',
               'analysis_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'energy_gate_percent': 1.0, 'pairs': {}, 'sources': {}, 'probes': {}}
@@ -130,13 +137,13 @@ def run(capture, linear, short):
             mask = ids[y:y+h, x:x+w] == object_id
             data[arm, region] = series([files[arm, f, 'final-' + region] for f in frames], mask, frames)
     for mode in ['hybrid', 'sdf']:
-        before, after = 'white-reference-' + mode, 'cdf-reference-' + mode
+        before, after = control + '-reference-' + mode, candidate + '-reference-' + mode
         assert all(matrices[before, f] == matrices[after, f] for f in frames)
         report['pairs'][mode] = {r: compare(data[before, r], data[after, r]) for r in ['ceiling', 'floor', 'right']}
         report['probes'][mode] = {r: compare(data[before, r], data[after, r])
                                  for r in ['hit-lighting', 'anchor', 'hit-lighting-aligned', 'anchor-aligned']}
-    report['proposals'] = verify_blocked_proposals(m, files, frames, arms, require_frozen=False)
-    assert all(v['cdf_probe_frames'] > 0 for k, v in report['proposals'].items() if k.startswith('cdf-'))
+    report['proposals'] = verify_blocked_proposals(m, files, frames, arms, require_frozen=frozen)
+    assert all(v[candidate + '_probe_frames'] > 0 for k, v in report['proposals'].items() if k.startswith(candidate + '-'))
     report['all_energy_passed'] = all(v['energy_passed'] for regions in report['pairs'].values() for v in regions.values())
     report['all_noise_reductions_confirmed'] = all(v['noise_reduction_confirmed'] for regions in report['pairs'].values() for v in regions.values())
     output = capture.parent / 'energy-reference.json'
@@ -150,5 +157,6 @@ if __name__ == '__main__':
     p.add_argument('capture', type=Path)
     p.add_argument('--linear', type=Path, required=True)
     p.add_argument('--short', type=Path, required=True, help='Completed short-sequence analysis.json with the identical source cache')
+    p.add_argument('--candidate', choices=['cdf', 'compact'], default='cdf')
     args = p.parse_args()
-    run(args.capture, args.linear, args.short)
+    run(args.capture, args.linear, args.short, args.candidate)

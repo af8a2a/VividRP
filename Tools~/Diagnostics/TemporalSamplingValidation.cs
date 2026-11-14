@@ -20,11 +20,13 @@ using UnityEditor;
     var cmd = new CommandBuffer {name = "Validate native probe temporal samples"};
     try
     {
-        foreach (string mode in new[] {"white", "sobol", "blocked"})
+        foreach (string mode in new[] {"white", "sobol", "blocked", "compact-blocked"})
         {
+            bool frozen = mode.EndsWith("blocked", StringComparison.Ordinal);
             cmd.Clear();
             cmd.SetComputeBufferParam(shader, kernel, "_TemporalValidation", buffer);
-            cmd.SetComputeIntParam(shader, "_SdfGatherHistoryDiagnostics", mode == "white" ? 0 : mode == "sobol" ? 262144 : 8388608);
+            cmd.SetComputeIntParam(shader, "_SdfGatherHistoryDiagnostics", (frozen ? 8388608 : mode == "sobol" ? 262144 : 0)
+                | (mode == "compact-blocked" ? 268435456 : 0));
             for (int frame = 0; frame < 256; frame++)
             {
                 cmd.SetComputeIntParam(shader, "_SdfDiffuseFrame", frame);
@@ -46,11 +48,11 @@ using UnityEditor;
                     else
                     {
                         uint proposalFrame = frame + (Hash(3u + 7u * 65537u) & 31u);
-                        uint sampleFrame = mode == "blocked" ? proposalFrame & 31u : frame;
+                        uint sampleFrame = frozen ? proposalFrame & 31u : frame;
                         uint index = sampleFrame ^ (sampleFrame >> 1), second = 0, direction = 0x80000000u;
                         for (uint bits = index; bits != 0; bits >>= 1) { if ((bits & 1) != 0) second ^= direction; direction ^= direction >> 1; }
                         uint scramble = Hash(3u + 7u * 65537u) ^ (0xb5297a4du * (ray+1));
-                        if (mode == "blocked") scramble ^= Hash((proposalFrame >> 5) ^ 0x27d4eb2du);
+                        if (frozen) scramble ^= Hash((proposalFrame >> 5) ^ 0x27d4eb2du);
                         sx = Reverse(index) ^ Hash(scramble); sy = second ^ Hash(scramble ^ 0x68e31da4u);
                     }
                 }
@@ -73,6 +75,7 @@ using UnityEditor;
             }
         }
         if (values["white"].SequenceEqual(values["sobol"])) throw new InvalidOperationException("A/B control has no effect.");
+        if (!values["blocked"].SequenceEqual(values["compact-blocked"])) throw new InvalidOperationException("Compact mode changed the controlled QMC sample sequence.");
         int phase = (int)(Hash(3u + 7u * 65537u) & 31u);
         for (int start = (32 - phase) & 31; start + 32 <= 256; start += 32) for (int ray = 0; ray < 8; ray++)
         {
@@ -90,7 +93,7 @@ using UnityEditor;
         string evidenceRoot = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..",
             "VividRP_GI_Evidence", "BlockedTemporalValidation-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff")));
         System.IO.Directory.CreateDirectory(evidenceRoot);
-        var report = new {evidenceRoot, gpuSamplesChecked = 6144, cpuReference = "iterative Sobol direction numbers", joint16x16Strata = true, blockedJoint8x4Strata = true,
+        var report = new {evidenceRoot, gpuSamplesChecked = 8192, cpuReference = "iterative Sobol direction numbers", joint16x16Strata = true, blockedJoint8x4Strata = true, compactSequenceMatchesBlocked = true,
             whiteSecond = values["white"][8].ToString("R"), sobolSecond = values["sobol"][8].ToString("R"),
             shaderMessages = ShaderUtil.GetComputeShaderMessages(shader).Select(m => new {m.message, severity=m.severity.ToString()}).ToArray()};
         System.IO.File.WriteAllText(evidenceRoot + "/gpu-validation.json",

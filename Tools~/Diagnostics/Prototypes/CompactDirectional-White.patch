@@ -1,0 +1,172 @@
+diff --git a/Editor/Resources/SdfTemporalSamplingValidation.compute b/Editor/Resources/SdfTemporalSamplingValidation.compute
+index 4e2615c6..3e88ca52 100644
+--- a/Editor/Resources/SdfTemporalSamplingValidation.compute
++++ b/Editor/Resources/SdfTemporalSamplingValidation.compute
+@@ -1,0 +2 @@
++#pragma kernel ValidateSdfCompactSampling
+@@ -6,0 +8,2 @@ RWStructuredBuffer<float2> _TemporalValidation;
++RWStructuredBuffer<float4> _CompactSamplingValidation;
++uint _CompactValidationCount;
+@@ -13,0 +17,11 @@ void ValidateSdfTemporalSampling(uint3 id : SV_DispatchThreadID)
++
++[numthreads(8, 1, 1)]
++void ValidateSdfCompactSampling(uint3 id : SV_DispatchThreadID)
++{
++    uint2 tile = uint2(id.x / 8u, 0u);
++    if (tile.x >= _CompactValidationCount) return;
++    uint ray = id.x & 7u, bin;
++    float mass;
++    float3 direction = SampleDiffuseProbeRay(tile, ray, ProbeSeed(tile), float3x3(1,0,0,0,1,0,0,0,1), bin, mass);
++    _CompactSamplingValidation[_TemporalValidationOffset + id.x] = float4(direction, mass);
++}
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+index 49e1a636..7b6d2c6f 100644
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+@@ -500,0 +501,2 @@ namespace VividRP.Runtime.RenderPass.Core
++        private bool m_CompactGuideActive;
++        private int m_DirectionalCompactGuideKernel = -1;
+@@ -710,0 +713,2 @@ namespace VividRP.Runtime.RenderPass.Core
++            if (HasKernel(m_ImportanceSamplingCompute, "PrepareSdfDirectionalCompactGuide"))
++                m_DirectionalCompactGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfDirectionalCompactGuide");
+@@ -768,0 +773 @@ namespace VividRP.Runtime.RenderPass.Core
++            m_CompactGuideActive = false;
+@@ -910,0 +916,3 @@ namespace VividRP.Runtime.RenderPass.Core
++            m_CompactGuideActive = m_DirectionalHierarchicalGuide && !m_FrozenGuideActive && !m_RestirGather
++                && m_DirectionalCompactGuideKernel >= 0 && EditorTraceCapture != null
++                && (EditorGatherHistoryDiagnostics & 268435456) != 0;
+@@ -1546,0 +1555 @@ namespace VividRP.Runtime.RenderPass.Core
++            m_DirectionalCompactGuideKernel = -1;
+@@ -2547 +2556 @@ namespace VividRP.Runtime.RenderPass.Core
+-            int kernel = m_DirectionalGuideKernel;
++            int kernel = m_CompactGuideActive ? m_DirectionalCompactGuideKernel : m_DirectionalGuideKernel;
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl b/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
+index 4c2c8679..ac49661f 100644
+--- a/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
++++ b/Shaders/Core/Private/GlobalIllumination/SdfDiffuseDirectionalCache.hlsl
+@@ -194,0 +195,12 @@ float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, ou
++        if (stratum.w < -8.0)
++        {
++            // Compact continuous rectangles. All endpoints share a 1/16 chart
++            // grid, including the encoded upper y coordinate in RGBA16F.
++            float4 rect = float4(stratum.xyz, -stratum.w - 8.0);
++            float2 extent = rect.zw - rect.xy;
++            float2 uv = (rect.xy + extent * clamp(sampleUv, 1e-5, 1.0 - 1e-5)) / DirectionalOctSize;
++            float3 direction = DirectionalOctDirection(uv, basis);
++            bin = DirectionalBin(direction, basis);
++            inverseRelativePdf = 0.5 * extent.x * extent.y;
++            return direction;
++        }
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+index 28c585f5..9fccbf3f 100644
+--- a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
++++ b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeImportanceSampling.compute
+@@ -1,0 +2,2 @@
++#pragma kernel PrepareSdfDirectionalCompactGuide VIVID_SDF_COMPACT_PROPOSAL
++#pragma kernel InspectSdfDirectionalCompactGuideCS VIVID_SDF_COMPACT_PROPOSAL VIVID_SDF_COMPACT_VALIDATION
+@@ -89,0 +92,93 @@ float DirectionalOctRegionImportance(float importance[16], uint4 rect)
++#if defined(VIVID_SDF_COMPACT_PROPOSAL)
++float CompactDirectionalMedian(float importance[16], float exploration, float4 rect, uint axis)
++{
++    float masses[4];
++    float total = 0.0;
++    uint other = 1u - axis;
++    [unroll]
++    for (uint band = 0u; band < 4u; ++band)
++    {
++        float density = 0.0;
++        [unroll]
++        for (uint crossCell = 0u; crossCell < 4u; ++crossCell)
++        {
++            uint cell = axis == 0u ? band + 4u * crossCell : crossCell + 4u * band;
++            float overlap = max(0.0, min(rect[other + 2u], float(crossCell + 1u)) - max(rect[other], float(crossCell)));
++            density += (importance[cell] + exploration) * overlap;
++        }
++        float width = max(0.0, min(rect[axis + 2u], float(band + 1u)) - max(rect[axis], float(band)));
++        masses[band] = width * density;
++        total += masses[band];
++    }
++    float target = 0.5 * total;
++    float prefix = 0.0;
++    float cut = 0.5 * (rect[axis] + rect[axis + 2u]);
++    [unroll]
++    for (uint band = 0u; band < 4u; ++band)
++    {
++        if (masses[band] > 0.0 && target <= prefix + masses[band])
++        {
++            float lower = max(rect[axis], float(band));
++            float upper = min(rect[axis + 2u], float(band + 1u));
++            cut = lerp(lower, upper, saturate((target - prefix) / masses[band]));
++            break;
++        }
++        prefix += masses[band];
++    }
++    // Shared endpoints and area weights remain exactly representable in the
++    // half guide/ray metadata. Keep both children nonempty after quantization.
++    return clamp(round(cut * 16.0) / 16.0, rect[axis] + 0.0625, rect[axis + 2u] - 0.0625);
++}
++
++void StoreCompactDirectionalGuide(uint2 tile, float importance[16], float total)
++{
++    float4 rects[8];
++    rects[0] = float4(0.0, 0.0, 4.0, 4.0);
++    float exploration = total > 0.0 ? total / 16.0 : 1.0;
++    [loop]
++    for (uint level = 0u; level < 3u; ++level)
++    {
++        // Traverse backwards so in-place child writes cannot replace a parent
++        // that has not yet been split at this level.
++        [loop]
++        for (int parent = int(1u << level) - 1; parent >= 0; --parent)
++        {
++            float4 rect = rects[parent];
++            float2 extent = rect.zw - rect.xy;
++            uint axis = extent.x >= extent.y ? 0u : 1u;
++            float cut = CompactDirectionalMedian(importance, exploration, rect, axis);
++            float4 a = rect, b = rect;
++            a[axis + 2u] = cut;
++            b[axis] = cut;
++            rects[2 * parent] = a;
++            rects[2 * parent + 1] = b;
++        }
++    }
++    [unroll]
++    for (uint ray = 0u; ray < DirectionalBinCount; ++ray)
++    {
++        float4 rect = rects[ray];
++        _SdfDirectionalGuideOutput[DirectionalAddress(tile, ray)] = float4(rect.xyz, -8.0 - rect.w);
++    }
++}
++#endif
++
++#if defined(VIVID_SDF_COMPACT_VALIDATION)
++StructuredBuffer<float4> _SdfCompactValidationInput;
++uint _SdfCompactValidationCount;
++[numthreads(8, 1, 1)]
++void InspectSdfDirectionalCompactGuideCS(uint3 id : SV_DispatchThreadID)
++{
++    if (id.x >= _SdfCompactValidationCount) return;
++    float importance[16];
++    float total = 0.0;
++    [unroll]
++    for (uint cell = 0u; cell < DirectionalGatherBinCount; ++cell)
++    {
++        importance[cell] = _SdfCompactValidationInput[4u * id.x + cell / 4u][cell & 3u];
++        total += importance[cell];
++    }
++    StoreCompactDirectionalGuide(uint2(id.x, 0u), importance, total);
++}
++#endif
++
+@@ -125,0 +221,3 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
++    #if defined(VIVID_SDF_COMPACT_PROPOSAL)
++    StoreCompactDirectionalGuide(tile, importance, total);
++    #else
+@@ -183,0 +282 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
++    #endif
+@@ -187,0 +287,3 @@ bool BuildDirectionalOctGuide(uint2 tile, float3 position, float3 normal, float3
++#if defined(VIVID_SDF_COMPACT_PROPOSAL)
++void PrepareSdfDirectionalCompactGuide(uint3 id : SV_DispatchThreadID)
++#else
+@@ -188,0 +291 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
++#endif

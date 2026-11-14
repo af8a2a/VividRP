@@ -94,6 +94,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler DirectionalTemporalSampler = new("Screen Probe Temporal Trace Radiance");
         private static readonly ProfilingSampler DirectionalFilterSampler = new("Screen Probe Filter Gather Traces");
         private static readonly ProfilingSampler DirectionalIrradianceSampler = new("Screen Probe Convert to Irradiance");
+        private static readonly ProfilingSampler AnchorPreFilterSampler = new("Screen Probe Anchor Prefilter");
         private static readonly int DirectionalCacheEnabledId = Shader.PropertyToID("_SdfDirectionalCacheEnabled");
         private static readonly int DirectionalGuideEnabledId = Shader.PropertyToID("_SdfDirectionalGuideEnabled");
         private static readonly int DirectionalWorldGuideId = Shader.PropertyToID("_SdfDirectionalWorldGuide");
@@ -251,6 +252,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int AnchorHistoryBlendId = Shader.PropertyToID("_SdfProbeAnchorHistoryBlend");
         private static readonly int ProbeAnchorMaxAgeId = Shader.PropertyToID("_SdfProbeAnchorMaxAge");
         private static readonly int SpatialAnchorId = Shader.PropertyToID("_SdfSpatialProbeAnchor");
+        private static readonly int SpatialAnchorInputId = Shader.PropertyToID("_SdfSpatialProbeAnchorInput");
+        private static readonly int SpatialAnchorOutputId = Shader.PropertyToID("_SdfSpatialProbeAnchorOutput");
+        private static readonly int SpatialAnchorPrefilteredId = Shader.PropertyToID("_SdfSpatialProbeAnchorPrefiltered");
         private static readonly int PreparedAnchorId = Shader.PropertyToID("_SdfPreparedProbeAnchor");
         private static readonly int PreparedAnchorOutputId = Shader.PropertyToID("_SdfPreparedProbeAnchorOutput");
         private static readonly int PreviousAnchorStatisticsId = Shader.PropertyToID("_SdfPreviousAnchorStatistics");
@@ -355,7 +359,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal int PixelHistoryMaxAge, ProbeAnchorMaxAge;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
-            internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide, SpatialAnchor;
+            internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide, SpatialAnchor, AnchorPreFilter;
             internal float MeshDetailDistance;
             internal bool GlobalClipmapUsed;
             internal Vector4 NearOcclusion;
@@ -427,6 +431,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Temporal Probe Anchor", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_PreparedAnchor = CreateScratch("Screen Probe Temporal Anchor", ProbeFormat);
+        [RenderGraphResource(Name = "Reconstructed Probe Anchor", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_ReconstructedAnchor = CreateScratch("Screen Probe Reconstructed Anchor", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousAnchorStatistics = RenderGraphTexture.CreateInput("Previous Probe Anchor Statistics", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentAnchorStatistics = CreateScratch("Probe Anchor Statistics", ProbeFormat);
         [RenderGraphResource(Name = "Directional Probe Guide", Access = AccessFlags.ReadWrite)]
@@ -506,6 +513,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DirectionalFilterKernel = -1, m_DirectionalIntegrateKernel = -1, m_DirectionalResolveKernel = -1;
         private int m_PrepareAnchorKernel = -1;
         private int m_PrepareAnchorNoPixelKernel = -1;
+        private int m_AnchorPreFilterKernel = -1;
         private CameraHistoryTexture m_AnchorStatisticsHistory;
         private bool m_AnchorStatisticsHistoryValid;
         private bool m_DirectionalCache, m_DirectionalGuide, m_DirectionalHistoryValid, m_DirectionalGuideHistoryValid;
@@ -603,7 +611,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_RecordRayDiagnostics;
         private bool m_RecordFirstHitDiagnostics;
         private bool m_RecordProbeAnchorDiagnostics;
-        private bool m_SpatialAnchor;
+        private bool m_SpatialAnchor, m_AnchorPreFilter;
         private SdfDiffuseTraceMode m_TraceMode;
 
         public SdfDiffuseGatherPass()
@@ -728,6 +736,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_PrepareAnchorKernel = m_FilterCompute.FindKernel("ScreenProbePrepareAnchorCS");
             if (HasKernel(m_FilterCompute, "ScreenProbePrepareAnchorNoPixelHistoryCS"))
                 m_PrepareAnchorNoPixelKernel = m_FilterCompute.FindKernel("ScreenProbePrepareAnchorNoPixelHistoryCS");
+            if (HasKernel(m_FilterCompute, "ScreenProbeFilterAnchorCS"))
+                m_AnchorPreFilterKernel = m_FilterCompute.FindKernel("ScreenProbeFilterAnchorCS");
             if (HasKernel(m_RestirCompute, "ResampleSdfRestirTemporal") && HasKernel(m_RestirCompute, "ResampleSdfRestirSpatial"))
             {
                 m_RestirTemporalKernel = m_RestirCompute.FindKernel("ResampleSdfRestirTemporal");
@@ -916,7 +926,9 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
             m_SpatialAnchor = m_DirectionalCache && m_PrepareAnchorKernel >= 0 && settings.screenProbeSpatialAnchor.value;
             bool prepareAnchor = m_DirectionalCache && m_PrepareAnchorKernel >= 0 && m_PrepareAnchorNoPixelKernel >= 0;
+            m_AnchorPreFilter = m_SpatialAnchor && prepareAnchor && m_AnchorPreFilterKernel >= 0 && settings.screenProbeAnchorPreFilter.value;
             m_PreparedAnchor.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
+            m_ReconstructedAnchor.Resize(m_AnchorPreFilter ? m_ProbeWidth : 1, m_AnchorPreFilter ? m_AtlasHeight : 1);
             m_CurrentAnchorStatistics.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
             bool fullPrecisionAnchor = false;
 #if UNITY_EDITOR
@@ -924,6 +936,7 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
             m_Probes.desc.ColorFormat = fullPrecisionAnchor && m_DirectionalCache ? GeometryFormat : ProbeFormat;
             m_PreparedAnchor.desc.ColorFormat = fullPrecisionAnchor && m_DirectionalCache ? GeometryFormat : ProbeFormat;
+            m_ReconstructedAnchor.desc.ColorFormat = fullPrecisionAnchor && m_DirectionalCache ? GeometryFormat : ProbeFormat;
             m_HitDistanceFilter &= !m_DirectionalCache;
             m_ProbeSpatialKernel = m_SpatialFilter && !m_RestirGather && !m_HitDistanceFilter
                 ? settings.screenProbeSpatialKernel.value : SdfScreenProbeSpatialKernel.Cross;
@@ -1079,6 +1092,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.HitDistanceFilter == m_HitDistanceFilter
                 && m_State.ProbeSpatialKernel == m_ProbeSpatialKernel
                 && m_State.SpatialAnchor == m_SpatialAnchor
+                && m_State.AnchorPreFilter == m_AnchorPreFilter
                 && m_State.ProbeAnchorMaxAge == m_ProbeAnchorMaxAge
                 && m_State.RestirGather == m_RestirGather && m_State.RestirCardVersion == m_RestirCardVersion
                 && m_State.RestirPixelIntegration == m_RestirPixelIntegration
@@ -1262,6 +1276,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     || !m_DirectionalTemporal.innerHandle.IsValid() || !m_DirectionalRayTexture.innerHandle.IsValid()))
                 || (m_DirectionalGuide && !(m_FrozenGuideActive ? m_CurrentProposal.innerHandle : m_DirectionalGuideTexture.innerHandle).IsValid())
                 || (m_SpatialAnchor && !m_PreparedAnchor.innerHandle.IsValid())
+                || (m_AnchorPreFilter && !m_ReconstructedAnchor.innerHandle.IsValid())
                 || (m_RestirGather && (m_RestirHistory == null || !m_CurrentRestir.innerHandle.IsValid()))
                 || (m_RestirPixelIntegration && (!m_RestirVariance.innerHandle.IsValid() || !m_RawResolved.innerHandle.IsValid()))
                 || !m_SpatialRestir.innerHandle.IsValid()
@@ -1461,6 +1476,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.CorrectReceiverSelfHits = correctReceiver;
             m_State.ScreenCardLighting = screenCardLighting;
             m_State.SpatialAnchor = m_SpatialAnchor;
+            m_State.AnchorPreFilter = m_AnchorPreFilter;
             m_State.MeshDetailDistance = m_MeshDetailDistance;
             m_State.GlobalClipmapUsed = useGlobalClipmap;
             m_State.ScreenJitterUv = m_ScreenJitterUv;
@@ -1559,6 +1575,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalFilterKernel = m_DirectionalIntegrateKernel = m_DirectionalResolveKernel = -1;
             m_PrepareAnchorKernel = -1;
             m_PrepareAnchorNoPixelKernel = -1;
+            m_AnchorPreFilterKernel = -1;
             m_RestirTemporalKernel = m_RestirSpatialKernel = -1;
             m_RestirDenoiseKernel = -1;
             m_AtrousKernel = m_AtrousFinalKernel = -1;
@@ -2652,7 +2669,25 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(shader, kernel, PreparedAnchorOutputId, m_PreparedAnchor.innerHandle);
                     cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
                 }
+                TextureHandle spatialAnchor = prepared ? m_PreparedAnchor.innerHandle : black;
+                if (m_AnchorPreFilter && prepared)
+                {
+                    using var anchorScope = new ProfilingScope(cmd, AnchorPreFilterSampler);
+                    kernel = m_AnchorPreFilterKernel;
+                    cmd.SetComputeIntParam(shader, PreparedAnchorEnabledId, 1);
+                    cmd.SetComputeTextureParam(shader, kernel, GeometryId, geometry);
+                    cmd.SetComputeTextureParam(shader, kernel, AnchorStatisticsId, m_CurrentAnchorStatistics.innerHandle);
+                    cmd.SetComputeMatrixParam(shader, ViewProjectionId, m_ViewProjection);
+                    cmd.SetComputeTextureParam(shader, kernel, DepthId, m_Depth.innerHandle);
+                    cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
+                    cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                    cmd.SetComputeTextureParam(shader, kernel, SpatialAnchorInputId, spatialAnchor);
+                    cmd.SetComputeTextureParam(shader, kernel, SpatialAnchorOutputId, m_ReconstructedAnchor.innerHandle);
+                    cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
+                    spatialAnchor = m_ReconstructedAnchor.innerHandle;
+                }
                 kernel = m_DirectionalIntegrateKernel;
+                cmd.SetComputeIntParam(shader, SpatialAnchorPrefilteredId, m_AnchorPreFilter && prepared ? 1 : 0);
                 cmd.SetComputeTextureParam(shader, kernel, GeometryId, geometry);
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalCompositeId, composite);
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalFilteredId, filtered);
@@ -2667,6 +2702,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
                 cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
                 cmd.SetComputeTextureParam(shader, kernel, PreparedAnchorId, prepared ? m_PreparedAnchor.innerHandle : black);
+                cmd.SetComputeTextureParam(shader, kernel, SpatialAnchorInputId, spatialAnchor);
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalTemporalId, temporal);
                 cmd.SetComputeTextureParam(shader, kernel, PreviousProbeId, hasHistory ? m_PreviousProbes.innerHandle : black);
                 cmd.SetComputeTextureParam(shader, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);

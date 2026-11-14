@@ -40,13 +40,13 @@ def error(value, reference, reference_variance, mask):
             "reference_variance_subtracted_rmse": float(np.sqrt(max(0, mse - reference_variance[mask].mean())))}
 
 
-def recent_exposure(files, matrices, pose):
+def recent_exposure(files, matrices, pose, arm="age32-motion", first_frame=512):
     """Current and three preceding newly visible strips, reprojected to this pose."""
-    arm = "age32-motion"; x, y, w, h = 800, 350, 320, 256
+    x, y, w, h = 800, 350, 320, 256
     yy, xx = np.mgrid[y:y+h, x:x+w]; pixels = np.stack([xx, yy], -1)
     geometry = {}; depth = {}; normals = {}; vp = {}; inverse = {}
     for point in range(pose - 4, pose + 1):
-        frame = 512 + point
+        frame = first_frame + point
         geometry[point] = read(files[arm, frame, "pixel-geometry-motion"])[..., 0]
         depth[point] = (geometry[point] & 65535).astype("<u2").view("<f2").astype(float)
         normals[point] = normal_from_packed((geometry[point] >> 16).astype(float))

@@ -12,12 +12,17 @@ from TemporalSamplingExperiment import LUMA, read
 def analyze(root, linear, partial=False):
     m = json.loads((root / ("capture-progress.json" if partial else "capture.json")).read_text())
     assert not m["errors"] and m["warmup"] == 512 and m["measuredFrames"] == 384
+    prefilter = m.get("schema") == "scalar-anchor-prefilter-relight.v1"
     if not partial:
-        assert m["complete"] and m["schema"] == "scalar-anchor-relight.v1" and m["changeAt"] == 64
+        assert m["complete"] and m["schema"] in ("scalar-anchor-relight.v1", "scalar-anchor-prefilter-relight.v1") and m["changeAt"] == 64
         assert (m["width"], m["height"], m["spacing"], m["rays"]) == (1920, 1080, 16, 8)
     files = {(r["arm"], r["frame"], r["tag"]): r for r in m["records"] if "tag" in r}
     states = [r for r in m["records"] if "state" in r]
     arms = [a for a in dict.fromkeys(r["arm"] for r in states) if all((a, f, "raw") in files for f in range(512, 896))]
+    if not partial:
+        expected = {f"age{age}-{step}" for age in ([128] if prefilter else [32, 128])
+                    for step in ["constant", "up", "down", "off"]}
+        assert set(arms) == expected, "Missing relight arms"
     report = {"scope": "Actual pure-emissive Cornell, scalar age 32/128; same-frame physical source scaling",
               "limits": "Final filters can be nonlinear; response is reported by stage and does not imply independent physical truth",
               "complete": not partial, "arms": {}, "pairs": {}}
@@ -29,6 +34,8 @@ def analyze(root, linear, partial=False):
         assert [r["frame"] for r in rows] == list(range(512, 896))
         for r in rows:
             s = r["state"]; target = level if r["frame"] >= 576 else 1
+            if prefilter:
+                assert s["preFilter"], "Candidate was not active"
             assert s["anchorMaxAge"] == age and s["samples"] == 64 and s["seed"] == 0 and s["guide"] and not s["restir"]
             assert s["atrous"] == 4 and s["sun"] == [0, 0, 0] and s["sky"] == 0 and s["requestedScale"] == target
             actual = np.asarray(s["emission"]); base = np.asarray(rows[0]["state"]["emission"])
@@ -39,7 +46,16 @@ def analyze(root, linear, partial=False):
             assert Path(files[arm, 512, "radiosity"]["path"]).read_bytes() == Path(files[arm, 895, "radiosity"]["path"]).read_bytes()
             continue
         control = f"age{age}-constant"; assert control in arms
-        assert all(np.array_equal(read(files[control, f, "raw"]), read(files[arm, f, "raw"])) for f in range(512, 576)), "Pre-step raw input differs"
+        assert all(np.array_equal(read(files[control, f, "geometry"]), read(files[arm, f, "geometry"]))
+                   for f in range(512, 896)), "Relight changed receiver geometry"
+        mismatched_prefix = [f for f in range(512, 576)
+                             if not np.array_equal(read(files[control, f, "raw"]), read(files[arm, f, "raw"]))]
+        if mismatched_prefix:
+            report["complete"] = False
+            report["input_qualification"] = dict(qualified=False, arm=arm, frames=mismatched_prefix,
+                                                reason="Raw input already differs before the lighting step")
+            (root / "invalid-input-analysis.json").write_text(json.dumps(report, indent=2))
+            raise AssertionError("Pre-step raw input differs: " + arm)
         before = read(files[control, 895, "radiosity"])[..., :3]
         after = read(files[arm, 895, "radiosity"])[..., :3]
         delta = after - before * level

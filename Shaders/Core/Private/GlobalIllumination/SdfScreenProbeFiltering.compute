@@ -6,6 +6,7 @@
 #pragma kernel ScreenProbeFilterGatherTracesCS
 #pragma kernel ScreenProbePrepareAnchorCS VIVID_SDF_ANCHOR_PIXEL_HISTORY
 #pragma kernel ScreenProbePrepareAnchorNoPixelHistoryCS
+#pragma kernel ScreenProbeFilterAnchorCS
 #pragma kernel ScreenProbeConvertToIrradianceCS
 #pragma kernel InspectDirectionalPlaneIdentityCS
 #pragma kernel InspectDirectionalHistoryAgeCS
@@ -41,6 +42,9 @@ void InspectDirectionalHistoryAgeCS(uint3 id : SV_DispatchThreadID)
 uint _SdfProbeAnchorDiagnostics;
 uint _SdfSpatialProbeAnchor;
 Texture2D<float4> _SdfPreparedProbeAnchor;
+Texture2D<float4> _SdfSpatialProbeAnchorInput;
+RWTexture2D<float4> _SdfSpatialProbeAnchorOutput;
+uint _SdfSpatialProbeAnchorPrefiltered;
 RWTexture2D<float4> _SdfPreparedProbeAnchorOutput;
 Texture2D<float4> _SdfPreviousAnchorStatistics;
 RWTexture2D<float4> _SdfAnchorStatisticsOutput;
@@ -999,7 +1003,7 @@ float AnchorConnectionWeight(float4 center, float4 other, float3 normal, float3 
         * exp2(-2.0 * dot(delta, delta) / (radius * radius));
 }
 
-float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4 center)
+float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4 center, bool temporalInput)
 {
     uint2 grid = DirectionalGrid();
     // Adaptive probes protect discontinuities and retain their own temporal anchor.
@@ -1018,7 +1022,8 @@ float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4
         if (any(candidate < 0) || any(candidate >= int2(grid)))
             continue;
         float4 other = _SdfDiffuseGeometry[uint2(candidate)];
-        float4 sample = _SdfPreparedProbeAnchor.Load(int3(candidate, 0));
+        float4 sample = temporalInput ? _SdfPreparedProbeAnchor.Load(int3(candidate, 0))
+            : _SdfSpatialProbeAnchorInput.Load(int3(candidate, 0));
         if (other.w < 0.0 || sample.a < 0.25)
             continue;
         if (adaptiveHistory && _SdfAnchorStatistics.Load(int3(candidate, 0)).w == 3.0)
@@ -1030,6 +1035,54 @@ float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4
         reconstructed += weight * (sample.rgb * sample.a - energy);
     }
     return float4(reconstructed / center.a, center.a);
+}
+
+bool AnchorPreFilterNearGeometryEdge(uint2 tile, float4 center, float3 normal)
+{
+    uint2 grid = DirectionalGrid();
+    if (tile.y >= grid.y)
+        return true;
+    // The extra half step and final 5x5 resolve together reach four probe
+    // cells. Retain the original reconstruction throughout that footprint.
+    [loop]
+    for (int y = -4; y <= 4; ++y)
+    {
+        [loop]
+        for (int x = -4; x <= 4; ++x)
+        {
+            int2 tap = int2(tile) + int2(x, y);
+            if (any(tap < 0) || any(tap >= int2(grid)))
+                return true;
+            float4 other = _SdfDiffuseGeometry.Load(tap);
+            if (other.w < 0.0)
+                return true;
+            float3 otherNormal = UnpackProbeNormal(other.w);
+            float3 delta = other.xyz - center.xyz;
+            float tolerance = 0.002 + 0.008 * length(delta);
+            if (dot(normal, otherNormal) < 0.995
+                || max(abs(dot(delta, normal)), abs(dot(delta, otherNormal))) >= tolerance)
+                return true;
+            if (_SdfDiffuseAdaptiveProbes != 0u
+                && _SdfDiffuseGeometry.Load(tap + int2(0, grid.y)).w >= 0.0)
+                return true;
+        }
+    }
+    return false;
+}
+
+[numthreads(8, 8, 1)]
+void ScreenProbeFilterAnchorCS(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = DirectionalGrid();
+    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+        return;
+    float4 geometry = _SdfDiffuseGeometry[id.xy];
+    float4 center = _SdfSpatialProbeAnchorInput.Load(int3(id.xy, 0));
+    float4 filtered = geometry.w >= 0.0
+        ? ReconstructProbeAnchor(id.xy, geometry, UnpackProbeNormal(geometry.w), center, false) : center;
+    // Half a diffusion step retains local gradients before the existing full
+    // reconstruction. This scratch result never becomes temporal history.
+    _SdfSpatialProbeAnchorOutput[id.xy] = RoundSdfAnchorHistory(lerp(center, filtered, 0.5));
 }
 
 void StoreProbeAnchorDiagnostics(uint2 address, uint2 stride, SdfProbeIrradiance sh,
@@ -1106,8 +1159,13 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
         anchorLighting = _SdfPreparedAnchorEnabled != 0u
             ? _SdfPreparedProbeAnchor.Load(int3(id.xy, 0))
             : AccumulateLegacyDirectionalProbeAnchor(anchorLighting, geometry.xyz, normal);
+        bool prefiltered = false;
+        [branch]
+        if (_SdfSpatialProbeAnchorPrefiltered != 0u)
+            prefiltered = !AnchorPreFilterNearGeometryEdge(id.xy, geometry, normal);
+        float4 spatialCenter = prefiltered ? _SdfSpatialProbeAnchorInput.Load(int3(id.xy, 0)) : anchorLighting;
         float4 calibrationAnchor = _SdfSpatialProbeAnchor != 0u
-            ? ReconstructProbeAnchor(id.xy, geometry, normal, anchorLighting) : anchorLighting;
+            ? ReconstructProbeAnchor(id.xy, geometry, normal, spatialCenter, !prefiltered) : anchorLighting;
         if (any(borrowedAnchor > 0.0))
         {
             // Redistribute directional shape without creating energy or trace coverage.

@@ -14,15 +14,15 @@ from ProbeAnchorCalibration import LUMA, normal_from_packed
 from TemporalSamplingExperiment import read, metrics, paired
 
 
-def motion(arm, files, matrices):
-    frames = range(512, 768)
+def motion(arm, files, matrices, first_frame=512):
+    frames = range(first_frame, first_frame+256)
     vp = np.stack([matrices[arm, f] for f in frames]); inverse = np.linalg.inv(vp)
     assert np.array_equal(vp[:128], vp[128:])
     geometry = np.stack([read(files[arm, f, "pixel-geometry-motion"])[..., 0] for f in frames])
     assert np.array_equal(geometry[:128], geometry[128:])
     depth = (geometry & 65535).astype("<u2").view("<f2").astype(float)
     normals = normal_from_packed((geometry >> 16).astype(float))
-    meta = files[arm, 512, "pixel-geometry-motion"]
+    meta = files[arm, first_frame, "pixel-geometry-motion"]
     x, y, w, h = (meta[k] for k in ("x", "y", "width", "height"))
     yy, xx = np.mgrid[y:y+h, x:x+w]; pixels = np.stack([xx, yy], -1)
     exposure_errors = []; probe_ages = []; probe_status = []

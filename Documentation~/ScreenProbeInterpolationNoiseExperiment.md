@@ -89,3 +89,30 @@ python -B Tools~/Diagnostics/ScreenProbeFrozenChainExperiment.py E:/VividRP_GI_E
 后续实验应分离“128 帧 FP16 / 128 帧 FP32”和更长稳定窗口的效果，并在 GPU 源缓存稳定后单独建立 Gather 历史起点，避免准备期旧能量混入长窗口。需要同时检查独立高样本均值、完整轨迹、新露出以及升光/降光/关灯响应，不能只以静止方差下降推广。当前默认仍是已验证的 128 帧配置。
 
 收尾磁盘检查为证据约 **119.149 GiB**、E 盘可用约 **116.252 GiB**，低于 125 GiB 软上限且高于 64 GiB 预留；本次完整分离数据已加入保护清单。另见 `post-experiment-storage.json` 和 `post-restoration-state.json`。未测量整帧托管分配。
+
+## 长窗口实验的基线资格与有限读回
+
+随后尝试 128 / 512 帧、FP16 / FP32 的因子实验。先等待源缓存 8 / 64 / 32 连续八帧就绪，再只使 Gather 的历史签名失效，保留已收敛的 Radiosity，并从独立采样帧 1733 开始。两次起点的几何、源、raw、anchor、统计与 SH 均逐字节一致，GPU 统计中的起点 age 只有 0 / 1。但预热 2,048 帧后的 A/A 有 6,146 / 6,410 份读回不同，实验按门槛自动停止，**没有运行 FP32 或 512 帧候选，也没有质量结论**。
+
+为减少磁盘占用，改用 `ScreenProbeEpochControlCapture.cs`：CPU 记录历史签名，GPU 数据主要保存 SHA-256，只有首两帧、末帧和每类首次分歧写入完整 payload。源就绪后独立建立历史起点；Profile 克隆、相机开关、回调与帧覆盖均在 `finally` 恢复，不保存场景。分析器为 `ScreenProbeEpochControlExperiment.py`。
+
+| 对照 | epoch 帧数 / arm | GPU 检查方式 | 配对检查点 | 差异 |
+|---|---:|---|---:|---:|
+| `134959-695` | 256 | 每帧 | 3,839 | 0 |
+| `135607-453` | 2,056 | 前缀、2 的幂边界及末段 | 374 | 120 |
+| `140653-569` | 640 | 前缀、第 240～520 帧及末帧 | 4,289 | 0 |
+| `141146-608` | 640 | 前缀、2 的幂边界及末帧 | 179 | 0 |
+| `142048-816`，源码文件恢复 | 640 | 前缀、2 的幂边界及末帧 | 179 | 0 |
+| `143435-247`，实际程序集重载 | 64 | 前缀、2 的幂边界及末帧 | 119 | 0 |
+
+表中六个目录均以 `E:/VividRP_GI_Evidence/ScreenProbeEpochControl-20261114-` 为前缀。前四次受检的 2,781 份源码 / 捕帧文件与两份外部输入均未变化；文件恢复后的 2,782 份文件及相同输入也未变化。对应实际捕帧脚本按原始 hash 归档到各目录。三组 640 帧控制的 A/A CPU 签名完全一致，没有检测到中途 Gather 拒绝、源重新准备或采样帧偏离。文件恢复后的全部 358 份 GPU 数据也与 `141146-608` 的同设置控制检查点逐字节相同。
+
+最终反射检查发现 Editor 当时关闭了自动刷新，源码恢复后仍加载旧程序集；不能把文件 hash 当作运行版本证明。保持该用户设置不变，通过 `script recompile` 显式编译，状态返回 completed、无编译错误，随后验证原型字段已从实际程序集移除。重载后的 64 帧前缀对照在执行前强制检查该字段不存在：238 份 GPU 数据与 `142048-816` 的相同前缀逐字节一致，2,782 份源码 / 工具、两份比较输入和实际执行脚本在捕帧前后均不变。最终 callbacks=null、flags=0、frame/Atrous override=-1，场景未脏、正常 8 阶 / 32 批；详见 `reloaded-comparison.json`、`source-verification.json`、`post-restoration-state.json`。这仍是有限前缀的恢复验证，不替代长序列失效原因定位。
+
+长对照首次**检测到**差异的检查点为 511，此前检查点 255 一致，故实际分歧起点只定位到 `(255, 511]`。不同项涉及 previous directional filtered、proposal、ray、raw、composite、directional temporal / filter、anchor、统计和 SH；几何、Radiosity、屏幕源辐亮度 / 几何 / motion 在该长对照的所有已采检查点中相同。长对照没有全帧 CPU 日志，不能排除两个检查点之间的临时重置。两次较短对照通过，也不能证明长对照无问题，或据此认定是 GPU 同步错误。原因仍未确定，后续应优先补齐长序列的全帧历史状态与首次分歧输入，而不是推广新累积窗口。
+
+未验证的 Editor 512 帧 override、对应 shader 分支及状态检查已从生产代码撤回，保存为 `Tools~/Diagnostics/Patches/ScreenProbeAnchorPrecision.patch`；`ScreenProbeAnchorPrecisionCapture.cs` 仅是要求该补丁的实验工具。默认仍为当前夹具已验证的 **128 帧、FP16、16 px / 8 rays、原生 Gather、四轮 À-Trous**。没有声称新的运行时降噪收益、零分配或 GPU 耗时改善，没有在活动 Editor 中启动 Unity Test Framework。
+
+失败因子实验的中间读回已按 [保留规则](GiEvidenceRetention.md) 清理，首尾帧、原因、编译二进制与源码指纹保留；完整旧序列不能再复算。后续有限读回对照每组只保留约数百 MiB，避免反复生成整段截图与原始纹理。
+
+分析器的七项独立 Python 检查通过，覆盖缺失 GPU 检查点、两组同时变动的源、缺失 CPU 帧、两组共同发生历史重置、重复 CPU 帧与缺失源数据。它们只验证资格门槛，不替代真实 GPU 对照。运行方式为 `python -B Tools~/Diagnostics/test_screen_probe_epoch_control.py`。

@@ -1,0 +1,60 @@
+diff --git a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+index f72ba09e..88b6d318 100644
+--- a/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
++++ b/Runtime/RenderPass/Core/GlobalIllumination/SdfDiffuseGatherPass.cs
+@@ -42,6 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
+         internal static int EditorGatherFrameOverride = -1;
+         internal static int EditorGatherHistoryDiagnostics;
+         internal static float EditorProbeAnchorHistoryBlend = 0.85f;
++        internal static int EditorProbeAnchorMaxAgeOverride = -1;
+         internal static System.Action<ComputePassContext, int, Texture> EditorGatherStageCapture;
+         // Diagnostic-only input binding after the normal probe binding, before dispatch.
+         internal static System.Action<ComputePassContext, ComputeShader, int> EditorBindResolveProbe;
+@@ -852,6 +853,10 @@ namespace VividRP.Runtime.RenderPass.Core
+                 && IsEnabledForGather(settings.pixelTemporal, legacyGather);
+             m_PixelHistoryMaxAge = pixelTemporal ? Mathf.Clamp(settings.pixelHistoryMaxAge.value, 8, 32) : 8;
+             m_ProbeAnchorMaxAge = useSettings ? Mathf.Clamp(settings.screenProbeAnchorMaxAge.value, 32, 128) : 32;
++#if UNITY_EDITOR
++            if (EditorTraceCapture != null && EditorProbeAnchorMaxAgeOverride >= 32)
++                m_ProbeAnchorMaxAge = Mathf.Clamp(EditorProbeAnchorMaxAgeOverride, 32, 512);
++#endif
+             m_SunCacheHits.Resize(1, 1);
+             if (m_TraceKernel < 0 || camera == null || camera.cullingMask == 0 || camera.stereoEnabled
+                 || DebugPassCameraUtility.ShouldSkipExecution(camera))
+diff --git a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute
+index ee61207d..2f8d9a32 100644
+--- a/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute
++++ b/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute
+@@ -925,7 +925,11 @@ float4 AccumulateDirectionalProbeAnchor(float4 current, float3 position, float3
+     separation /= total;
+     float limit = 8.0;
+     #if defined(VIVID_SDF_ANCHOR_PIXEL_HISTORY)
+-        limit = lerp(8.0, _SdfProbeAnchorMaxAge, exp2(-separation * separation / 0.000036));
++        // Longer windows are only for the same world-space receiver. Preserve
++        // the existing moving-window response, including sub-centimeter motion.
++        limit = lerp(8.0, min(_SdfProbeAnchorMaxAge, 128.0), exp2(-separation * separation / 0.000036));
++        if (_SdfProbeAnchorMaxAge > 128.0 && separation <= 0.0001)
++            limit = _SdfProbeAnchorMaxAge;
+     #endif
+     float acceptedAge = min(ageSum / total, limit - 1.0) * saturate(total);
+     float age = 1.0 + acceptedAge;
+diff --git a/Tools~/Diagnostics/EmissionSidednessState.cs b/Tools~/Diagnostics/EmissionSidednessState.cs
+index 529d947e..50bb9ce5 100644
+--- a/Tools~/Diagnostics/EmissionSidednessState.cs
++++ b/Tools~/Diagnostics/EmissionSidednessState.cs
+@@ -27,12 +27,13 @@ using VividRP.Runtime.RenderPass.Core;
+     int frameOverride = (int)type.GetField("EditorGatherFrameOverride", stat).GetValue(null);
+     int diagnostics = (int)type.GetField("EditorGatherHistoryDiagnostics", stat).GetValue(null);
+     int atrousOverride = (int)type.GetField("EditorAtrousIterationOverride", stat).GetValue(null);
++    int anchorAgeOverride = (int)type.GetField("EditorProbeAnchorMaxAgeOverride", stat).GetValue(null);
+     bool forceTwoSided = (bool)sceneType.GetField("EditorForceTwoSidedEmission", stat).GetValue(null);
+     float configuredBias = (float)type.GetField("m_RayBias", priv).GetValue(pass), effectiveBias = (float)Field("m_Bias");
+-    if (!callbacksNull || frameOverride != -1 || atrousOverride != -1 || diagnostics != 0 || forceTwoSided || scenes.Any(s => s.isDirty)
++    if (!callbacksNull || frameOverride != -1 || atrousOverride != -1 || anchorAgeOverride != -1 || diagnostics != 0 || forceTwoSided || scenes.Any(s => s.isDirty)
+         || Mathf.Abs(configuredBias - .04f) > 1e-6 || Mathf.Abs(effectiveBias - .04f) > 1e-6)
+         throw new InvalidOperationException("Emission validation left altered editor state.");
+-    return new { callbacksNull, frameOverride, atrousOverride, diagnostics, forceTwoSided,
++    return new { callbacksNull, frameOverride, atrousOverride, anchorAgeOverride, diagnostics, forceTwoSided,
+         scenes = scenes.Select(s => new { s.path, s.isDirty }).ToArray(), configuredBias, effectiveBias,
+         order = Field("m_RadiosityPublishedOrder"), batch = Field("m_RadiosityBatch"),
+         spacing = type.GetField("ProbeSpacing", stat).GetRawConstantValue(),

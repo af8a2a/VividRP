@@ -202,3 +202,29 @@ E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-031916-377/trace-confor
 ```
 
 捕帧无运行错误。恢复检查确认诊断回调为空、flags=0、强制双面关闭、frame override=-1、bias=0.04、正常 Radiosity 为 8 阶 / 32 批，两个场景均未脏。未运行 Unity Test Framework（Editor 正在使用），未测量 GPU 耗时；旧卡片的原法线版本迁移与移动机位验证仍不在本轮范围内。
+
+## Cornell 四轮滤波配置复验（2026-11-14）
+
+在正式启用 `Atrous4` 后重新完成八组同机位对照。原生 Screen Probe Gather、1920×1080、16 px / 8 rays；每组预热 512 帧后采集 8 帧，保持原照明、曝光与材质。捕帧前后 **2,839 个**受检源码、诊断及夹具文件校验一致。分析器已识别四轮配置并核对每个采样帧的实际迭代数为 4。
+
+| 条件 | 天花板背面高亮命中：双面 → 单面 | 全图有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,532 / 35,532 | −0.159% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.071% |
+| SDF Only，零阶，5 mm | 1,935 → 0 | 8,737 / 8,737 | 0.000% |
+
+共 **52,411** 条材质背面样本 RGB 为零，全部保留原有效 Screen / SDF 类别及非零覆盖，零阶源计数检查通过。零阶地面正面发光命中的辐亮度仍为 **200.000046**。默认偏移下，零阶天花板原始命中照明为零，最终重建仍有约 **0.000214** 的微小残留；5 mm 压力组最终为零。这是短序列的 ±1% 地面均值检查，不替代长序列物理能量参考。
+
+重新调用生产 `TraceCardRadiance`、`TraceFarProbe` 和 `TryLoadFarRadiance`：Off 两侧均约 200；Front 为原正面 0、原背面约 200；Back 为原正面约 200、原背面 0。即使远场诊断 atlas 的两侧均预存亮值，背面重连也返回黑，valid=1，距离仍为正。共享结构逐字段检查通过（材质 64 B、节点 48 B），原场景发光值未变，诊断 shader 无错误或警告。
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-054440-297/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-054440-297/source-before-capture.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-054440-297/source-verification.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-054440-297/final-verification.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-055346-319/trace-conformance.json
+E:/VividRP_GI_Evidence/Atrous4Sampling-20261114-052735-802/post-promotion-verification.json
+```
+
+最终确认 Cornell 实际使用原生四轮，16 px / 8 rays、正常 8 阶 / 32 批、bias=0.04；全部捕帧回调为空，frame / Atrous override 均为 −1，flags=0，强制双面关闭，两个场景均未脏。C# 编译通过，无 shader 错误；保留渲染 shader 的 51 条既有编译器警告。未测 GPU 耗时，Editor 正在使用，未启动 Unity Test Framework。旧 Surface Cache 的原法线兼容限制仍适用，须重捕获后启用完整单面契约。

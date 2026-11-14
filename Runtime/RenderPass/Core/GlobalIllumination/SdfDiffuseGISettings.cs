@@ -37,7 +37,8 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         Legacy,
         [InspectorName("À-Trous (2 passes)")] Atrous2 = 2,
-        [InspectorName("À-Trous (3 passes)")] Atrous3 = 3
+        [InspectorName("À-Trous (3 passes)")] Atrous3 = 3,
+        [InspectorName("À-Trous (4 passes)")] Atrous4 = 4
     }
 
     [Serializable]

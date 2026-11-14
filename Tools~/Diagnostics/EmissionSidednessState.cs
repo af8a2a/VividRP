@@ -20,18 +20,19 @@ using VividRP.Runtime.RenderPass.Core;
         game.Repaint(); EditorApplication.QueuePlayerLoopUpdate();
         await System.Threading.Tasks.Task.Delay(16);
     }
-    bool callbacksNull = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture" }
+    bool callbacksNull = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorAtrousDispatchCapture" }
         .All(n => type.GetField(n, stat).GetValue(null) == null);
     var scenes = Enumerable.Range(0, UnityEngine.SceneManagement.SceneManager.sceneCount)
         .Select(i => UnityEngine.SceneManagement.SceneManager.GetSceneAt(i)).ToArray();
     int frameOverride = (int)type.GetField("EditorGatherFrameOverride", stat).GetValue(null);
     int diagnostics = (int)type.GetField("EditorGatherHistoryDiagnostics", stat).GetValue(null);
+    int atrousOverride = (int)type.GetField("EditorAtrousIterationOverride", stat).GetValue(null);
     bool forceTwoSided = (bool)sceneType.GetField("EditorForceTwoSidedEmission", stat).GetValue(null);
     float configuredBias = (float)type.GetField("m_RayBias", priv).GetValue(pass), effectiveBias = (float)Field("m_Bias");
-    if (!callbacksNull || frameOverride != -1 || diagnostics != 0 || forceTwoSided || scenes.Any(s => s.isDirty)
+    if (!callbacksNull || frameOverride != -1 || atrousOverride != -1 || diagnostics != 0 || forceTwoSided || scenes.Any(s => s.isDirty)
         || Mathf.Abs(configuredBias - .04f) > 1e-6 || Mathf.Abs(effectiveBias - .04f) > 1e-6)
         throw new InvalidOperationException("Emission validation left altered editor state.");
-    return new { callbacksNull, frameOverride, diagnostics, forceTwoSided,
+    return new { callbacksNull, frameOverride, atrousOverride, diagnostics, forceTwoSided,
         scenes = scenes.Select(s => new { s.path, s.isDirty }).ToArray(), configuredBias, effectiveBias,
         order = Field("m_RadiosityPublishedOrder"), batch = Field("m_RadiosityBatch"),
         spacing = type.GetField("ProbeSpacing", stat).GetRawConstantValue(),

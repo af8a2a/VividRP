@@ -192,7 +192,7 @@ namespace VividRP.Editor.Tools
                 gi.screenProbeSpatialAnchor.Override(true);
                 gi.screenProbeSamplingGuide.Override(true);
                 gi.screenProbeHierarchicalGuide.Override(true);
-                gi.spatialDenoise.Override(SdfDiffuseSpatialDenoise.Atrous3);
+                gi.spatialDenoise.Override(SdfDiffuseSpatialDenoise.Atrous4);
                 gi.pixelTemporal.Override(true);
                 gi.pixelHistoryMaxAge.Override(32);
                 gi.correctReceiverSelfHits.Override(true);

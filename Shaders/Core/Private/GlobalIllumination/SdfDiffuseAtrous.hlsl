@@ -165,6 +165,12 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
             center.rgb = sum / totalWeight;
         // Neighboring pixels can share a reservoir. Keep a conservative variance floor.
         filteredVariance = max(0.25 * variance, varianceNumerator / (totalWeight * totalWeight));
+#if defined(VIVID_SDF_ATROUS_GEOMETRY_GUARD) && !defined(VIVID_SDF_ATROUS_FINAL)
+        // A rejected coarse footprint keeps both the fine signal and its
+        // uncertainty, so the following scale cannot trust a fictitious blur.
+        if (coarseGeometryEdge)
+            filteredVariance = variance;
+#endif
     }
 
 #if defined(VIVID_SDF_ATROUS_FINAL)

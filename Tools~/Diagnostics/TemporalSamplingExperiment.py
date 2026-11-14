@@ -57,9 +57,50 @@ def probe_hash(value):
     return value ^ (value >> 16)
 
 
+def verify_atrous_bindings(manifest):
+    """Check actual GPU texture identities and the observed ping-pong chain."""
+    states = {(r["arm"], r["frame"]): r["state"] for r in manifest["records"] if "state" in r}
+    groups = {}
+    for r in manifest["records"]:
+        if "atrousDispatch" in r:
+            groups.setdefault((r["arm"], r["frame"]), []).append(r["atrousDispatch"])
+    expected_frames = {manifest["warmup"], manifest["warmup"] + manifest["measuredFrames"] - 1}
+    arms = {arm for arm, _ in states}
+    assert set(groups) == {(arm, frame) for arm in arms for frame in expected_frames}, "Missing dispatch bindings"
+
+    def texture(t, channels):
+        assert t is not None and t["native"] != 0, "Missing GPU texture"
+        assert (t["width"], t["height"]) == (1920, 1080)
+        assert t["format"] == ("R16G16B16A16_SFloat" if channels == 4 else "R16_SFloat")
+        return t["native"]
+
+    dispatches = 0
+    for key, chain in groups.items():
+        count = states[key]["atrousIterations"]
+        assert count in (3, 4) and [d["iteration"] for d in chain] == list(range(count))
+        for i, d in enumerate(chain):
+            assert d["step"] == 1 << i
+            source, output = texture(d["input"], 4), texture(d["output"], 4)
+            assert source != output, "Color input/output alias"
+            if i:
+                assert source == chain[i-1]["output"]["native"], "Broken color chain"
+                assert texture(d["variance"], 1) == chain[i-1]["varianceOutput"]["native"], "Broken variance chain"
+            if i == count - 1:
+                assert d["varianceOutput"] is None and output == chain[0]["input"]["native"]
+            else:
+                target = texture(d["varianceOutput"], 1)
+                assert target != d["variance"]["native"], "Variance input/output alias"
+                if i >= 2:
+                    assert output == chain[i-2]["output"]["native"], "Color ping-pong did not reuse its owned target"
+                    assert target == chain[i-2]["varianceOutput"]["native"], "Variance ping-pong did not reuse its owned target"
+            dispatches += 1
+    return {"groups": len(groups), "dispatches": dispatches, "distinct_input_output": True,
+            "color_and_variance_ping_pong": True, "scope": "Observed texture identities; not physical heap alias analysis"}
+
+
 def verify_blocked_proposals(manifest, files, frames, arms, allow_fixed_cosine_resets=False, require_frozen=True):
     report = {}
-    for arm in (a for a in arms if a.startswith(("blocked-", "fine-", "stable-", "atrous3-", "cdf-", "compact-")) or (not require_frozen and a.startswith("white-"))):
+    for arm in (a for a in arms if a.startswith(("blocked-", "fine-", "stable-", "atrous3-", "atrous4-", "cdf-", "compact-")) or (not require_frozen and a.startswith("white-"))):
         previous = None
         fixed = changed = octahedral = fine_count = cdf_count = compact_count = descriptors = resets = 0
         maximum_mass = 0.0
@@ -224,6 +265,10 @@ def analyze(root, linear, candidate="sobol"):
             assert s["frozenProposal"] == frozen and (not frozen or s["proposalHistoryValid"])
             assert s["samplingFlags"] == (8388608 if frozen else 0)
             assert s["atrousIterations"] == (3 if expected else 2)
+        elif candidate == "atrous4":
+            expected = record["arm"].startswith("atrous4-")
+            assert not s["frozenProposal"] and s["samplingFlags"] == 0
+            assert s["atrousIterations"] == (4 if expected else 3) and s["atrousOverride"] == (4 if expected else -1)
         elif candidate == "cdf":
             expected = record["arm"].startswith("cdf-")
             assert s["cdfGuide"] == expected and s["samplingFlags"] == (134217728 if expected else 0)
@@ -282,10 +327,15 @@ def analyze(root, linear, candidate="sobol"):
         b, a = control + "-" + mode, candidate + "-" + mode
         assert all(np.array_equal(matrices[b, f], matrices[a, f]) for f in frames)
         assert all(np.array_equal(get(b, f, "probe-geometry"), get(a, f, "probe-geometry")) for f in frames), "Static A/B probe geometry differs"
-        if candidate == "atrous3":
+        if candidate in ("atrous3", "atrous4"):
             tags = ["proposal", "hit-lighting", "anchor", "sh"] + [stage + "-" + region
                     for stage in ["resolved", "pixel-temporal"] for region in ["ceiling", "floor", "right"]]
             assert all(np.array_equal(get(b, f, tag), get(a, f, tag)) for f in frames for tag in tags), "Denoise-only comparison changed upstream lighting"
+            if candidate == "atrous4":
+                assert all(np.array_equal(get(b, f, "pre-wide-" + region), get(a, f, "pre-wide-" + region))
+                           for f in frames for region in ["ceiling", "floor", "right"]), "First three wavelet outputs differ"
+                assert all(np.array_equal(get(b, f, "final-" + region)[..., 3], get(a, f, "final-" + region)[..., 3])
+                           for f in frames for region in ["ceiling", "floor", "right"]), "Static coverage differs"
         report["pairs"][mode] = {stage + "-" + region: paired(y, all_y[a, stage, region])
                                   for (arm, stage, region), y in all_y.items() if arm == b}
         for region in ["ceiling", "floor", "right"]:
@@ -311,7 +361,7 @@ def analyze(root, linear, candidate="sobol"):
         raw = stack(arm, "resolved-motion")
         temporal = stack(arm, "pixel-temporal-motion")
         history = stack(arm, "history-motion")
-        if candidate == "atrous3":
+        if candidate in ("atrous3", "atrous4"):
             motion_upstream[arm] = {tag: hashlib.sha256(value).hexdigest()
                                     for tag, value in [("resolved", raw), ("pixel-temporal", temporal), ("history", history)]}
         age, _, status = unpack_pixel_history(history[..., 3].astype("<f2"))
@@ -348,10 +398,15 @@ def analyze(root, linear, candidate="sobol"):
                                   "matched_pose_cycle_delta_mean": float(cycle_delta.mean())}
     assert np.array_equal(*motion_geometry), "A/B motion geometry differs"
     assert all(np.array_equal(matrices[control + "-motion", f], matrices[candidate + "-motion", f]) for f in frames)
-    if candidate == "atrous3":
+    if candidate in ("atrous3", "atrous4"):
         assert motion_upstream[control + "-motion"] == motion_upstream[candidate + "-motion"], "Denoise-only comparison changed motion history"
         report["denoise_upstream_equivalence"] = {"static_and_motion_exact": True,
             "scope": "Captured static interiors and 320x256 motion ROI", "motion_hashes": motion_upstream}
+        if candidate == "atrous4":
+            assert all(np.array_equal(get(control + "-motion", f, "pre-wide-motion"), get(candidate + "-motion", f, "pre-wide-motion")) for f in frames)
+            assert all(np.array_equal(get(control + "-motion", f, "final-motion")[..., 3], get(candidate + "-motion", f, "final-motion")[..., 3]) for f in frames), "Motion coverage differs"
+            report["denoise_upstream_equivalence"].update(first_three_wavelet_exact=True, final_coverage_exact=True)
+            report["atrous_bindings"] = verify_atrous_bindings(manifest)
     # Compare the same 80 poses; eight-pose blocks retain short-range correlation.
     before = cycle_errors[control + "-motion"]
     after = cycle_errors[candidate + "-motion"]
@@ -360,8 +415,8 @@ def analyze(root, linear, candidate="sobol"):
     draws = np.random.default_rng(20261114).integers(0, 10, (4096, 10))
     report["motion_comparison"] = {"cycle_rms_change_percent": float(100 * (np.sqrt(a.mean()/b.mean()) - 1)),
         "paired_block8_conditional_95_percent": np.quantile(100 * (np.sqrt(a[draws].mean(1)/b[draws].mean(1)) - 1), [.025, .975]).tolist()}
-    if candidate in ("blocked", "fine", "stable", "atrous3", "cdf", "compact"):
-        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms, require_frozen=(candidate == "compact" and control == "blocked") or (candidate not in ("cdf", "compact") and not(candidate == "atrous3" and control == "white")))
+    if candidate in ("blocked", "fine", "stable", "atrous3", "atrous4", "cdf", "compact"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, arms, require_frozen=(candidate == "compact" and control == "blocked") or (candidate not in ("cdf", "compact", "atrous4") and not(candidate == "atrous3" and control == "white")))
     (root.parent / "analysis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     plot_quality(root.parent, report, control, candidate)
     print(json.dumps(report["pairs"], indent=2))
@@ -434,6 +489,11 @@ def analyze_static_prefix(root, linear, candidate):
                 assert all(s["frozenProposal"] == frozen and (not frozen or s["proposalHistoryValid"])
                            and s["samplingFlags"] == (8388608 if frozen else 0)
                            and s["atrousIterations"] == (3 if expected else 2) for s in states)
+            elif candidate == "atrous4":
+                expected = arm.startswith("atrous4-")
+                assert all(not s["frozenProposal"] and s["samplingFlags"] == 0
+                           and s["atrousIterations"] == (4 if expected else 3)
+                           and s["atrousOverride"] == (4 if expected else -1) for s in states)
             elif candidate == "cdf":
                 expected = arm.startswith("cdf-")
                 assert all(s["cdfGuide"] == expected and s["samplingFlags"] == (134217728 if expected else 0)
@@ -482,8 +542,8 @@ def analyze_static_prefix(root, linear, candidate):
                 report["spectra"][mode][stage + "-" + region] = dict(zip([control, candidate], bands))
     assert report["pairs"], "No completed static pair"
     assert len(set(report["sources"].values())) == 1, "A/B source differs"
-    if candidate in ("fine", "blocked", "stable", "atrous3", "cdf", "compact"):
-        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms, require_frozen=(candidate == "compact" and control == "blocked") or (candidate not in ("cdf", "compact") and not(candidate == "atrous3" and control == "white")))
+    if candidate in ("fine", "blocked", "stable", "atrous3", "atrous4", "cdf", "compact"):
+        report["proposals"] = verify_blocked_proposals(manifest, files, frames, completed_arms, require_frozen=(candidate == "compact" and control == "blocked") or (candidate not in ("cdf", "compact", "atrous4") and not(candidate == "atrous3" and control == "white")))
     (root.parent / "static-analysis.json").write_text(json.dumps(report, indent=2))
     plot_quality(root.parent, report, control, candidate, "static-sampling-quality.png")
     print(json.dumps({mode: {key: row for key, row in rows.items() if key.startswith("final-")} for mode, rows in report["pairs"].items()}, indent=2))
@@ -495,7 +555,8 @@ def analyze_denoise_edges(root, linear):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     manifest = json.loads((root / "capture.json").read_text())
-    assert manifest["complete"] and not manifest["errors"] and manifest["candidate"] == "atrous3"
+    assert manifest["complete"] and not manifest["errors"] and manifest["candidate"] in ("atrous3", "atrous4")
+    candidate = manifest["candidate"]
     assert manifest["spacing"] == 16 and manifest["rays"] == 8 and manifest["measuredFrames"] == 256
     frames = range(manifest["warmup"], manifest["warmup"] + manifest["measuredFrames"])
     files = {(r["arm"], r["frame"], r["tag"]): r for r in manifest["records"] if "tag" in r}
@@ -503,11 +564,11 @@ def analyze_denoise_edges(root, linear):
     ids = exr_read(linear / "vivid-ev4/object_id.exr")[::-1]
     edge = minimum_filter(ids, 3) != maximum_filter(ids, 3)
     edge = maximum_filter(edge, 9)
-    report = {"scope": "Contact and wall-corner patches; signal change relative to two-pass mean, not physical ground truth",
+    report = {"scope": "Contact and wall-corner patches; signal change relative to control mean, not physical ground truth",
               "display_scale": 20, "pairs": {}}
     images = []
     for mode in ["hybrid", "sdf"]:
-        before, after = control + "-" + mode, "atrous3-" + mode
+        before, after = control + "-" + mode, candidate + "-" + mode
         report["pairs"][mode] = {}
         for region in ["short-contact", "tall-contact", "wall-corner"]:
             meta = files[before, frames.start, "final-" + region]
@@ -516,6 +577,8 @@ def analyze_denoise_edges(root, linear):
             for f in frames:
                 for stage in ["resolved", "pixel-temporal"]:
                     assert np.array_equal(read(files[before, f, stage + "-" + region]), read(files[after, f, stage + "-" + region])), "Edge input differs"
+                if candidate == "atrous4":
+                    assert np.array_equal(read(files[before, f, "pre-wide-" + region]), read(files[after, f, "pre-wide-" + region])), "First three edge wavelet outputs differ"
             a = np.stack([read(files[before, f, "final-" + region]) for f in frames])
             b = np.stack([read(files[after, f, "final-" + region]) for f in frames])
             assert np.array_equal(a[..., 3], b[..., 3]), "Denoising changed edge coverage"
@@ -548,7 +611,7 @@ def analyze_denoise_edges(root, linear):
         shown = axes[index, 2].imshow(delta[::-1], cmap="coolwarm", vmin=-bound, vmax=bound, interpolation="nearest")
         for axis in axes[index]: axis.set_xticks([]); axis.set_yticks([])
         axes[index, 0].set_ylabel(region)
-    for axis, title in zip(axes[0], ["2-pass mean", "3-pass mean", "Signed delta E/pi luminance"]): axis.set_title(title)
+    for axis, title in zip(axes[0], [control + " mean", candidate + " mean", "Signed delta E/pi luminance"]): axis.set_title(title)
     fig.colorbar(shown, ax=axes[:, 2], shrink=.8)
     fig.suptitle("Hybrid contact patches: shared display scale 20, no brightness fitting")
     fig.savefig(root.parent / "denoise-edges.png", dpi=160); plt.close(fig)
@@ -673,7 +736,7 @@ if __name__ == "__main__":
     parser.add_argument("--uniform-only", action="store_true")
     parser.add_argument("--static-only", action="store_true", help="Completed static pairs from an intentionally rejected, incomplete capture")
     parser.add_argument("--edges-only", action="store_true", help="Denoise-only contact patches with unchanged upstream and coverage")
-    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine", "stable", "atrous3", "cdf", "compact"], default="sobol")
+    parser.add_argument("--candidate", choices=["sobol", "blocked", "fine", "stable", "atrous3", "atrous4", "cdf", "compact"], default="sobol")
     parser.add_argument("--control-root", type=Path, help="Frozen-source white reference root from a previous capture")
     args = parser.parse_args()
     if args.edges_only:

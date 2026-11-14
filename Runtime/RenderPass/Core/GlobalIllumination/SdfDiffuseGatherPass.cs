@@ -43,6 +43,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static int EditorGatherHistoryDiagnostics;
         internal static float EditorProbeAnchorHistoryBlend = 0.85f;
         internal static System.Action<ComputePassContext, int, Texture> EditorGatherStageCapture;
+        internal static int EditorAtrousIterationOverride = -1;
+        internal static System.Action<ComputePassContext, int, Texture, Texture, Texture, Texture> EditorAtrousDispatchCapture;
 #endif
         private const int ProbeSpacing = 16; // Keep in sync with SdfScreenProbeCommon.hlsl.
         private const int RestirPixelSpacing = 2;
@@ -116,6 +118,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler AtrousFineSampler = new("Diffuse GI Atrous Step 1");
         private static readonly ProfilingSampler AtrousMiddleSampler = new("Diffuse GI Atrous Step 2");
         private static readonly ProfilingSampler AtrousCoarseSampler = new("Diffuse GI Atrous Step 4");
+        private static readonly ProfilingSampler AtrousWideSampler = new("Diffuse GI Atrous Step 8");
         private static readonly ProfilingSampler ResolveSampler = new("Screen Probe Resolve");
         private static readonly ProfilingSampler PixelTemporalSampler = new("Screen Probe Pixel Temporal");
         private static readonly int PixelHistoryMaxAgeId = Shader.PropertyToID("_SdfPixelHistoryMaxAge");
@@ -941,13 +944,18 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 SdfDiffuseSpatialDenoise.Atrous2 => 2,
                 SdfDiffuseSpatialDenoise.Atrous3 => 3,
+                SdfDiffuseSpatialDenoise.Atrous4 => 4,
                 _ => 0
             } : 0;
-            bool rawResolved = pixelTemporal || m_RestirPixelIntegration || m_AtrousIterations == 3;
+#if UNITY_EDITOR
+            if (EditorTraceCapture != null && EditorAtrousIterationOverride == 4 && m_AtrousIterations == 3)
+                m_AtrousIterations = 4;
+#endif
+            bool rawResolved = pixelTemporal || m_RestirPixelIntegration || m_AtrousIterations >= 3;
             m_RawResolved.Resize(rawResolved ? m_Width : 1, rawResolved ? m_Height : 1);
             m_AtrousLighting.Resize(m_AtrousIterations > 0 ? m_Width : 1, m_AtrousIterations > 0 ? m_Height : 1);
             m_AtrousVarianceA.Resize(m_AtrousIterations > 0 ? m_Width : 1, m_AtrousIterations > 0 ? m_Height : 1);
-            m_AtrousVarianceB.Resize(m_AtrousIterations == 3 ? m_Width : 1, m_AtrousIterations == 3 ? m_Height : 1);
+            m_AtrousVarianceB.Resize(m_AtrousIterations >= 3 ? m_Width : 1, m_AtrousIterations >= 3 ? m_Height : 1);
             m_RestirVariance.Resize(m_RestirPixelIntegration ? m_Width : 1, m_RestirPixelIntegration ? m_Height : 1);
             m_SpatialRestir.Resize(m_RestirPixelIntegration ? 2 * m_ProbeWidth : 1, m_RestirPixelIntegration ? m_AtlasHeight : 1);
             bool storeRayData = m_HitDistanceFilter || m_RestirGather;
@@ -1404,7 +1412,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_RestirPixelIntegration)
                     RecordRestirDenoise(cmd, pixelTemporal, restirVarianceTemporal);
                 if (atrous)
-                    RecordAtrousDenoise(cmd, black, restirVarianceTemporal);
+                    RecordAtrousDenoise(context, black, restirVarianceTemporal);
                 if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
                     RecordNearOcclusion(cmd);
             }
@@ -2352,8 +2360,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_RestirCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
         }
 
-        private void RecordAtrousDenoise(ComputeCommandBuffer cmd, TextureHandle black, bool restirVarianceTemporal)
+        private void RecordAtrousDenoise(ComputePassContext context, TextureHandle black, bool restirVarianceTemporal)
         {
+            var cmd = context.cmd;
             var input = m_Output.innerHandle;
             var variance = restirVarianceTemporal ? m_CurrentRestirVariance.innerHandle
                 : m_RestirPixelIntegration ? m_RestirVariance.innerHandle : black;
@@ -2365,10 +2374,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 bool last = iteration == m_AtrousIterations - 1;
                 int kernel = last ? m_AtrousFinalKernel : m_AtrousKernel;
                 // The resolve and temporal passes are finished before the second wavelet write.
-                var output = last ? m_Output.innerHandle : first ? m_AtrousLighting.innerHandle : m_RawResolved.innerHandle;
-                var varianceOutput = first ? m_AtrousVarianceA.innerHandle : m_AtrousVarianceB.innerHandle;
+                bool even = (iteration & 1) == 0;
+                var output = last ? m_Output.innerHandle : even ? m_AtrousLighting.innerHandle : m_RawResolved.innerHandle;
+                var varianceOutput = even ? m_AtrousVarianceA.innerHandle : m_AtrousVarianceB.innerHandle;
                 using var scope = new ProfilingScope(cmd, first ? AtrousFineSampler
-                    : iteration == 1 ? AtrousMiddleSampler : AtrousCoarseSampler);
+                    : iteration == 1 ? AtrousMiddleSampler : iteration == 2 ? AtrousCoarseSampler : AtrousWideSampler);
                 BindReceiver(cmd, m_GatherCompute, kernel);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, AtrousInputId, input);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, CurrentResolvedId,
@@ -2381,6 +2391,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(m_GatherCompute, AtrousUseRestirDomainId, first && m_RestirPixelIntegration ? 1 : 0);
                 cmd.SetComputeIntParam(m_GatherCompute, AtrousHasVarianceId, !first || m_RestirPixelIntegration ? 1 : 0);
                 cmd.DispatchCompute(m_GatherCompute, kernel, groupsX, groupsY, 1);
+#if UNITY_EDITOR
+                EditorAtrousDispatchCapture?.Invoke(context, iteration, input.ResolveTexture(), output.ResolveTexture(),
+                    variance.ResolveTexture(), last ? null : varianceOutput.ResolveTexture());
+#endif
                 input = output;
                 variance = varianceOutput;
             }

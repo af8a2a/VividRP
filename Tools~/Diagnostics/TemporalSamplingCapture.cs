@@ -10,7 +10,11 @@ using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
     // fine compares 8x8 against 4x4 with the same blocked samples; legacy modes remain available.
-    string experiment = "atrous3-white-fresh-hybrid";
+    string experiment = "atrous4";
+    bool four = experiment == "atrous4";
+    if (four && typeof(SdfDiffuseGatherPass).GetField("EditorAtrousIterationOverride",
+        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic) == null)
+        throw new InvalidOperationException("Wait for the four-pass experiment assembly reload.");
     bool compactBlocked = experiment == "compact-blocked" || experiment == "reference-compact-blocked";
     bool compactReference = experiment == "reference-compact" || experiment == "reference-compact-blocked";
     bool compact = experiment == "compact" || compactReference || compactBlocked;
@@ -28,7 +32,7 @@ using VividRP.Editor.Tools;
     bool fine = experiment == "fine";
     bool stable = experiment == "stable";
     bool sameModeWarmup = experiment == "atrous3-white-cold";
-    bool freshCameraState = experiment == "atrous3-white-fresh-hybrid" || cdf || compact;
+    bool freshCameraState = experiment == "atrous3-white-fresh-hybrid" || cdf || compact || four;
     bool qualifyReset = !cdfReference && !compactReference && (experiment == "atrous3-white-reset" || sameModeWarmup || freshCameraState);
     bool atrousWhite = experiment.StartsWith("atrous3-white", StringComparison.Ordinal);
     bool atrous3 = experiment == "atrous3" || atrousWhite;
@@ -40,14 +44,14 @@ using VividRP.Editor.Tools;
         throw new InvalidOperationException("Fine experiment was rejected and withdrawn. Apply the archived FineDirectional-FourFaces.patch in an isolated checkout to replay it.");
     bool blocked = fine || stable || (atrous3 && !atrousWhite) || experiment.Contains("blocked", StringComparison.Ordinal);
     bool confirmation = experiment == "reference-confirm-blocked";
-    string candidate = compact ? "compact" : cdf ? "cdf" : atrous3 ? "atrous3" : stable ? "stable" : fine ? "fine" : blocked ? "blocked" : "sobol";
-    string control = compactBlocked || (!atrousWhite && (fine || stable || atrous3)) ? "blocked" : "white";
+    string candidate = four ? "atrous4" : compact ? "compact" : cdf ? "cdf" : atrous3 ? "atrous3" : stable ? "stable" : fine ? "fine" : blocked ? "blocked" : "sobol";
+    string control = four ? "atrous3" : compactBlocked || (!atrousWhite && (fine || stable || atrous3)) ? "blocked" : "white";
     bool reference = experiment.StartsWith("reference", StringComparison.Ordinal);
     bool referenceSdf = experiment == "reference-sdf";
     bool referenceSobol = experiment == "reference-sobol" || experiment == "reference-blocked";
     bool isolateUniform = experiment == "uniform-isolation";
     bool scroll = false;
-    string output = fine || stable || atrous3 || cdf || compact ? "E:/VividRP_GI_Evidence/" + (compact ? "CompactDirectionalSampling-" : cdf ? "CdfDirectionalSampling-" : atrousWhite ? "Atrous3WhiteSampling-" : atrous3 ? "Atrous3Sampling-" : stable ? "StableDirectionalSampling-" : "FineDirectionalSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
+    string output = fine || stable || atrous3 || cdf || compact || four ? "E:/VividRP_GI_Evidence/" + (four ? "Atrous4Sampling-" : compact ? "CompactDirectionalSampling-" : cdf ? "CdfDirectionalSampling-" : atrousWhite ? "Atrous3WhiteSampling-" : atrous3 ? "Atrous3Sampling-" : stable ? "StableDirectionalSampling-" : "FineDirectionalSampling-") + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "/capture"
         : "E:/VividRP_GI_Evidence/" + (confirmation ? "BlockedTemporalConfirmation-20261113/"
         : blocked ? "BlockedTemporalSampling-20261113/" : "TemporalSamplingCovered-20261113/")
         + (experiment == "compare" ? "capture-imported" : experiment);
@@ -81,9 +85,14 @@ using VividRP.Editor.Tools;
     var type = typeof(SdfDiffuseGatherPass);
     var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics", "EditorGatherHistoryDiagnostics" }
         .ToDictionary(n => n, n => type.GetField(n, stat));
+    if (four)
+        foreach (string name in new[] { "EditorAtrousIterationOverride", "EditorAtrousDispatchCapture" })
+            hooks.Add(name, type.GetField(name, stat) ?? throw new InvalidOperationException("Missing four-pass hook: " + name));
     var previousHooks = hooks.ToDictionary(p => p.Key, p => p.Value.GetValue(null));
     foreach (string name in new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture" })
         if (previousHooks[name] != null) throw new InvalidOperationException("Another GI capture is active: " + name);
+    if (four && previousHooks["EditorAtrousDispatchCapture"] != null)
+        throw new InvalidOperationException("Another Atrous capture is active.");
     var nativeCmd = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", priv);
     var passes = typeof(PassRecorder).GetField("s_RenderPasses", stat);
     var game = UnityEngine.Resources.FindObjectsOfTypeAll(typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView")).OfType<EditorWindow>().First();
@@ -155,7 +164,7 @@ using VividRP.Editor.Tools;
             ReadRegion(cmd, texture, tag + "-ceiling", 912, 970, 96, 48);
             ReadRegion(cmd, texture, tag + "-floor", 912, 130, 96, 64);
             ReadRegion(cmd, texture, tag + "-right", 1430, 500, 64, 96);
-            if (atrousWhite || cdf || compact)
+            if (atrousWhite || cdf || compact || four)
             {
                 ReadRegion(cmd, texture, tag + "-short-contact", 720, 64, 64, 64);
                 ReadRegion(cmd, texture, tag + "-tall-contact", 1093, 153, 64, 64);
@@ -194,7 +203,7 @@ using VividRP.Editor.Tools;
             ReadRegion(cmd, Resolve("m_HitLighting"), "hit-lighting", 48, 59, 24, 7);
             ReadRegion(cmd, Resolve("m_Probes"), "anchor", 48, 59, 24, 7);
             ReadRegion(cmd, Resolve("m_FilteredProbes"), "sh", 0, 59, 2640, 7);
-            if ((blocked || atrous3 || cdf || compact) && (bool)Field("m_DirectionalGuide"))
+            if ((blocked || atrous3 || cdf || compact || four) && (bool)Field("m_DirectionalGuide"))
                 ReadRegion(cmd, Resolve((bool)Field("m_FrozenGuideActive") ? "m_CurrentProposal" : "m_DirectionalGuideTexture"), "proposal", 48 * 8, 59, 24 * 8, 7);
         }
         if (cdfReference || compactReference)
@@ -237,6 +246,7 @@ using VividRP.Editor.Tools;
             compactGuide = type.GetField("m_CompactGuideActive", priv)?.GetValue(pass) ?? false,
             compactVersion = type.GetField("CompactProposalVersion", stat)?.GetRawConstantValue() ?? 1,
             atrousIterations = Field("m_AtrousIterations"),
+            atrousOverride = four ? hooks["EditorAtrousIterationOverride"].GetValue(null) : -1,
             samplingFlags = hooks["EditorGatherHistoryDiagnostics"].GetValue(null),
             rayBias = Field("m_Bias"), sun = new[] { light.x, light.y, light.z, light.w }, sky = Field("m_SkyTraceDistance") } });
     };
@@ -244,6 +254,22 @@ using VividRP.Editor.Tools;
         if (!active || context.Get<VividCameraData>().camera != camera) return;
         if (Sample()) ReadPixels((CommandBuffer)nativeCmd.GetValue(context.cmd), lighting, "final");
         if (++frame >= frameLimit) active = false;
+    };
+    object TextureInfo(Texture texture) => texture == null ? null : new {
+        texture.name, texture.width, texture.height, format = texture.graphicsFormat.ToString(),
+        entity = texture.GetEntityId().ToString(), native = texture.GetNativeTexturePtr().ToInt64() };
+    Action<ComputePassContext, int, Texture, Texture, Texture, Texture> atrousDispatch = (context, iteration, input, destination, variance, varianceOutput) => {
+        if (!Sample() || context.Get<VividCameraData>().camera != camera) return;
+        if (iteration == 2)
+            ReadPixels((CommandBuffer)nativeCmd.GetValue(context.cmd), destination, "pre-wide");
+        if (frame != warmup && frame != warmup + measuredFrames - 1) return;
+        if (input == null || destination == null || input.GetNativeTexturePtr() == IntPtr.Zero
+            || destination.GetNativeTexturePtr() == IntPtr.Zero || input.GetNativeTexturePtr() == destination.GetNativeTexturePtr())
+            throw new InvalidOperationException("Atrous color input/output alias at iteration " + iteration);
+        if (varianceOutput != null && (varianceOutput.GetNativeTexturePtr() == IntPtr.Zero || variance.GetNativeTexturePtr() == varianceOutput.GetNativeTexturePtr()))
+            throw new InvalidOperationException("Atrous variance input/output alias at iteration " + iteration);
+        records.Add(new { arm, frame, atrousDispatch = new { iteration, step = 1 << iteration,
+            input = TextureInfo(input), output = TextureInfo(destination), variance = TextureInfo(variance), varianceOutput = TextureInfo(varianceOutput) } });
     };
     async System.Threading.Tasks.Task Run(string name, SdfDiffuseTraceMode mode, bool legacy, bool moving = false)
     {
@@ -261,11 +287,12 @@ using VividRP.Editor.Tools;
         }
         arm = name; frame = 0; scroll = moving;
         frameLimit = name == "reset" ? sameModeWarmup ? 64 : 1 : name == "prime" ? warmup : warmup + measuredFrames;
-        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, compact ? (legacy ? 0 : 268435456) | (compactBlocked ? 8388608 : 0) : cdf ? legacy ? 0 : 134217728 : atrousWhite ? 0 : legacy ? (fine || stable || atrous3 ? 8388608 : 0) : stable ? 75497472 : fine ? 41943040 : blocked ? 8388608 : 262144);
+        hooks["EditorGatherHistoryDiagnostics"].SetValue(null, four ? 0 : compact ? (legacy ? 0 : 268435456) | (compactBlocked ? 8388608 : 0) : cdf ? legacy ? 0 : 134217728 : atrousWhite ? 0 : legacy ? (fine || stable || atrous3 ? 8388608 : 0) : stable ? 75497472 : fine ? 41943040 : blocked ? 8388608 : 262144);
+        if (four) hooks["EditorAtrousIterationOverride"].SetValue(null, legacy ? -1 : 4);
         System.IO.Directory.CreateDirectory(output + "/" + arm);
         gi.traceMode.Override(mode);
         gi.surfaceCacheBounceOrders.Override(8);
-        gi.spatialDenoise.Override(compact || cdf || (atrous3 && !legacy) ? SdfDiffuseSpatialDenoise.Atrous3 : SdfDiffuseSpatialDenoise.Atrous2);
+        gi.spatialDenoise.Override(four || compact || cdf || (atrous3 && !legacy) ? SdfDiffuseSpatialDenoise.Atrous3 : SdfDiffuseSpatialDenoise.Atrous2);
         // Probe filters stay fixed: the raw/temporal/final taps isolate pixel reconstruction.
         extra.ResetPostProcessingHistory();
         active = true;
@@ -287,7 +314,7 @@ using VividRP.Editor.Tools;
     EditorApplication.LockReloadAssemblies();
     try
     {
-        if (atrous3 || cdf || compact) ArchiveAtrousVariants();
+        if (atrous3 || cdf || compact || four) ArchiveAtrousVariants();
         volume.profile = profile;
         SceneManager.SetActiveScene(scene);
         foreach (var c in cameras) c.camera.enabled = c.camera == camera;
@@ -307,6 +334,7 @@ using VividRP.Editor.Tools;
         hooks["EditorTraceCapture"].SetValue(null, trace);
         hooks["EditorGatherStageCapture"].SetValue(null, stage);
         hooks["EditorRecordProbeAnchorDiagnostics"].SetValue(null, true);
+        if (four) hooks["EditorAtrousDispatchCapture"].SetValue(null, atrousDispatch);
         RenderPipelineManager.beginCameraRendering += Begin;
         Application.logMessageReceived += Log;
         await Run("prime", SdfDiffuseTraceMode.Hybrid, true);
@@ -338,7 +366,7 @@ using VividRP.Editor.Tools;
             await Run(control + "-reference-sdf", SdfDiffuseTraceMode.SdfOnly, true);
             await Run(candidate + "-reference-sdf", SdfDiffuseTraceMode.SdfOnly, false);
         }
-        else if (cdf || compact)
+        else if (cdf || compact || four)
         {
             await Run(candidate + "-hybrid", SdfDiffuseTraceMode.Hybrid, false);
             await Run(control + "-sdf", SdfDiffuseTraceMode.SdfOnly, true);
@@ -396,7 +424,7 @@ using VividRP.Editor.Tools;
             System.IO.Directory.CreateDirectory(output);
             System.IO.File.WriteAllText(output + "/capture.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
                 complete, experiment, candidate, control, frameBase, qualifyReset, sameModeWarmup, freshCameraState,
-                requestedPaths = cdfReference || compactReference ? "static-energy" : freshCameraState && !cdf && !compact ? "hybrid-static" : "full", compiledVariants,
+                requestedPaths = cdfReference || compactReference ? "static-energy" : freshCameraState && !cdf && !compact && !four ? "hybrid-static" : "full", compiledVariants,
                 width = 1920, height = 1080, spacing = 16, rays = 8, warmup, measuredFrames, captureStride,
                 scene_dirty_before = wasDirty, scene_dirty_after = scene.isDirty,
                 row_origin = "bottom_left", pre_exposure = 1.0, quantity = "conditional E/pi RGB + GI coverage alpha",

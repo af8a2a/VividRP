@@ -58,7 +58,7 @@ def run(root):
             assert s["directionalCache"] and not s["restir"]
             if capture.get("schema") == "emission-sidedness.v2":
                 assert s["spatialDenoise"] == capture["spatialDenoise"]
-                expected_iterations = {"Atrous2": 2, "Atrous3": 3}.get(capture["spatialDenoise"], 0)
+                expected_iterations = {"Atrous2": 2, "Atrous3": 3, "Atrous4": 4}.get(capture["spatialDenoise"], 0)
                 assert s["atrousIterations"] == expected_iterations, (arm, s["atrousIterations"])
             assert s["traceMode"] == ("SdfOnly" if "sdf" in arm else "Hybrid")
             assert abs(s["rayBias"] - (.005 if "stress" in arm else .04)) < 1e-6

@@ -228,3 +228,29 @@ E:/VividRP_GI_Evidence/Atrous4Sampling-20261114-052735-802/post-promotion-verifi
 ```
 
 最终确认 Cornell 实际使用原生四轮，16 px / 8 rays、正常 8 阶 / 32 批、bias=0.04；全部捕帧回调为空，frame / Atrous override 均为 −1，flags=0，强制双面关闭，两个场景均未脏。C# 编译通过，无 shader 错误；保留渲染 shader 的 51 条既有编译器警告。未测 GPU 耗时，Editor 正在使用，未启动 Unity Test Framework。旧 Surface Cache 的原法线兼容限制仍适用，须重捕获后启用完整单面契约。
+
+## Cornell 128 帧 scalar anchor 配置复验（2026-11-14）
+
+参见 [scalar anchor 收敛实验](ScreenProbeScalarAnchorConvergence.md)。Cornell 专用 anchor 上限由 32 改为 128 后，再次运行完整八组同机位对照，保留四轮 À-Trous、16 px / 8 rays。捕帧工具升级为 `emission-sidedness.v3`，记录配置及逐帧实际 `anchorMaxAge`，分析器逐帧核对为 128；没有只验证 Inspector 配置。捕帧前后 **2,781 个**受检源码、诊断及发光夹具文件校验一致。
+
+| 条件 | 背面高亮命中：双面 → 单面 | 全图有效黑命中／保留覆盖 | 地面最终线性均值变化 |
+|---|---:|---:|---:|
+| Hybrid，零阶，4 cm | 9 → 0 | 35,532 / 35,532 | −0.097% |
+| SDF Only，零阶，4 cm | 9 → 0 | 4,278 / 4,278 | 0.000% |
+| Hybrid，8 阶，4 cm | 11 → 0 | 3,864 / 3,864 | −0.056% |
+| SDF Only，零阶，5 mm | 1,935 → 0 | 8,737 / 8,737 | 0.000% |
+
+**52,411** 条材质背面命中全部为黑，保留有效 Screen / SDF 类别与非零覆盖；零阶源覆盖计数无差异。地面正面发光辐亮度仍为 **200.000046**。默认偏移下零阶天花板原始命中照明为零，最终重建约 **0.000122**，并非最终图像所有背面像素完全归零；5 mm 压力组最终为零。地面差值通过短序列 ±1% 检查，不将它解释为物理真值误差。
+
+生产 `TraceCardRadiance`、`TraceFarProbe` 和 `TryLoadFarRadiance` 的 Off / Front / Back GPU 矩阵同时通过。Back 正面约 200.00006、背面为 0；背面远场重连返回黑、valid=1、距离为正，即使 atlas 两侧均预存亮值。材质 64 B、节点 48 B 的逐字段检查通过，场景发光值未变，独立诊断 shader 无编译错误或警告。
+
+```text
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-080255-446/analysis.json
+E:/VividRP_GI_Evidence/EmissionSidedness-20261114-080255-446/source-verification.json
+E:/VividRP_GI_Evidence/EmissionTraceConformance-20261114-081119-301/trace-conformance.json
+E:/VividRP_GI_Evidence/ScalarAnchorAge-20261114-063528-201/post-promotion-verification.json
+```
+
+本轮未再次修改四路单面发光生产实现，只复验新历史配置没有破坏契约。未测 GPU 耗时，未在正在使用的 Editor 中启动 Unity Test Framework；旧卡片重捕获和更广动态验证的限制仍适用。
+
+最终 GPU 读回确认 anchor 最大年龄 128、6,059 个探针至少 96 帧；正常原生路径、16 px / 8 rays、四轮、8 阶 / 32 批已恢复。C# 编译通过，51 条 shader 编译消息与前一四轮基线一致，没有错误或新增警告；回调为空、flags=0、frame / Atrous override 为 −1、强制双面关闭、bias=0.04，场景与共享 Profile 未脏。

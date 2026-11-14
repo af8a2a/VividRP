@@ -249,6 +249,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ProbeAnchorDiagnosticsId = Shader.PropertyToID("_SdfProbeAnchorDiagnostics");
         private static readonly int GatherHistoryDiagnosticsId = Shader.PropertyToID("_SdfGatherHistoryDiagnostics");
         private static readonly int AnchorHistoryBlendId = Shader.PropertyToID("_SdfProbeAnchorHistoryBlend");
+        private static readonly int ProbeAnchorMaxAgeId = Shader.PropertyToID("_SdfProbeAnchorMaxAge");
         private static readonly int SpatialAnchorId = Shader.PropertyToID("_SdfSpatialProbeAnchor");
         private static readonly int PreparedAnchorId = Shader.PropertyToID("_SdfPreparedProbeAnchor");
         private static readonly int PreparedAnchorOutputId = Shader.PropertyToID("_SdfPreparedProbeAnchorOutput");
@@ -351,7 +352,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool RestirOpenPbrDiffuse;
             internal ulong RestirCardVersion;
             internal bool PixelTemporal;
-            internal int PixelHistoryMaxAge;
+            internal int PixelHistoryMaxAge, ProbeAnchorMaxAge;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
             internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide, SpatialAnchor;
@@ -582,7 +583,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_RestirDenoiseKernel = -1;
         private int m_AtrousKernel = -1, m_AtrousFinalKernel = -1, m_AtrousIterations;
         private int m_PixelTemporalKernel = -1, m_ScreenProbeTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
-        private int m_PixelHistoryMaxAge;
+        private int m_PixelHistoryMaxAge, m_ProbeAnchorMaxAge;
         private int m_RestirVarianceTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
         private int m_AtlasHeight;
@@ -838,6 +839,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool pixelTemporal = useSettings && motionConnected && m_PixelTemporalKernel >= 0
                 && IsEnabledForGather(settings.pixelTemporal, legacyGather);
             m_PixelHistoryMaxAge = pixelTemporal ? Mathf.Clamp(settings.pixelHistoryMaxAge.value, 8, 32) : 8;
+            m_ProbeAnchorMaxAge = useSettings ? Mathf.Clamp(settings.screenProbeAnchorMaxAge.value, 32, 128) : 32;
             m_SunCacheHits.Resize(1, 1);
             if (m_TraceKernel < 0 || camera == null || camera.cullingMask == 0 || camera.stereoEnabled
                 || DebugPassCameraUtility.ShouldSkipExecution(camera))
@@ -1077,6 +1079,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.HitDistanceFilter == m_HitDistanceFilter
                 && m_State.ProbeSpatialKernel == m_ProbeSpatialKernel
                 && m_State.SpatialAnchor == m_SpatialAnchor
+                && m_State.ProbeAnchorMaxAge == m_ProbeAnchorMaxAge
                 && m_State.RestirGather == m_RestirGather && m_State.RestirCardVersion == m_RestirCardVersion
                 && m_State.RestirPixelIntegration == m_RestirPixelIntegration
                 && m_State.SunConfigured == (m_SunHistory != null)
@@ -1454,6 +1457,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.RestirCardVersion = m_RestirCardVersion;
             m_State.PixelTemporal = pixelTemporal;
             m_State.PixelHistoryMaxAge = m_PixelHistoryMaxAge;
+            m_State.ProbeAnchorMaxAge = m_ProbeAnchorMaxAge;
             m_State.CorrectReceiverSelfHits = correctReceiver;
             m_State.ScreenCardLighting = screenCardLighting;
             m_State.SpatialAnchor = m_SpatialAnchor;
@@ -2685,6 +2689,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(shader, GatherHistoryDiagnosticsId, diagnostics);
             cmd.SetComputeVectorParam(shader, HistoryLightScaleId, PreserveRelitHistory ? m_RadiosityHistoryScale : Vector4.one);
             cmd.SetComputeFloatParam(shader, AnchorHistoryBlendId, anchorBlend);
+            cmd.SetComputeFloatParam(shader, ProbeAnchorMaxAgeId, m_ProbeAnchorMaxAge);
             cmd.SetComputeMatrixParam(shader, InverseViewProjectionId, m_InverseViewProjection);
             cmd.SetComputeVectorParam(shader, ScreenSizeId, new Vector4(m_Width, m_Height, 1f / m_Width, 1f / m_Height));
             cmd.SetComputeIntParam(shader, RestirDenseId, m_RestirPixelIntegration ? 1 : 0);

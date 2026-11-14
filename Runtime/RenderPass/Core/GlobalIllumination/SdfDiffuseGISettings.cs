@@ -163,6 +163,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Experimental conservative reconstruction of the SH energy anchor on connected coplanar screen probes. Keeps coverage and unfiltered temporal history separate. Screen Probe Gather only.")]
         public BoolParameter screenProbeSpatialAnchor = new(false);
 
+        [Tooltip("Maximum effective age of stable screen-probe energy anchors. World displacement shortens it to eight; newly exposed receivers reject history. Screen Probe Gather only.")]
+        public ClampedIntParameter screenProbeAnchorMaxAge = new(32, 32, 128);
+
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
         public BoolParameter screenProbeHitDistanceFilter = new(false);
 

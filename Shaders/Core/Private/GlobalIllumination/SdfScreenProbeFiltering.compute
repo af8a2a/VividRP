@@ -47,6 +47,7 @@ RWTexture2D<float4> _SdfAnchorStatisticsOutput;
 Texture2D<float4> _SdfAnchorStatistics;
 uint _SdfAnchorStatisticsHistoryValid;
 uint _SdfPreparedAnchorEnabled;
+float _SdfProbeAnchorMaxAge;
 
 float FilterNeighborWeight(uint2 tile, float4 center, float3 normal, float eyeDepth)
 {
@@ -920,7 +921,7 @@ float4 AccumulateDirectionalProbeAnchor(float4 current, float3 position, float3 
     separation /= total;
     float limit = 8.0;
     #if defined(VIVID_SDF_ANCHOR_PIXEL_HISTORY)
-        limit = lerp(8.0, 32.0, exp2(-separation * separation / 0.000036));
+        limit = lerp(8.0, _SdfProbeAnchorMaxAge, exp2(-separation * separation / 0.000036));
     #endif
     float acceptedAge = min(ageSum / total, limit - 1.0) * saturate(total);
     float age = 1.0 + acceptedAge;

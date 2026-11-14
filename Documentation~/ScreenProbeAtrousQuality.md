@@ -129,3 +129,5 @@ E:/VividRP_GI_Evidence/Atrous4Sampling-20261114-052735-802/
 ## 质量目标的剩余范围
 
 `atrous4-overview.png` 的同尺度整帧与天花板检查仍可见墙面低频云斑，四轮空间平滑尚未达到稳定无噪声目标。后续应区分固定空间误差与时间方差，改善输入估计的收敛，并在动态光照、Sponza、真实 GPU 计时及更强参考下验证；本轮不把方差收益等同于物理误差的同等下降或 Lumen 质量已经对齐。
+
+后续 [scalar anchor 收敛实验](ScreenProbeScalarAnchorConvergence.md) 保留四轮滤波，将发光 Cornell 的静态 anchor 窗口改为 128；该轮的方差、能量、移动和光照响应证据独立记录，不改写上面的三轮 / 四轮对照结论。

@@ -70,6 +70,23 @@ class ReferenceTests(unittest.TestCase):
         np.testing.assert_array_equal(direct["meanRgb"], bounced["meanRgb"])
         np.testing.assert_array_equal(np.array(bounced["meanRgbByOrder"])[1:], np.zeros((3, 3)))
 
+    def test_black_material_back_is_still_an_opaque_hit(self):
+        scene = Scene(self.fixture, backface_diffuse="black")
+        origins = np.array([[0., 3., 1.85], [0., 2., 1.85]])
+        directions = np.array([[0., -1., 0.], [0., 1., 0.]])
+        distance, hit, normals = scene.intersect(origins, directions, face_forward=False)
+        np.testing.assert_array_equal(hit, [scene.light, scene.light])
+        np.testing.assert_allclose(distance, [.035, .965], atol=1e-12)
+        np.testing.assert_array_equal(scene.reflection_visible(directions, normals), [False, True])
+        np.testing.assert_array_equal(normals, [[0, -1, 0], [0, -1, 0]])
+        # Absorption can remove returned energy, never expose a light through a culled hit.
+        point, normal = [0., 3., 1.85], [0., -1., 0.]
+        black = estimate(scene, point, normal, 8192, 8, 671)
+        scene.backface_diffuse = "two-sided"
+        both = estimate(scene, point, normal, 8192, 8, 671)
+        self.assertTrue(np.all(np.array(black["meanRgb"]) <= np.array(both["meanRgb"])))
+        self.assertGreater(sum(both["meanRgb"]), sum(black["meanRgb"]))
+
 
 if __name__ == "__main__":
     unittest.main()

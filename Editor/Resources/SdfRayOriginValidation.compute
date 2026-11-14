@@ -1,0 +1,108 @@
+#pragma kernel InspectSdfCardOrigins VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
+#pragma kernel TraceSdfOriginPoints VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE VIVID_SDF_RECEIVER
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfScreenProbeCommon.hlsl"
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfScreenProbeReceiver.hlsl"
+#include "../../Shaders/Core/Private/GlobalIllumination/SdfSurfaceCacheLighting.hlsl"
+
+RWStructuredBuffer<float4> _SdfOriginResults;
+RWStructuredBuffer<float4> _SdfOriginPointMetrics;
+StructuredBuffer<float4> _SdfOriginPoints; // position/bias, normal/receiver instance.
+uint _SdfOriginCardCount, _SdfOriginPointCount, _SdfOriginRayCount, _SdfOriginSeed, _SdfOriginEmitter;
+
+float3 CardMeshPosition(VividMeshSdfInstance instance, float3 local)
+{
+    float3 r0 = instance.worldToLocal0.xyz, r1 = instance.worldToLocal1.xyz, r2 = instance.worldToLocal2.xyz;
+    float3 c0 = cross(r1, r2), c1 = cross(r2, r0), c2 = cross(r0, r1);
+    float3 delta = local - float3(instance.worldToLocal0.w, instance.worldToLocal1.w, instance.worldToLocal2.w);
+    return (c0 * delta.x + c1 * delta.y + c2 * delta.z) / dot(r0, c0);
+}
+
+[numthreads(8, 8, 1)]
+void InspectSdfCardOrigins(uint3 id : SV_DispatchThreadID)
+{
+    uint card = id.z;
+    if (card >= _SdfOriginCardCount)
+        return;
+    uint output = (card * 64u + id.y * 8u + id.x) * 5u;
+    [unroll] for (uint i = 0; i < 5u; ++i) _SdfOriginResults[output + i] = 0.0;
+    uint work = _SdfRadiosityWork[0] + 2u * card;
+    uint instanceIndex = _SdfRadiosityWork[work], slot = _SdfRadiosityWork[work + 1u];
+    VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+    if ((instance.layerMask & _SdfDiffuseLayerMask) == 0u)
+        return;
+    // Match GatherCardIndirect's card-cell reconstruction, then call its real
+    // ProjectCardPoint and ResolveSunShadowBias implementations.
+    uint slice, axis;
+    float3 boundsMin, extent;
+    VividGetSdfCardProjection(_SdfDiffuseSurfaces[instanceIndex], slot, slice, axis, boundsMin, extent);
+    uint2 size; uint slices;
+    _SdfSurfaceAlbedoDepth.GetDimensions(size.x, size.y, slices);
+    uint2 pixel = RadiosityCardPixel(id.xy, size);
+    float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(pixel, slice, 0));
+    if (packedNormal.a == 0.0)
+        return;
+    float3 normalLS = SafeNormalize(packedNormal.xyz * 2.0 - 1.0);
+    float3 normalWS = SafeNormalize(normalLS.x * instance.worldToLocal0.xyz
+        + normalLS.y * instance.worldToLocal1.xyz + normalLS.z * instance.worldToLocal2.xyz);
+    float depth = _SdfSurfaceAlbedoDepth.Load(int4(pixel, slice, 0)).a;
+    float2 uv = (float2(pixel) + 0.5) / float2(size);
+    float3 relative = axis == 0u ? float3(depth, uv) : axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
+    float3 local = boundsMin + extent * relative;
+    VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+    float3 position, geometryNormal;
+    bool valid = ProjectCardPoint(instance, field, local, normalLS, normalWS, position, geometryNormal);
+    float bias = valid ? ResolveSunShadowBias(field, instance, geometryNormal) : 0.0;
+    _SdfOriginResults[output] = float4(CardMeshPosition(instance, local), float(instanceIndex + 1u));
+    _SdfOriginResults[output + 1u] = float4(position, valid ? 1.0 : 0.0);
+    _SdfOriginResults[output + 2u] = float4(normalWS, bias);
+    _SdfOriginResults[output + 3u] = float4(geometryNormal, float(field.signMode));
+    _SdfOriginResults[output + 4u] = float4(position + geometryNormal * bias, float(card + 1u));
+}
+
+[numthreads(64, 1, 1)]
+void TraceSdfOriginPoints(uint3 id : SV_DispatchThreadID)
+{
+    uint pointIndex = id.y, ray = id.x;
+    if (pointIndex >= _SdfOriginPointCount || ray >= _SdfOriginRayCount)
+        return;
+    float4 p = _SdfOriginPoints[2u * pointIndex], n = _SdfOriginPoints[2u * pointIndex + 1u];
+    VividMeshSdfReceiver receiver;
+    receiver.positionWS = p.xyz;
+    receiver.normalWS = n.xyz;
+    receiver.entityId = _MeshSdfInstances[uint(n.w)].entityId;
+    float3 origin = p.xyz + p.w * n.xyz;
+    if (ray == 0u)
+    {
+        VividMeshSdfInstance emitter = _MeshSdfInstances[_SdfOriginEmitter];
+        VividMeshSdfField field = _MeshSdfFields[emitter.fieldIndex];
+        float4 world = float4(origin, 1.0);
+        float3 grid = float3(dot(emitter.worldToLocal0, world), dot(emitter.worldToLocal1, world),
+            dot(emitter.worldToLocal2, world)) - field.originAndVoxelSize.xyz;
+        bool insideGrid = all(grid >= 0.0) && all(grid <= float3(field.dimensions - 1u) * field.originAndVoxelSize.w);
+        // Sampling outside the grid clamps to the boundary. Mark it explicitly;
+        // only in-grid values can classify an origin as inside the baked shell.
+        _SdfOriginPointMetrics[pointIndex] = float4(VividMeshSdfSample(field, grid) * emitter.distanceScale,
+            insideGrid ? 1.0 : 0.0, field.shellThickness * emitter.distanceScale, float(field.signMode));
+    }
+    float3 direction = CosineRayDirection(ray, _SdfOriginRayCount, _SdfOriginSeed, GetLocalFrame(n.xyz));
+    VividMeshSdfHit hit;
+    bool advanced, incomplete;
+    bool traced = VividTraceMeshSdfSceneInternal(origin, direction, 0.0, _SdfDiffuseMaxDistance,
+        _SdfDiffuseLayerMask, 0.0, false, receiver, hit, advanced, incomplete);
+    float3 normal = 0.0, originalNormal = 0.0;
+    uint3 texel = 0u; float error = 0.0;
+    bool sampled = false, side = false;
+    if (traced) {
+        DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+        sampled = VividTrySampleSdfSurface(hit, origin + direction * hit.distance, surface,
+            normal, originalNormal, texel, error);
+        side = sampled && VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -direction);
+    }
+    uint flags = (traced ? 1u : 0u) | (incomplete ? 2u : 0u) | (advanced ? 4u : 0u)
+        | (sampled ? 8u : 0u) | (side ? 16u : 0u);
+    uint output = (pointIndex * _SdfOriginRayCount + ray) * 4u;
+    _SdfOriginResults[output] = float4(TraceCardRadiance(origin, direction, receiver), traced ? float(hit.instanceIndex + 1u) : 0.0);
+    _SdfOriginResults[output + 1u] = float4(direction, hit.distance);
+    _SdfOriginResults[output + 2u] = float4(hit.normalWS, float(flags));
+    _SdfOriginResults[output + 3u] = float4(originalNormal, error);
+}

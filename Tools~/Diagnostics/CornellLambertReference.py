@@ -16,7 +16,10 @@ EPS = 1e-6
 
 
 class Scene:
-    def __init__(self, fixture):
+    def __init__(self, fixture, backface_diffuse="two-sided"):
+        if backface_diffuse not in ("two-sided", "black"):
+            raise ValueError("Unknown diffuse backside model")
+        self.backface_diffuse = backface_diffuse
         self.items = fixture["geometry"]
         self.centers = np.array([o["position"] for o in self.items], float)
         self.half = np.array([np.multiply(o["meshBounds"], o["scale"])*.5 for o in self.items])
@@ -40,7 +43,7 @@ class Scene:
         self.light_normal = np.array([0., -1., 0.]) @ self.rotations[self.light].T
         self.area = 4*self.half[self.light, 0]*self.half[self.light, 2]
 
-    def intersect(self, origins, directions):
+    def intersect(self, origins, directions, face_forward=True):
         """Closest opaque hit; the emitter blocks on both sides and emits downward."""
         count = len(origins)
         nearest = np.full(count, np.inf)
@@ -72,9 +75,14 @@ class Scene:
                 n = n@rotation.T
             select = valid & (t < nearest)
             nearest[select], indices[select], normals[select] = t[select], i, n[select]
-        # Opaque diffuse reflection is two-sided; emission has its own facing rule.
-        normals *= np.where(np.sum(normals*directions, 1) > 0, -1., 1.)[:, None]
+        if face_forward:
+            normals *= np.where(np.sum(normals*directions, 1) > 0, -1., 1.)[:, None]
         return nearest, indices, normals
+
+    def reflection_visible(self, directions, original_normals):
+        # The opaque hit remains an occluder even when the material side is black.
+        return (np.sum(original_normals*directions, 1) < 0
+                if self.backface_diffuse == "black" else np.ones(len(directions), bool))
 
     def light_points(self, uv):
         local = np.zeros((len(uv), 3))
@@ -129,8 +137,8 @@ def estimate(scene, position, normal, samples, bounces, seed):
             break
         direction = cosine_sample(n, rng.random((len(active), 2)))
         start = p+EPS*n
-        distance, hit, new_normal = scene.intersect(start, direction)
-        keep = hit >= 0
+        distance, hit, new_normal = scene.intersect(start, direction, face_forward=False)
+        keep = (hit >= 0) & scene.reflection_visible(direction, new_normal)
         if not keep.any():
             break
         # Emission is accounted for at the preceding vertex by area sampling.
@@ -138,6 +146,7 @@ def estimate(scene, position, normal, samples, bounces, seed):
         active = active[keep]
         p = start[keep]+direction[keep]*distance[keep, None]
         n = new_normal[keep]
+        n *= np.where(np.sum(n*direction[keep], 1) > 0, -1., 1.)[:, None]
         throughput = throughput[keep]*scene.albedo[hit[keep]]
     values = by_order.sum(1)
     assert np.isfinite(values).all() and np.all(values >= 0)
@@ -173,14 +182,17 @@ if __name__ == "__main__":
     parser.add_argument("--samples", type=int, default=16384)
     parser.add_argument("--bounces", type=int, default=8)
     parser.add_argument("--seed", type=int, default=20261114)
+    parser.add_argument("--backface-diffuse", choices=("two-sided", "black"), default="two-sided",
+                        help="Keep the original model, or absorb diffuse light on material backsides")
     args = parser.parse_args()
     assert not args.output.exists(), "Refusing to overwrite reference evidence"
     fixture = json.loads(args.fixture.read_text(encoding="utf-8-sig"))
-    scene = Scene(fixture)
+    scene = Scene(fixture, args.backface_diffuse)
     points = json.loads(args.points.read_text()) if args.points else camera_points(scene, fixture)
     report = dict(schema="cornell-lambert-reference.v1", quantity="Incident diffuse E/pi, linear RGB",
         scope="Independent exact box/quad Lambert model; no SDF, cache or reconstruction. Not OpenPBR or an engine-equivalence claim.",
-        emitterFacing="Downward emission; opaque diffuse reflection on both sides, including the emitter",
+        emitterFacing="Downward emission; opaque shadowing on both sides",
+        backfaceDiffuse=args.backface_diffuse,
         fixtureSha256=hashlib.sha256(args.fixture.read_bytes()).hexdigest(), points=[])
     for i, point in enumerate(points):
         report["points"].append(dict(point, estimate=estimate(scene, point["position"], point["normal"], args.samples, args.bounces, args.seed+i)))

@@ -4,6 +4,8 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeAnchorGpuTimingProbe-20261114-221031-612",
+    "ScreenProbeAnchorGpuTimingProbe-20261114-221530-936",
     "ScreenProbeAnchorWindowRelight-20261114-205334-330163",
     "ScreenProbeAnchorWindowMotion-20261114-195008-007",
     "ScreenProbeAnchorWindowRevisit-20261114-183607-958",

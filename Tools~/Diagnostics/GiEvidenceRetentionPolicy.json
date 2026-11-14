@@ -4,6 +4,10 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeAnchorWindow-20261114-155720-209141",
+    "ScreenProbeEpochLong-20261114-144706-279838",
+    "ScreenProbeAnchorStorage-20261114-151333-500182",
+    "AnchorPrecisionPrediction-20261114-145555-246221",
     "ScreenProbeEpochControl-20261114-143435-247",
     "ScreenProbeEpochControl-20261114-142048-816",
     "ScreenProbeEpochControl-20261114-135607-453",
@@ -19,7 +23,6 @@
     "ScalarAnchorPreFilterMotion-20261114-101331-294",
     "ScalarAnchorPreFilterRelightSettled-20261114-103852-758",
     "ProbePlaneSnapshot-20261114-060209-436",
-    "ScalarAnchorAge-20261114-063528-201",
     "Atrous4Sampling-20261114-052735-802",
     "EmissionSidedness-20261114-114713-646",
     "EmissionTraceConformance-20261114-114640-591",
@@ -28,6 +31,7 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScalarAnchorAge-20261114-063528-201", "reason": "Historical 32/128 window experiment superseded by accepted guarded anchor-prefilter regression and the current precision study. No other protected capture/snapshot/source manifest references this run; original promotion, input checks and reports retained", "requiredFiles": ["analysis.json", "capture.json", "source-verification.json", "profile-promotion.json", "post-promotion-verification.json"] },
     { "run": "ScreenProbeEpochControl-20261114-134959-695", "reason": "Short 256-frame hash control superseded by two 640-frame CPU+GPU controls. All hashes, exact capture script and source verification retained; complete interior raw reanalysis no longer required", "requiredFiles": ["analysis.json", "qualification.json", "source-verification.json", "capture-script.cs", "capture.json"] },
     { "run": "ScreenProbeAnchorPrecision-20261114-132744-210", "reason": "Precision/window experiment stopped at failed baseline A/A. No candidate ran. Source verification, rejection and first/last complete bundles preserve the qualified scope", "requiredFiles": ["rejection.json", "qualification.json", "source-verification.json", "capture.json"] },
     { "run": "EmissionSidedness-20261113-145618-928", "reason": "Superseded by current Cornell anchor-prefilter regression b0b08177", "requiredFiles": ["analysis.json", "capture/capture.json"] },

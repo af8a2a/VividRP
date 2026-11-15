@@ -10,6 +10,72 @@ namespace VividRP.Editor.Tests
 {
     public class AutoExposureTests
     {
+        [Test, Category("AutoExposureReadbackLifetime")]
+        public void AutoExposureStatsReadback_RetiredCallbacksCannotTouchReplacementState()
+        {
+            var cameraObject = new GameObject("AutoExposureReadbackLifetime.Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var flags = BindingFlags.Static | BindingFlags.NonPublic;
+            var bridge = typeof(AutoExposureStatsReadbackBridge);
+            var getState = bridge.GetMethod("GetOrCreateState", flags);
+            var invalidate = bridge.GetMethod("InvalidateSnapshots", flags);
+
+            try
+            {
+                var retired = getState.Invoke(null, new object[] { camera });
+                var callbacks = new[] { "exposureReadback", "preExposureReadback", "histogramReadback" }
+                    .Select(name => (global::System.Action<AsyncGPUReadbackRequest>)retired.GetType()
+                        .GetField(name).GetValue(retired)).ToArray();
+                invalidate.Invoke(null, null);
+                var replacement = getState.Invoke(null, new object[] { camera });
+                SetMemberValue(replacement, "exposurePending", true);
+                SetMemberValue(replacement, "preExposurePending", true);
+                SetMemberValue(replacement, "histogramPending", true);
+                Object.DestroyImmediate(cameraObject);
+                cameraObject = null;
+
+                foreach (var callback in callbacks)
+                    Assert.DoesNotThrow(() => callback(default));
+
+                foreach (var field in new[] { "exposurePending", "preExposurePending", "histogramPending" })
+                    Assert.That(replacement.GetType().GetField(field).GetValue(replacement), Is.True, field);
+                Assert.That(retired.GetType().GetField("isActive").GetValue(retired), Is.False);
+            }
+            finally
+            {
+                invalidate.Invoke(null, null);
+                if (cameraObject != null) Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test, Category("AutoExposureReadbackLifetime")]
+        public void AutoExposureStatsReadback_StableRequestDoesNotAllocate()
+        {
+            var cameraObject = new GameObject("AutoExposureReadbackNoAllocation.Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var commandBuffer = new CommandBuffer();
+            var settings = AutoExposureSettingsData.CreateDefault();
+
+            try
+            {
+                AutoExposureStatsReadbackBridge.TouchInspectorRequest();
+                for (var i = 0; i < 64; i++)
+                    AutoExposureStatsReadbackBridge.Request(commandBuffer, camera, settings, true, false, false, null, null, null);
+                var before = global::System.GC.GetAllocatedBytesForCurrentThread();
+                for (var i = 0; i < 128; i++)
+                    AutoExposureStatsReadbackBridge.Request(commandBuffer, camera, settings, true, false, false, null, null, null);
+                var allocated = global::System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero, "Stable Inspector request bookkeeping must reuse its state and delegates.");
+            }
+            finally
+            {
+                typeof(AutoExposureStatsReadbackBridge).GetMethod("InvalidateSnapshots", BindingFlags.Static | BindingFlags.NonPublic)
+                    .Invoke(null, null);
+                commandBuffer.Release();
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
         [Test]
         public void AutoExposureHistory_UsesCameraHistoryBufferAndTexturePairs()
         {

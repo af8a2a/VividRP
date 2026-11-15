@@ -64,6 +64,13 @@ namespace VividRP.Runtime
 
         private static float s_LastInspectorRequestTime = float.NegativeInfinity;
 
+        static AutoExposureStatsReadbackBridge()
+        {
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += InvalidateSnapshots;
+            UnityEditor.EditorApplication.quitting += InvalidateSnapshots;
+            UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
         private sealed class SnapshotState
         {
             public readonly uint[] histogram = new uint[HistogramBucketCount];
@@ -71,7 +78,7 @@ namespace VividRP.Runtime
             public readonly Action<AsyncGPUReadbackRequest> preExposureReadback;
             public readonly Action<AsyncGPUReadbackRequest> histogramReadback;
 
-            private readonly Camera m_Camera;
+            public bool isActive = true;
             public string cameraName = string.Empty;
             public AutoExposureSettingsData settings = AutoExposureSettingsData.CreateDefault();
             public Vector4 exposureState = s_DefaultExposureState;
@@ -91,7 +98,6 @@ namespace VividRP.Runtime
 
             public SnapshotState(Camera camera)
             {
-                m_Camera = camera;
                 cameraName = camera != null ? camera.name : string.Empty;
                 exposureReadback = OnExposureReadback;
                 preExposureReadback = OnPreExposureReadback;
@@ -100,18 +106,39 @@ namespace VividRP.Runtime
 
             private void OnExposureReadback(AsyncGPUReadbackRequest request)
             {
-                HandleExposureReadback(m_Camera, request);
+                HandleExposureReadback(this, request);
             }
 
             private void OnPreExposureReadback(AsyncGPUReadbackRequest request)
             {
-                HandlePreExposureReadback(m_Camera, request);
+                HandlePreExposureReadback(this, request);
             }
 
             private void OnHistogramReadback(AsyncGPUReadbackRequest request)
             {
-                HandleHistogramReadback(m_Camera, request);
+                HandleHistogramReadback(this, request);
             }
+
+            public void Invalidate()
+            {
+                isActive = false;
+                exposurePending = preExposurePending = histogramPending = false;
+            }
+        }
+
+        private static void OnPlayModeStateChanged(UnityEditor.PlayModeStateChange state)
+        {
+            if (state == UnityEditor.PlayModeStateChange.ExitingEditMode
+                || state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+                InvalidateSnapshots();
+        }
+
+        private static void InvalidateSnapshots()
+        {
+            foreach (var state in s_Snapshots.Values)
+                state?.Invalidate();
+            s_Snapshots.Clear();
+            s_LastInspectorRequestTime = float.NegativeInfinity;
         }
 
         internal static void TouchInspectorRequest()
@@ -247,9 +274,11 @@ namespace VividRP.Runtime
             return state;
         }
 
-        private static void HandleExposureReadback(Camera camera, AsyncGPUReadbackRequest request)
+        private static void HandleExposureReadback(SnapshotState state, AsyncGPUReadbackRequest request)
         {
-            if (!s_Snapshots.TryGetValue(camera, out var state) || state == null)
+            // Readbacks can be flushed after native Camera wrappers are released.
+            // The cached delegate owns this state; never resolve it through Unity Object equality.
+            if (!state.isActive)
                 return;
 
             state.exposurePending = false;
@@ -271,9 +300,9 @@ namespace VividRP.Runtime
             state.lastCompletedTime = Time.realtimeSinceStartup;
         }
 
-        private static void HandlePreExposureReadback(Camera camera, AsyncGPUReadbackRequest request)
+        private static void HandlePreExposureReadback(SnapshotState state, AsyncGPUReadbackRequest request)
         {
-            if (!s_Snapshots.TryGetValue(camera, out var state) || state == null)
+            if (!state.isActive)
                 return;
 
             state.preExposurePending = false;
@@ -295,9 +324,9 @@ namespace VividRP.Runtime
             state.lastCompletedTime = Time.realtimeSinceStartup;
         }
 
-        private static void HandleHistogramReadback(Camera camera, AsyncGPUReadbackRequest request)
+        private static void HandleHistogramReadback(SnapshotState state, AsyncGPUReadbackRequest request)
         {
-            if (!s_Snapshots.TryGetValue(camera, out var state) || state == null)
+            if (!state.isActive)
                 return;
 
             state.histogramPending = false;
@@ -353,7 +382,11 @@ namespace VividRP.Runtime
                 return;
 
             for (var i = 0; i < staleCameras.Count; i++)
+            {
+                if (s_Snapshots.TryGetValue(staleCameras[i], out var state))
+                    state?.Invalidate();
                 s_Snapshots.Remove(staleCameras[i]);
+            }
         }
     }
 }

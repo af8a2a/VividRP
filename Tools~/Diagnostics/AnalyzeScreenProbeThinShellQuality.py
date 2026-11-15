@@ -51,7 +51,7 @@ def hit_coverage(root, capture_name):
         anchorAgeQuantiles=np.quantile(stats[..., 0], [0, .1, .5, .9, 1]).tolist(), sourceSha256=next(iter(source_hashes)))
 
 
-def motion_history(capture, rows, states, comparison_rows=None):
+def motion_history(capture, rows, states, comparison_rows=None, control_moment_layout=None):
     """Isolate pixel temporal inheritance; final-minus-resolve also includes spatial filtering."""
     if not capture.get("motionHistoryRecorded", False):
         return None
@@ -118,6 +118,11 @@ def motion_history(capture, rows, states, comparison_rows=None):
                 report[arm]["nativeMoments"]["meanResidualMaxAbs"] = float(abs(moments[:, 3]).max())
             else:
                 report[arm]["nativeMoments"]["minimumCoverage"] = float(moments[:, 3].min())
+        if control_moment_layout == "packed-dual-variance":
+            control = np.stack([read(rows[arm, f, "temporal-control-moments-edge"]) for f in frames])[exposed]
+            report[arm]["controlSlowMoments"] = dict(ageRange=[float(control[:, 2].min()), float(control[:, 2].max())],
+                maximumSlowVariance=float(np.maximum(0, control[:, 3].astype(float) - 2**-14).max()),
+                invalidPackedValues=int((control[:, 3] < 2**-14).sum()))
     return report
 
 

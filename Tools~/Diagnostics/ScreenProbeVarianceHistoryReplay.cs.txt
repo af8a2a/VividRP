@@ -1,0 +1,78 @@
+    ComputeShader temporalReplayAa=null,temporalReplayControl=null;
+    RenderTexture temporalReplayAaMoments=null,temporalReplayGeometry=null;
+    var temporalControlMoments=new RenderTexture[2];
+    var temporalReplayPrograms=new List<object>();
+    void ReplayTemporalMoments(ComputePassContext context) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);
+        var state=Field("m_State");
+        object State(string name)=>state.GetType().GetField(name,inst).GetValue(state);
+        var previousVp=(Matrix4x4)State("ViewProjection");
+        bool hasHistory=(bool)Field("m_HasHistory") && Resolve("m_PreviousGeometry")!=null
+            && (bool)State("PixelTemporal") && (int)State("PixelHistoryMaxAge")== (int)Field("m_PixelHistoryMaxAge")
+            && ((CameraHistoryTexture)Field("m_PixelHistory")).IsValid()
+            && ((CameraHistoryTexture)Field("m_PixelGeometryHistory")).IsValid();
+        bool momentsValid=hasHistory && ((CameraHistoryTexture)Field("m_ScreenProbeMomentsHistory")).IsValid();
+        var jitter=(Vector2)Field("m_ScreenJitterDelta");
+        bool observe=frame<warmup && frame<2 || frame>=warmup;
+        if(frame==0) {
+            if(temporalControlDualVariance) {
+                int initialize=temporalReplayControl.FindKernel("InitializeDualVarianceHistoryCS");
+                raw.SetComputeTextureParam(temporalReplayControl,initialize,"_SdfInitialMomentsInput",Resolve("m_PreviousScreenProbeMoments"));
+                raw.SetComputeTextureParam(temporalReplayControl,initialize,"_SdfInitialMomentsOutput",temporalControlMoments[1]);
+                cmd.DispatchCompute(temporalReplayControl,initialize,240,135,1);
+            } else raw.CopyTexture(Resolve("m_PreviousScreenProbeMoments"),temporalControlMoments[1]);
+            foreach(var roi in replayRois) {
+                ReadRegion(raw,Resolve("m_PreviousScreenProbeMoments"),"temporal-initial-actual-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:temporalControlDualVariance);
+                ReadRegion(raw,temporalControlMoments[1],"temporal-initial-copy-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:temporalControlDualVariance);
+            }
+        }
+        foreach(var shader in new[]{temporalReplayAa,temporalReplayControl}) {
+            bool aa=shader==temporalReplayAa;
+            int kernel=shader.FindKernel("ScreenProbeTemporalReprojectionWithMomentsCS");
+            bindReceiver(cmd,shader,kernel);bindFrame(cmd,shader);
+            cmd.SetComputeMatrixParam(shader,"_SdfDiffusePreviousVP",previousVp);
+            cmd.SetComputeMatrixParam(shader,"_SdfScreenPreviousInverseVP",previousVp.inverse);
+            cmd.SetComputeVectorParam(shader,"_SdfScreenJitterDelta",new Vector4(jitter.x,jitter.y,0,0));
+            cmd.SetComputeIntParam(shader,"_SdfDiffuseHasHistory",hasHistory?1:0);
+            cmd.SetComputeFloatParam(shader,"_SdfPixelHistoryMaxAge",(int)Field("m_PixelHistoryMaxAge"));
+            cmd.SetComputeIntParam(shader,"_SdfScreenProbeMomentsHistoryValid",momentsValid?1:0);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenProbePreviousMoments",
+                aa?Resolve("m_PreviousScreenProbeMoments"):temporalControlMoments[1-(frame&1)]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenProbeMomentsOutput",
+                aa?temporalReplayAaMoments:temporalControlMoments[frame&1]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenMotion",Resolve("m_ScreenMotion"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffuseCurrentResolved",Resolve("m_RawResolved"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePreviousPixelLighting",Resolve("m_PreviousPixelLighting"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePreviousPixelGeometry",Resolve("m_PreviousPixelGeometry"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePixelLightingOutput",replayColors[0]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePixelGeometryOutput",temporalReplayGeometry);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffuseOutput",replayColors[1]);
+            cmd.DispatchCompute(shader,kernel,240,135,1);
+            if(!aa && temporalControlPackedDualVariance) {
+                int slow=shader.FindKernel("ScreenProbeUpdateSlowVarianceCS");
+                bindReceiver(cmd,shader,slow);
+                raw.SetComputeTextureParam(shader,slow,"_SdfScreenProbePreviousMoments",temporalControlMoments[1-(frame&1)]);
+                raw.SetComputeTextureParam(shader,slow,"_SdfScreenProbeMomentsOutput",temporalControlMoments[frame&1]);
+                raw.SetComputeTextureParam(shader,slow,"_SdfScreenMotion",Resolve("m_ScreenMotion"));
+                raw.SetComputeTextureParam(shader,slow,"_SdfDiffuseCurrentResolved",Resolve("m_RawResolved"));
+                raw.SetComputeTextureParam(shader,slow,"_SdfDiffusePreviousPixelLighting",Resolve("m_PreviousPixelLighting"));
+                raw.SetComputeTextureParam(shader,slow,"_SdfDiffusePreviousPixelGeometry",Resolve("m_PreviousPixelGeometry"));
+                cmd.DispatchCompute(shader,slow,240,135,1);
+            }
+            if(observe)foreach(var roi in replayRois) {
+                string label=aa?"temporal-aa-":"temporal-control-";
+                ReadRegion(raw,replayColors[1],label+"lighting-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);
+                ReadRegion(raw,replayColors[0],label+"history-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);
+                ReadRegion(raw,temporalReplayGeometry,label+"geometry-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);
+                ReadRegion(raw,aa?temporalReplayAaMoments:temporalControlMoments[frame&1],
+                    aa?"temporal-aa-moments-"+roi.Item1:"temporal-control-moments-"+roi.Item1,
+                    roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:!aa);
+            }
+        }
+        if(observe)foreach(var roi in replayRois) {
+            ReadRegion(raw,Resolve("m_Output"),"temporal-actual-lighting-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);
+            ReadRegion(raw,Resolve("m_CurrentPixelLighting"),"temporal-actual-history-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);
+            ReadRegion(raw,Resolve("m_CurrentPixelGeometry"),"temporal-actual-geometry-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);
+            ReadRegion(raw,Resolve("m_CurrentScreenProbeMoments"),"temporal-actual-moments-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:frame<2);
+        }
+    }

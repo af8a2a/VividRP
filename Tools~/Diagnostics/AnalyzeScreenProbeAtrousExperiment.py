@@ -209,17 +209,80 @@ def replay_hash_differences(rows, arms, labels):
     return differences
 
 
-def compare_same_frame(root, reference_root):
+def qualify_temporal_replay(root, capture, rows, protocol, arms, labels):
+    if not protocol.get("temporalMomentReplay", False):
+        return None
+    for label, expected in protocol["temporalSourceSha256"].items():
+        assert hashlib.sha256((root / f"temporal-{label}.compute.txt").read_bytes()).hexdigest() == expected
+    programs = capture["temporalReplayPrograms"]
+    packed = protocol.get("controlMomentLayout") == "packed-dual-variance"
+    dual = protocol.get("controlMomentLayout") in ("dual-variance", "packed-dual-variance")
+    expected_programs = {
+        (label, "ScreenProbeTemporalReprojectionWithMomentsCS") for label in ("aa", "control")}
+    if dual:
+        expected_programs.add(("initialize", "InitializeDualVarianceHistoryCS"))
+    if packed:
+        expected_programs.add(("slow", "ScreenProbeUpdateSlowVarianceCS"))
+    assert len(programs) == len(expected_programs) and {(p["reference"], p["name"]) for p in programs} == expected_programs
+    differences, results = [], {}
+    frames = (0, 1, *FRAMES)
+    for arm in arms:
+        results[arm] = {}
+        for label in labels:
+            initial = rows[arm, 0, "temporal-initial-actual-" + label]
+            copied = rows[arm, 0, "temporal-initial-copy-" + label]
+            if dual:
+                old, new = read(initial), read(copied)
+                expected_slow = np.where((old[..., 2] >= 1) & (old[..., 3] > 0), old[..., 1].astype(float) + 2**-14, 0).astype("<f2") if packed else old[..., 1]
+                initial_matches = np.array_equal(old[..., :3], new[..., :3]) and np.array_equal(expected_slow, new[..., 3])
+            else:
+                initial_matches = all(initial[k] == copied[k] for k in ("sha256", "x", "y", "width", "height", "format"))
+            if not initial_matches:
+                differences.append([arm, 0, "initial-copy", label])
+            for frame in frames:
+                for reference in ("aa", "control"):
+                    for kind in ("lighting", "history", "geometry", "moments"):
+                        if reference == "control" and kind == "moments":
+                            continue  # Check the layout's invariant channels below.
+                        actual = rows[arm, frame, f"temporal-actual-{kind}-{label}"]
+                        replay = rows[arm, frame, f"temporal-{reference}-{kind}-{label}"]
+                        if any(actual[k] != replay[k] for k in ("sha256", "x", "y", "width", "height", "format")):
+                            differences.append([arm, frame, reference, kind, label])
+            tag = "native-moments" if label == "emitter-gap" else "native-moments-" + label
+            actual = np.stack([read(rows[arm, f, "temporal-actual-moments-" + label if f < 2 else tag]).astype(float) for f in frames])
+            control = np.stack([read(rows[arm, f, "temporal-control-moments-" + label]).astype(float) for f in frames])
+            assert np.isfinite(control).all() and (control[..., 1:] >= 0).all()
+            invariant_channels = (0, 1, 2) if dual else (0, 2, 3)
+            unchanged = int(np.count_nonzero(actual[..., invariant_channels] != control[..., invariant_channels]))
+            variance_channel = 3 if dual else 1
+            control_variance = np.maximum(0, control[2:, ..., variance_channel] - (2**-14 if packed else 0))
+            results[arm][label] = dict(invariantChannelDifferentValues=unchanged, invariantChannels=list(invariant_channels),
+                actualMeanVariance=float(actual[2:, ..., 1].mean()), controlMeanVariance=float(control_variance.mean()),
+                actualVarianceTemporalRms=float(np.sqrt(np.mean(np.var(actual[2:, ..., 1], axis=0)))),
+                controlVarianceTemporalRms=float(np.sqrt(np.mean(np.var(control_variance, axis=0)))))
+    return dict(schema="screen-probe-temporal-moments-replay.v1",
+        qualified=not differences and not any(v["invariantChannelDifferentValues"] for a in results.values() for v in a.values()),
+        hashDifferences=differences, arms=results,
+        aaHashObservations=len(arms) * len(labels) * len(frames) * 4,
+        initialHistoryCopyHashObservations=len(arms) * len(labels),
+        controlColorHistoryGeometryHashObservations=len(arms) * len(labels) * len(frames) * 3,
+        limitations=["Control moments evolve independently, but receiver geometry and pixel color histories remain shared",
+                     "AA covers four output roles in recorded ROIs and frames; not unsaved full-screen pixels",
+                     "A passing provenance gate does not establish a quality gain or dynamic lighting acceptance"])
+
+
+def compare_same_frame(root, reference_root, matched_reference_subset=False):
     _, snapshot, blocks, _, _ = qualify(reference_root, "inside-shell-reference")
     geometry = read(snapshot["geometry"])[:68, :120]
     target = blocks.mean(0)[..., 4]
-    report, (capture, rows, _) = analyze(root, geometry, target)
+    report, (capture, rows, _) = analyze(root, geometry, target, matched_reference_subset)
     assert capture["schema"] == "screen-probe-atrous-same-frame.v1"
     protocol = load(root / "protocol.json")
     verify_replay_sources(root, capture, protocol)
     results = {}
     labels = ("emitter-gap", "ceiling", "floor", "back")
     differences = replay_hash_differences(rows, ARMS, labels)
+    temporal = qualify_temporal_replay(root, capture, rows, protocol, ARMS, labels)
     for arm in ARMS:
         results[arm] = {}
         for label in labels:
@@ -254,13 +317,15 @@ def compare_same_frame(root, reference_root):
                         if any(first[k] != frozen[k] for k in ("sha256", "x", "y", "width", "height", "format")):
                             frozen_differences.append([arm, frame, label])
     return dict(schema="screen-probe-atrous-same-frame-analysis.v1", capture=str(root),
-        qualified=report["qualified"] and not differences and not frozen_differences and not any(v["coverageDifferences"] for a in results.values() for v in a.values()),
+        qualified=report["qualified"] and not differences and not frozen_differences
+            and (temporal is None or temporal["qualified"]) and not any(v["coverageDifferences"] for a in results.values() for v in a.values()),
         replayDifferences=differences, inputHashObservations=4 * 256, aaHashObservations=4 * 256,
         controlMomentsFrozen=frozen_moments, frozenMomentDifferences=frozen_differences,
-        controlIterations=protocol.get("controlIterations", 4), sourceAndReference=report, arms=results,
+        controlIterations=protocol.get("controlIterations", 4), temporalReplay=temporal, sourceAndReference=report, arms=results,
         limitations=["AA is byte-exact in four recorded ROIs, not a claim about unsaved full-screen pixels",
                      "Both filters consume one copied pixel-temporal input and the same receiver textures",
-                     "The control uses first-measured-frame frozen moments" if frozen_moments else "Both filters consume the actual current moment textures",
+                     "The control evolves independent temporal moments" if temporal is not None else
+                         "The control uses first-measured-frame frozen moments" if frozen_moments else "Both filters consume the actual current moment textures",
                      "The control isolates wavelet behavior; changes upstream of the copied input require separate validation",
                      "Replay adds dispatches/readbacks and is not a GPU performance experiment",
                      "The frozen-source high-sample reference is not absolute Unreal truth"])
@@ -274,12 +339,15 @@ def compare_same_frame_motion(root):
     assert protocol["motionHistory"] and protocol["arms"] == list(arms)
     verify_replay_sources(root, capture, protocol)
     differences = replay_hash_differences(rows, arms, ("edge",))
+    temporal = qualify_temporal_replay(root, capture, rows, protocol, arms, ("edge",))
     control_rows = dict(rows)
     for arm in arms:
         for frame in FRAMES:
             control_rows[arm, frame, "final-edge"] = rows[arm, frame, "control-edge"]
-    histories = dict(current=motion_history(capture, rows, states, comparison_rows=control_rows),
-                     control=motion_history(capture, control_rows, states))
+    histories = dict(current=motion_history(capture, rows, states, comparison_rows=control_rows,
+                                          control_moment_layout=protocol.get("controlMomentLayout")),
+                     control=motion_history(capture, control_rows, states,
+                                            control_moment_layout=protocol.get("controlMomentLayout")))
     results = {}
     for arm in arms:
         current = np.stack([read(rows[arm, f, "final-edge"]).astype(float) for f in FRAMES])
@@ -295,15 +363,21 @@ def compare_same_frame_motion(root):
                      and h["temporalMinusResolveP99"] == 0 and h["temporalMinusResolveMax"] == 0
                      and h["nativeMoments"]["oldAge"] == 0 and h["nativeMoments"]["varianceMax"] == 0
                      for group in histories.values() for h in group.values())
+    if protocol.get("controlMomentLayout") == "packed-dual-variance":
+        history_ok = history_ok and all(h["controlSlowMoments"]["ageRange"] == [1, 1]
+            and h["controlSlowMoments"]["maximumSlowVariance"] == 0
+            and h["controlSlowMoments"]["invalidPackedValues"] == 0 for h in histories["control"].values())
     return dict(schema="screen-probe-atrous-same-frame-motion-analysis.v1", capture=str(root),
-        qualified=not differences and history_ok and not any(v["coverageDifferences"] for v in results.values()),
+        qualified=not differences and history_ok and (temporal is None or temporal["qualified"])
+            and not any(v["coverageDifferences"] for v in results.values()),
         replayDifferences=differences, inputHashObservations=256, aaHashObservations=256,
         pixelHistoryRejectedAtDisocclusion=history_ok,
         exposedOutputExactlyEqual={arm: histories["current"][arm]["finalExposedRgba16Sha256"]
             == histories["control"][arm]["finalExposedRgba16Sha256"] for arm in arms},
-        histories=histories, arms=results,
+        histories=histories, arms=results, temporalReplay=temporal,
         limitations=["Same-frame copied input and A/A qualification cover the moving-edge ROI only",
-                     "The control changes only spatial filtering; its own pixel/probe history is not evolved independently",
+                     "The control evolves independent moments but shares actual pixel/probe color history" if temporal is not None else
+                         "The control changes only spatial filtering; its own pixel/probe history is not evolved independently",
                      "Final-minus-resolve includes spatial reconstruction and is not error relative to physical ground truth",
                      "Replays invalidate GPU performance timing; no cross-run GBuffer matching claim"])
 
@@ -323,7 +397,7 @@ if __name__ == "__main__":
             report = compare_same_frame_motion(args.candidate.resolve())
         else:
             assert args.reference_root, "Static replay requires the high-sample reference"
-            report = compare_same_frame(args.candidate.resolve(), args.reference_root.resolve())
+            report = compare_same_frame(args.candidate.resolve(), args.reference_root.resolve(), args.matched_reference_subset)
         (args.candidate / "same-frame-comparison.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(dict(qualified=report["qualified"], replayDifferences=report["replayDifferences"],
                              arms=report["arms"]), indent=2))

@@ -4,6 +4,7 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeVarianceHistory-20261115-172500",
     "ScreenProbeCoveredWavelet-20261115-164056",
     "ScreenProbeMomentGuidance-20261115-144400",
     "ScreenProbeNativeMoments-20261115-1400",

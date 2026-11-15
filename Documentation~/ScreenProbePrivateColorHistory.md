@@ -4,6 +4,8 @@
 
 **稳定像素不做弱裁剪的候选通过两组静态初筛与一次固定轨迹的新露出历史检查，但未启用默认行为。** 全图仍有低频杂斑，原高采样 Hybrid 联合参考仍未通过，GPU 增量开销尚未测量，不能宣称达到 Lumen 质量。生产 Runtime、shader、场景与 Profile 均未修改。
 
+后续[同帧能量参考与黑色环境边界检查](ScreenProbeSameFrameEnergy.md)未通过候选推广门槛，并定位到大量完整 miss 被作为未知覆盖。该候选继续保留为诊断选项；优先验证已知黑色环境的覆盖语义，再评估历史裁剪。
+
 证据：`E:/VividRP_GI_Evidence/ScreenProbePrivateColorHistory-20261116-061000`。起点 `fb33d578`，生产渲染仍为 `7b9d8836`。Unity 7000.0.0a16 / CoreRP 17.7 / D3D12 / RTX5070Ti。Cornell 顶部自发光夹具，固定原机位、1920×1080、16 px / 每探针 8 rays、原生 Gather、4 轮 À-trous、FP32 anchor age512、像素历史上限32。Radiosity 固定8阶 / 64样本 / 32批，源 atlas hash 仍为 `40252e7ae82c1da6ae025dbf012a3ce232aa54ea10bfbf1ca9a7998df93270a8`。
 
 ## 重放可信度与元数据契约

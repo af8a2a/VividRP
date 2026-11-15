@@ -1,0 +1,149 @@
+    const int energySets=__SETS__,energySeed=__REFERENCE_SEED__;
+    bool energyRecordReasons=__REASONS__;
+    ComputeShader energyAccumulator=null;
+    RenderTexture energySum=null,energyScreen=null,energyReasonA=null,energyReasonB=null;
+    var energyOutputs=new List<(string property,string field,RenderTexture texture)>();
+    var energyRegions=new[]{("ceiling",46,59,28),("floor",54,8,12),("back",68,38,8),("edge",55,26,10)};
+    var energyPending=new Dictionary<string,(string side,string hash,byte[] data,string format,int width,int height)>();
+    int energyAaPairs=0;
+    RenderTexture EnergyTexture(RenderTextureDescriptor descriptor) {
+        descriptor.depthBufferBits=0;descriptor.msaaSamples=1;descriptor.enableRandomWrite=true;
+        descriptor.useMipMap=false;descriptor.autoGenerateMips=false;
+        var result=new RenderTexture(descriptor){hideFlags=HideFlags.HideAndDontSave};privateOwned.Add(result);
+        if(!result.Create())throw new InvalidOperationException("Energy texture creation failed.");return result;
+    }
+    void SetupEnergy() {
+        energyAccumulator=PrivateShader("energy-accumulator.compute.txt",new[]{"AccumulateEnergyReferenceCS"});
+        energySum=EnergyTexture(new RenderTextureDescriptor(120,136){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R32G32B32A32_SFloat});
+        if(energyRecordReasons) {
+            energyReasonA=EnergyTexture(energySum.descriptor);energyReasonB=EnergyTexture(energySum.descriptor);
+        }
+    }
+    void ReadEnergy(ComputePassContext context,Texture texture,string role,string side,bool pixel=false,bool aa=false) {
+        int f=frame,width=texture.width,height=texture.height;string format=texture.graphicsFormat.ToString();
+        int stride=format=="R16G16B16A16_SFloat"?8:format=="R32G32B32A32_SFloat"?16:0;
+        if(stride==0)throw new InvalidOperationException("Unexpected energy descriptor: "+role);
+        pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Energy readback failed.");
+                var data=request.GetData<byte>().ToArray();
+                if(aa) {
+                    string hash=Hash(data),key=f+"/"+role;
+                    records.Add(new{arm,frame=f,tag="energy-aa-"+role,side,width,height,format,sha256=hash,saved=false});
+                    if(energyPending.TryGetValue(key,out var prior)) {
+                        energyPending.Remove(key);energyAaPairs++;
+                        if(prior.side==side || prior.hash!=hash) {
+                            foreach(var item in new[]{(prior.side,prior.data,prior.hash),(side,data,hash)}) {
+                                string file=output+"/"+arm+"/"+f.ToString("0000")+"-energy-failure-"+role+"-"+item.Item1+".bin";
+                                Write(file,item.Item2);records.Add(new{arm,frame=f,tag="energy-failure-"+role,side=item.Item1,width,height,format,sha256=item.Item3,saved=true,path=file});
+                            }
+                            errors.Add("Original trace energy AA mismatch: "+key);
+                        }
+                    }else energyPending.Add(key,(side,hash,data,format,width,height));
+                }
+                foreach(var region in energyRegions) {
+                    var crop=new byte[region.Item4*stride];
+                    for(int i=0;i<region.Item4;++i) {
+                        int x=region.Item2+i,y=region.Item3;
+                        if(pixel){x=x*16+8;y=y*16+8;}
+                        Buffer.BlockCopy(data,(y*width+x)*stride,crop,i*stride,stride);
+                    }
+                    string file=output+"/"+arm+"/"+f.ToString("0000")+"-"+side+"-energy-"+role+"-"+region.Item1+".bin";
+                    Write(file,crop);records.Add(new{arm,frame=f,tag="energy-"+role+"-"+region.Item1,side,width=region.Item4,height=1,format,sha256=Hash(crop),saved=true,path=file});
+                }
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void ReplayEnergy(ComputePassContext context) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);
+        var shader=(ComputeShader)PrivateField("m_TraceCompute");
+        if(!EditorUtility.IsPersistent(shader))throw new InvalidOperationException("Original persistent trace shader required.");
+        bool receiver=(int)PrivateField("m_ReceiverCount")>0 && PrivateResolve("m_ReceiverVisibility")!=null;
+        bool sun=PrivateResolve("m_SunAtlas")!=null;
+        int kernel=(int)PrivateField(receiver?(sun?"m_ReceiverCachedSunKernel":"m_ReceiverCachedKernel"):(sun?"m_CachedSunTraceKernel":"m_CachedTraceKernel"));
+        int screenKernel=(int)PrivateField(receiver?"m_ScreenReceiverTraceKernel":"m_ScreenTraceKernel");
+        int nativeFrame=frameBase+frame;
+        float energyRange=(float)PrivateField("m_TraceDistance"),energyBias=(float)PrivateField("m_Bias");
+        if(energyRecordReasons) {
+            int f=frame;
+            var scene=PrivateField("m_Scene");
+            var nodes=(GraphicsBuffer)scene.GetType().GetField("m_NodeBuffer",inst).GetValue(scene);
+            if(nodes.stride!=48)throw new InvalidOperationException("Unexpected SDF node stride.");
+            var sky=(Vector4)PrivateField("m_SkyTextureParams");
+            var skyType=context.Get<VividSkyData>().activeSkyType;
+            if(sky.w!=0f || skyType!=SkyType.None)throw new InvalidOperationException("Black-environment proof requires SkyType.None.");
+            pending++;
+            raw.RequestAsyncReadback(nodes,request=>{
+                try {
+                    if(request.hasError)throw new InvalidOperationException("SDF root readback failed.");
+                    var all=request.GetData<byte>().ToArray();var root=new byte[48];Buffer.BlockCopy(all,0,root,0,48);
+                    var floats=new float[12];Buffer.BlockCopy(root,0,floats,0,48);
+                    string file=output+"/"+arm+"/"+f.ToString("0000")+"-energy-root-node.bin";
+                    Write(file,root);records.Add(new{arm,frame=f,tag="energy-root-node",width=12,height=1,format="raw-node48",sha256=Hash(root),saved=true,path=file,
+                        energyRange,energyBias,boundsMin=new[]{floats[0],floats[1],floats[2]},boundsMax=new[]{floats[4],floats[5],floats[6]},skyTexturePresent=false,activeSkyType=skyType.ToString()});
+                }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+            });
+        }
+        int nativeGuide=(bool)PrivateField("m_DirectionalHierarchicalGuide")?2:(bool)PrivateField("m_DirectionalGuide")?1:0;
+        if(!(bool)PrivateField("m_HasScreenHistory") || !(bool)PrivateField("m_DirectionalCache") || (bool)PrivateField("m_RestirGather"))
+            throw new InvalidOperationException("Native Hybrid directional path required.");
+        if(energyOutputs.Count==0) {
+            foreach(var pair in new[]{("_SdfDiffuseProbes","m_DirectionalRayTexture"),("_SdfDiffuseGeometry","m_Geometry"),
+                ("_SdfDiffuseHitLighting","m_HitLighting"),("_SdfDiffuseTraceSources","m_TraceSources"),
+                ("_SdfDiffuseHitSamples","m_HitSamples"),("_SdfDiffuseRayDiagnostics","m_RayDiagnostics"),
+                ("_SdfDiffuseFirstHitDiagnostics","m_FirstHitDiagnostics"),("_SdfSunCacheHits","m_SunCacheHits")}) {
+                var original=PrivateResolve(pair.Item2) as RenderTexture;
+                if(original==null)throw new InvalidOperationException("Missing energy output: "+pair.Item2);
+                var descriptor=energyRecordReasons && pair.Item2=="m_RayDiagnostics"
+                    ?new RenderTextureDescriptor(960,136){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R32G32B32A32_SFloat}:original.descriptor;
+                energyOutputs.Add((pair.Item1,pair.Item2,EnergyTexture(descriptor)));
+            }
+            energyScreen=EnergyTexture(((RenderTexture)PrivateResolve("m_ScreenRays")).descriptor);
+        }
+        var geometry=energyOutputs.Single(p=>p.field=="m_Geometry").texture;
+        var lighting=energyOutputs.Single(p=>p.field=="m_HitLighting").texture;
+        ReadEnergy(context,PrivateResolve("m_ScreenRays"),"screen","native",aa:true);
+        ReadEnergy(context,PrivateResolve("m_Geometry"),"geometry","native",aa:true);
+        ReadEnergy(context,PrivateResolve("m_HitLighting"),"raw","native",aa:true);
+        try {
+            foreach(var item in energyOutputs)raw.SetComputeTextureParam(shader,kernel,item.property,item.texture);
+            raw.SetComputeTextureParam(shader,screenKernel,"_SdfScreenRaysOutput",energyScreen);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenRays",energyScreen);
+            cmd.SetComputeFloatParam(shader,"_SdfDiffuseMaxDistance",energyRange);
+            cmd.DispatchCompute(shader,screenKernel,15,17,1);
+            ReadEnergy(context,energyScreen,"screen","replay",aa:true);
+            cmd.DispatchCompute(shader,kernel,15,17,1);
+            ReadEnergy(context,geometry,"geometry","replay",aa:true);
+            ReadEnergy(context,lighting,"raw","replay",aa:true);
+            cmd.SetComputeIntParam(shader,"_SdfDirectionalGuideEnabled",0);
+            int accumulate=energyAccumulator.FindKernel("AccumulateEnergyReferenceCS");
+            raw.SetComputeTextureParam(energyAccumulator,accumulate,"_EnergyInput",lighting);
+            raw.SetComputeTextureParam(energyAccumulator,accumulate,"_EnergySum",energySum);
+            if(energyRecordReasons) {
+                cmd.SetComputeIntParam(shader,"_SdfDiffuseRecordRayDiagnostics",1);
+                raw.SetComputeTextureParam(energyAccumulator,accumulate,"_EnergyRays",energyOutputs.Single(p=>p.field=="m_RayDiagnostics").texture);
+                raw.SetComputeTextureParam(energyAccumulator,accumulate,"_EnergyReasonA",energyReasonA);
+                raw.SetComputeTextureParam(energyAccumulator,accumulate,"_EnergyReasonB",energyReasonB);
+            }
+            for(int sample=0;sample<energySets;++sample) {
+                int seed=energySeed+(frame-warmup)*energySets+sample;
+                cmd.SetComputeIntParam(shader,"_SdfDiffuseFrame",seed);
+                cmd.DispatchCompute(shader,screenKernel,15,17,1);
+                cmd.DispatchCompute(shader,kernel,15,17,1);
+                cmd.SetComputeIntParam(energyAccumulator,"_EnergySample",sample);
+                cmd.DispatchCompute(energyAccumulator,accumulate,15,17,1);
+            }
+            ReadEnergy(context,energySum,"reference","source");
+            ReadEnergy(context,geometry,"reference-geometry","source");
+            if(energyRecordReasons){ReadEnergy(context,energyReasonA,"reasons-a","source");ReadEnergy(context,energyReasonB,"reasons-b","source");}
+            records.Add(new{arm,frame,energySets,energySeed,energyRecordReasons,energyTraceKernel=kernel,energyScreenKernel=screenKernel,traceShader=AssetDatabase.GetAssetPath(shader)});
+        }finally {
+            cmd.SetComputeIntParam(shader,"_SdfDiffuseFrame",nativeFrame);
+            cmd.SetComputeIntParam(shader,"_SdfDirectionalGuideEnabled",nativeGuide);
+            cmd.SetComputeIntParam(shader,"_SdfDiffuseRecordRayDiagnostics",(bool)PrivateField("m_RecordRayDiagnostics")?1:0);
+            foreach(var item in energyOutputs)raw.SetComputeTextureParam(shader,kernel,item.property,PrivateResolve(item.field));
+            raw.SetComputeTextureParam(shader,screenKernel,"_SdfScreenRaysOutput",PrivateResolve("m_ScreenRays"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenRays",PrivateResolve("m_ScreenRays"));
+        }
+    }

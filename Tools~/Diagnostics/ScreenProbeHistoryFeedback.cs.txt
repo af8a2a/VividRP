@@ -1,0 +1,125 @@
+    ComputeShader feedbackShader=null;int feedbackKernel=-1,feedbackWeightKernel=-1;
+    bool conservativeFeedback=__CONSERVATIVE__;
+    bool alignFeedbackMoments=__ALIGN_MOMENTS__;
+    RenderTexture feedbackWeights=null,feedbackFiltered=null,feedbackMoments=null;
+    var feedbackPrograms=new List<object>();
+    void SetupFeedback() {
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic)
+            .Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        feedbackShader=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/feedback.compute.txt")});
+        if(EditorUtility.IsPersistent(feedbackShader) || AssetDatabase.GetAssetPath(feedbackShader)!="")throw new InvalidOperationException("Feedback shader must remain in memory.");
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CompileComputeShaderVariant");
+        foreach(string name in conservativeFeedback?new[]{"NormalizeScreenProbeHistoryWeightsCS","WriteScreenProbeHistoryFeedbackCS"}:new[]{"WriteScreenProbeHistoryFeedbackCS"}) {
+            int kernel=feedbackShader.FindKernel(name);
+            var variant=compile.Invoke(null,new object[]{feedbackShader,kernel,Array.Empty<string>(),UnityEngine.Rendering.GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+            if(!(bool)variant.GetType().GetProperty("Success").GetValue(variant))throw new InvalidOperationException("Feedback shader compilation failed: "+name);
+            var bytes=(byte[])variant.GetType().GetProperty("ShaderData").GetValue(variant);
+            feedbackPrograms.Add(new{name,kernel,bytes=bytes.Length,sha256=Hash(bytes)});
+        }
+        feedbackKernel=feedbackShader.FindKernel("WriteScreenProbeHistoryFeedbackCS");
+        if(conservativeFeedback) {
+            feedbackWeightKernel=feedbackShader.FindKernel("NormalizeScreenProbeHistoryWeightsCS");
+            feedbackWeights=new RenderTexture(new RenderTextureDescriptor(1920,1080){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+            feedbackFiltered=new RenderTexture(new RenderTextureDescriptor(1920,1080){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+            if(!feedbackWeights.Create() || !feedbackFiltered.Create())throw new InvalidOperationException("Feedback scratch allocation failed.");
+            if(alignFeedbackMoments) {
+                feedbackMoments=new RenderTexture(feedbackFiltered.descriptor){hideFlags=HideFlags.HideAndDontSave};
+                if(!feedbackMoments.Create())throw new InvalidOperationException("Feedback moments allocation failed.");
+            }
+        }
+    }
+    void CleanupFeedback() {
+        foreach(var texture in new[]{feedbackWeights,feedbackFiltered,feedbackMoments})if(texture!=null){texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+        if(feedbackShader!=null)UnityEngine.Object.DestroyImmediate(feedbackShader);
+        // These pilots modify the renderer's current histories. Discard them
+        // after the final GPU readback instead of retaining a rejected candidate.
+        if(arm!="" && camera!=null) {
+            var pass=((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p=>p.GetType()==type);
+            var owner=type.GetField("m_Cameras",inst).GetValue(pass);
+            owner.GetType().GetMethod("CleanupCamera").Invoke(owner,new object[]{camera});
+            var histories=type.Assembly.GetType("VividRP.Runtime.CameraHistorySystem").GetField("s_Histories",stat).GetValue(null);
+            histories.GetType().GetMethod("CleanupCamera").Invoke(histories,new object[]{camera});
+        }
+    }
+    void ReadFeedbackEnergy(ComputePassContext context,Texture texture,string tag) {
+        string currentArm=arm;int f=frame;pending++;
+        var command=(CommandBuffer)wrapped.GetValue(context.cmd);
+        command.RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Feedback energy readback failed.");
+                var values=request.GetData<ushort>();double red=0,green=0,blue=0;int valid=0;
+                for(int i=0;i<values.Length;i+=4)if(values[i+3]!=0) {
+                    red+=Unity.Mathematics.math.f16tof32(values[i]);green+=Unity.Mathematics.math.f16tof32(values[i+1]);blue+=Unity.Mathematics.math.f16tof32(values[i+2]);valid++;
+                }
+                records.Add(new{arm=currentArm,frame=f,energyTag=tag,validPixels=valid,red,green,blue});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    Texture FeedbackTexture(string field) {
+        var pass=((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p=>p.GetType()==type);
+        var value=type.GetField(field,inst).GetValue(pass);
+        var handle=value is RenderGraphTexture graph?(TextureHandle)graph:(TextureHandle)value;
+        return handle.IsValid()?(Texture)handle:null;
+    }
+    void ReadFeedbackCrop(ComputePassContext context,Texture texture,string tag,int x,int y,int width,int height) {
+        if(texture==null || texture.graphicsFormat!=UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat)
+            throw new InvalidOperationException("Unexpected feedback ROI format: "+tag);
+        string currentArm=arm;int f=frame,fullWidth=texture.width;string format=texture.graphicsFormat.ToString();
+        var command=(CommandBuffer)wrapped.GetValue(context.cmd);pending++;
+        command.RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Feedback readback failed: "+tag);
+                var bytes=request.GetData<byte>().ToArray();var crop=new byte[width*height*8];
+                for(int row=0;row<height;++row)Buffer.BlockCopy(bytes,((row+y)*fullWidth+x)*8,crop,row*width*8,width*8);
+                string path=output+"/"+currentArm+"/"+f.ToString("0000")+"-"+tag+".bin";Write(path,crop);
+                records.Add(new{arm=currentArm,frame=f,tag,x,y,width,height,format,sha256=Hash(crop),saved=true,path});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    Action<ComputePassContext,int,Texture,Texture,Texture,Texture> feedbackHook=(context,iteration,input,result,variance,varianceOutput)=>{
+        if(!active || phase!=1 || context.Get<VividCameraData>().camera!=camera)return;
+        if(iteration==3 && alignFeedbackMoments && arm=="feedback") {
+            var moments=FeedbackTexture("m_CurrentScreenProbeMoments");
+            bool sample=frame>=warmup && ((frame-warmup)%16==0 || frame==warmup+count-1);
+            if(sample)ReadFeedbackCrop(context,moments,"moments-before",912,970,96,48);
+            ((CommandBuffer)wrapped.GetValue(context.cmd)).CopyTexture(feedbackMoments,moments);
+            if(sample)ReadFeedbackCrop(context,moments,"moments-after",912,970,96,48);
+            return;
+        }
+        if(iteration!=1)return;
+        var history=FeedbackTexture("m_CurrentPixelLighting");
+        bool save=frame>=warmup && ((frame-warmup)%16==0 || frame==warmup+count-1);
+        if(save) {
+            ReadFeedbackCrop(context,history,"history-before",912,970,96,48);
+            ReadFeedbackCrop(context,result,"feedback-source",912,970,96,48);
+            if(conservativeFeedback)ReadFeedbackEnergy(context,history,"before");
+        }
+        if(arm=="feedback") {
+            var cmd=(CommandBuffer)wrapped.GetValue(context.cmd);
+            cmd.SetComputeIntParam(feedbackShader,"_SdfGatherHistoryDiagnostics",0);
+            if(conservativeFeedback) {
+                var pass=((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p=>p.GetType()==type);
+                foreach(int kernel in new[]{feedbackWeightKernel,feedbackKernel}) {
+                    type.GetMethod("BindReceiver",inst).Invoke(pass,new object[]{context.cmd,feedbackShader,kernel});
+                    cmd.SetComputeTextureParam(feedbackShader,kernel,"_SdfFeedbackHistoryInput",history);
+                    cmd.SetComputeTextureParam(feedbackShader,kernel,"_SdfFeedbackMoments",FeedbackTexture("m_CurrentScreenProbeMoments"));
+                }
+                type.GetMethod("BindProbeFrame",inst).Invoke(pass,new object[]{context.cmd,feedbackShader});
+                cmd.SetComputeTextureParam(feedbackShader,feedbackWeightKernel,"_SdfFeedbackWeightOutput",feedbackWeights);
+                context.cmd.DispatchCompute(feedbackShader,feedbackWeightKernel,240,135,1);
+                cmd.SetComputeTextureParam(feedbackShader,feedbackKernel,"_SdfFeedbackWeights",feedbackWeights);
+                cmd.SetComputeTextureParam(feedbackShader,feedbackKernel,"_SdfFeedbackPixelHistory",feedbackFiltered);
+                if(alignFeedbackMoments)cmd.SetComputeTextureParam(feedbackShader,feedbackKernel,"_SdfFeedbackMomentsOutput",feedbackMoments);
+                context.cmd.DispatchCompute(feedbackShader,feedbackKernel,240,135,1);
+                cmd.CopyTexture(feedbackFiltered,history);
+            }else {
+                cmd.SetComputeTextureParam(feedbackShader,feedbackKernel,"_SdfFeedbackLighting",result);
+                cmd.SetComputeTextureParam(feedbackShader,feedbackKernel,"_SdfFeedbackPixelHistory",history);
+                context.cmd.DispatchCompute(feedbackShader,feedbackKernel,240,135,1);
+            }
+        }
+        if(save) {
+            ReadFeedbackCrop(context,history,"history-after",912,970,96,48);
+            if(conservativeFeedback)ReadFeedbackEnergy(context,history,"after");
+        }
+    };

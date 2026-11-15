@@ -1,0 +1,20 @@
+    void ReadCrop(ComputePassContext context,Texture texture,string tag,int x,int y,int width,int height) {
+        if(texture==null)throw new InvalidOperationException("Missing witness: "+tag);
+        string format=texture.graphicsFormat.ToString();
+        int stride=format=="R32G32B32A32_SFloat"?16:format=="R16G16B16A16_SFloat"?8:0;
+        if(stride==0 || x+width>texture.width || y+height>texture.height)throw new InvalidOperationException("Invalid witness crop: "+tag);
+        string currentArm=arm;int f=frame,fullWidth=texture.width,fullHeight=texture.height;
+        var command=(CommandBuffer)wrapped.GetValue(context.cmd);
+        pending++;
+        command.RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError)throw new InvalidOperationException("Witness readback failed: "+tag);
+                if(Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Unexpected witness callback thread.");
+                var data=request.GetData<byte>().ToArray();var cropped=new byte[width*height*stride];
+                for(int row=0;row<height;++row)Buffer.BlockCopy(data,((y+row)*fullWidth+x)*stride,cropped,row*width*stride,width*stride);
+                string path=output+"/"+currentArm+"/"+f.ToString("0000")+"-"+tag+".bin";
+                Write(path,cropped);
+                records.Add(new{arm=currentArm,frame=f,tag,x,y,width,height,fullWidth,fullHeight,format,sha256=Hash(cropped),saved=true,path});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }

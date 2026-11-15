@@ -1,0 +1,83 @@
+#pragma kernel NormalizeScreenProbeHistoryWeightsCS
+#pragma kernel WriteScreenProbeHistoryFeedbackCS
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeCommon.hlsl"
+
+Texture2D<float4> _SdfFeedbackHistoryInput;
+Texture2D<float4> _SdfFeedbackMoments;
+Texture2D<float> _SdfFeedbackWeights;
+RWTexture2D<float> _SdfFeedbackWeightOutput;
+RWTexture2D<float4> _SdfFeedbackPixelHistory;
+#if defined(VIVID_HISTORY_FEEDBACK_MOMENTS)
+RWTexture2D<float4> _SdfFeedbackMomentsOutput;
+#endif
+
+float HistoryPairWeight(uint2 first,uint2 second,float4 a,float4 b,float3 position,float3 normal) {
+    if(a.a<=0.0 || b.a<=0.0)return 0.0;
+    float3 otherPosition,otherNormal;
+    if(!LoadReceiver(second,otherPosition,otherNormal))return 0.0;
+    float normalAgreement=saturate(dot(normal,otherNormal));
+    if(normalAgreement<0.95)return 0.0;
+    float3 delta=otherPosition-position;
+    float plane=max(abs(dot(delta,normal)),abs(dot(delta,otherNormal)));
+    float eye=max(dot(float4(position,1),_SdfProbeCameraForward),dot(float4(otherPosition,1),_SdfProbeCameraForward));
+    float planeSigma=max(0.005,0.002*eye);
+    float la=log2(1.0+dot(max(a.rgb,0.0),float3(.2126,.7152,.0722)));
+    float lb=log2(1.0+dot(max(b.rgb,0.0),float3(.2126,.7152,.0722)));
+    float variance=max(0.0,_SdfFeedbackMoments.Load(int3(first,0)).y)+max(0.0,_SdfFeedbackMoments.Load(int3(second,0)).y);
+    float luminanceSigma=max(0.02,2.0*sqrt(variance));
+    float2 pixelDelta=float2(first)-float2(second);
+    float spatial=exp2(-dot(pixelDelta,pixelDelta)/8.0);
+    float difference=(la-lb)/luminanceSigma;
+    float depth=plane/planeSigma;
+    return spatial*pow(normalAgreement,32.0)*exp2(-depth*depth-difference*difference);
+}
+
+[numthreads(8,8,1)]
+void NormalizeScreenProbeHistoryWeightsCS(uint3 id:SV_DispatchThreadID) {
+    uint2 size=uint2(_SdfDiffuseScreenSize.xy);
+    if(any(id.xy>=size))return;
+    float4 center=_SdfFeedbackHistoryInput.Load(int3(id.xy,0));
+    float3 position,normal;float sum=1.0;
+    if(center.a>0.0 && LoadReceiver(id.xy,position,normal)) {
+        [unroll]for(int y=-1;y<=1;++y)[unroll]for(int x=-1;x<=1;++x) {
+            if(x==0 && y==0)continue;
+            int2 pixel=int2(id.xy)+2*int2(x,y);
+            if(any(pixel<0) || any(pixel>=int2(size)))continue;
+            sum+=HistoryPairWeight(id.xy,uint2(pixel),center,_SdfFeedbackHistoryInput.Load(int3(pixel,0)),position,normal);
+        }
+    }
+    _SdfFeedbackWeightOutput[id.xy]=sum;
+}
+
+[numthreads(8,8,1)]
+void WriteScreenProbeHistoryFeedbackCS(uint3 id:SV_DispatchThreadID) {
+    uint2 size=uint2(_SdfDiffuseScreenSize.xy);
+    if(any(id.xy>=size))return;
+    float4 center=_SdfFeedbackHistoryInput.Load(int3(id.xy,0));
+    float3 position,normal;float3 correction=0.0;
+    if(center.a>0.0 && LoadReceiver(id.xy,position,normal)) {
+        float ownWeight=_SdfFeedbackWeights.Load(int3(id.xy,0));
+        [unroll]for(int y=-1;y<=1;++y)[unroll]for(int x=-1;x<=1;++x) {
+            if(x==0 && y==0)continue;
+            int2 pixel=int2(id.xy)+2*int2(x,y);
+            if(any(pixel<0) || any(pixel>=int2(size)))continue;
+            float4 sample=_SdfFeedbackHistoryInput.Load(int3(pixel,0));
+            float weight=HistoryPairWeight(id.xy,uint2(pixel),center,sample,position,normal);
+            weight/=max(ownWeight,_SdfFeedbackWeights.Load(int3(pixel,0)));
+            correction+=weight*(sample.rgb-center.rgb);
+        }
+    }
+    float3 filtered=SdfRoundToNearestHalf(float4(center.rgb+correction,0)).rgb;
+    _SdfFeedbackPixelHistory[id.xy]=float4(filtered,center.a);
+#if defined(VIVID_HISTORY_FEEDBACK_MOMENTS)
+    float4 moments=_SdfFeedbackMoments.Load(int3(id.xy,0));
+    if(center.a>0.0) {
+        uint payload=f32tof16(center.a)-0x0400u;
+        float coverage=max(float(payload&255u)/255.0,1.0/255.0);
+        float oldLog=log2(1.0+dot(max(center.rgb,0.0)/coverage,float3(.2126,.7152,.0722)));
+        float newLog=log2(1.0+dot(max(filtered,0.0)/coverage,float3(.2126,.7152,.0722)));
+        moments.x=SdfRoundToNearestHalf(float4(moments.x+newLog-oldLog,0,0,0)).x;
+    }
+    _SdfFeedbackMomentsOutput[id.xy]=moments;
+#endif
+}

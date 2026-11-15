@@ -4,6 +4,8 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeHybridInputWitness-20261116-052500",
+    "ScreenProbeColorHistoryFeedback-20261116-054500",
     "ScreenProbeGeometryReference-20261115-200000",
     "ScreenProbeVarianceRoleIsolation-20261115-192000",
     "ScreenProbeMomentChannelIsolation-20261115-185000",

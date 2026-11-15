@@ -1,0 +1,193 @@
+    string privateMethod="__METHOD__";
+    bool privateFeedbackWitness=__FEEDBACK_WITNESS__;
+    object privatePass=null;
+    ComputeShader privateTemporal=null,privateTemporalCandidate=null,privateWavelet=null,privateFeedback=null;
+    var privatePrograms=new List<object>();var privateOwned=new List<RenderTexture>();
+    var privateShaders=new List<ComputeShader>();
+    var privateColor=new RenderTexture[2,2];var privateMoments=new RenderTexture[2,2];var privateGeometry=new RenderTexture[2,2];
+    var privateLighting=new RenderTexture[2];var privateWaveColors=new RenderTexture[2];var privateWaveVariance=new RenderTexture[2];
+    RenderTexture privateWeights=null,privateFiltered=null,privateAdjustedMoments=null;
+    bool privateInitialized=false;int privateAaPairs=0;
+    var privatePendingPairs=new Dictionary<string,(string side,string hash,byte[] bytes,string format,int width,int height)>();
+    var privateRois=new[]{("ceiling",912,970,96,48),("floor",912,130,96,64),("back",1100,600,96,64),("edge",880,414,160,128)};
+    Action<ComputeCommandBuffer,ComputeShader,int> privateBindReceiver=null;
+    Action<ComputeCommandBuffer,ComputeShader> privateBindFrame=null;
+    object PrivateField(string name)=>type.GetField(name,inst).GetValue(privatePass);
+    Texture PrivateResolve(string name) {
+        var value=PrivateField(name);var handle=value is RenderGraphTexture graph?(TextureHandle)graph:(TextureHandle)value;
+        return handle.IsValid()?(Texture)handle:null;
+    }
+    RenderTexture PrivateTexture(UnityEngine.Experimental.Rendering.GraphicsFormat format) {
+        var texture=new RenderTexture(new RenderTextureDescriptor(1920,1080){graphicsFormat=format,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+        privateOwned.Add(texture);if(!texture.Create())throw new InvalidOperationException("Private replay texture creation failed.");return texture;
+    }
+    ComputeShader PrivateShader(string file,string[] names) {
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        var shader=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/"+file)});
+        if(EditorUtility.IsPersistent(shader) || AssetDatabase.GetAssetPath(shader)!="")throw new InvalidOperationException("Replay shaders must stay in memory.");
+        privateShaders.Add(shader);
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CompileComputeShaderVariant");
+        foreach(string name in names) {
+            int kernel=shader.FindKernel(name);var result=compile.Invoke(null,new object[]{shader,kernel,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+            if(!(bool)result.GetType().GetProperty("Success").GetValue(result))throw new InvalidOperationException("Private shader compilation failed: "+name);
+            var data=(byte[])result.GetType().GetProperty("ShaderData").GetValue(result);privatePrograms.Add(new{file,name,kernel,bytes=data.Length,sha256=Hash(data)});
+        }
+        return shader;
+    }
+    void SetupPrivateReplay() {
+        privatePass=((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p=>p.GetType()==type);
+        privateBindReceiver=(Action<ComputeCommandBuffer,ComputeShader,int>)type.GetMethod("BindReceiver",inst).CreateDelegate(typeof(Action<ComputeCommandBuffer,ComputeShader,int>),privatePass);
+        privateBindFrame=(Action<ComputeCommandBuffer,ComputeShader>)type.GetMethod("BindProbeFrame",inst).CreateDelegate(typeof(Action<ComputeCommandBuffer,ComputeShader>),privatePass);
+        privateTemporal=PrivateShader("temporal.compute.txt",new[]{"ScreenProbeTemporalReprojectionWithMomentsCS"});
+        if(privateMethod=="stable-unclamped")privateTemporalCandidate=PrivateShader("temporal-candidate.compute.txt",new[]{"ScreenProbeTemporalReprojectionWithMomentsCS"});
+        privateWavelet=PrivateShader("wavelet.compute.txt",new[]{"FilterSdfDiffuseAtrous","FilterSdfDiffuseAtrousFinal"});
+        var rgba=UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
+        for(int path=0;path<2;++path) {
+            privateLighting[path]=PrivateTexture(rgba);
+            for(int slot=0;slot<2;++slot){privateColor[path,slot]=PrivateTexture(rgba);privateMoments[path,slot]=PrivateTexture(rgba);privateGeometry[path,slot]=PrivateTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_UInt);}
+        }
+        for(int slot=0;slot<2;++slot){privateWaveColors[slot]=PrivateTexture(rgba);privateWaveVariance[slot]=PrivateTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat);}
+        if(privateMethod=="wavelet" || privateMethod=="conservative-moments")privateFeedback=PrivateShader("feedback.compute.txt",privateMethod=="wavelet"?new[]{"WriteScreenProbeHistoryFeedbackCS"}:new[]{"NormalizeScreenProbeHistoryWeightsCS","WriteScreenProbeHistoryFeedbackCS"});
+        if(privateMethod=="conservative-moments") {
+            privateWeights=PrivateTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat);privateFiltered=PrivateTexture(rgba);privateAdjustedMoments=PrivateTexture(rgba);
+        }
+    }
+    void CleanupPrivateReplay() {
+        foreach(var texture in privateOwned){texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+        foreach(var shader in privateShaders)UnityEngine.Object.DestroyImmediate(shader);
+    }
+    void PairPrivate(string key,string side,string hash,byte[] bytes,string format,int width,int height,int f) {
+        if(privatePendingPairs.TryGetValue(key,out var prior)) {
+            privatePendingPairs.Remove(key);privateAaPairs++;
+            if(prior.side==side || prior.hash!=hash) {
+                foreach(var witness in new[]{(prior.side,prior.bytes,prior.hash),(side,bytes,hash)}) {
+                    string file=output+"/"+arm+"/"+f.ToString("0000")+"-failure-"+key.Replace('/','-')+"-"+witness.Item1+".bin";
+                    Write(file,witness.Item2);records.Add(new{arm,frame=f,failureKey=key,side=witness.Item1,path=file,format,width,height,sha256=witness.Item3});
+                }
+                errors.Add("Private native-baseline mismatch: "+key);
+            }
+        }else privatePendingPairs.Add(key,(side,hash,bytes,format,width,height));
+    }
+    void ReadPrivate(ComputePassContext context,Texture texture,string role,string side,bool pair,bool save) {
+        if(texture==null)throw new InvalidOperationException("Missing private replay resource: "+role);
+        int fullWidth=texture.width,fullHeight=texture.height,f=frame;string currentArm=arm,format=texture.graphicsFormat.ToString();
+        int stride=format=="R16G16B16A16_SFloat"?8:format=="R32_UInt"?4:0;
+        if(stride==0 || fullWidth!=1920 || fullHeight!=1080)throw new InvalidOperationException("Unexpected replay descriptor: "+role);
+        bool full=pair && (f<3 || f==warmup-1 || f>=warmup);pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Private replay readback failed.");
+                var bytes=request.GetData<byte>().ToArray();
+                if(full) {
+                    string hash=Hash(bytes);records.Add(new{arm=currentArm,frame=f,tag=role+"-full",side,format,width=fullWidth,height=fullHeight,sha256=hash,saved=false});
+                    PairPrivate(f+"/"+role+"/full",side,hash,bytes,format,fullWidth,fullHeight,f);
+                }
+                foreach(var roi in privateRois) {
+                    var crop=new byte[roi.Item4*roi.Item5*stride];
+                    for(int row=0;row<roi.Item5;++row)Buffer.BlockCopy(bytes,((roi.Item3+row)*fullWidth+roi.Item2)*stride,crop,row*roi.Item4*stride,roi.Item4*stride);
+                    string tag=role+"-"+roi.Item1,hash=Hash(crop),file=save?output+"/"+currentArm+"/"+f.ToString("0000")+"-"+side+"-"+tag+".bin":null;
+                    if(save)Write(file,crop);
+                    string metadataSha256=null;
+                    if(role.Contains("history",StringComparison.Ordinal) || role.Contains("moments",StringComparison.Ordinal)) {
+                        bool historyRole=role.Contains("history",StringComparison.Ordinal);
+                        bool publication=role.StartsWith("feedback-",StringComparison.Ordinal);
+                        int offset=historyRole?6:publication?2:4,bytesPerPixel=historyRole?2:publication?6:4;
+                        var metadata=new byte[roi.Item4*roi.Item5*bytesPerPixel];
+                        for(int pixel=0;pixel<roi.Item4*roi.Item5;++pixel)for(int component=0;component<bytesPerPixel;++component)
+                            metadata[pixel*bytesPerPixel+component]=crop[pixel*8+offset+component];
+                        metadataSha256=Hash(metadata);
+                    }
+                    records.Add(new{arm=currentArm,frame=f,tag,side,x=roi.Item2,y=roi.Item3,width=roi.Item4,height=roi.Item5,format,sha256=hash,metadataSha256,saved=save,path=file});
+                    if(pair)PairPrivate(f+"/"+tag,side,hash,crop,format,roi.Item4,roi.Item5,f);
+                }
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void ReplayPrivateTemporal(ComputePassContext context) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);int slot=frame&1,previous=1-slot;
+        var state=PrivateField("m_State");object State(string name)=>state.GetType().GetField(name,inst).GetValue(state);
+        var previousVp=(Matrix4x4)State("ViewProjection");var jitter=(Vector2)PrivateField("m_ScreenJitterDelta");
+        bool hasHistory=(bool)PrivateField("m_HasHistory") && PrivateResolve("m_PreviousGeometry")!=null
+            && (bool)State("PixelTemporal") && (int)State("PixelHistoryMaxAge")== (int)PrivateField("m_PixelHistoryMaxAge")
+            && ((CameraHistoryTexture)PrivateField("m_PixelHistory")).IsValid() && ((CameraHistoryTexture)PrivateField("m_PixelGeometryHistory")).IsValid();
+        bool momentsValid=hasHistory && ((CameraHistoryTexture)PrivateField("m_ScreenProbeMomentsHistory")).IsValid();
+        if(!privateInitialized) {
+            for(int path=0;path<2;++path) {
+                raw.CopyTexture(PrivateResolve("m_PreviousPixelLighting"),privateColor[path,previous]);
+                raw.CopyTexture(PrivateResolve("m_PreviousScreenProbeMoments"),privateMoments[path,previous]);
+                raw.CopyTexture(PrivateResolve("m_PreviousPixelGeometry"),privateGeometry[path,previous]);
+            }
+            privateInitialized=true;records.Add(new{arm,frame,privateInitialization=true,hasHistory,momentsValid});
+        }
+        foreach(var item in new[]{("temporal",PrivateResolve("m_Output")),("history",PrivateResolve("m_CurrentPixelLighting")),("moments",PrivateResolve("m_CurrentScreenProbeMoments")),("geometry",PrivateResolve("m_CurrentPixelGeometry"))})
+            ReadPrivate(context,item.Item2,item.Item1,"native",true,frame==0 || frame==warmup || frame==warmup+count-1);
+        for(int path=0;path<2;++path) {
+            var shader=path==1 && privateTemporalCandidate!=null?privateTemporalCandidate:privateTemporal;
+            int kernel=shader.FindKernel("ScreenProbeTemporalReprojectionWithMomentsCS");privateBindReceiver(cmd,shader,kernel);privateBindFrame(cmd,shader);
+            cmd.SetComputeMatrixParam(shader,"_SdfDiffusePreviousVP",previousVp);cmd.SetComputeMatrixParam(shader,"_SdfScreenPreviousInverseVP",previousVp.inverse);
+            cmd.SetComputeVectorParam(shader,"_SdfScreenJitterDelta",new Vector4(jitter.x,jitter.y,0,0));
+            cmd.SetComputeIntParam(shader,"_SdfDiffuseHasHistory",hasHistory?1:0);cmd.SetComputeFloatParam(shader,"_SdfPixelHistoryMaxAge",(int)PrivateField("m_PixelHistoryMaxAge"));
+            cmd.SetComputeIntParam(shader,"_SdfScreenProbeMomentsHistoryValid",momentsValid?1:0);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenProbePreviousMoments",privateMoments[path,previous]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenProbeMomentsOutput",privateMoments[path,slot]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfScreenMotion",PrivateResolve("m_ScreenMotion"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffuseCurrentResolved",PrivateResolve("m_RawResolved"));
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePreviousPixelLighting",privateColor[path,previous]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePreviousPixelGeometry",privateGeometry[path,previous]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePixelLightingOutput",privateColor[path,slot]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffusePixelGeometryOutput",privateGeometry[path,slot]);
+            raw.SetComputeTextureParam(shader,kernel,"_SdfDiffuseOutput",privateLighting[path]);cmd.DispatchCompute(shader,kernel,240,135,1);
+            foreach(var item in new[]{("temporal",privateLighting[path]),("history",privateColor[path,slot]),("moments",privateMoments[path,slot]),("geometry",privateGeometry[path,slot])})
+                ReadPrivate(context,item.Item2,item.Item1,path==0?"baseline":"candidate",path==0,frame==0 || frame==warmup || frame==warmup+count-1);
+        }
+    }
+    void ReplayPrivateFeedback(ComputePassContext context,Texture lighting) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);int slot=frame&1;
+        bool saveWitness=privateFeedbackWitness && frame<32;
+        ReadPrivate(context,privateColor[1,slot],"feedback-history-before","candidate",false,saveWitness);
+        ReadPrivate(context,privateMoments[1,slot],"feedback-moments-before","candidate",false,saveWitness);
+        if(privateMethod=="wavelet") {
+            int kernel=privateFeedback.FindKernel("WriteScreenProbeHistoryFeedbackCS");cmd.SetComputeIntParam(privateFeedback,"_SdfGatherHistoryDiagnostics",0);
+            raw.SetComputeTextureParam(privateFeedback,kernel,"_SdfFeedbackLighting",lighting);raw.SetComputeTextureParam(privateFeedback,kernel,"_SdfFeedbackPixelHistory",privateColor[1,slot]);cmd.DispatchCompute(privateFeedback,kernel,240,135,1);
+        }else if(privateMethod=="conservative-moments") {
+            int weight=privateFeedback.FindKernel("NormalizeScreenProbeHistoryWeightsCS"),apply=privateFeedback.FindKernel("WriteScreenProbeHistoryFeedbackCS");
+            privateBindFrame(cmd,privateFeedback);
+            foreach(int kernel in new[]{weight,apply}) {
+                privateBindReceiver(cmd,privateFeedback,kernel);raw.SetComputeTextureParam(privateFeedback,kernel,"_SdfFeedbackHistoryInput",privateColor[1,slot]);
+                raw.SetComputeTextureParam(privateFeedback,kernel,"_SdfFeedbackMoments",privateMoments[1,slot]);
+            }
+            raw.SetComputeTextureParam(privateFeedback,weight,"_SdfFeedbackWeightOutput",privateWeights);cmd.DispatchCompute(privateFeedback,weight,240,135,1);
+            raw.SetComputeTextureParam(privateFeedback,apply,"_SdfFeedbackWeights",privateWeights);raw.SetComputeTextureParam(privateFeedback,apply,"_SdfFeedbackPixelHistory",privateFiltered);
+            raw.SetComputeTextureParam(privateFeedback,apply,"_SdfFeedbackMomentsOutput",privateAdjustedMoments);cmd.DispatchCompute(privateFeedback,apply,240,135,1);raw.CopyTexture(privateFiltered,privateColor[1,slot]);
+        }
+        ReadPrivate(context,privateColor[1,slot],"feedback-history-after","candidate",false,saveWitness);
+    }
+    void ReplayPrivateWavelets(ComputePassContext context,int path) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);Texture input=privateLighting[path],variance=Texture2D.blackTexture;
+        privateBindFrame(cmd,privateWavelet);
+        for(int iteration=0;iteration<4;++iteration) {
+            bool last=iteration==3;int kernel=privateWavelet.FindKernel(last?"FilterSdfDiffuseAtrousFinal":"FilterSdfDiffuseAtrous"),slot=iteration&1;
+            privateBindReceiver(cmd,privateWavelet,kernel);raw.SetComputeTextureParam(privateWavelet,kernel,"_SdfAtrousInput",input);
+            raw.SetComputeTextureParam(privateWavelet,kernel,"_SdfDiffuseCurrentResolved",Texture2D.blackTexture);raw.SetComputeTextureParam(privateWavelet,kernel,"_SdfAtrousVariance",variance);
+            raw.SetComputeTextureParam(privateWavelet,kernel,"_SdfDiffuseOutput",privateWaveColors[slot]);if(!last)raw.SetComputeTextureParam(privateWavelet,kernel,"_SdfAtrousVarianceOutput",privateWaveVariance[slot]);
+            raw.SetComputeTextureParam(privateWavelet,kernel,"_SdfAtrousScreenProbeMoments",privateMoments[path,frame&1]);
+            cmd.SetComputeIntParam(privateWavelet,"_SdfAtrousStep",1<<iteration);cmd.SetComputeIntParam(privateWavelet,"_SdfAtrousUseRestirDomain",0);
+            cmd.SetComputeIntParam(privateWavelet,"_SdfAtrousHasVariance",1);cmd.SetComputeIntParam(privateWavelet,"_SdfAtrousUseScreenProbeMoments",1);
+            cmd.DispatchCompute(privateWavelet,kernel,240,135,1);input=privateWaveColors[slot];variance=privateWaveVariance[slot];
+            if(path==1 && iteration==1 && (privateMethod=="wavelet" || privateMethod=="conservative-moments"))ReplayPrivateFeedback(context,input);
+        }
+        if(path==1 && privateMethod=="conservative-moments") {
+            raw.CopyTexture(privateAdjustedMoments,privateMoments[1,frame&1]);
+        }
+        if(path==1 && (privateMethod=="wavelet" || privateMethod=="conservative-moments"))ReadPrivate(context,privateMoments[1,frame&1],"feedback-moments-after","candidate",false,privateFeedbackWitness && frame<32);
+        ReadPrivate(context,input,"final",path==0?"baseline":"candidate",path==0,frame>=warmup || frame==0);
+    }
+    Action<ComputePassContext,int,Texture> privateTemporalHook=(context,index,texture)=> {
+        if(active && phase==1 && index==1 && context.Get<VividCameraData>().camera==camera)ReplayPrivateTemporal(context);
+    };
+    Action<ComputePassContext,int,Texture,Texture,Texture,Texture> privateWaveletHook=(context,index,input,result,variance,varianceOutput)=> {
+        if(!active || phase!=1 || index!=3 || context.Get<VividCameraData>().camera!=camera)return;
+        if(!privateInitialized)throw new InvalidOperationException("Private temporal stage did not run.");
+        ReadPrivate(context,result,"final","native",true,frame==0 || frame==warmup || frame==warmup+count-1);
+        ReplayPrivateWavelets(context,0);ReplayPrivateWavelets(context,1);
+    };

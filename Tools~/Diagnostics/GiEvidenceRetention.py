@@ -70,6 +70,10 @@ def plan_runs(root, policy):
         if name in seen or name in protected or Path(name).name != name or name in (".", "..") or "/" in name or "\\" in name:
             raise ValueError("Unsafe, duplicate or protected run: " + name)
         seen.add(name)
+        preserved = entry.get("preserveFrames", [])
+        if not isinstance(preserved, list) or any(type(frame) is not int or frame < 0 or frame > 999999 for frame in preserved):
+            raise ValueError("Expected nonnegative frame numbers up to six digits: " + name)
+        preserved = set(preserved)
         run = root / name
         no_link(run)
         if run.resolve() != run.absolute() or run.parent != root or not entry["reason"].strip():
@@ -92,16 +96,16 @@ def plan_runs(root, policy):
         removed = []
         kept = 0
         for group in groups.values():
-            # Keep complete first/last frame bundles in every arm/subdirectory.
+            # Keep complete endpoints and explicitly preserved bundles in every arm/subdirectory.
             endpoints = {min(f for f, _ in group), max(f for f, _ in group)}
             for frame, path in sorted(group):
-                if frame in endpoints:
+                if frame in endpoints or frame in preserved:
                     kept += 1
                     continue
                 info = path.stat()
                 removed.append(dict(path=str(path.relative_to(run)), bytes=info.st_size, mtimeNs=info.st_mtime_ns))
         result.append(dict(run=name, reason=entry["reason"], bytes=sum(p["bytes"] for p in removed),
-                           files=len(removed), keptFrameFiles=kept, archiveEvidence=evidence, paths=removed))
+                           files=len(removed), keptFrameFiles=kept, preserveFrames=sorted(preserved), archiveEvidence=evidence, paths=removed))
     return result
 
 
@@ -118,7 +122,8 @@ def prune(root, plans):
             raise ValueError("Run already has a retention audit: " + str(run))
         audit = dict(schema="gi-raw-retention.v1", utc=now(), complete=False, reason=plan["reason"],
                      archiveEvidence=plan["archiveEvidence"],
-                     rawReanalysisAvailable=False, kept="All non-frame files and first/last frame bundles per directory",
+                     rawReanalysisAvailable=False, kept="All non-frame files, first/last bundles, and explicitly preserved frames",
+                     preserveFrames=plan["preserveFrames"],
                      plannedFiles=plan["files"], plannedBytes=plan["bytes"], removedFiles=0, freedBytes=0,
                      fileJournal=file_journal.name, errors=[])
         write(journal, audit)

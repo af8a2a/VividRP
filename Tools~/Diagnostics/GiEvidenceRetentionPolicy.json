@@ -4,6 +4,8 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeTemporalPixPair-20261115-034908-669385",
+    "ScreenProbeFreshPixTiming-20261115-032443-384775",
     "ScreenProbeOriginalStageControl-20261115-021737-918072",
     "ScreenProbeOrderedReconstruction-20261115-020229-565866",
     "ScreenProbeDispatchInputWitness-20261115-014752-081900",
@@ -14,7 +16,6 @@
     "ScreenProbeControlledTraceAA-20261115-010602-290128",
     "ScreenProbePayloadBudgetGuard-20261115-000048-115815",
     "ScreenProbeInverseVpInputs-20261114-235131-623461",
-    "ScreenProbeDirectDepthHashes-20261114-234735-781902",
     "ScreenProbePlayModeTiming-20261114-223303-488278",
     "ScreenProbeAnchorGpuTimingProbe-20261114-223553-035",
     "ScreenProbeAnchorGpuTimingProbe-20261114-221031-612",
@@ -51,6 +52,7 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbeDirectDepthHashes-20261114-234735-781902", "reason": "Superseded by exact SDF/visibility witness and actual PIX b0/b1 bytes. Preserve complete first divergence2, prior1, endpoints and all metadata at original paths; interior sequence no longer fully reanalyzable", "requiredFiles": ["archive-review.json", "archive-review-correction.json", "source-verification.json", "timing-qualification.json", "capture.json"], "preserveFrames": [1, 2] },
     { "run": "ScreenProbePreciseGpuTiming-20261115-003323-857461", "reason": "Withdrawn precise-output candidate failed long A/A. First divergence1727 remains in each arm last complete bundle; GPU witness and ordered reconstruction experiments supersede interior inputs. Preserve all source/hash/CPU metadata and reports", "requiredFiles": ["archive-review.json", "source-verification.json", "capture.json"] },
     { "run": "ScreenProbePreciseRayFrame-20261115-004254-225175", "reason": "Incomplete first-arm-only capture invalidated by concurrent Editor edits. Superseded by unchanged-source controlled A/A and original-shader SDF/visibility witness; preserve failed source verification, reports, exact script and complete first/last bundles", "requiredFiles": ["archive-review.json", "source-verification.json", "capture.json"] },
     { "run": "ScreenProbeReceiverPrepPilot-20261115-001355-482964", "reason": "Receiver preparation prototype failed A/A and was withdrawn. First frame divergence is retained in complete endpoint bundles; all hashes, patches, source and analysis retained", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json"] },

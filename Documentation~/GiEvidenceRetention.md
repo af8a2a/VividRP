@@ -25,7 +25,7 @@ python -B Tools~/Diagnostics/GiEvidenceRetention.py --policy Tools~/Diagnostics/
 python -B Tools~/Diagnostics/GiEvidenceRetention.py --policy Tools~/Diagnostics/GiEvidenceRetentionPolicy.json --apply
 ```
 
-工具拒绝路径越界、重复/受保护目录、链接与 reparse point。仅允许删除文件名以四至六位帧号开头的 `.bin`，完整首尾帧、非帧文件及编译 shader 二进制不删除。删除前校验大小/修改时间、计算 SHA-256，并先发布删除批次清单；只对已经验证的文件逐个 unlink。计划后发生变化即停止，不覆盖旧清理审计。
+工具拒绝路径越界、重复/受保护目录、链接与 reparse point。仅允许删除文件名以四至六位帧号开头的 `.bin`，完整首尾帧、非帧文件及编译 shader 二进制不删除。归档项可用 `preserveFrames` 指定额外保留的完整帧包，例如 `[1, 2]` 保留首次分歧和前一帧的原始路径；必须为非负、最多六位的整数数组。删除前校验大小/修改时间、计算 SHA-256，并先发布删除批次清单；只对已经验证的文件逐个 unlink。计划后发生变化即停止，不覆盖旧清理审计。
 
 每个被归档目录新增 `raw-retention.json` 和 `raw-retention-files.jsonl`，记录理由、原证据 hash、删除文件 hash、首尾保留策略及完成/失败状态。`rawReanalysisAvailable=false` 明确表示完整原始序列已归档清理。中断时以文件清单与实际文件是否存在核对，不把未完成批次当作已完成。根目录 `retention-*.json` 汇总实际释放空间与是否需要继续审查。
 
@@ -121,3 +121,15 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 新旁路、重建精度及原shader观测控制组加入保护项。诊断的二进制预算降为32 MiB；深层方向纹理只存哈希，不能冒充保留了完整GPU载荷。两份1728帧控制组各仅保存832,512 B二进制，JSON/源码快照另计。涉及新GPU捕帧前仍需审查总容量并单独预留`.wpix`预算。
 
 后续真实PIX捕帧另清理340,376,972B重复/可再生成载荷：closed live捕帧副本及全量C++导出数据。canonical完整`.wpix`、全部源代码、压缩常量块及逐位校验的实际b0/b1字节保留；清理审计与限制见[PIX绑定证据](ScreenProbePixBindingCapture.md)。该阶段累计实际删除570,389,900B，未将已有文件缺失或另存副本冒充释放量。最新证据125.044GiB、可用115.910GiB；软上限审查标志仍为true，下一轮大捕帧前需继续预算审查。
+
+## 重启后 A/A 与成对 temporal 捕帧的清理
+
+`ScreenProbeDirectDepthHashes-20261114-234735-781902` 已被整数 visibility / SDF 见证和真实 PIX 常量取代。核验保护目录无待删除载荷依赖后，保留原路径的首次分歧2、前帧1及各 arm 首尾完整帧包，删除183份中间读回，释放 **573,305,856 B**。87份实际保留载荷逐份 SHA 校验通过；全部脚本、协议、报告与源码指纹保留，原中间序列不再完整可复算。审计为 `retention-20261115-033042-534528.json`。
+
+初始审查清单错误地将基线第4帧也列为保留；实际删除计划正确地将它视作中间帧，没有删除首次分歧或前帧。原审查与审计未改写，`archive-review-correction.json` 保留其 hash、87份实际保留项及12份错误列项。归档策略要求该更正文件继续存在。
+
+随后[两份同帧 temporal PIX 检查](ScreenProbeTemporalPixPair.md)完成，确认 session idle、诊断回调为空、默认参数恢复后，独立解压校验保留的常量 / DXIL，并核验两份 canonical 捕帧 SHA。只删除失败的首次 `.wpix`（189,688,272 B）及可重新导出的两份 `resources.bin`（192,476,800 / 192,898,006 B），共 **575,063,078 B**。canonical 捕帧、全部读回、压缩常量和程序、生成 C++、查询 JSON 及提取脚本均保留；C++ 导出目录需重导出载荷才能构建或回放。
+
+本阶段共实际删除 **1,148,368,934 B（约1.069 GiB）**，没有清理活动捕帧。成对捕帧审计为 `ScreenProbeTemporalPixPair-20261115-034908-669385/pix-derived-retention.json`，最终容量见同目录 `post-experiment-storage.json`。新 A/A 与成对捕帧保持保护。新增完整帧保留及非法策略回归后，10项独立文件系统测试通过；没有运行 Unity Test Framework。
+
+最新证据 **125.355 GiB**，E盘可用 **112.659 GiB**，`needsFurtherReview=true`；大捕帧前仍需审查可归档项。软上限不是任意删除保护证据的授权，不将其他进程造成的可用空间变化归因于上述清理。

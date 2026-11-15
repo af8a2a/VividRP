@@ -56,6 +56,29 @@ class RetentionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan_runs(self.root, self.policy)
 
+    def test_explicit_frames_remain_at_original_paths_with_complete_bundles(self):
+        for frame in (13, 14):
+            for tag in ("raw", "final"):
+                (self.arm / f"{frame:04d}-{tag}.bin").write_bytes(bytes([frame]) * 8)
+        self.policy["archiveRuns"][0]["preserveFrames"] = [11]
+        plans = plan_runs(self.root, self.policy)
+        self.assertEqual(4, plans[0]["files"])
+        prune(self.root, plans)
+        for frame in (10, 11, 14):
+            for tag in ("raw", "final"):
+                self.assertEqual(bytes([frame]) * 8, (self.arm / f"{frame:04d}-{tag}.bin").read_bytes())
+        for frame in (12, 13):
+            self.assertFalse((self.arm / f"{frame:04d}-raw.bin").exists())
+        self.assertEqual([11], json.loads((self.run / "raw-retention.json").read_text())["preserveFrames"])
+
+    def test_invalid_preserved_frame_policy_is_rejected(self):
+        for value in (None, "11", [True], [-1], ["11"], [1000000]):
+            with self.subTest(value=value):
+                self.policy["archiveRuns"][0]["preserveFrames"] = value
+                with self.assertRaises(ValueError):
+                    plan_runs(self.root, self.policy)
+        self.assertTrue((self.arm / "0011-raw.bin").exists())
+
     def test_directory_escape_refused(self):
         for name in ("../outside", str(self.root), "..", "nested/run"):
             self.policy["archiveRuns"][0]["run"] = name

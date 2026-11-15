@@ -54,3 +54,5 @@ python -B Tools~/Diagnostics/AnalyzeScreenProbeRecorderCadence.py E:/VividRP_GI_
 只保存声明的96份原始载荷，**149,492,736 B（142.57 MiB）**，逐份SHA通过，低于192 MiB上限。完整阶段 hash、CPU记录、实际脚本、恢复记录与报告保留，目录加入保护；容量复核见 [GI 数据保留](GiEvidenceRetention.md)。
 
 下一步应围绕 temporal 首次分歧的真实输入绑定与历史读取建立更短、可复现的控制；尤其保留第30→31帧这种前缀一致的样本。当前没有足够证据添加生产栅栏、量化几何或推广FP32/512，也不能将上一轮单个1727检查点直接视为 recorder 导致。
+
+后续[64帧窗口与冻结原kernel重放](ScreenProbeDirectionalBinding.md)已保存另一例第1→2帧分歧；1,512对CPU history内容链接一致，克隆与直接原对象的34对重放一致，原dispatch的实际常量与读取时序仍需取证。

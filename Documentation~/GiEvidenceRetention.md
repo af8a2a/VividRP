@@ -156,3 +156,9 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 [8组原 shader 控制](ScreenProbeRecorderCadence.md)完成后，新目录 `ScreenProbeRecorderCadence-20261115-054646-719003` 加入保护。96份保存载荷共 **149,492,736 B（142.57 MiB）**，逐份SHA通过，未超出192 MiB的硬上限；其余阶段只保存hash与CPU元数据。实际脚本、两版分析、分析工具副本及完整57 MB capture JSON保留。
 
 以05:15的刷新清单为基准，仅计入这份全新目录的实际文件，估计证据 **107.450 GiB**，实时E盘可用 **129.999 GiB**，`needsFurtherReview=false`。新增目录在写入容量审计前共215,102,933 B；其他目录沿用基准，没有再次全盘扫描。依据见该目录 `post-experiment-storage.json`。本次没有删除文件，没有将其他进程造成的磁盘变化归因于清理。
+
+## 短窗口首次分歧与原kernel重放
+
+[Directional历史检查](ScreenProbeDirectionalBinding.md)将8组窗口缩短为64帧，临时内存只持有基准与当前组的输入，逻辑持有量不超过3 GiB。只将首个分歧的前帧／当前帧保存，32份载荷94,525,440 B；克隆与直接原kernel重放额外保存75,202,560 B。合计 **169,728,000 B（161.87 MiB）**，低于192 MiB上限，所有保存payload均经SHA校验。末位扫描只保存hash与参数，没有新增二进制载荷。
+
+`ScreenProbeDirectionalBinding-20261115-061302-342892` 加入保护，保留完整metadata、实际脚本、初版未执行脚本、状态守卫停止记录、源码指纹及分析工具副本。新目录在写入审计前177,345,264 B；以06:02的容量估计为基准只加入该新目录，估计证据 **107.616 GiB**，实时E盘可用 **129.021 GiB**，`needsFurtherReview=false`。未完整重扫其他目录，没有删除文件。范围与时间见该目录 `post-experiment-storage.json`，后续新写入少量分析元数据不回填成旧审计时刻的计数。

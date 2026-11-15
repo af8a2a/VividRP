@@ -44,3 +44,5 @@ Runtime DLL时间早于源码最后写入时间，因此另核对实际加载MVI
 下一步应保持资源尺寸与数量，尝试在现有、经geometry有效性验证的未使用adaptive bin中记录原kernel常量；当前参考的adaptive原点geometry.w=-1。如果运行时该位置有效则不得覆盖。只有见证运行本身也复现分歧，才可用其常量归因；否则继续明确观察条件限制，不推广猜测性同步或舍入改动。
 
 新增目录及追加的旧目录已复核容量并保持保护，没有删除文件或创建临时链接。容量范围见 [GI 数据保留](GiEvidenceRetention.md)。
+
+后续[保持布局的原dispatch见证](ScreenProbeTemporalWeightWitness.md)已复现第2帧518个texel差异：记录group的32个常量字段与CPU预期一致，目标线程实际四个历史tap的geometry、地址和lighting也一致；clip相同而probe Y出现约3.8e-6差异，使微小历史权重跨过接受阈值，随后center分支放大结果。尚未修改生产路径，原型全部撤回；下一步可针对坐标运算精度与低支持历史的center资格分别验证。

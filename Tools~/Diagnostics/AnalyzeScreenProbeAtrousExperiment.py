@@ -197,6 +197,8 @@ def verify_replay_sources(root, capture, protocol):
         (label, name) for label in ("aa", "control") for name in ("FilterSdfDiffuseAtrous", "FilterSdfDiffuseAtrousFinal")}
     if protocol.get("controlMomentChannelFrozen"):
         expected.add(("moment-composition", "ComposeSdfMomentGuideCS"))
+    if protocol.get("controlMomentVariancePrefilter"):
+        expected.add(("variance-prefilter", "PrefilterSdfMomentVarianceCS"))
     assert len(programs) == len(expected) and {(p["reference"], p["name"]) for p in programs} == expected
 
 
@@ -241,6 +243,40 @@ def replay_hash_differences(rows, arms, labels):
                     if any(a[k] != b[k] for k in ("sha256", "x", "y", "width", "height", "format")):
                         differences.append([arm, frame, actual + label])
     return differences
+
+
+def qualify_variance_prefilter(rows, arms, labels):
+    results = {}
+    for arm in arms:
+        results[arm] = {}
+        for label in labels:
+            tag = "native-moments" if label == "emitter-gap" else "native-moments-" + label
+            live, filtered = [], []
+            for frame in FRAMES:
+                a, b = rows[arm, frame, tag], rows[arm, frame, "variance-prefiltered-moments-" + label]
+                assert all(a[k] == b[k] for k in ("x", "y", "width", "height", "format"))
+                live.append(read(a)); filtered.append(read(b))
+            live, filtered = np.stack(live), np.stack(filtered)
+            assert np.isfinite(filtered).all() and (filtered[..., 1] >= 0).all()
+            invariant = (0, 2, 3)
+            changed = int(np.count_nonzero(np.ascontiguousarray(live[..., invariant].astype("<f2")).view("<u2")
+                != np.ascontiguousarray(filtered[..., invariant].astype("<f2")).view("<u2")))
+            fresh = (live[..., 2] < 2) | (live[..., 3] <= 0)
+            fresh_changed = int(np.count_nonzero(np.ascontiguousarray(live[..., 1].astype("<f2")).view("<u2")[fresh]
+                != np.ascontiguousarray(filtered[..., 1].astype("<f2")).view("<u2")[fresh]))
+            variance = live[..., 1].astype(float)
+            taps = [variance[:, 2+y:variance.shape[1]-2+y, 2+x:variance.shape[2]-2+x]
+                    for y in range(-2, 3) for x in range(-2, 3)]
+            actual = filtered[:, 2:-2, 2:-2, 1]
+            outside = int(np.count_nonzero((actual < np.minimum.reduce(taps)) | (actual > np.maximum.reduce(taps))))
+            results[arm][label] = dict(invariantDifferentValues=changed, freshVarianceDifferentValues=fresh_changed,
+                freshSamples=int(np.count_nonzero(fresh)),
+                outsideLocalVarianceBounds=outside, checkedInvariantHalfWords=int(live[..., invariant].size),
+                rawVarianceTemporalRms=float(np.sqrt(np.mean(np.var(variance, axis=0)))),
+                filteredVarianceTemporalRms=float(np.sqrt(np.mean(np.var(filtered[..., 1].astype(float), axis=0)))))
+    return dict(qualified=all(not (v["invariantDifferentValues"] or v["freshVarianceDifferentValues"] or v["outsideLocalVarianceBounds"])
+                    for regions in results.values() for v in regions.values()), arms=results,
+                scope="Recorded ROI means, ages, coverage and fresh variance remain exact; interior variance stays within the dense 5x5 input bounds")
 
 
 def qualify_temporal_replay(root, capture, rows, protocol, arms, labels):
@@ -318,7 +354,11 @@ def compare_same_frame(root, reference_root, matched_reference_subset=False):
     differences = replay_hash_differences(rows, ARMS, labels)
     temporal = qualify_temporal_replay(root, capture, rows, protocol, ARMS, labels)
     frozen_channel = protocol.get("controlMomentChannelFrozen")
+    variance_role = protocol.get("controlFrozenVarianceRole", "all")
+    assert variance_role in ("all", "guard", "magnitude")
+    assert variance_role == "all" or frozen_channel == "variance"
     composition = qualify_moment_channel_composition(rows, frozen_channel) if frozen_channel else None
+    prefilter = qualify_variance_prefilter(rows, ARMS, labels) if protocol.get("controlMomentVariancePrefilter") else None
     for arm in ARMS:
         results[arm] = {}
         for label in labels:
@@ -355,13 +395,17 @@ def compare_same_frame(root, reference_root, matched_reference_subset=False):
     return dict(schema="screen-probe-atrous-same-frame-analysis.v1", capture=str(root),
         qualified=report["qualified"] and not differences and not frozen_differences
             and (composition is None or composition["qualified"])
+            and (prefilter is None or prefilter["qualified"])
             and (temporal is None or temporal["qualified"]) and not any(v["coverageDifferences"] for a in results.values() for v in a.values()),
         replayDifferences=differences, inputHashObservations=4 * 256, aaHashObservations=4 * 256,
         controlMomentsFrozen=frozen_moments, frozenMomentDifferences=frozen_differences,
         momentChannelComposition=composition, controlFrozenMomentScales=protocol.get("controlFrozenMomentScales"),
+        controlFrozenVarianceRole=variance_role,
+        momentVariancePrefilter=prefilter,
         controlIterations=protocol.get("controlIterations", 4), temporalReplay=temporal, sourceAndReference=report, arms=results,
         limitations=["AA is byte-exact in four recorded ROIs, not a claim about unsaved full-screen pixels",
                      "Both filters consume one copied pixel-temporal input and the same receiver textures",
+                     "The control uses current-frame prefiltered variance at coarse scales" if prefilter is not None else
                      "The control freezes only its " + frozen_channel + " guide channel; other channels stay live" if frozen_channel else
                      "The control evolves independent temporal moments" if temporal is not None else
                          "The control uses first-measured-frame frozen moments" if frozen_moments else "Both filters consume the actual current moment textures",
@@ -379,6 +423,7 @@ def compare_same_frame_motion(root):
     verify_replay_sources(root, capture, protocol)
     differences = replay_hash_differences(rows, arms, ("edge",))
     temporal = qualify_temporal_replay(root, capture, rows, protocol, arms, ("edge",))
+    prefilter = qualify_variance_prefilter(rows, arms, ("edge",)) if protocol.get("controlMomentVariancePrefilter") else None
     control_rows = dict(rows)
     for arm in arms:
         for frame in FRAMES:
@@ -408,12 +453,13 @@ def compare_same_frame_motion(root):
             and h["controlSlowMoments"]["invalidPackedValues"] == 0 for h in histories["control"].values())
     return dict(schema="screen-probe-atrous-same-frame-motion-analysis.v1", capture=str(root),
         qualified=not differences and history_ok and (temporal is None or temporal["qualified"])
+            and (prefilter is None or prefilter["qualified"])
             and not any(v["coverageDifferences"] for v in results.values()),
         replayDifferences=differences, inputHashObservations=256, aaHashObservations=256,
         pixelHistoryRejectedAtDisocclusion=history_ok,
         exposedOutputExactlyEqual={arm: histories["current"][arm]["finalExposedRgba16Sha256"]
             == histories["control"][arm]["finalExposedRgba16Sha256"] for arm in arms},
-        histories=histories, arms=results, temporalReplay=temporal,
+        histories=histories, arms=results, temporalReplay=temporal, momentVariancePrefilter=prefilter,
         limitations=["Same-frame copied input and A/A qualification cover the moving-edge ROI only",
                      "The control evolves independent moments but shares actual pixel/probe color history" if temporal is not None else
                          "The control changes only spatial filtering; its own pixel/probe history is not evolved independently",

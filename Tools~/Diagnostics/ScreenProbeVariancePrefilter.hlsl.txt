@@ -1,0 +1,45 @@
+#pragma kernel PrefilterSdfMomentVarianceCS
+RWTexture2D<float4> _SdfAtrousPrefilteredMoments;
+
+[numthreads(8,8,1)]
+void PrefilterSdfMomentVarianceCS(uint3 id:SV_DispatchThreadID)
+{
+    int2 size=int2(_SdfDiffuseScreenSize.xy), pixel=int2(id.xy);
+    if(any(pixel>=size))return;
+    float4 result=_SdfAtrousScreenProbeMoments.Load(int3(pixel,0));
+    SdfAtrousGuide center=LoadSdfAtrousGuide(pixel,size);
+    if(center.valid && result.w>0.0 && result.z>=2.0)
+    {
+        const int2 axes[4]={int2(-1,0),int2(1,0),int2(0,-1),int2(0,1)};
+        float4 deltas=2.0;
+        float relativeDepth=max(abs(center.depth),1e-4);
+        float maxSlope=lerp(0.035*relativeDepth,0.02,unity_OrthoParams.w);
+        [unroll]for(uint i=0u;i<4u;++i)
+        {
+            SdfAtrousGuide tap=LoadSdfAtrousGuide(pixel+axes[i],size);
+            float delta=tap.depth-center.depth;
+            if(SdfAtrousNormalAgreement(center,tap)>0.85 && abs(delta)<=maxSlope)deltas[i]=delta;
+        }
+        float2 gradient=float2(SdfAtrousGradient(deltas.x,deltas.y,2.0),SdfAtrousGradient(deltas.z,deltas.w,2.0));
+        float tolerance=lerp(0.006*abs(center.depth),0.0002,unity_OrthoParams.w)+1e-6;
+        const float kernel[5]={1.0,4.0,6.0,4.0,1.0};
+        float sum=36.0*max(0.0,result.y), total=36.0;
+        [loop]for(int y=-2;y<=2;++y)[loop]for(int x=-2;x<=2;++x)
+        {
+            if(x==0 && y==0)continue;
+            int2 offset=int2(x,y), tapPixel=pixel+offset;
+            SdfAtrousGuide tap=LoadSdfAtrousGuide(tapPixel,size);
+            float agreement=SdfAtrousNormalAgreement(center,tap);
+            float error=abs(tap.depth-center.depth-dot(gradient,float2(offset)))/tolerance;
+            if(agreement<=0.8 || error>=3.0)continue;
+            float4 moments=_SdfAtrousScreenProbeMoments.Load(int3(tapPixel,0));
+            if(moments.w<=0.0 || moments.z<2.0)continue;
+            float3 albedoDelta=tap.material.rgb-center.material.rgb;
+            float weight=kernel[x+2]*kernel[y+2]*PositivePow(agreement,16.0)
+                *exp2(-error*error-16.0*dot(albedoDelta,albedoDelta))*smoothstep(2.0,8.0,moments.z);
+            sum+=weight*max(0.0,moments.y);total+=weight;
+        }
+        result.y=lerp(result.y,sum/total,smoothstep(2.0,8.0,result.z));
+    }
+    _SdfAtrousPrefilteredMoments[id.xy]=SdfRoundToNearestHalf(result);
+}

@@ -87,6 +87,32 @@ class MomentChannelIsolationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
 
+    def test_variance_roles_have_distinct_pinned_controls_and_shared_aa(self):
+        script = Path(__file__).with_name("BuildScreenProbeMomentChannelIsolation.py")
+        with tempfile.TemporaryDirectory(prefix="vivid-variance-role-") as temporary:
+            roots = [Path(temporary) / name for name in ("guard", "magnitude")]
+            for root in roots:
+                result = subprocess.run([sys.executable, "-X", "utf8", "-B", str(script), str(root),
+                    "--frozen-channel", "variance", "--variance-role", root.name, "--frozen-scales", "coarse"],
+                    capture_output=True, text=True, encoding="utf-8")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                protocol = json.loads((root / "protocol.json").read_text(encoding="utf-8"))
+                self.assertEqual(protocol["controlFrozenVarianceRole"], root.name)
+                for label, expected in protocol["referenceSourceSha256"].items():
+                    self.assertEqual(hashlib.sha256((root / f"reference-{label}.compute.txt").read_bytes()).hexdigest(), expected)
+            self.assertEqual((roots[0] / "reference-aa.compute.txt").read_bytes(), (roots[1] / "reference-aa.compute.txt").read_bytes())
+            self.assertNotEqual((roots[0] / "reference-control.compute.txt").read_bytes(), (roots[1] / "reference-control.compute.txt").read_bytes())
+
+    def test_variance_role_cannot_be_declared_for_mean(self):
+        script = Path(__file__).with_name("BuildScreenProbeMomentChannelIsolation.py")
+        with tempfile.TemporaryDirectory(prefix="vivid-variance-role-invalid-") as temporary:
+            root = Path(temporary) / "capture"
+            result = subprocess.run([sys.executable, "-X", "utf8", "-B", str(script), str(root),
+                "--frozen-channel", "mean", "--variance-role", "guard"],
+                capture_output=True, text=True, encoding="utf-8")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(root.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

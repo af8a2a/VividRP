@@ -27,11 +27,40 @@ void ComposeSdfMomentGuideCS(uint3 id:SV_DispatchThreadID) {
 """.replace("COMPONENT", component)
 
 
-def build(template, output, sample_frame_base=1733, frozen_scales="all"):
+def variance_role_source(body, role):
+    if role == "all":
+        return body
+    if role not in ("guard", "magnitude"):
+        raise ValueError("Variance role must be all, guard or magnitude")
+    declaration = "Texture2D<float4> _SdfAtrousScreenProbeMoments;"
+    assert body.count(declaration) == 1
+    body = body.replace(declaration, declaration + "\nTexture2D<float4> _SdfAtrousLiveMoments;", 1)
+    center = "_SdfAtrousLiveMoments.Load(int3(centerPixel, 0)).y"
+    tap = "_SdfAtrousLiveMoments.Load(int3(tapPixel, 0)).y"
+    if role == "guard":
+        replacements = {
+            "2.0 * max(0.0, moments.y)": "2.0 * max(0.0, " + center + ")",
+            "trust * max(0.0, tapMoments.y)": "trust * max(0.0, " + tap + ")",
+            "lerp(max(0.0, moments.y), nativeVarianceSum": "lerp(max(0.0, " + center + "), nativeVarianceSum",
+            "_SdfAtrousScreenProbeMoments.Load(int3(tapPixel, 0)).y": tap,
+        }
+        for old, new in replacements.items():
+            assert body.count(old) == 1, old
+            body = body.replace(old, new, 1)
+    else:
+        old = "float scale = 0.01 + 2.5 * sqrt(max(max(0.0, moments.y), max(0.0, tapMoments.y)));"
+        assert body.count(old) == 2
+        body = body.replace(old, "float scale = 0.01 + 2.5 * sqrt(max(max(0.0, " + center + "), max(0.0, " + tap + ")));")
+    return body
+
+
+def build(template, output, sample_frame_base=1733, frozen_scales="all", variance_role="all"):
     if not 0 <= sample_frame_base <= 2**31 - 4096:
         raise ValueError("Sample frame base is out of range")
     if frozen_scales not in ("all", "fine", "coarse"):
         raise ValueError("Frozen scales must be all, fine or coarse")
+    if variance_role not in ("all", "guard", "magnitude"):
+        raise ValueError("Variance role must be all, guard or magnitude")
     source = replay_build(template, output, freeze_control_moments=True)
 
     def replace(old, new):
@@ -46,6 +75,9 @@ def build(template, output, sample_frame_base=1733, frozen_scales="all"):
     scale_predicate = "true" if frozen_scales == "all" else "i < 2" if frozen_scales == "fine" else "i >= 2"
     replace('            raw.SetComputeTextureParam(shader,kernel,"_SdfAtrousScreenProbeMoments",moments);',
             '            raw.SetComputeTextureParam(shader,kernel,"_SdfAtrousScreenProbeMoments",label=="control-" && (' + scale_predicate + ')?composedControlMoments:moments);')
+    if variance_role != "all":
+        marker = '            cmd.SetComputeIntParam(shader,"_SdfAtrousStep",1<<i);'
+        replace(marker, '            if(label=="control-")raw.SetComputeTextureParam(shader,kernel,"_SdfAtrousLiveMoments",moments);\n' + marker)
     marker = '            if(frame==warmup)cmd.CopyTexture(Resolve("m_CurrentScreenProbeMoments"),frozenControlMoments);'
     replace(marker, marker + '''
             int compose=replayControl.FindKernel("ComposeSdfMomentGuideCS");
@@ -83,13 +115,16 @@ if __name__ == "__main__":
     parser.add_argument("--frozen-channel", choices=("mean", "variance"), required=True)
     parser.add_argument("--sample-frame-base", type=int, default=1733)
     parser.add_argument("--frozen-scales", choices=("all", "fine", "coarse"), default="all")
+    parser.add_argument("--variance-role", choices=("all", "guard", "magnitude"), default="all")
     args = parser.parse_args()
+    if args.variance_role != "all" and args.frozen_channel != "variance":
+        parser.error("Variance-role isolation requires --frozen-channel variance")
     workspace = Path(__file__).resolve().parents[2]
     output = args.output.resolve()
     template = Path(__file__).with_name("ScreenProbeAnchorGpuTimingCapture.cs").read_text(encoding="utf-8-sig")
-    source = build(template, output, args.sample_frame_base, args.frozen_scales)
+    source = build(template, output, args.sample_frame_base, args.frozen_scales, args.variance_role)
     body = (workspace / "Shaders/Core/Private/GlobalIllumination/SdfDiffuseAtrous.hlsl").read_text(encoding="utf-8-sig")
-    references = {"aa": shader_source(body), "control": shader_source(body) + composition_source(args.frozen_channel)}
+    references = {"aa": shader_source(body), "control": shader_source(variance_role_source(body, args.variance_role)) + composition_source(args.frozen_channel)}
     output.mkdir(parents=True, exist_ok=False)
     hashes = {}
     for label, text in references.items():
@@ -102,6 +137,7 @@ if __name__ == "__main__":
         spacing=16, rays=8, sampleFrameBase=args.sample_frame_base,
         aaIterations=4, controlIterations=4, controlMomentsFrozen=True,
         controlMomentHashesRecorded=True, controlMomentChannelFrozen=args.frozen_channel,
+        controlFrozenVarianceRole=args.variance_role,
         controlFrozenMomentScales=[1, 2] if args.frozen_scales == "fine" else [4, 8] if args.frozen_scales == "coarse" else [1, 2, 4, 8],
         planeGuidance=True, waveletStagesSaved=False, varianceStagesSaved=False,
         payloadBudget=512 * 1024**2, referenceSourceSha256=hashes,

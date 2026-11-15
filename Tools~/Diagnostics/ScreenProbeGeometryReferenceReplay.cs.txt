@@ -1,0 +1,115 @@
+    object referencePass=null;
+    ComputeShader referenceShader=null, originalTraceShader=null;
+    Texture2D referenceGeometryInput=null;
+    RenderTexture referenceAaGeometry=null, referenceNormalOutput=null;
+    bool referenceInstalled=false;
+    string referenceNormalHash=null;
+    var referencePrograms=new List<object>();
+    var referenceOutputs=new List<(string property,string field,RenderTexture texture)>();
+    var referenceOwned=new List<RenderTexture>();
+    var aaPairs=new Dictionary<string,(string side,string hash)>();
+    RenderTexture OwnReferenceTexture(RenderTextureDescriptor descriptor) {
+        descriptor.depthBufferBits=0;descriptor.msaaSamples=1;descriptor.enableRandomWrite=true;
+        descriptor.useMipMap=false;descriptor.autoGenerateMips=false;
+        var result=new RenderTexture(descriptor){hideFlags=HideFlags.HideAndDontSave};referenceOwned.Add(result);
+        if(!result.Create())throw new InvalidOperationException("Reference texture creation failed.");
+        return result;
+    }
+    void SetupReference() {
+        referencePass=((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p=>p.GetType()==type);
+        originalTraceShader=(ComputeShader)type.GetField("m_TraceCompute",inst).GetValue(referencePass);
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic)
+            .Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        referenceShader=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/reference-tracing.compute.txt")});
+        if(EditorUtility.IsPersistent(referenceShader) || AssetDatabase.GetAssetPath(referenceShader)!="")
+            throw new InvalidOperationException("Reference shader must remain an in-memory object.");
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic)
+            .Single(m=>m.Name=="CompileComputeShaderVariant");
+        foreach(string name in __KERNEL_NAMES__) {
+            int kernel=referenceShader.FindKernel(name);
+            if(name!="CaptureReferenceNormalsCS" && kernel!=originalTraceShader.FindKernel(name))
+                throw new InvalidOperationException("Reference kernel indices differ.");
+            var variant=compile.Invoke(null,new object[]{referenceShader,kernel,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+            if(!(bool)variant.GetType().GetProperty("Success").GetValue(variant))throw new InvalidOperationException("Reference compilation failed: "+name);
+            var bytes=(byte[])variant.GetType().GetProperty("ShaderData").GetValue(variant);
+            referencePrograms.Add(new{name,kernel,bytes=bytes.Length,sha256=Hash(bytes)});
+        }
+        var input=System.IO.File.ReadAllBytes(output+"/geometry-input.bin");
+        if(input.Length!=120*136*16 || Hash(input)!="__GEOMETRY_INPUT_SHA__")throw new InvalidOperationException("Reference geometry input changed.");
+        referenceGeometryInput=new Texture2D(120,136,TextureFormat.RGBAFloat,false,true){hideFlags=HideFlags.HideAndDontSave};
+        referenceGeometryInput.LoadRawTextureData(input);referenceGeometryInput.Apply(false,false);
+        referenceShader.SetInt("_SdfUseReferenceGeometry",1);
+        foreach(string name in __ORIGINAL_KERNEL_NAMES__)
+            if(!name.EndsWith("ScreenRays",StringComparison.Ordinal))
+                referenceShader.SetTexture(referenceShader.FindKernel(name),"_SdfReferenceGeometry",referenceGeometryInput);
+        referenceNormalOutput=OwnReferenceTexture(new RenderTextureDescriptor(120,68){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R32G32B32A32_SFloat});
+        type.GetField("m_TraceCompute",inst).SetValue(referencePass,referenceShader);referenceInstalled=true;
+    }
+    void CleanupReference() {
+        if(referenceInstalled) {
+            var field=type.GetField("m_TraceCompute",inst);
+            if(object.ReferenceEquals(field.GetValue(referencePass),referenceShader))field.SetValue(referencePass,originalTraceShader);
+            else errors.Add("Reference shader field changed externally; original was not overwritten.");
+        }
+        foreach(var texture in referenceOwned){texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+        if(referenceGeometryInput!=null)UnityEngine.Object.DestroyImmediate(referenceGeometryInput);
+        if(referenceShader!=null)UnityEngine.Object.DestroyImmediate(referenceShader);
+    }
+    void ReplayReferenceAa(ComputePassContext context,Func<string,Texture> resolve) {
+        var raw=(CommandBuffer)wrapped.GetValue(context.cmd);
+        object Field(string name)=>type.GetField(name,inst).GetValue(referencePass);
+        if(!object.ReferenceEquals(Field("m_TraceCompute"),referenceShader) || !(bool)Field("m_DirectionalCache") || (bool)Field("m_RestirGather")
+            || (SdfDiffuseTraceMode)Field("m_TraceMode")!=SdfDiffuseTraceMode.__TRACE_MODE__)
+            throw new InvalidOperationException("Reference tracing contract changed.");
+        bool receiver=(int)Field("m_ReceiverCount")>0 && resolve("m_ReceiverVisibility")!=null;
+        bool sun=resolve("m_SunAtlas")!=null;
+        int kernel=(int)Field(receiver?(sun?"m_ReceiverCachedSunKernel":"m_ReceiverCachedKernel"):(sun?"m_CachedSunTraceKernel":"m_CachedTraceKernel"));
+        if(referenceOutputs.Count==0) {
+            foreach(var pair in new[]{("_SdfDiffuseProbes","m_DirectionalRayTexture"),("_SdfDiffuseGeometry","m_Geometry"),
+                ("_SdfDiffuseHitLighting","m_HitLighting"),("_SdfDiffuseTraceSources","m_TraceSources"),
+                ("_SdfDiffuseHitSamples","m_HitSamples"),("_SdfDiffuseRayDiagnostics","m_RayDiagnostics"),
+                ("_SdfDiffuseFirstHitDiagnostics","m_FirstHitDiagnostics"),("_SdfSunCacheHits","m_SunCacheHits")}) {
+                var source=resolve(pair.Item2) as RenderTexture;
+                if(source==null)throw new InvalidOperationException("Missing reference output: "+pair.Item2);
+                referenceOutputs.Add((pair.Item1,pair.Item2,OwnReferenceTexture(source.descriptor)));
+            }
+            referenceAaGeometry=OwnReferenceTexture(((RenderTexture)resolve("m_Geometry")).descriptor);
+        }
+        void ReadAa(RenderTexture texture,string side,string kind) {
+            string currentArm=arm;int f=frame;string format=texture.graphicsFormat.ToString();
+            pending++;
+            raw.RequestAsyncReadback(texture,0,request=>{
+                try {
+                    if(request.hasError)throw new InvalidOperationException("Reference AA readback failed.");
+                    if(Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Unexpected reference AA callback thread.");
+                    var bytes=request.GetData<byte>().ToArray();int stride=kind=="geometry"?16:8;
+                    var points=new byte[28*stride];Buffer.BlockCopy(bytes,(59*120+46)*stride,points,0,points.Length);
+                    string hash=Hash(points),key=currentArm+"/"+f+"/"+kind;
+                    string path=output+"/"+currentArm+"/"+f.ToString("0000")+"-aa-"+side+"-"+kind+".bin";
+                    Write(path,points);
+                    records.Add(new{arm=currentArm,frame=f,tag="aa-"+side+"-"+kind,width=28,height=1,x=46,y=59,format,sha256=hash,saved=true,path});
+                    if(aaPairs.TryGetValue(key,out var pair)) {
+                        if(pair.side==side || pair.hash!=hash)errors.Add("Reference AA mismatch: "+key);
+                        aaPairs.Remove(key);
+                    }else aaPairs.Add(key,(side,hash));
+                }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+            });
+        }
+        try {
+            foreach(var item in referenceOutputs)raw.SetComputeTextureParam(referenceShader,kernel,item.property,item.texture);
+            raw.SetComputeIntParam(referenceShader,"_SdfUseReferenceGeometry",0);
+            context.cmd.DispatchCompute(referenceShader,kernel,15,17,1);
+            var geometry=referenceOutputs.Single(p=>p.field=="m_Geometry").texture;
+            var lighting=referenceOutputs.Single(p=>p.field=="m_HitLighting").texture;
+            ReadAa(geometry,"native","geometry");ReadAa(lighting,"native","raw");
+            raw.CopyTexture(geometry,referenceAaGeometry);
+            raw.SetComputeTextureParam(referenceShader,kernel,"_SdfReferenceGeometry",referenceAaGeometry);
+            raw.SetComputeIntParam(referenceShader,"_SdfUseReferenceGeometry",1);
+            context.cmd.DispatchCompute(referenceShader,kernel,15,17,1);
+            ReadAa(geometry,"forced","geometry");ReadAa(lighting,"forced","raw");
+        }finally {
+            raw.SetComputeIntParam(referenceShader,"_SdfUseReferenceGeometry",1);
+            raw.SetComputeTextureParam(referenceShader,kernel,"_SdfReferenceGeometry",referenceGeometryInput);
+            foreach(var item in referenceOutputs)raw.SetComputeTextureParam(referenceShader,kernel,item.property,resolve(item.field));
+        }
+    }

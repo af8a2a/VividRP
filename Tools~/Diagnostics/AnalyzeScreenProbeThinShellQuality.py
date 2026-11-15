@@ -90,16 +90,29 @@ def motion_history(capture, rows, states):
         report[arm] = dict(samples=int(exposed.sum()), frames=int(exposed.any((1, 2)).sum()),
             oldPixelAge=int((age[exposed] > 1).sum()), acceptedOldPixelHistory=int((status[exposed] == 1).sum()),
             temporalMinusResolveP99=float(np.quantile(error, .99)), temporalMinusResolveMax=float(error.max()))
+        if (arm, 1024, "final-edge") in rows:
+            final = np.stack([read(rows[arm, f, "final-edge"]).astype(float) for f in frames])
+            difference = abs(((final[..., :3] * abs(final[..., 3:4]))
+                              - (current[..., :3] * abs(current[..., 3:4]))) @ LUMA)[exposed]
+            report[arm]["finalMinusResolveP99"] = float(np.quantile(difference, .99))
+            report[arm]["finalMinusResolveMax"] = float(difference.max())
         if (arm, 1024, "native-moments-edge") in rows:
             moments = np.stack([read(rows[arm, f, "native-moments-edge"]) for f in frames])[exposed]
-            assert np.isfinite(moments).all() and (moments[:, 1:] >= 0).all()
+            encoding = capture.get("nativeMomentEncoding", "legacy-mean")
+            assert encoding in ("legacy-mean", "split-mean")
+            assert np.isfinite(moments).all() and (moments[:, 1:3] >= 0).all()
+            assert encoding == "split-mean" or (moments[:, 3] >= 0).all()
             report[arm]["nativeMoments"] = dict(oldAge=int((moments[:, 2] > 1).sum()),
                 ageRange=[float(moments[:, 2].min()), float(moments[:, 2].max())],
-                varianceMax=float(moments[:, 1].max()), minimumCoverage=float(moments[:, 3].min()))
+                varianceMax=float(moments[:, 1].max()), encoding=encoding)
+            if encoding == "split-mean":
+                report[arm]["nativeMoments"]["meanResidualMaxAbs"] = float(abs(moments[:, 3]).max())
+            else:
+                report[arm]["nativeMoments"]["minimumCoverage"] = float(moments[:, 3].min())
     return report
 
 
-def trace_input_qualification(before, after):
+def trace_input_qualification(before, after, arms=None):
     """TraceProbe writes geometry itself; compare its actual receiver inputs separately."""
     if not all(capture[0].get("traceInputsRecorded", False) for capture in (before, after)):
         return None
@@ -109,7 +122,8 @@ def trace_input_qualification(before, after):
     normal_differences = valid_differences = geometry_frames = 0
     position_max = 0.0
     observations = 0
-    for arm in (f"{i:02}-r0-t0" for i in range(4)):
+    arms = tuple(arms) if arms is not None else tuple(f"{i:02}-r0-t0" for i in range(4))
+    for arm in arms:
         for frame in range(1024, 1152):
             for tag in ("input-gbuffer0", "input-gbuffer1", "input-depth", "input-placement"):
                 a, b = old_rows[arm, frame, tag], new_rows[arm, frame, tag]
@@ -129,8 +143,9 @@ def trace_input_qualification(before, after):
     def subset_valid(arms):
         return derived_valid and not any(row[0] in arms for row in input_differences + matrix_differences)
     return dict(qualified=derived_valid and not (input_differences or matrix_differences),
-        staticQualified=subset_valid(("00-r0-t0", "01-r0-t0")),
-        motionQualified=subset_valid(("02-r0-t0", "03-r0-t0")),
+        staticQualified=subset_valid(("00-r0-t0", "01-r0-t0")) if all(a in arms for a in ("00-r0-t0", "01-r0-t0")) else None,
+        motionQualified=subset_valid(("02-r0-t0", "03-r0-t0")) if all(a in arms for a in ("02-r0-t0", "03-r0-t0")) else None,
+        observedArms=list(arms),
         receiverInputObservations=observations, inputDifferences=input_differences, inverseVpDifferences=matrix_differences,
         derivedGeometryDifferentFrames=geometry_frames, derivedNormalDifferences=normal_differences,
         derivedValidityDifferences=valid_differences, derivedPositionMaxAbsMetres=position_max,

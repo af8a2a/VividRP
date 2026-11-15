@@ -88,6 +88,9 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
         float4 deltas = invalidDelta;
         float varianceSum = 0.0;
         float varianceWeight = 0.0;
+        float nativeVarianceSum = 2.0 * max(0.0, moments.y);
+        float nativeVarianceWeight = 2.0;
+        float nativePlaneTrust = 1.0;
         [unroll]
         for (uint i = 0u; i < 4u; ++i)
         {
@@ -97,6 +100,19 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
             if (SdfAtrousNormalAgreement(guide, tap) > 0.85 && abs(delta) <= maxSlope)
             {
                 deltas[i] = delta;
+                if (_SdfAtrousUseScreenProbeMoments != 0u && momentTrust > 0.0)
+                {
+                    float4 tapMoments = _SdfAtrousScreenProbeMoments.Load(int3(tapPixel, 0));
+                    float3 materialDelta = tap.material.rgb - guide.material.rgb;
+                    float meanDelta = abs(tapMoments.x - moments.x);
+                    float scale = 0.01 + 2.5 * sqrt(max(max(0.0, moments.y), max(0.0, tapMoments.y)));
+                    float distance = meanDelta / scale;
+                    float trust = smoothstep(2.0, 8.0, tapMoments.z)
+                        * exp2(-distance * distance - 16.0 * dot(materialDelta, materialDelta));
+                    nativePlaneTrust = min(nativePlaneTrust, trust);
+                    nativeVarianceSum += trust * max(0.0, tapMoments.y);
+                    nativeVarianceWeight += trust;
+                }
                 if ((_SdfAtrousHasVariance == 0u || (firstNative && momentTrust < 1.0))
                     && abs(delta) <= 0.02 * relativeDepth)
                 {
@@ -106,14 +122,48 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
                     varianceWeight += abs(lighting.a);
                 }
             }
+            else
+                nativePlaneTrust = 0.0;
         }
         float2 gradient = float2(SdfAtrousGradient(deltas.x, deltas.y, invalidDelta),
             SdfAtrousGradient(deltas.z, deltas.w, invalidDelta));
         float variance = !firstNative && _SdfAtrousHasVariance != 0u
             ? max(0.0, _SdfAtrousVariance.Load(int3(centerPixel, 0)))
             : 0.5 * varianceSum / max(1.0, varianceWeight);
+        if (_SdfAtrousUseScreenProbeMoments != 0u && momentTrust > 0.0 && nativePlaneTrust > 0.0)
+        {
+            // The entire wavelet footprint must remain in a stable radiance
+            // region. A one-pixel test misses borders reached by later scales.
+            [loop]
+            for (uint i = 0u; i < 25u; ++i)
+            {
+                if (i == 12u)
+                    continue;
+                int2 offset = int2(i % 5u, i / 5u) - 2;
+                int2 tapPixel = centerPixel + offset * int(_SdfAtrousStep);
+                if (any(tapPixel < 0) || any(tapPixel >= size))
+                {
+                    nativePlaneTrust = 0.0;
+                    continue;
+                }
+                float4 tapMoments = _SdfAtrousScreenProbeMoments.Load(int3(tapPixel, 0));
+                float delta = abs(tapMoments.x - moments.x);
+                float scale = 0.01 + 2.5 * sqrt(max(max(0.0, moments.y), max(0.0, tapMoments.y)));
+                float distance = delta / scale;
+                nativePlaneTrust = min(nativePlaneTrust, smoothstep(2.0, 8.0, tapMoments.z) * exp2(-distance * distance));
+                if (nativePlaneTrust == 0.0)
+                    break;
+            }
+        }
+        // Keep the original fine-scale uncertainty at geometry, material and
+        // illumination boundaries; only stable plane interiors borrow variance.
+        float nativeVariance = lerp(max(0.0, moments.y), nativeVarianceSum / nativeVarianceWeight, nativePlaneTrust);
         if (firstNative)
-            variance = lerp(0.5 * varianceSum / max(1.0, varianceWeight), max(0.0, moments.y), momentTrust);
+            variance = lerp(0.5 * varianceSum / max(1.0, varianceWeight), nativeVariance, momentTrust);
+        else if (_SdfAtrousUseScreenProbeMoments != 0u)
+            // Pixels share sparse probes: wavelet taps do not provide independent
+            // observations. Preserve native temporal uncertainty at larger scales.
+            variance = max(variance, momentTrust * nativePlaneTrust * nativeVariance);
         // Mature native history supplies temporal uncertainty instead of treating
         // a real illumination edge as spatial noise. Fresh history keeps the prior.
         float lumaFloor = lerp(0.15, 0.01, momentTrust);

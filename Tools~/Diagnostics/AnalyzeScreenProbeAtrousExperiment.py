@@ -29,21 +29,23 @@ def scalar_read(row):
     return values.astype(float)
 
 
-def inspect(root):
+def inspect(root, motion_only=False):
     capture = load(root / "capture.json")
-    assert capture["schema"] == "screen-probe-atrous-stages.v1"
+    schemas = ("screen-probe-native-moments-motion-only.v1",) if motion_only else ("screen-probe-atrous-stages.v1", "screen-probe-atrous-same-frame.v1")
+    assert capture["schema"] in schemas
     assert capture["complete"] and not capture["errors"]
     assert (capture["warmup"], capture["measured"], capture["lastFrame"]) == (1024, 128, 1152)
     assert load(root / "source-verification.json")["unchanged"]
     rows = {(r["arm"], r["frame"], r["tag"]): r for r in capture["records"] if "tag" in r}
     states = {(r["arm"], r["frame"]): r["qualityState"] for r in capture["records"] if "qualityState" in r}
     assert len(rows) == sum("tag" in r for r in capture["records"])
-    assert set(states) == {(a, f) for a in ARMS for f in FRAMES}
+    arms = ("02-r0-t0", "03-r0-t0") if motion_only else ARMS
+    assert set(states) == {(a, f) for a in arms for f in FRAMES}
     completed = [r for r in capture["records"] if r.get("completed")]
     assert len(completed) == 2 and all(r["targetCount"] == 1152 and r["sourceFrames"] == 264
                                      and r["otherCount"] == 0 for r in completed)
     assert all(s["order"] == 8 and s["batch"] == 32 and s["updates"] == 0 and s["anchorAge"] == 512
-               and s["flags"] == 0 and s["atrous"] == 4 and not s["moving"]
+               and s["flags"] == 0 and s["atrous"] == 4 and s["moving"] == motion_only
                and abs(s["bias"] - .04) < 1e-6 for s in states.values())
     assert {r["sha256"] for r in rows.values() if r["tag"] == "radiosity"} == {SOURCE_SHA256}
     payload = 0
@@ -76,6 +78,11 @@ def input_differences(a, b, same_run=False):
 
 def analyze(root, reference_geometry, target, matched_reference_subset=False):
     capture, rows, states = data = inspect(root)
+    protocol = load(root / "protocol.json")
+    encoding = capture.get("nativeMomentEncoding", "legacy-mean")
+    assert encoding in ("legacy-mean", "split-mean")
+    stage_tags = tuple(tag for tag in STAGES if (not tag.startswith("wavelet-") or protocol.get("waveletStagesSaved", True))
+                       and (tag != "wavelet-2" or protocol.get("wavelet2Saved", True)))
     aa = input_differences(data, data, same_run=True)
     xs = np.arange(46, 74)
     px, py = xs * 16 + 8 - 720, 16
@@ -88,27 +95,47 @@ def analyze(root, reference_geometry, target, matched_reference_subset=False):
         assert matched.any(), "No exactly matched reference points"
         assert matched_reference_subset or matched.all(), "Reference geometry differs; keep the failure or explicitly diagnose a subset"
         stages = {}
-        for tag in STAGES:
+        for tag in stage_tags:
             values = stack(tag)
             y = ((values[..., :3] * abs(values[..., 3:4])) @ LUMA)[:, py, px]
             error = y[matched] - target[59, xs]
             stages[tag] = dict(metrics(y), referenceBias=float(error.mean()),
                                referenceRmsError=float(np.sqrt(np.mean(error**2))))
         variance = {}
-        for step in range(3):
+        for step in (range(3) if protocol.get("varianceStagesSaved", True) else ()):
             values = np.stack([scalar_read(rows[arm, f, f"variance-{step}"]) for f in FRAMES])[:, py, px]
             variance[str(step)] = dict(mean=float(values.mean()),
                                       quantiles=np.quantile(values, [0, .5, .99, 1]).tolist())
         moments = None
         if (arm, 1024, "native-moments") in rows:
             values = stack("native-moments")[:, py, px]
-            assert (values[..., 1:] >= 0).all()
-            moments = dict(channels=["logMean", "centralLogVariance", "effectiveAge", "coverage"],
+            assert (values[..., 1:3] >= 0).all()
+            assert encoding == "split-mean" or (values[..., 3] >= 0).all()
+            channels = ["logMeanHigh", "centralLogVariance", "effectiveAge", "logMeanResidual"] if encoding == "split-mean" else ["logMean", "centralLogVariance", "effectiveAge", "coverage"]
+            moments = dict(encoding=encoding, channels=channels,
                            quantiles=np.quantile(values, [0, .5, 1], axis=(0, 1)).tolist())
+        regions, region_inputs = {}, {}
+        for tag in ("final-ceiling", "final-floor", "final-back"):
+            final = stack(tag)
+            regions[tag] = metrics((final[..., :3] * abs(final[..., 3:4])) @ LUMA)
+            if protocol.get("planeGuidance", False):
+                label = tag.removeprefix("final-")
+                for frame in FRAMES:
+                    current, final_row = rows[arm, frame, "temporal-" + label], rows[arm, frame, tag]
+                    assert all(current[k] == final_row[k] for k in ("x", "y", "width", "height"))
+                temporal, moment = stack("temporal-" + label), stack("native-moments-" + label)
+                conditional_y = temporal[..., :3] @ LUMA
+                temporal_metrics = metrics(conditional_y * abs(temporal[..., 3]))
+                region_inputs[tag] = dict(temporal=temporal_metrics,
+                    currentLog=metrics(np.log2(1 + conditional_y)),
+                    momentLogMean=metrics(moment[..., 0] + (moment[..., 3] if encoding == "split-mean" else 0)),
+                    momentMeanUnchangedFraction=float(np.mean(np.diff(moment[..., 0] + (moment[..., 3] if encoding == "split-mean" else 0), axis=0) == 0)),
+                    momentAgeQuantiles=np.quantile(moment[..., 2], [0, .5, 1]).tolist(),
+                    momentVarianceQuantiles=np.quantile(moment[..., 1], [0, .5, 1]).tolist(),
+                    finalToTemporalVarianceRatio=regions[tag]["temporal_variance"] / max(temporal_metrics["temporal_variance"], 1e-20),
+                    meanChangeFromTemporalPercent=100 * (regions[tag]["mean_y"] / temporal_metrics["mean_y"] - 1))
         result[arm] = dict(stages=stages, variance=variance, moments=moments,
-                           exactReferenceFrames=int(matched.sum()),
-                           regions={tag: metrics((stack(tag)[..., :3] * abs(stack(tag)[..., 3:4])) @ LUMA)
-                                    for tag in ("final-ceiling", "final-floor", "final-back")})
+                           exactReferenceFrames=int(matched.sum()), regions=regions, regionInputs=region_inputs)
     return dict(schema="screen-probe-atrous-analysis.v1", qualified=not (aa or reference_differences),
                 withinConfigurationInputDifferences=aa, referenceGeometryDifferences=reference_differences,
                 payloadBytes=capture["savedPayloadBytes"], sourceSha256=SOURCE_SHA256,
@@ -140,11 +167,12 @@ def compare(baseline, candidate, reference_root, matched_reference_subset=False)
                              "No GPU performance or motion acceptance follows from this static experiment"])
 
 
-def compare_motion(baseline, candidate):
+def compare_motion(baseline, candidate, compact=False):
     assert baseline.parent == candidate.parent
-    core = quality_analysis(candidate.parent, candidate.name, baseline)
-    captures = {name: quality_inspect(path) for name, path in (("before", baseline), ("after", candidate))}
-    inputs = trace_input_qualification(captures["before"], captures["after"])
+    core = None if compact else quality_analysis(candidate.parent, candidate.name, baseline)
+    captures = {name: inspect(path, motion_only=True) if compact else quality_inspect(path)
+                for name, path in (("before", baseline), ("after", candidate))}
+    inputs = trace_input_qualification(captures["before"], captures["after"], arms=("02-r0-t0", "03-r0-t0") if compact else None)
     histories = {name: motion_history(*capture) for name, capture in captures.items()}
     assert all(h is not None for h in histories.values())
     history_ok = all(h["oldPixelAge"] == 0 and h["acceptedOldPixelHistory"] == 0
@@ -154,26 +182,85 @@ def compare_motion(baseline, candidate):
                      and h["nativeMoments"]["varianceMax"] == 0
                      for h in histories["after"].values())
     return dict(schema="screen-probe-native-moments-motion.v1", baseline=str(baseline), candidate=str(candidate),
-                qualified=bool(core["qualityComparisonQualified"] and inputs["qualified"] and history_ok and moments_ok),
+                qualified=bool((compact or core["qualityComparisonQualified"]) and inputs["qualified"] and history_ok and moments_ok),
                 inputQualification=inputs, histories=histories, core=core,
                 limitations=["Final-minus-resolve includes spatial filtering; only temporal-minus-resolve isolates pixel history",
                              "Newly exposed pixels are classified by the existing strict geometry thresholds",
                              "Exact input gates remain unchanged; no GPU timing claim"])
 
 
+def compare_same_frame(root, reference_root):
+    _, snapshot, blocks, _, _ = qualify(reference_root, "inside-shell-reference")
+    geometry = read(snapshot["geometry"])[:68, :120]
+    target = blocks.mean(0)[..., 4]
+    report, (capture, rows, _) = analyze(root, geometry, target)
+    assert capture["schema"] == "screen-probe-atrous-same-frame.v1"
+    protocol = load(root / "protocol.json")
+    for label, expected in protocol["referenceSourceSha256"].items():
+        assert hashlib.sha256((root / f"reference-{label}.compute.txt").read_bytes()).hexdigest() == expected
+    programs = capture["replayPrograms"]
+    assert len(programs) == 4 and {(p["reference"], p["name"]) for p in programs} == {
+        (label, name) for label in ("aa", "control") for name in ("FilterSdfDiffuseAtrous", "FilterSdfDiffuseAtrousFinal")}
+    differences, results = [], {}
+    labels = ("emitter-gap", "ceiling", "floor", "back")
+    for arm in ARMS:
+        results[arm] = {}
+        for label in labels:
+            for frame in FRAMES:
+                for actual, replay in (("temporal-", "replay-input-"), ("final-", "replay-aa-")):
+                    a, b = rows[arm, frame, actual + label], rows[arm, frame, replay + label]
+                    if any(a[k] != b[k] for k in ("sha256", "x", "y", "width", "height", "format")):
+                        differences.append([arm, frame, actual + label])
+            stack = lambda prefix: np.stack([read(rows[arm, f, prefix + label]).astype(float) for f in FRAMES])
+            current, control = stack("final-"), stack("control-")
+            coverage_differences = int(np.count_nonzero(current[..., 3] != control[..., 3]))
+            current_y = (current[..., :3] * abs(current[..., 3:4])) @ LUMA
+            control_y = (control[..., :3] * abs(control[..., 3:4])) @ LUMA
+            result = dict(paired(control_y, current_y), current=metrics(current_y), control=metrics(control_y),
+                          coverageDifferences=coverage_differences)
+            if label == "emitter-gap":
+                px = np.arange(46, 74) * 16 + 8 - 720
+                result["points"] = {}
+                for name, y in (("current", current_y), ("control", control_y)):
+                    points = y[:, 16, px]
+                    error = points - target[59, np.arange(46, 74)]
+                    result["points"][name] = dict(metrics(points), referenceBias=float(error.mean()),
+                        referenceRmsError=float(np.sqrt(np.mean(error**2))))
+            results[arm][label] = result
+    return dict(schema="screen-probe-atrous-same-frame-analysis.v1", capture=str(root),
+        qualified=report["qualified"] and not differences and not any(v["coverageDifferences"] for a in results.values() for v in a.values()),
+        replayDifferences=differences, inputHashObservations=4 * 256, aaHashObservations=4 * 256,
+        sourceAndReference=report, arms=results,
+        limitations=["AA is byte-exact in four recorded ROIs, not a claim about unsaved full-screen pixels",
+                     "Both filters consume one copied pixel-temporal input and the same receiver/moment textures",
+                     "The control isolates wavelet behavior; changes upstream of the copied input require separate validation",
+                     "Replay adds dispatches/readbacks and is not a GPU performance experiment",
+                     "The frozen-source high-sample reference is not absolute Unreal truth"])
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate", type=Path)
-    parser.add_argument("--baseline", type=Path, required=True)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--reference-root", type=Path)
     parser.add_argument("--matched-reference-subset", action="store_true")
     parser.add_argument("--motion-only", action="store_true")
+    parser.add_argument("--same-frame", action="store_true")
+    parser.add_argument("--compact-motion", action="store_true", help="Analyze two moving arms without duplicated static captures")
     args = parser.parse_args()
+    if args.same_frame:
+        assert args.reference_root and not args.motion_only
+        report = compare_same_frame(args.candidate.resolve(), args.reference_root.resolve())
+        (args.candidate / "same-frame-comparison.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(dict(qualified=report["qualified"], replayDifferences=report["replayDifferences"],
+                             arms=report["arms"]), indent=2))
+        raise SystemExit(0)
+    assert args.baseline, "Independent-run comparison requires a baseline"
     if args.motion_only:
-        report = compare_motion(args.baseline.resolve(), args.candidate.resolve())
+        report = compare_motion(args.baseline.resolve(), args.candidate.resolve(), args.compact_motion)
         (args.candidate / "moments-motion-comparison.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(dict(qualified=report["qualified"], inputs=report["inputQualification"],
-                             histories=report["histories"], motion=report["core"]["motion"]), indent=2))
+                             histories=report["histories"], motion=report["core"]["motion"] if report["core"] else None), indent=2))
         raise SystemExit(0)
     assert args.reference_root, "Static analysis requires the frozen high-sample reference"
     report = compare(args.baseline.resolve(), args.candidate.resolve(), args.reference_root.resolve(), args.matched_reference_subset)

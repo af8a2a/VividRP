@@ -6,6 +6,18 @@ from pathlib import Path
 from BuildScreenProbeThinShellQuality import build as quality_build
 
 
+def with_moment_encoding(source):
+    old = '    var wrapped = typeof(ComputeCommandBuffer).BaseType.GetField("m_WrappedCommandBuffer", inst);'
+    assert source.count(old) == 1
+    source = source.replace(old, old + '''
+    var momentShader=(ComputeShader)Field("m_GatherTemporalCompute");
+    string nativeMomentEncoding=momentShader!=null && momentShader.HasKernel("ScreenProbeTemporalReprojectionWithSplitMomentsCS")
+        ? "split-mean" : "legacy-mean";''', 1)
+    old = "savedPayloadBudget,savedPayloadBytes,"
+    assert source.count(old) == 1
+    return source.replace(old, old + "nativeMomentEncoding,", 1)
+
+
 def without_moments(source):
     replacements = {
         "    EditorApplication.LockReloadAssemblies();": '''    var momentsKernelField=type.GetField("m_ScreenProbeMomentsKernel",inst);
@@ -22,7 +34,7 @@ def without_moments(source):
     return source
 
 
-def build(template, output, disable_moments=False):
+def build(template, output, disable_moments=False, plane_guidance=False):
     source = quality_build(template, output, trace_inputs=True)
 
     def replace(old, new):
@@ -56,16 +68,35 @@ def build(template, output, disable_moments=False):
     replace('hooks["EditorGatherStageCapture"].SetValue(null,stage);',
             'hooks["EditorGatherStageCapture"].SetValue(null,stage); hooks["EditorAtrousDispatchCapture"].SetValue(null,wavelet);')
     replace('schema="screen-probe-anchor-quality.v1"', 'schema="screen-probe-atrous-stages.v1"')
+    if plane_guidance:
+        replace('if(index<3)ReadRegion(cmd,result,"wavelet-"+index,720,936,480,40);',
+                'if(index<2)ReadRegion(cmd,result,"wavelet-"+index,720,936,480,40);')
+        replace('        else if(index==1)ReadRegion(cmd,texture,"temporal-emitter-gap",720,936,480,40);', '''        else if(index==1) {
+            ReadRegion(cmd,texture,"temporal-emitter-gap",720,936,480,40);
+            foreach(var roi in new[]{("ceiling",912,970,48),("floor",912,130,64),("back",1100,600,64)}) {
+                ReadRegion(cmd,texture,"temporal-"+roi.Item1,roi.Item2,roi.Item3,96,roi.Item4);
+                if((int)Field("m_ScreenProbeMomentsKernel")>=0)
+                    ReadRegion(cmd,Resolve("m_CurrentScreenProbeMoments"),"native-moments-"+roi.Item1,roi.Item2,roi.Item3,96,roi.Item4);
+            }
+        }''')
+    source = with_moment_encoding(source)
     return without_moments(source) if disable_moments else source
 
 
-def build_motion(template, output, disable_moments=False):
+def build_motion(template, output, disable_moments=False, motion_only=False):
     source = quality_build(template, output, motion_history=True, trace_inputs=True)
     old = '                ReadRegion(cmd,Resolve("m_CurrentPixelLighting"),"pixel-history-edge",880,414,160,128);'
     assert source.count(old) == 1
     source = source.replace(old, old + '''
                 if((int)Field("m_ScreenProbeMomentsKernel")>=0)
                     ReadRegion(cmd,Resolve("m_CurrentScreenProbeMoments"),"native-moments-edge",880,414,160,128);''', 1)
+    source = with_moment_encoding(source)
+    if motion_only:
+        for old, new in (("Enumerable.Repeat((false,false),4)", "Enumerable.Repeat((false,false),2)"),
+                         ("        int index=0;", "        int index=2;"),
+                         ('schema="screen-probe-anchor-quality.v1"', 'schema="screen-probe-native-moments-motion-only.v1"')):
+            assert source.count(old) == 1, old
+            source = source.replace(old, new, 1)
     return without_moments(source) if disable_moments else source
 
 
@@ -76,14 +107,21 @@ if __name__ == "__main__":
                         help="Use the existing no-moments kernel in the same assembly; restore it in finally")
     parser.add_argument("--motion-history", action="store_true",
                         help="Use two static/two fixed-motion arms and read moments at the moving edge")
+    parser.add_argument("--plane-guidance", action="store_true",
+                        help="Read pixel-temporal input and moments on three planes; omit wavelet step 4 to keep the 512 MiB cap")
+    parser.add_argument("--motion-only", action="store_true", help="Capture only the two fixed-motion arms to avoid duplicating validated static data")
     args = parser.parse_args()
     template = Path(__file__).with_name("ScreenProbeAnchorGpuTimingCapture.cs").read_text(encoding="utf-8-sig")
-    source = (build_motion if args.motion_history else build)(template, args.output.resolve(), args.disable_native_moments)
+    assert not (args.motion_history and args.plane_guidance), "Plane guidance readbacks are static only"
+    assert not args.motion_only or args.motion_history, "Motion-only requires --motion-history"
+    source = (build_motion(template, args.output.resolve(), args.disable_native_moments, args.motion_only) if args.motion_history
+              else build(template, args.output.resolve(), args.disable_native_moments, args.plane_guidance))
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "capture-script.cs").write_text(source, encoding="utf-8")
     (args.output / "protocol.json").write_text(json.dumps(dict(schema="screen-probe-atrous-protocol.v1",
-        arms=[f"{i:02}-r0-t0" for i in range(4 if args.motion_history else 2)],
+        arms=[f"{i:02}-r0-t0" for i in (range(2, 4) if args.motion_only else range(4 if args.motion_history else 2))],
         warmup=1024, measured=128, spacing=16, rays=8, motionHistory=args.motion_history,
+        planeGuidance=args.plane_guidance, wavelet2Saved=not args.plane_guidance,
         payloadBudget=512*1024**2, nativeMomentsEnabled=not args.disable_native_moments,
         roi=dict(x=720, y=936, width=480, height=40),
         note="Native Gather, frozen 8/64/32 source; temporal input and wavelet steps 1/2/4/8, plus propagated variance"), indent=2)+"\n", encoding="utf-8")

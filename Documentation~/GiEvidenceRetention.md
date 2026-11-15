@@ -108,3 +108,14 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 审计为 `E:/VividRP_GI_Evidence/retention-20261115-004856-339652.json`。随后保存了受控追踪、完整整数 visibility/SDF 输入和原生绑定检查，最新容量为 **124.977 GiB**，E 盘可用 **116.370 GiB**。目前仍在 125 GiB / 64 GiB 审查线内，但证据距软上限仅约 23 MiB；下一轮大捕帧前必须先审查可归档数据并预留预算，不能凭单次 1 GiB 载荷保护继续无限追加。
 
 最新复核为 `FrameDebuggerGIFixedFrame-20261115-013807-646763/post-experiment-retention.json`。当前受控 A/A、原 shader 输入见证、长精度复查、并发失效运行及原生事件 JSON 均加入保护项。本轮具体定位边界见 [追踪重复性定位](ScreenProbeTraceRepeatability.md)。
+
+## GPU旁路与观测控制组前的清理
+
+两份已被新诊断取代的失败运行完成依赖审查后，从保护项移入归档白名单：
+
+- 并发修改失效的`ScreenProbePreciseRayFrame-20261115-004254-225175`删除25份中间读回，释放76,409,856 B；保留失败的源码验证、全部metadata以及首尾帧。
+- 已撤回的`ScreenProbePreciseGpuTiming-20261115-003323-857461`删除54份中间读回，释放153,603,072 B；首次分歧1727正是每组保留的末帧，完整分歧载荷仍在。
+
+两次共释放 **230,012,928 B（约219.357 MiB）**。审计分别为`retention-20261115-014856-356754.json`与`retention-20261115-021140-068661.json`。原始中间序列不再完整可复算；所需源码、脚本、哈希和报告保持保留。活动采集期间没有删除。
+
+新旁路、重建精度及原shader观测控制组加入保护项。诊断的二进制预算降为32 MiB；深层方向纹理只存哈希，不能冒充保留了完整GPU载荷。两份1728帧控制组各仅保存832,512 B二进制，JSON/源码快照另计。涉及新GPU捕帧前仍需审查总容量并单独预留`.wpix`预算。

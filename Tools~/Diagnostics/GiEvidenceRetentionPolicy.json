@@ -4,13 +4,14 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeOriginalStageControl-20261115-021737-918072",
+    "ScreenProbeOrderedReconstruction-20261115-020229-565866",
+    "ScreenProbeDispatchInputWitness-20261115-014752-081900",
     "FrameDebuggerGIFixedFrame-20261115-013807-646763",
     "FrameDebuggerGICustomInputs-20261115-013203-900038",
     "FrameDebuggerGIInputs-20261115-012825-669494",
     "ScreenProbeSdfInputWitness-20261115-011654-903687",
     "ScreenProbeControlledTraceAA-20261115-010602-290128",
-    "ScreenProbePreciseRayFrame-20261115-004254-225175",
-    "ScreenProbePreciseGpuTiming-20261115-003323-857461",
     "ScreenProbePayloadBudgetGuard-20261115-000048-115815",
     "ScreenProbeInverseVpInputs-20261114-235131-623461",
     "ScreenProbeDirectDepthHashes-20261114-234735-781902",
@@ -50,6 +51,8 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbePreciseGpuTiming-20261115-003323-857461", "reason": "Withdrawn precise-output candidate failed long A/A. First divergence1727 remains in each arm last complete bundle; GPU witness and ordered reconstruction experiments supersede interior inputs. Preserve all source/hash/CPU metadata and reports", "requiredFiles": ["archive-review.json", "source-verification.json", "capture.json"] },
+    { "run": "ScreenProbePreciseRayFrame-20261115-004254-225175", "reason": "Incomplete first-arm-only capture invalidated by concurrent Editor edits. Superseded by unchanged-source controlled A/A and original-shader SDF/visibility witness; preserve failed source verification, reports, exact script and complete first/last bundles", "requiredFiles": ["archive-review.json", "source-verification.json", "capture.json"] },
     { "run": "ScreenProbeReceiverPrepPilot-20261115-001355-482964", "reason": "Receiver preparation prototype failed A/A and was withdrawn. First frame divergence is retained in complete endpoint bundles; all hashes, patches, source and analysis retained", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json"] },
     { "run": "ScreenProbeGpuInputWitness-20261115-001847-188050", "reason": "Withdrawn instrumented receiver prototype. All 126 actual GPU input witnesses preserved bit-exact in verified compressed NPZ, plus all metadata and endpoints; other middle payloads no longer needed", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json", "gpu-input-witnesses.npz", "gpu-input-witnesses-index.json"] },
     { "run": "ScreenProbePreciseReceiverPilot-20261115-002500-578347", "reason": "Short precise-position A/A passed but long same-source A/A failed, so this is not promotion evidence. Superseded by full-sequence diagnosis; endpoints, all hashes, source and reports retained", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json"] },

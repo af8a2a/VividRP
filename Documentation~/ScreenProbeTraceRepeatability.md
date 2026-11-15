@@ -62,3 +62,29 @@ v12 的实际脚本已在 live eval 编译运行，受控失配时给出了明�
 恢复检查确认所有诊断回调为空、override=-1、flags0、16 px/8 rays/age128/四轮/bias0.04/源8阶32批，两个场景干净，Edit Mode，自动刷新保持0。未保存 Profile、Scene 或修改同步资源资产。
 
 下一步需使用可复现的 GPU 常量见证或捕帧，在同一个失败运行中核对 screen/SDF dispatch 的实际矩阵和 ray 构造，再决定修复位置。通过长 A/A 后才恢复 FP32/512 成本比较；继续增加历史权重或模糊半径无法解释当前输入重复性问题。
+
+## 旁路见证、精度重建与观测控制组
+
+同日后续实验仍使用 Cornell 固定机位、16 px、8 rays、源8阶/64 samples/32 batches。保存的 shader、Runtime 与 Profile 均已恢复，没有新增渲染质量或性能推广。
+
+`ScreenProbeDispatchInputWitness-20261115-014752-081900/long-repeat` 在两个原追踪 dispatch 前分别运行旁路 kernel，保存64×2个float4：四组矩阵、相机/屏幕/光照常量，以及 probe(95,4) 的 receiver、basis 和八条射线。原追踪函数体未改。两组第0～6帧的七对 GPU 见证逐位一致；第3帧原几何输出仍有3,478个texel不同，最大位置差7.152557e-7 m，随后raw/proposal出现分歧。旁路 kernel 读的是自身 shader 状态，不能据此证明原 kernel 的实际常量缓冲也完全一致。
+
+该目录另保留两个工具自身的失败：首次在没有有效receiver的SceneView上触发RenderGraph绑定校验，未进入采样；加入receiver-ready前置条件后，首组1728帧完成，但末帧重复登记geometry/raw导致记账拒绝。分别修正后另建目录重跑，没有覆盖失败或放宽校验。
+
+`ScreenProbeOrderedReconstruction-20261115-020229-565866` 临时将精度约束放入世界坐标重建内部，显式展开矩阵乘加并约束UV运算；同时撤回旁路kernel与对应C#代码。实际DX12 shader编译诊断为空。无深层阶段读回的1728帧A/A在第二组第12帧失败，几何哈希一致，raw/proposal/rays/screen-rays不同，不能推广此方案。
+
+| 控制组 | 结果 |
+|---|---|
+| 精度原型，`stages`，64帧 | 966对哈希一致，包含composite、directional temporal/filter、prepared/reconstructed anchor和previous histories。 |
+| 精度原型，`stage-long`，1728帧 | 25,926对哈希一致；仅保存832,512 B二进制。 |
+| 原shader，`ScreenProbeOriginalStageControl-20261115-021737-918072`，同一深层1728帧协议 | 同样25,926对哈希一致，二进制832,512 B；源码核验2782份文件未变。 |
+
+上述比较排除第0帧已经失效的previous存储。大尺寸方向纹理只保留哈希，失配仍立即拒绝；未提供GPU计时。GPU读回本身会改变观测条件，不能将精度原型的深层对照通过归因于精度修改，也不能由此认定存在缺失barrier。原型已全部撤回，补丁和准确执行脚本保存在证据目录。
+
+当前需要直接核对原dispatch的常量缓冲、实际资源访问和命令顺序。PIX 2606.18-preview、匹配的analyzer与Unity7000a16路径已核验；原生桥的`ERROR_MOD_NOT_FOUND`来自缺少已注入的`WinPixGpuCapturer.dll`。现有D3D12 device不能通过该桥晚加载补全捕帧条件。
+
+原shader控制目录的`pix-relaunch-plan.json`记录了正常退出、官方PIX launch、相机/精确marker和监控阈值；`WatchPixStartup.ps1`只会附加到新launcher的Editor后代，并拒绝旧PID。监控预算30 GiB/24000 handles参考当前正常空闲Editor约22.9 GiB/11443 handles，超限仅作为终止诊断的边界，不能单独判定泄漏。脚本静态语法校验通过，尚未启动验证；重启计划另获用户明确授权，见`pix-restart-approval.json`。
+
+`normal-state.json`再次确认回调为空、override=-1、flags0、默认age128/四轮/16 px/8 rays/bias0.04，两个场景干净。所有捕帧已结束，Editor处于Edit Mode，现有并发Frame Debugger源文件修改保留。
+
+正常重启前的持久资产检查发现`Assets/VividRPDefaultVolumeProfile.asset`尚未保存。未修改其值；先将原磁盘文件以及内存中的Profile/29个组件JSON存入`default-profile-before-restart/`，再通过`SaveAssetIfDirty`仅保存该资产，保留重启前的状态。该项目资产不在本轮package提交中。

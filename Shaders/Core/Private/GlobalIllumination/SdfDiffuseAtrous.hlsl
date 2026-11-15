@@ -9,6 +9,8 @@ RWTexture2D<float> _SdfAtrousVarianceOutput;
 uint _SdfAtrousStep;
 uint _SdfAtrousUseRestirDomain;
 uint _SdfAtrousHasVariance;
+Texture2D<float4> _SdfAtrousScreenProbeMoments;
+uint _SdfAtrousUseScreenProbeMoments;
 
 struct SdfAtrousGuide
 {
@@ -75,6 +77,10 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
     {
         SdfAtrousGuide guide = LoadSdfAtrousGuide(centerPixel, size);
         float centerLuma = SdfAtrousLogLuminance(center.rgb);
+        float4 moments = _SdfAtrousUseScreenProbeMoments != 0u
+            ? _SdfAtrousScreenProbeMoments.Load(int3(centerPixel, 0)) : 0.0;
+        float momentTrust = moments.w > 0.0 ? smoothstep(2.0, 8.0, moments.z) : 0.0;
+        bool firstNative = _SdfAtrousUseScreenProbeMoments != 0u && _SdfAtrousStep == 1u;
         const int2 axes[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
         const float invalidDelta = 2.0;
         float relativeDepth = max(abs(guide.depth), 1e-4);
@@ -91,7 +97,8 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
             if (SdfAtrousNormalAgreement(guide, tap) > 0.85 && abs(delta) <= maxSlope)
             {
                 deltas[i] = delta;
-                if (_SdfAtrousHasVariance == 0u && abs(delta) <= 0.02 * relativeDepth)
+                if ((_SdfAtrousHasVariance == 0u || (firstNative && momentTrust < 1.0))
+                    && abs(delta) <= 0.02 * relativeDepth)
                 {
                     float4 lighting = LoadSdfAtrousLighting(tapPixel);
                     float difference = SdfAtrousLogLuminance(lighting.rgb) - centerLuma;
@@ -102,10 +109,15 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
         }
         float2 gradient = float2(SdfAtrousGradient(deltas.x, deltas.y, invalidDelta),
             SdfAtrousGradient(deltas.z, deltas.w, invalidDelta));
-        float variance = _SdfAtrousHasVariance != 0u
+        float variance = !firstNative && _SdfAtrousHasVariance != 0u
             ? max(0.0, _SdfAtrousVariance.Load(int3(centerPixel, 0)))
             : 0.5 * varianceSum / max(1.0, varianceWeight);
-        float lumaScale = rcp(0.15 + 2.5 * sqrt(variance));
+        if (firstNative)
+            variance = lerp(0.5 * varianceSum / max(1.0, varianceWeight), max(0.0, moments.y), momentTrust);
+        // Mature native history supplies temporal uncertainty instead of treating
+        // a real illumination edge as spatial noise. Fresh history keeps the prior.
+        float lumaFloor = lerp(0.15, 0.01, momentTrust);
+        float lumaScale = rcp(lumaFloor + 2.5 * sqrt(variance));
         float inverseCoverage = rcp(max(abs(center.a), 1e-4));
         // Device depth is affine on a projected plane. Orthographic depth has a fixed range.
         float depthTolerance = lerp(0.006 * abs(guide.depth), 0.0002, unity_OrthoParams.w) + 1e-6;
@@ -154,7 +166,9 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
                     * exp2(-depthError * depthError - 16.0 * dot(albedoDelta, albedoDelta) - lumaScale * lumaDelta);
                 sum += weight * lighting.rgb;
                 totalWeight += weight;
-                float tapVariance = _SdfAtrousHasVariance != 0u
+                float tapVariance = firstNative
+                    ? lerp(variance, max(0.0, _SdfAtrousScreenProbeMoments.Load(int3(tapPixel, 0)).y), momentTrust)
+                    : _SdfAtrousHasVariance != 0u
                     ? max(0.0, _SdfAtrousVariance.Load(int3(tapPixel, 0))) : variance;
                 varianceNumerator += weight * weight * tapVariance;
             }
@@ -163,7 +177,7 @@ void FilterSdfDiffuseAtrousPixel(uint2 pixel)
         if (!coarseGeometryEdge)
 #endif
             center.rgb = sum / totalWeight;
-        // Neighboring pixels can share a reservoir. Keep a conservative variance floor.
+        // Neighboring pixels can share probes or reservoirs. Keep a conservative variance floor.
         filteredVariance = max(0.25 * variance, varianceNumerator / (totalWeight * totalWeight));
 #if defined(VIVID_SDF_ATROUS_GEOMETRY_GUARD) && !defined(VIVID_SDF_ATROUS_FINAL)
         // A rejected coarse footprint keeps both the fine signal and its

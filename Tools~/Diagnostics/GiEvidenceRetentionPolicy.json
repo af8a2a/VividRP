@@ -4,6 +4,7 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeNativeMoments-20261115-1400",
     "ScreenProbeBlackAnchorStages-20261115-1300",
     "ScreenProbeResidualMap-20261115-104052-278383",
     "ScreenProbeAnchorFinalQuality-20261115-092158-108905",

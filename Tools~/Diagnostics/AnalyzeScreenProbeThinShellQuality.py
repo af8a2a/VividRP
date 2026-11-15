@@ -90,6 +90,12 @@ def motion_history(capture, rows, states):
         report[arm] = dict(samples=int(exposed.sum()), frames=int(exposed.any((1, 2)).sum()),
             oldPixelAge=int((age[exposed] > 1).sum()), acceptedOldPixelHistory=int((status[exposed] == 1).sum()),
             temporalMinusResolveP99=float(np.quantile(error, .99)), temporalMinusResolveMax=float(error.max()))
+        if (arm, 1024, "native-moments-edge") in rows:
+            moments = np.stack([read(rows[arm, f, "native-moments-edge"]) for f in frames])[exposed]
+            assert np.isfinite(moments).all() and (moments[:, 1:] >= 0).all()
+            report[arm]["nativeMoments"] = dict(oldAge=int((moments[:, 2] > 1).sum()),
+                ageRange=[float(moments[:, 2].min()), float(moments[:, 2].max())],
+                varianceMax=float(moments[:, 1].max()), minimumCoverage=float(moments[:, 3].min()))
     return report
 
 

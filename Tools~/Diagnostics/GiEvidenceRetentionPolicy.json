@@ -4,6 +4,13 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "FrameDebuggerGIFixedFrame-20261115-013807-646763",
+    "FrameDebuggerGICustomInputs-20261115-013203-900038",
+    "FrameDebuggerGIInputs-20261115-012825-669494",
+    "ScreenProbeSdfInputWitness-20261115-011654-903687",
+    "ScreenProbeControlledTraceAA-20261115-010602-290128",
+    "ScreenProbePreciseRayFrame-20261115-004254-225175",
+    "ScreenProbePreciseGpuTiming-20261115-003323-857461",
     "ScreenProbePayloadBudgetGuard-20261115-000048-115815",
     "ScreenProbeInverseVpInputs-20261114-235131-623461",
     "ScreenProbeDirectDepthHashes-20261114-234735-781902",
@@ -43,6 +50,9 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbeReceiverPrepPilot-20261115-001355-482964", "reason": "Receiver preparation prototype failed A/A and was withdrawn. First frame divergence is retained in complete endpoint bundles; all hashes, patches, source and analysis retained", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json"] },
+    { "run": "ScreenProbeGpuInputWitness-20261115-001847-188050", "reason": "Withdrawn instrumented receiver prototype. All 126 actual GPU input witnesses preserved bit-exact in verified compressed NPZ, plus all metadata and endpoints; other middle payloads no longer needed", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json", "gpu-input-witnesses.npz", "gpu-input-witnesses-index.json"] },
+    { "run": "ScreenProbePreciseReceiverPilot-20261115-002500-578347", "reason": "Short precise-position A/A passed but long same-source A/A failed, so this is not promotion evidence. Superseded by full-sequence diagnosis; endpoints, all hashes, source and reports retained", "requiredFiles": ["archive-review.json", "source-verification.json", "input-pair-analysis.json"] },
     { "run": "ScreenProbeIsolatedRays-20261114-233542-652465", "reason": "Failed isolated A/A superseded by dense depth/motion/inverse-VP input diagnosis. First observed difference and prior saved frame copied with SHA verification; no protected raw dependency. Preserve all metadata and endpoints; complete original sequence no longer reanalyzable", "requiredFiles": ["timing-qualification.json", "archive-review.json", "source-verification.json"] },
     { "run": "ScreenProbeDenseInputHashes-20261114-233923-261783", "reason": "Failed A/A superseded by direct-depth and HZB/source diagnosis. First frame2 ray/composite/history difference and prior saved frame copied with SHA verification; preserve reports, scripts and endpoints", "requiredFiles": ["timing-qualification.json", "archive-review.json", "source-verification.json"] },
     { "run": "ScreenProbeTraceInputHashes-20261114-234243-546604", "reason": "Failed A/A superseded by direct-depth and actual inverse-VP diagnosis. First frame2 screen-ray divergence and prior saved frame copied with SHA verification; preserve hashes, source, reports and endpoints", "requiredFiles": ["timing-qualification.json", "archive-review.json", "source-verification.json"] },

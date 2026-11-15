@@ -15,6 +15,7 @@ using VividRP.Editor.Tools;
     const System.Reflection.BindingFlags stat = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
     const System.Reflection.BindingFlags inst = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
     if (!Application.isPlaying || EditorApplication.isPaused) throw new InvalidOperationException("An unpaused PlayMode session is required.");
+    if (UnityEngine.FrameDebugger.enabled) throw new InvalidOperationException("Disable Frame Debugger before a GI timing/input capture.");
     if (UnityEngine.Profiling.Profiler.enableBinaryLog) throw new InvalidOperationException("A binary Profiler recording is active.");
     var type = typeof(SdfDiffuseGatherPass);
     var hookNames = new[] { "EditorTraceCapture", "EditorLinearCapture", "EditorGatherFrameOverride",
@@ -100,7 +101,13 @@ using VividRP.Editor.Tools;
     }
     void Begin(ScriptableRenderContext context, Camera current) {
         if (!active) return;
-        if (current != camera) { otherCount++; return; }
+        if (current != camera) {
+            if (otherCount < 8) records.Add(new { arm,frame,phase,unexpectedCamera=new {
+                current.name,type=current.cameraType.ToString(),scene=current.scene.path } });
+            otherCount++; return;
+        }
+        if (errors.Count == 0 && (!Application.isPlaying || EditorApplication.isPaused || UnityEngine.FrameDebugger.enabled))
+            errors.Add("PlayMode/pause/Frame Debugger state changed during capture.");
         if (resetPending) {
             var owner=type.GetField("m_Cameras",inst).GetValue(pass);
             var state=owner.GetType().GetMethod("GetOrCreateBase").Invoke(owner,new object[]{camera});
@@ -248,7 +255,12 @@ using VividRP.Editor.Tools;
                 await System.Threading.Tasks.Task.Delay(16);
             }
             AsyncGPUReadback.WaitAllRequests();
-            if(active || pending!=0 || errors.Count!=0 || otherCount!=0) throw new InvalidOperationException("Timing arm failed: "+arm+" "+string.Join("; ",errors));
+            if(active || pending!=0 || errors.Count!=0 || otherCount!=0) {
+                records.Add(new { arm,age,frame,phase,pending,active,targetCount,otherCount,sourceFrames,
+                    deadlineReached=EditorApplication.timeSinceStartup>=deadline,completed=false });
+                throw new InvalidOperationException("Timing arm failed: "+arm+" frame="+frame+" phase="+phase
+                    +" active="+active+" pending="+pending+" target="+targetCount+" other="+otherCount+" "+string.Join("; ",errors));
+            }
             records.Add(new { arm,age,targetCount,otherCount,sourceFrames,role=index<=2?"qualification":"measured",completed=true });
             System.IO.File.WriteAllText(output+"/progress.txt",arm+" complete");
         }
@@ -270,7 +282,8 @@ using VividRP.Editor.Tools;
             Application.runInBackground=previousBackground;
             foreach(var c in profile.components) UnityEngine.Object.DestroyImmediate(c); UnityEngine.Object.DestroyImmediate(profile);
             System.IO.File.WriteAllText(output+"/capture.json",Newtonsoft.Json.JsonConvert.SerializeObject(new {
-                schema="anchor-gpu-timing.v11",complete,errors,warmup,flush,measured,drain,timingStart,lastFrame,timing,records,timings,
+                schema="anchor-gpu-timing.v12",complete,errors,warmup,flush,measured,drain,timingStart,lastFrame,timing,records,timings,
+                lastArm=arm,frame,phase,pending,targetCount,otherCount,sourceFrames,readyFrames,
                 savedPayloadBudget,savedPayloadBytes,
                 isolatedRoots=otherRoots.Select(r=>new {r.root.name,r.active,restored=r.root.activeSelf}).ToArray(),
                 graphicsApi=SystemInfo.graphicsDeviceType.ToString(),gpu=SystemInfo.graphicsDeviceName,deviceVersion=SystemInfo.graphicsDeviceVersion,

@@ -94,3 +94,17 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 本轮删除 **736** 份中间读回，释放 **1,996,727,808 B（约 1.860 GiB）**。保留首次分歧、前帧、完整首尾帧、全部协议/哈希/源码/分析报告；三个旧中间序列不能再完整复算。清理后 90 份另存载荷再次校验通过，清理计划待删除量为零。审计为 `E:/VividRP_GI_Evidence/retention-20261114-235756-263779.json`：证据约 **123.79 GiB**，E 盘可用约 **117.51 GiB**，未触发 125 GiB/64 GiB 审查线。释放量仅指实际删除字节，另存副本已计入当前容量。
 
 一轮旧诊断的 512 MiB 预计量未被强制执行，实际约 914 MiB。新的 `ScreenProbeAnchorGpuTimingCapture.cs` 常规只存前三帧和差异，其余保留哈希；每次写入前强制检查 **1 GiB 二进制载荷上限**，超限即停，保留已有数据。临时设为 1 字节的 live 验证在写入前停止、产生零份二进制文件，并恢复场景/Profiler。最新直接深度、inverse-VP、计时可用性和预算保护验证加入保护项，具体结论见 [播放模式计时与输入重复性](ScreenProbePlayModeTiming.md)。
+
+## receiver 与精度候选撤回后的清理
+
+三个短实验的原型已撤回，共享 receiver 未通过 A/A；增加 GPU 见证的短对照和 precise-position 短对照虽通过，但未通过无仪表或长序列复查，不能作为推广证据。完成依赖审查、确认捕帧已结束和回调为空后，归档三个目录的中间 `.bin`，删除 **283** 份文件，释放 **460,456,448 B（439.125 MiB）**：
+
+- `ScreenProbeReceiverPrepPilot-20261115-001355-482964`：51 份，153,186,816 B；
+- `ScreenProbeGpuInputWitness-20261115-001847-188050`：178 份，153,666,560 B；
+- `ScreenProbePreciseReceiverPilot-20261115-002500-578347`：54 份，153,603,072 B。
+
+保留各组完整首尾帧、所有哈希、协议、源码、patch 与失败/分析记录。第二个目录的全部 **126** 份实际 GPU 常量见证在删除前压缩到 `gpu-input-witnesses.npz`，索引保留每份原始 SHA 和 NPZ SHA；删除后再次逐份解压校验通过。三个目录的删除日志和实际缺失数全部相符，归档计划待删除量为零。其他中间序列已不再完整可复算。
+
+审计为 `E:/VividRP_GI_Evidence/retention-20261115-004856-339652.json`。随后保存了受控追踪、完整整数 visibility/SDF 输入和原生绑定检查，最新容量为 **124.977 GiB**，E 盘可用 **116.370 GiB**。目前仍在 125 GiB / 64 GiB 审查线内，但证据距软上限仅约 23 MiB；下一轮大捕帧前必须先审查可归档数据并预留预算，不能凭单次 1 GiB 载荷保护继续无限追加。
+
+最新复核为 `FrameDebuggerGIFixedFrame-20261115-013807-646763/post-experiment-retention.json`。当前受控 A/A、原 shader 输入见证、长精度复查、并发失效运行及原生事件 JSON 均加入保护项。本轮具体定位边界见 [追踪重复性定位](ScreenProbeTraceRepeatability.md)。

@@ -1,5 +1,7 @@
 # Screen Probe 播放模式计时与输入重复性
 
+后续的原 shader 整数 visibility / SDF buffer 对照、精度候选撤回与原生绑定检查见 [追踪重复性定位](ScreenProbeTraceRepeatability.md)。下文保留首次播放模式诊断当时的检查范围。
+
 2026-11-15，Unity 7000.0.0a16 / D3D12 / RTX 5070 Ti。播放模式的 GPU-only recorder 已可用，但 FP32/512 的受控 A/B 尚未合格；保存的默认配置继续使用 FP16/128。本轮没有修改 Runtime、Shader 或保存的 Profile，也没有候选 GPU 成本、性能改善或新增 GI 质量改善结论。
 
 ## 可用计时与实验条件

@@ -150,3 +150,9 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 本轮[连续帧控制](ScreenProbeContinuousPixControl.md)只保存必要信号、常量与hash。三份有效canonical PIX保留；实际原DXIL核验后，另清理188,544,504 B可再生成的导出数据，保留C++源与压缩程序。该导出目录不能直接构建或回放，需从canonical重导出数据。
 
 容量依据为05:04的完整清单，随后刷新本轮7个变更目录；其他目录沿用该清单，不冒充再次完整扫描。估计证据 **107.250 GiB**，实时E盘可用 **130.497 GiB**，`needsFurtherReview=false`。具体范围、时间和刷新目录见 `ScreenProbePostControlGpuTiming-20261115-044317-996633/post-cleanup-inventory.json`。没有删除活动捕帧或当前候选 / 参考数据。
+
+## Recorder / 读回控制的容量复核
+
+[8组原 shader 控制](ScreenProbeRecorderCadence.md)完成后，新目录 `ScreenProbeRecorderCadence-20261115-054646-719003` 加入保护。96份保存载荷共 **149,492,736 B（142.57 MiB）**，逐份SHA通过，未超出192 MiB的硬上限；其余阶段只保存hash与CPU元数据。实际脚本、两版分析、分析工具副本及完整57 MB capture JSON保留。
+
+以05:15的刷新清单为基准，仅计入这份全新目录的实际文件，估计证据 **107.450 GiB**，实时E盘可用 **129.999 GiB**，`needsFurtherReview=false`。新增目录在写入容量审计前共215,102,933 B；其他目录沿用基准，没有再次全盘扫描。依据见该目录 `post-experiment-storage.json`。本次没有删除文件，没有将其他进程造成的磁盘变化归因于清理。

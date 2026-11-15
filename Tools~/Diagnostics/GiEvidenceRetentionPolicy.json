@@ -4,6 +4,10 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbePostControlGpuTiming-20261115-044317-996633",
+    "ScreenProbeNaturalColdTrials-20261115-043832-933141",
+    "ScreenProbeContinuousPixPair-20261115-043230-349638",
+    "ScreenProbeTemporalInlineWitness-20261115-041510-409875",
     "ScreenProbeTemporalPixPair-20261115-034908-669385",
     "ScreenProbeFreshPixTiming-20261115-032443-384775",
     "ScreenProbeOriginalStageControl-20261115-021737-918072",
@@ -52,6 +56,8 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "SponzaPlanarAnchor-20261113-175547-778", "reason": "Withdrawn moving-window planar anchor prototype; no accepted final-image benefit, superseded by current native GI controls. Protected runs reference only storage inventories. Preserve reports, exact source/patch/hash and all complete per-arm first/last bundles; full interior sequence no longer required", "requiredFiles": ["archive-review.json", "analysis.json", "capture/capture.json", "source-window-only/sha256.json", "source-window-only/prototype.patch"] },
+    { "run": "SponzaPlanarAnchor-20261113-180918-964", "reason": "Withdrawn planar confidence prototype increased energy and variance, superseded by current native GI controls. Protected runs reference only storage inventories. Preserve reports, restoration, exact source/patch/hash and complete per-arm first/last bundles; full interior sequence no longer required", "requiredFiles": ["archive-review.json", "analysis.json", "capture/capture.json", "restoration.json", "source-confidence/sha256.json", "source-confidence/prototype.patch"] },
     { "run": "ScreenProbeDirectDepthHashes-20261114-234735-781902", "reason": "Superseded by exact SDF/visibility witness and actual PIX b0/b1 bytes. Preserve complete first divergence2, prior1, endpoints and all metadata at original paths; interior sequence no longer fully reanalyzable", "requiredFiles": ["archive-review.json", "archive-review-correction.json", "source-verification.json", "timing-qualification.json", "capture.json"], "preserveFrames": [1, 2] },
     { "run": "ScreenProbePreciseGpuTiming-20261115-003323-857461", "reason": "Withdrawn precise-output candidate failed long A/A. First divergence1727 remains in each arm last complete bundle; GPU witness and ordered reconstruction experiments supersede interior inputs. Preserve all source/hash/CPU metadata and reports", "requiredFiles": ["archive-review.json", "source-verification.json", "capture.json"] },
     { "run": "ScreenProbePreciseRayFrame-20261115-004254-225175", "reason": "Incomplete first-arm-only capture invalidated by concurrent Editor edits. Superseded by unchanged-source controlled A/A and original-shader SDF/visibility witness; preserve failed source verification, reports, exact script and complete first/last bundles", "requiredFiles": ["archive-review.json", "source-verification.json", "capture.json"] },

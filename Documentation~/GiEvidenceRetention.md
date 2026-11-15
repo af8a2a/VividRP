@@ -133,3 +133,20 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 本阶段共实际删除 **1,148,368,934 B（约1.069 GiB）**，没有清理活动捕帧。成对捕帧审计为 `ScreenProbeTemporalPixPair-20261115-034908-669385/pix-derived-retention.json`，最终容量见同目录 `post-experiment-storage.json`。新 A/A 与成对捕帧保持保护。新增完整帧保留及非法策略回归后，10项独立文件系统测试通过；没有运行 Unity Test Framework。
 
 最新证据 **125.355 GiB**，E盘可用 **112.659 GiB**，`needsFurtherReview=true`；大捕帧前仍需审查可归档项。软上限不是任意删除保护证据的授权，不将其他进程造成的可用空间变化归因于上述清理。
+
+## 撤回的 Sponza planar 原型归档
+
+2026-11-15，容量复核发现两份明确撤回的旧原型占据约19.3 GiB。现有[历史结论](ScreenProbeMotionHistoryReplay.md)说明：窗口原型没有足够最终画面收益，置信度原型增加静止能量与方差；均已撤回，未作当前质量参考。检索全部保护目录的文本依赖，仅在两份容量清单中出现其目录名，没有中间原始帧消费者。
+
+暂停状态恢复、PIX idle、无capture observer后，两项加入显式归档白名单：
+
+| 旧目录 | 删除中间文件 | 实际释放 | 首尾帧保留并校验 |
+|---|---:|---:|---:|
+| `SponzaPlanarAnchor-20261113-175547-778` | 12,700 | 10,195,763,200 B | 112 |
+| `SponzaPlanarAnchor-20261113-180918-964` | 12,700 | 10,195,763,200 B | 112 |
+
+合计 **20,391,526,400 B（约18.990 GiB）**。全部报告、汇总图、源码 / patch / hash、profile与恢复记录保留；224份首尾载荷逐份SHA复核通过，剩余计划删除文件为零。原始中间序列不可再完整复算。每个旧目录包含独立审查、保留载荷清单和逐文件删除审计；本次汇总为 `ScreenProbePostControlGpuTiming-20261115-044317-996633/planar-retention-result.json`。
+
+本轮[连续帧控制](ScreenProbeContinuousPixControl.md)只保存必要信号、常量与hash。三份有效canonical PIX保留；实际原DXIL核验后，另清理188,544,504 B可再生成的导出数据，保留C++源与压缩程序。该导出目录不能直接构建或回放，需从canonical重导出数据。
+
+容量依据为05:04的完整清单，随后刷新本轮7个变更目录；其他目录沿用该清单，不冒充再次完整扫描。估计证据 **107.250 GiB**，实时E盘可用 **130.497 GiB**，`needsFurtherReview=false`。具体范围、时间和刷新目录见 `ScreenProbePostControlGpuTiming-20261115-044317-996633/post-cleanup-inventory.json`。没有删除活动捕帧或当前候选 / 参考数据。

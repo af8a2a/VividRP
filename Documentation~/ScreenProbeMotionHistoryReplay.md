@@ -80,6 +80,8 @@ E:/VividRP_GI_Evidence/SponzaPlanarAnchor-20261113-180918-964/source-confidence/
 
 原型基于 `0886fc72`，复现应在独立 checkout 应用对应 snapshot 的 patch，并使用对应 capture 源码，不能只在当前主路径打开一个已删除的实验入口。分析器保留 `candidate=planar` 的历史数据读取能力。
 
+2026-11-15，确认当前保护实验没有依赖两批原始中间帧后，按[数据保留规则](GiEvidenceRetention.md)归档：全部报告、汇总图、源码 / patch / hash及每组完整首尾帧保留，中间读回已清理，原256帧序列不能再完整复算。审计及224份保留载荷校验见各目录与最新清理记录。
+
 恢复检查确认 prototype kernel 不存在、原入口索引恢复 5、hooks 为空、flags=0、frame override=−1，原两个 Cornell 场景均未脏。过滤 shader 无 Error；保留现有 `plane` 同名和潜在未初始化 Warning，详见第二批的 `restoration.json`。生产 C# 和过滤 shader 与原实现的 diff 为空。
 
 后续 `sponza-anchor` 模式只记录正常路径的 raw / temporal anchor、GPU age / separation / rejection、探针几何，不修改 kernel 选择。重放与消融共同说明：当前证据支持继续分离命中辐亮度、方向采样和重建方差，不支持继续扩大 scalar 历史作为主要解决途径。

@@ -52,4 +52,6 @@
 
 下一步针对这个更短的窗口，尝试连续0～3帧的原dispatch捕获，检查实际b0与资源访问。只有捕获内也复现相同分歧，才能将它作为故障dispatch证据；捕获若改变结果，须保留这一限制，不能替代原异常。
 
+后续[四帧PIX控制](ScreenProbeFourFramePix.md)两组均有效，但捕获内功能结果相同，第1帧恰与冻结重放一致，故没有取得故障b0。只读geometry原型因上游输入已不同而未通过门槛，已撤回；恢复原程序又复现第2帧518个texel差异。追加的10种诊断分支扫描也未精确解释自然结果，未增加二进制载荷。
+
 生产shader未改动，不添加猜测性栅栏、坐标量化或舍入补丁，不推广FP32/512。重放后重新运行正常相机帧以重绑共享ComputeShader参数，实测默认128、16/8、四轮、bias0.04、源8/32；两个场景干净、hooks为空、override=-1、flags0、PIX idle，Playing=true / Paused=true。Console游标202→203无新错误、无drop/reset；未运行Unity Test Framework（Editor保持打开）。容量复核见 [数据保留](GiEvidenceRetention.md)。

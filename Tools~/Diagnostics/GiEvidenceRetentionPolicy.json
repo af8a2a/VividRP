@@ -4,6 +4,8 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeGeometrySrv-20261115-065335-414126",
+    "ScreenProbeFourFramePix-20261115-064454-901919",
     "ScreenProbeDirectionalBinding-20261115-061302-342892",
     "ScreenProbeRecorderCadence-20261115-054646-719003",
     "ScreenProbePostControlGpuTiming-20261115-044317-996633",

@@ -162,3 +162,9 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 [Directional历史检查](ScreenProbeDirectionalBinding.md)将8组窗口缩短为64帧，临时内存只持有基准与当前组的输入，逻辑持有量不超过3 GiB。只将首个分歧的前帧／当前帧保存，32份载荷94,525,440 B；克隆与直接原kernel重放额外保存75,202,560 B。合计 **169,728,000 B（161.87 MiB）**，低于192 MiB上限，所有保存payload均经SHA校验。末位扫描只保存hash与参数，没有新增二进制载荷。
 
 `ScreenProbeDirectionalBinding-20261115-061302-342892` 加入保护，保留完整metadata、实际脚本、初版未执行脚本、状态守卫停止记录、源码指纹及分析工具副本。新目录在写入审计前177,345,264 B；以06:02的容量估计为基准只加入该新目录，估计证据 **107.616 GiB**，实时E盘可用 **129.021 GiB**，`needsFurtherReview=false`。未完整重扫其他目录，没有删除文件。范围与时间见该目录 `post-experiment-storage.json`，后续新写入少量分析元数据不回填成旧审计时刻的计数。
+
+## 四帧 PIX 与被撤回的 geometry SRV 原型
+
+[四帧控制](ScreenProbeFourFramePix.md)保存两份有效canonical捕获，共381,117,046 B，以及64份关键读回189,050,880 B。它们没有复现自然分歧，未继续生成大体积C++／常量导出。SRV原型的原配置／候选／恢复三阶段保存80份载荷236,313,600 B，保留首次分歧、精确patch、原始／原型源码及编译数据；候选输入门槛失败并已撤回。两个新目录均加入保护，所有保存payload的SHA复核通过。
+
+仅测量两个新目录和追加20次诊断分支扫描的既有保护目录；扫描没有额外二进制。以06:37审计为基准，两个新目录分别570,916,505 B与254,672,113 B，既有目录增加522,776 B。估计证据 **108.385 GiB**，实时E盘可用 **128.081 GiB**，`needsFurtherReview=false`。没有再次全盘扫描或删除文件，没有创建临时链接。审计为 `ScreenProbeGeometrySrv-20261115-065335-414126/post-experiment-storage-v2.json`，此前审计保留，后续少量元数据不回填到旧时刻计数。

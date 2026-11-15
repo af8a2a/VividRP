@@ -3,17 +3,16 @@
 PIX 的显式捕获、M1 管线边界/异步队列同步、M2 外部分析器及异步查询，以及统一入口 `agentic_gpu_debugger --backend pix|frame_debugger` 见 [PIX.md](PIX.md)。
 
 CPU Profiler 的 `status / frames / frame / allocation` GC 分配查询见 [GCProfiler.md](GCProfiler.md)。
-该接口独立于下面的 Frame Debugger，不受 Raster 事件白名单影响，也不会观察 RasterPass。
+该接口独立于下面的 Frame Debugger，不读取其事件或 RasterPass 详情。
 
 通过 Editor API / Unity CLI 读取 Unity Frame Debugger，不需要操作桌面窗口。
 核心程序集仅在 Editor 加载；`Pipeline/` 是可选的 `com.unity.pipeline` CLI 适配。
-当前验证目标：Unity **6000.7.0a6**。私有 API 被隔离在 `FrameDebuggerApi.cs`；
+当前项目版本：Unity **7000.0.0a16**（见项目 `ProjectSettings/ProjectVersion.txt`）。私有 API 被隔离在 `FrameDebuggerApi.cs`；
 缺少成员时返回 `unsupported_unity_api`，升级 Editor 后应重新运行 smoke 检查。
 
-**当前 Unity 存在观察 Raster / Native RenderPass 时崩溃的问题。**
-本工具硬性只允许观察 `ComputeDispatch` / `RayTracingDispatch`：列表过滤 Raster 事件，
-`select` / `event` 在调用原生选择或详情 API 前拒绝所有其他事件类型；
-渲染目标导出已禁用。没有绕过此保护的开关。
+**Frame Debugger 观察 Raster / Native RenderPass 时的崩溃问题已在当前版本修复（2026-11-15，用户确认）。**
+此前为规避崩溃添加的事件白名单和详情字段过滤已移除，支持 Raster / Native RenderPass、Compute 和 Ray Tracing 事件查看，
+并恢复当前选中事件的渲染目标导出。会话归属、事件索引、过期 hash 和详情匹配检查仍然保留。
 
 ## 调用
 
@@ -39,6 +38,9 @@ unity command agentic_frame_debugger --project-path $project --action select --s
 # select 后需等 Unity 重绘；遇到 code=pending 时稍后重试
 unity command agentic_frame_debugger --project-path $project --action event --event_index 42 --include_shader_properties true --format json
 
+# 导出同一选中事件的渲染目标；文件必须不存在，HDR 可使用 .exr
+unity command agentic_frame_debugger --project-path $project --action export --event_index 42 --events_hash HASH --path Temp/AgenticDebugger/target.png --format json
+
 # 完成后必须释放；无人释放时也会在租约到期后自动恢复
 unity command agentic_frame_debugger --project-path $project --action release --session_id SESSION --format json
 ```
@@ -55,17 +57,22 @@ CLI 响应需要同时检查外层 `success` 和 `data.result.success`。
 
 ## 返回的数据
 
-- `events`：只返回 Compute / Ray Tracing 事件，包含零基 `eventIndex`、Profiler 标记名称、事件类型和关联对象。
-  编号保留原生索引，因此会有间隔；`total` / `eventCount` 是未过滤的原生事件总数。
-  `offset` 是原生索引，`count` 是最多返回的允许事件数，用 `nextOffset` 翻页（-1 表示结束）。单页最多 2000 条。
-- `event`：当前选中 Compute / Ray Tracing 事件的 Shader、Kernel、线程组和光追分派参数。
-  不输出 RenderTarget、混合/深度/模板/光栅状态等 Raster 字段。
+- `events`：返回所有原生事件类型，包含零基 `eventIndex`、Profiler 标记名称、事件类型和关联对象。
+  编号与原生索引一致；`total` / `eventCount` 是原生事件总数。
+  `offset` 是原生索引，`count` 是最多返回的事件数，用 `nextOffset` 翻页（-1 表示结束）。单页最多 2000 条。
+- `event`：当前选中事件的完整公开 DTO 字段，包括 Shader、绘制参数、RenderTarget、混合/深度/模板/光栅状态，
+  以及 Compute Kernel、线程组和光追分派参数。
   `details` 保留当前 Unity DTO 的字段名，并非跨版本固定字段表；不适用于该事件的字段可能为零/空。
   `include_shader_properties=true` 额外输出关键字、常量、纹理/缓冲绑定名称等。
   Unity Object 只输出身份与纹理描述，不遍历其属性或复制缓冲内容。
 - `events` / `event` 可通过 `path=...json` 将本次响应写入文件。
-- JSON 路径相对于 Unity 项目根目录，也可传绝对路径；已有文件不会被覆盖。
-- `export` 始终返回 `raster_inspection_disabled`，不读取 GPU 渲染目标。
+- 所有输出路径相对于 Unity 项目根目录，也可传绝对路径；已有文件不会被覆盖。
+- `export`：将当前选中事件的 `m_RenderTargetRenderTexture` 导出至必填的 `path`，支持 `.png`（RGBA8，超出范围的值被截断）
+  和 `.exr`（RGBA 浮点，保留 HDR 范围）。返回 `eventIndex`、`path`、`width`、`height`、`format`。
+  与 `event` 一样，需先选择事件并等待重绘；`event_index=-1` 使用当前选择，`pending` 时可稍后重试。
+  导出读取 Unity 提供的当前 2D 渲染目标预览，不切换 MRT、深度、mip 或数组切片，也不保证与窗口的通道、色阶和翻转显示一致。
+  无目标时返回 `no_render_target`，非 2D 目标返回 `unsupported_render_target`。导出会同步读取 GPU 数据，不应计入性能基线；
+  完成或失败时均恢复活动渲染目标和 sRGB 写入状态，并释放工具创建的临时纹理。
 
 ## 状态与边界
 
@@ -78,7 +85,7 @@ CLI 响应需要同时检查外层 `success` 和 `data.result.success`。
 - Play Mode 正在运行时捕获会暂停；释放时只恢复本工具改变的暂停状态。
   关闭、程序集重载、Play Mode 转换、租约到期都清理本工具的会话。
   租约是从 capture 开始的绝对时限（1..300 秒），读取/选择不会自动延期。
-- 已启用的 Frame Debugger 可直接 `events` / `event`，不会被本工具接管；同样受事件白名单限制。
+- 已启用的 Frame Debugger 可直接 `events` / `event` / `export`，不会被本工具接管。
   `select` / `release` 只接受本工具发出的会话 ID；用户已有捕获由用户在原窗口选择事件。
 - `eventsHash` 用于检测事件列表变化，不代表 GPU 帧号，也不能证明两个图像来自同一帧。
   `event` 校验 Unity 返回成功及其 `m_FrameEventIndex`，避免返回上次选中的旧事件。
@@ -87,23 +94,27 @@ CLI 响应需要同时检查外层 `success` 和 `data.result.success`。
 
 ## 验证
 
-最终代码的核心/CLI 两个程序集已通过 Roslyn 离线编译。
-`Tests~/PolicyChecks` 在独立 .NET 进程中检查实际编译程序集的事件白名单和字段过滤，
-10 项检查通过，不构造原生适配器、不调用任何 Unity 原生函数。
+既有验证记录（最初验证目标为 Unity **6000.7.0a6**）：核心/CLI 两个程序集已通过 Roslyn 离线编译。
+当时的 `Tests~/PolicyChecks` 通过了 10 项白名单和字段过滤检查；该历史结果不代表当前恢复后的功能验收。
+
+2026-11-15：移除限制后，核心/CLI 两个程序集使用当前 Unity **7000.0.0a16** 的实际编译响应文件和引用通过 Roslyn 离线编译。
+更新后的 `Tests~/PolicyChecks` 在独立 .NET 进程中检查实际编译程序集的事件类型序列化、Raster/Compute/Ray Tracing 详情、
+Shader 属性开关、PNG/EXR 输出路径及禁止覆盖行为，16 项检查通过，不构造原生适配器、不调用任何 Unity 原生函数。
 需要 .NET 10 SDK，参数为编译后的核心 DLL、UnityEngine DLL 目录、Newtonsoft.Json DLL：
 
 ```powershell
 dotnet run --project Editor/AgenticDebugger/Tests~/PolicyChecks -- <AgenticDebugger.dll> <UnityEngine目录> <Newtonsoft.Json.dll>
 ```
 
-实时验证尚未完成：默认 Game view 捕获未收到事件；显式相机探测曾返回 126 条事件元数据，
+早期实时验证未完成：默认 Game view 捕获未收到事件；显式相机探测曾返回 126 条事件元数据，
 但随后编辑器发生崩溃（用户确认，具体触发点未确定）。探测没有调用事件详情 API。
 收到 RasterPass 崩溃限制后已停止原生捕获，添加白名单并只做离线验证。
-**Compute / Ray Tracing 的实时详情、最终会话生命周期仍需在修复后的 Editor 中验证。**
-当前不能把整个捕获流程标记为稳定或验收通过。
+截至 2026-11-15，用户已确认当前 Unity **7000.0.0a16** 中上述崩溃问题已修复。
+**恢复后的 Raster / Native RenderPass、Compute / Ray Tracing 实时详情、PNG/EXR 导出和最终会话生命周期仍待在当前版本验证。**
+此次未重新运行实时捕获；离线编译和检查不等同于整个自动化捕获流程已验收通过。
 
 `Tests~/smoke.py` 是 CLI 集成检查，不调用 Unity Test Framework：
-它会调用原生捕获/选择/详情 API；当前崩溃版本不要运行此脚本，保留给后续 Editor 修复后使用。
+它会调用原生捕获/选择/详情和 GPU 读回 API，可用于当前版本的集成复验；本次未运行此脚本。
 
 ```powershell
 python Editor/AgenticDebugger/Tests~/smoke.py --project E:/VividRP_Reborn
@@ -111,6 +122,6 @@ python Editor/AgenticDebugger/Tests~/smoke.py --project E:/VividRP_Reborn
 python Editor/AgenticDebugger/Tests~/smoke.py --project E:/VividRP_Reborn --source camera
 ```
 
-它临时启用捕获，只选择允许的 Compute / Ray Tracing 事件，检查分页、详情、错误会话、过期 hash 和释放，并用 `finally`
-恢复工具创建的会话。需要连接中的 Editor；Game view 模式需要正在重绘的视图，
-camera 模式需要可渲染相机。遇到用户已有捕获会拒绝启动。
+它临时启用捕获，检查完整事件分页、Raster 选择及详情、PNG/EXR 文件签名、禁止覆盖、错误会话、过期 hash 和释放，
+并用 `finally` 恢复工具创建的会话。图片输出到系统临时目录并自动清理。需要连接中的 Editor 和包含可导出 Raster 目标的帧；
+Game view 模式需要正在重绘的视图，camera 模式需要可渲染相机。遇到用户已有捕获会拒绝启动。

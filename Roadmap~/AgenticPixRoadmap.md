@@ -28,7 +28,8 @@ Implemented:
   on compute queues and requires all logical scope markers, including aliased queues.
 - `agentic_gpu_debugger --backend pix|frame_debugger`, common readiness/ownership
   fields, cross-backend exclusion and legacy-command compatibility. Frame Debugger's
-  raster restrictions remain in place.
+  crash-workaround whitelist was removed on 2026-11-15, restoring raster inspection
+  and PNG/EXR render-target export; see its [validation status](../Editor/AgenticDebugger/README.md#验证).
 
 Validated: full Runtime compilation with Unity 6000.7.0b1's actual response file;
 Editor/CLI compilation; standalone hook/queue/router checks (idle hooks 0 B after

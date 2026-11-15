@@ -34,7 +34,6 @@ namespace VividRP.AgenticDebugger
                 switch (action)
                 {
                     case "status": return Status();
-                    case "export": return Failure("raster_inspection_disabled", "Render-target export is disabled: this Unity version can crash when inspecting native render passes.");
                     case "capture": return Capture(timeoutSeconds, source, cameraName);
                     case "release":
                         RequireOwner(sessionId);
@@ -47,16 +46,15 @@ namespace VividRP.AgenticDebugger
                         RequireOwner(sessionId);
                         RequireCapture(expectedEventsHash);
                         RequireIndex(eventIndex);
-                        RequireInspectable(eventIndex);
                         api.SetLimit(eventIndex + 1);
                         settleTicks = 4;
                         Repaint();
                         return Status();
                     case "event":
+                    case "export":
                         RequireCapture(expectedEventsHash);
                         if (eventIndex == -1) eventIndex = api.Limit() - 1;
                         RequireIndex(eventIndex);
-                        RequireInspectable(eventIndex);
                         if (api.Limit() != eventIndex + 1)
                             return Failure("selection_required", "Select this event first, then poll event until ready.");
                         if (settleTicks > 0) return Failure("pending", "Waiting for the selected event to render.");
@@ -64,13 +62,14 @@ namespace VividRP.AgenticDebugger
                         object data = api.Data(eventIndex);
                         if (data == null) return Failure("pending", "Unity has not returned matching event data yet.");
                         if (hash != api.EventsHash()) return Failure("stale_capture", "Event list changed while reading details.");
-                        var fields = FrameDebuggerApi.DescribeDispatch(data, includeShaderProperties);
+                        if (action == "export") return Export(data, eventIndex, hash, path);
+                        var fields = FrameDebuggerApi.DescribeEvent(data, includeShaderProperties);
                         var detail = Status();
                         detail["eventIndex"] = eventIndex;
                         detail["details"] = fields;
                         SaveJson(detail, path);
                         return detail;
-                    default: return Failure("invalid_action", "Use status, capture, events, select, event or release. Texture export is disabled.");
+                    default: return Failure("invalid_action", "Use status, capture, events, select, event, export or release.");
                 }
             }
             catch (Exception exception)
@@ -93,7 +92,7 @@ namespace VividRP.AgenticDebugger
             ["source"] = session == null ? null : captureSource,
             ["camera"] = captureCamera ? captureCamera.name : null,
             ["cameraCaptureSupported"] = api.EnterCapture != null,
-            ["inspectionPolicy"] = "ComputeDispatch and RayTracingDispatch only; raster/native render-pass inspection and texture export disabled.",
+            ["inspectionPolicy"] = "All event types; selected render-target export to PNG or EXR.",
             ["remainingSeconds"] = session == null ? 0 : Math.Max(0, deadline - EditorApplication.timeSinceStartup),
             ["playing"] = EditorApplication.isPlaying, ["paused"] = EditorApplication.isPaused
         };
@@ -175,13 +174,6 @@ namespace VividRP.AgenticDebugger
             if (index < 0 || index >= api.Count()) throw new ArgumentOutOfRangeException(nameof(index), "eventIndex is zero-based and must be inside eventCount.");
         }
 
-        private static void RequireInspectable(int index)
-        {
-            Array events = api.Events();
-            if (index >= events.Length || !FrameDebuggerApi.Inspectable(events.GetValue(index)))
-                throw new InvalidOperationException("Raster/native render-pass inspection is disabled. Only ComputeDispatch and RayTracingDispatch are allowed.");
-        }
-
         private static JObject Events(int offset, int count, string path)
         {
             if (offset < 0 || count < 1 || count > 2000) throw new ArgumentOutOfRangeException(nameof(offset), "offset >= 0; count must be 1..2000.");
@@ -193,7 +185,6 @@ namespace VividRP.AgenticDebugger
             {
                 int index = end++;
                 object frameEvent = events.GetValue(index);
-                if (!FrameDebuggerApi.Inspectable(frameEvent)) continue;
                 var row = (JObject)FrameDebuggerApi.Describe(frameEvent);
                 row["eventIndex"] = index;
                 row["name"] = api.Name(index);
@@ -207,6 +198,54 @@ namespace VividRP.AgenticDebugger
             result["nextOffset"] = end < events.Length ? end : -1;
             SaveJson(result, path);
             return result;
+        }
+
+        private static JObject Export(object data, int eventIndex, int hash, string path)
+        {
+            string extension = Path.GetExtension(path);
+            bool exr = string.Equals(extension, ".exr", StringComparison.OrdinalIgnoreCase);
+            if (!exr && !string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Render-target output path must end in .png or .exr.");
+            var target = FrameDebuggerApi.RenderTarget(data);
+            if (!target) return Failure("no_render_target", "Unity did not provide a render target for this event.");
+            if (target.dimension != UnityEngine.Rendering.TextureDimension.Tex2D)
+                return Failure("unsupported_render_target", "Export requires Unity's 2D render-target preview.");
+            string output = OutputPath(path, extension);
+            var previous = RenderTexture.active;
+            bool previousSrgbWrite = GL.sRGBWrite;
+            RenderTexture copy = null;
+            Texture2D pixels = null;
+            try
+            {
+                // Read a single-sample copy; never release or modify Unity's event texture.
+                copy = RenderTexture.GetTemporary(target.width, target.height, 0,
+                    RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+                GL.sRGBWrite = false;
+                Graphics.Blit(target, copy);
+                RenderTexture.active = copy;
+                pixels = new Texture2D(target.width, target.height,
+                    exr ? TextureFormat.RGBAFloat : TextureFormat.RGBA32, false, true);
+                pixels.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0, false);
+                byte[] bytes = exr ? pixels.EncodeToEXR(Texture2D.EXRFlags.OutputAsFloat) : pixels.EncodeToPNG();
+                if (bytes == null || bytes.Length == 0) throw new IOException("Unity returned an empty encoded image.");
+                if (hash != api.EventsHash() || api.Limit() != eventIndex + 1)
+                    return Failure("stale_capture", "Event list or selection changed during export.");
+                using (var stream = new FileStream(output, FileMode.CreateNew)) stream.Write(bytes, 0, bytes.Length);
+                var result = Status();
+                result["eventIndex"] = eventIndex;
+                result["path"] = output;
+                result["width"] = target.width;
+                result["height"] = target.height;
+                result["format"] = exr ? "exr" : "png";
+                return result;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                GL.sRGBWrite = previousSrgbWrite;
+                if (pixels) UnityEngine.Object.DestroyImmediate(pixels);
+                if (copy) RenderTexture.ReleaseTemporary(copy);
+            }
         }
 
         private static string OutputPath(string path, string extension)

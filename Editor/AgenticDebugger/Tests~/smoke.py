@@ -1,7 +1,9 @@
 """Opt-in CLI integration check; never launches Unity Test Framework or changes scenes."""
 import argparse
 import json
+from pathlib import Path
 import subprocess
+import tempfile
 import time
 
 
@@ -31,7 +33,7 @@ def main():
     before = call("status")
     check("initially_disabled", before["success"] and not before["enabled"])
     check("reject_invalid_timeout", not call("capture", timeout_seconds=0)["success"])
-    check("texture_export_disabled", call("export").get("code") == "raster_inspection_disabled")
+    check("reject_export_without_capture", not call("export")["success"])
     started = call("capture", timeout_seconds=120, source=args.source)
     check("capture_started", started["success"] and bool(started.get("sessionId")))
     session = started["sessionId"]
@@ -49,11 +51,22 @@ def main():
         page = call("events", count=8)
         check("event_page", page["success"] and 0 < len(page["events"]) <= 8)
         indices = [e["eventIndex"] for e in page["events"]]
-        check("ordered_native_indices", indices == sorted(set(indices)) and indices[0] >= 0)
-        check("no_raster_events", all(e["m_Type"] in ("ComputeDispatch", "RayTracingDispatch") for e in page["events"]))
+        check("contiguous_native_indices", indices == list(range(len(indices))))
+        events = list(page["events"])
+        while page["nextOffset"] != -1:
+            page = call("events", offset=page["nextOffset"], count=2000,
+                        events_hash=page["eventsHash"])
+            check("next_page", page["success"])
+            events.extend(page["events"])
+        check("all_native_events", [e["eventIndex"] for e in events] == list(range(page["total"])))
+        raster = [e for e in events if e["m_Type"] in (
+            "Mesh", "SRPBatch", "InstancedMesh", "StaticBatch", "DynamicBatch",
+            "DrawProcedural", "DrawProceduralIndirect", "DrawProceduralIndexed",
+            "DrawProceduralIndexedIndirect", "ClearColor", "ClearColorDepth", "ClearAll")]
+        check("raster_events_present", bool(raster))
         check("reject_stale_hash", not call("events", events_hash="invalid")["success"])
         check("reject_invalid_index", not call("select", session_id=session, event_index=page["total"])["success"])
-        index = page["events"][-1]["eventIndex"]
+        index = raster[-1]["eventIndex"]
         selected = call("select", session_id=session, event_index=index)
         check("selection_accepted", selected["success"])
         deadline = time.monotonic() + 20
@@ -66,6 +79,18 @@ def main():
             time.sleep(0.3)
         check("matching_event_data", detail["details"]["m_FrameEventIndex"] == index)
         check("shader_properties", "m_ShaderInfo" in detail["details"])
+        check("raster_details", all(k in detail["details"] for k in (
+            "m_RenderTargetRenderTexture", "m_RasterState", "m_BlendState", "m_DepthState", "m_StencilState")))
+        check("reject_invalid_export_extension", not call("export", event_index=index, path="target.jpg")["success"])
+        with tempfile.TemporaryDirectory(prefix="VividRP-FrameDebugger-") as directory:
+            for extension, signature in (("png", b"\x89PNG\r\n\x1a\n"), ("exr", b"\x76\x2f\x31\x01")):
+                path = Path(directory) / ("target." + extension)
+                result = call("export", event_index=index, events_hash=detail["eventsHash"], path=str(path))
+                check("export_" + extension, result["success"] and result["eventIndex"] == index)
+                content = path.read_bytes()
+                check("image_" + extension, content.startswith(signature))
+                check("reject_overwrite_" + extension, not call("export", event_index=index, path=str(path))["success"])
+                check("preserve_output_" + extension, path.read_bytes() == content)
     finally:
         released = call("release", session_id=session)
         if not released["success"]:

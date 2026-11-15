@@ -60,25 +60,20 @@ namespace VividRP.AgenticDebugger
         internal Array Events() => (Array)getEvents.Invoke(null, null);
         internal string Name(int index) => (string)getName.Invoke(null, new object[] { index });
 
-        internal static bool Inspectable(object frameEvent)
-        {
-            string kind = frameEvent.GetType().GetField("m_Type").GetValue(frameEvent).ToString();
-            return kind == "ComputeDispatch" || kind == "RayTracingDispatch";
-        }
-
-        internal static JObject DescribeDispatch(object data, bool includeShaderProperties)
+        internal static JObject DescribeEvent(object data, bool includeShaderProperties)
         {
             var result = new JObject();
             foreach (var field in data.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
             {
-                // Do not touch native render-pass targets or raster state on affected Unity versions.
-                if (field.Name == "m_FrameEventIndex" || field.Name.StartsWith("m_ComputeShader", StringComparison.Ordinal)
-                    || field.Name.StartsWith("m_RayTracing", StringComparison.Ordinal)
-                    || (includeShaderProperties && field.Name == "m_ShaderInfo"))
+                if (includeShaderProperties || field.Name != "m_ShaderInfo")
                     result[field.Name] = Describe(field.GetValue(data));
             }
             return result;
         }
+
+        internal static RenderTexture RenderTarget(object data) =>
+            (RenderTexture)(data.GetType().GetField("m_RenderTargetRenderTexture")
+                ?? throw new MissingFieldException(data.GetType().FullName, "m_RenderTargetRenderTexture")).GetValue(data);
 
         internal object Data(int index)
         {

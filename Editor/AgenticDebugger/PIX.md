@@ -7,8 +7,11 @@ and its remaining boundaries are recorded in the
 
 The backend uses explicit capture and a hard content gate. `success=true` for a capture
 requires `state=ready`; an existing `.wpix`, a successful Begin/End HRESULT, or
-GPU-fence completion alone is insufficient. The existing Frame Debugger backend
-and its raster restrictions are unchanged.
+GPU-fence completion alone is insufficient. The Frame Debugger raster/native
+render-pass crash is fixed in the current Unity **7000.0.0a16** project version
+(user-confirmed on 2026-11-15). The backend's crash-workaround whitelist has been
+removed; raster details and selected render-target PNG/EXR export are available.
+see the [Frame Debugger status and validation record](README.md).
 
 ## Setup and capture
 
@@ -122,8 +125,9 @@ Every unified session operation except preflight/status/capture requires its bac
 matching `session_id`; an explicitly supplied token on status is checked too.
 PIX and Frame Debugger cannot acquire captures while the other owns a session,
 including through legacy commands. User-enabled Frame Debugger also blocks PIX.
-Frame Debugger still supports `events`, `select` and `event` for Compute/RayTracing
-only; raster/native render-pass inspection and texture export remain disabled.
+Frame Debugger supports `events`, `select` and `event` for all event types,
+including raster/native render passes, and `export` for the selected 2D render-target
+preview (PNG/EXR). The unified entry point requires its matching `session_id` for export too.
 
 ## M2 external analysis
 
@@ -211,8 +215,10 @@ queries replay on the local GPU using the captured adapter's ordinary defaults.
   notification, queue scheduling, cross-backend ownership and routing. Idle hooks
   allocate 0 B over 100,000 warmed calls in .NET. Unity calls are simulated in these
   checks; this is not an Editor whole-frame allocation measurement.
-- The existing 10 Frame Debugger policy/serialization checks pass against the
-  newly compiled Editor assembly; raster inspection remains excluded.
+- The original 10 Frame Debugger policy/serialization checks passed with raster
+  inspection excluded. On 2026-11-15, the whitelist was removed; 16 updated offline
+  serialization/output-path checks and core/CLI compilation pass against Unity
+  **7000.0.0a16**. Live raster inspection and PNG/EXR export still require validation.
 - M2: 31 standalone request/process checks cover identity/schema, queue-local
   indices, hashes, Windows argument quoting, timeout, cancellation, detach and
   evidence preservation; 33 checks with the optional production analyzer run.

@@ -413,7 +413,22 @@ void TraceProbe(uint3 id)
 
         DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
         bool backface = dot(hit.normalWS, direction) >= 0.0;
-        if (surface.albedoAndValid.a == 0.0 || backface)
+        bool insideShellExit = false;
+        // A biased receiver can start inside a neighboring artificial shell.
+        // Only that exit is reliable here; retain rejection for outside starts.
+        if (backface && hit.signMode == 2u && surface.albedoAndValid.a != 0.0)
+        {
+            VividMeshSdfInstance instance = _MeshSdfInstances[hit.instanceIndex];
+            VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+            float4 shellOrigin = float4(origin, 1.0);
+            float3 grid = float3(dot(instance.worldToLocal0, shellOrigin), dot(instance.worldToLocal1, shellOrigin),
+                dot(instance.worldToLocal2, shellOrigin)) - field.originAndVoxelSize.xyz;
+            float3 extent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
+            if (all(grid >= 0.0) && all(grid <= extent))
+                insideShellExit = VividMeshSdfSample(field, grid) <= 0.0;
+        }
+        // Recover the captured material normal below: a culled side is covered black.
+        if (surface.albedoAndValid.a == 0.0 || (backface && !insideShellExit))
         {
             StoreTraceSample(tile, ray, rayState | (backface ? RayBackface : RayMissingSurface), hit.distance,
                 0.0, direction, bin, inverseRelativePdf);

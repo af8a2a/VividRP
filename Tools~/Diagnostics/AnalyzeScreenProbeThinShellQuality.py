@@ -51,7 +51,7 @@ def hit_coverage(root, capture_name):
         anchorAgeQuantiles=np.quantile(stats[..., 0], [0, .1, .5, .9, 1]).tolist(), sourceSha256=next(iter(source_hashes)))
 
 
-def motion_history(capture, rows, states):
+def motion_history(capture, rows, states, comparison_rows=None):
     """Isolate pixel temporal inheritance; final-minus-resolve also includes spatial filtering."""
     if not capture.get("motionHistoryRecorded", False):
         return None
@@ -96,6 +96,15 @@ def motion_history(capture, rows, states):
                               - (current[..., :3] * abs(current[..., 3:4]))) @ LUMA)[exposed]
             report[arm]["finalMinusResolveP99"] = float(np.quantile(difference, .99))
             report[arm]["finalMinusResolveMax"] = float(difference.max())
+            report[arm]["finalExposedRgba16Sha256"] = hashlib.sha256(
+                np.ascontiguousarray(final[exposed].astype("<f2")).tobytes()).hexdigest()
+            if comparison_rows is not None:
+                comparison = np.stack([read(comparison_rows[arm, f, "final-edge"]).astype(float) for f in frames])
+                paired_difference = abs(((final[..., :3] * abs(final[..., 3:4]))
+                    - (comparison[..., :3] * abs(comparison[..., 3:4]))) @ LUMA)[exposed]
+                report[arm]["pairedFinalDifferenceP99"] = float(np.quantile(paired_difference, .99))
+                report[arm]["pairedFinalDifferenceMax"] = float(paired_difference.max())
+                report[arm]["pairedDifferentRgbaSamples"] = int(np.any(final[exposed] != comparison[exposed], axis=-1).sum())
         if (arm, 1024, "native-moments-edge") in rows:
             moments = np.stack([read(rows[arm, f, "native-moments-edge"]) for f in frames])[exposed]
             encoding = capture.get("nativeMomentEncoding", "legacy-mean")

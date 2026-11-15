@@ -59,3 +59,5 @@ python -B Tools~/Diagnostics/AnalyzeScreenProbeAtrousExperiment.py NEW_MOTION --
 执行前 pin 实际 C# 和两个内存 shader 源码，结束立即核验。每次仍受 512 MiB 上限约束。最终有效数据与精确分析工具独立保留，正常设置恢复、回调和覆盖参数清空，播放暂停。
 
 后续需要定位移动 GBuffer 的不确定性，补全同帧运动滤波对照和受控 GPU A/B；同时核对去噪统计、条件辐亮度、覆盖能量与 Deferred 实际消费的域是否一致。动态光照变化及 Sponza 整体质量尚未重新验收，Lumen 质量目标仍未完成。
+
+后续受控实验已补上移动边缘 ROI 的同帧对照，并审计覆盖率与统计引导的波动，见 [移动验证与滤波噪声定位](ScreenProbeWaveletMotionAndCausalAudit.md)。该轮没有采用新的渲染器候选，也没有将这里未通过的跨运行比较改判为通过。

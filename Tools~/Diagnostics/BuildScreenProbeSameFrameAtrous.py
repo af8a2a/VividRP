@@ -16,7 +16,11 @@ def shader_source(body):
     return prefix + body
 
 
-def build(template, output):
+def build(template, output, motion_history=False, control_iterations=4, freeze_control_moments=False):
+    if control_iterations not in (4, 5):
+        raise ValueError("The same-frame control supports four or five wavelet scales")
+    if freeze_control_moments and motion_history:
+        raise ValueError("Frozen moments are a static diagnostic, not a moving-history candidate")
     source = stage_build(template, output, plane_guidance=True)
 
     def replace(old, new):
@@ -124,6 +128,39 @@ def build(template, output):
             if(depthReadback!=null) {''')
     replace('schema="screen-probe-atrous-stages.v1",complete,errors,',
             'schema="screen-probe-atrous-same-frame.v1",replayPrograms,complete,errors,')
+    if control_iterations != 4:
+        replace('        for(int i=0;i<4;++i) {\n            bool last=i==3;',
+                f'        int iterations=label.StartsWith("control-",StringComparison.Ordinal)?{control_iterations}:4;\n        for(int i=0;i<iterations;++i) {{\n            bool last=i==iterations-1;')
+    if freeze_control_moments:
+        replace('    RenderTexture replayInput=null;', '    RenderTexture replayInput=null, frozenControlMoments=null;')
+        replace('        var moments=Resolve("m_CurrentScreenProbeMoments");',
+                '        var moments=label=="control-"?frozenControlMoments:Resolve("m_CurrentScreenProbeMoments");')
+        replace('            cmd.CopyTexture(input,replayInput);',
+                '''            cmd.CopyTexture(input,replayInput);
+            if(frame==warmup)cmd.CopyTexture(Resolve("m_CurrentScreenProbeMoments"),frozenControlMoments);
+            foreach(var roi in replayRois)ReadRegion(cmd,frozenControlMoments,"control-moments-"+roi.Item1,roi.Item2,roi.Item3,roi.Item4,roi.Item5,save:false);''')
+        replace('        replayInput=ReplayTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat);',
+                '        replayInput=ReplayTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat);\n        frozenControlMoments=ReplayTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat);')
+    if motion_history:
+        replace("        int index=0;", "        int index=2;")
+        replace('schema="screen-probe-atrous-same-frame.v1",',
+                'schema="screen-probe-atrous-same-frame-motion.v1",motionHistoryRecorded=true,')
+        replace('    var replayRois=new[]{("emitter-gap",720,936,480,40),("ceiling",912,970,96,48),\n        ("floor",912,130,96,64),("back",1100,600,96,64)};',
+                '    var replayRois=new[]{("edge",880,414,160,128)};')
+        replace('            ReadRegion(cmd,Resolve("m_CurrentPixelLighting"),"pixel-history-emitter-gap",720,936,480,40);\n            ReadRegion(cmd,Resolve("m_CurrentScreenProbeMoments"),"native-moments",720,936,480,40);', '')
+        start = source.index("    Action<ComputePassContext,int,Texture> stage=")
+        end = source.index("    Action<ComputePassContext,Texture,Texture,Texture,Texture> linear =", start)
+        replace(source[start:end], '''    Action<ComputePassContext,int,Texture> stage=(context,index,texture)=> {
+        if(!active || phase!=1 || frame<warmup || context.Get<VividCameraData>().camera!=camera)return;
+        var cmd=(CommandBuffer)wrapped.GetValue(context.cmd);
+        if(index==0)ReadRegion(cmd,texture,"resolved-edge",880,414,160,128);
+        if(index==1) {
+            ReadRegion(cmd,texture,"temporal-edge",880,414,160,128);
+            ReadRegion(cmd,Resolve("m_CurrentPixelLighting"),"pixel-history-edge",880,414,160,128);
+            ReadRegion(cmd,Resolve("m_CurrentScreenProbeMoments"),"native-moments-edge",880,414,160,128);
+        }
+    };
+''')
     return source
 
 
@@ -131,10 +168,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--control-body", type=Path, required=True)
+    parser.add_argument("--motion-history", action="store_true", help="Replay two fixed-motion arms on the actual moving-edge inputs")
+    parser.add_argument("--control-iterations", type=int, choices=(4, 5), default=4,
+                        help="Number of spatial wavelet scales in the isolated control; A/A remains the actual four-pass renderer")
+    parser.add_argument("--freeze-control-moments", action="store_true",
+                        help="Static causal diagnostic: freeze only the control's moments at the first measured frame")
     args = parser.parse_args()
     output = args.output.resolve()
     template = Path(__file__).with_name("ScreenProbeAnchorGpuTimingCapture.cs").read_text(encoding="utf-8-sig")
-    source = build(template, output)
+    source = build(template, output, args.motion_history, args.control_iterations, args.freeze_control_moments)
     output.mkdir(parents=True, exist_ok=False)
     workspace = Path(__file__).resolve().parents[2]
     aa = (workspace / "Shaders/Core/Private/GlobalIllumination/SdfDiffuseAtrous.hlsl").read_text(encoding="utf-8-sig")
@@ -147,8 +189,13 @@ if __name__ == "__main__":
         references[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     (output / "capture-script.cs").write_text(source, encoding="utf-8")
     (output / "protocol.json").write_text(json.dumps(dict(schema="screen-probe-atrous-same-frame-protocol.v1",
-        arms=["00-r0-t0", "01-r0-t0"], warmup=1024, measured=128, spacing=16, rays=8,
+        arms=["02-r0-t0", "03-r0-t0"] if args.motion_history else ["00-r0-t0", "01-r0-t0"],
+        motionHistory=args.motion_history, warmup=1024, measured=128, spacing=16, rays=8,
+        trajectory=dict(period=128, lateral=.28, forward=.06, yawDegrees=-7) if args.motion_history else None,
+        aaIterations=4, controlIterations=args.control_iterations,
+        controlMomentsFrozen=args.freeze_control_moments,
+        controlMomentHashesRecorded=args.freeze_control_moments,
         planeGuidance=True, waveletStagesSaved=False, varianceStagesSaved=False,
         payloadBudget=512 * 1024**2, referenceSourceSha256=references,
-        note="Native moments; identical copied pixel-temporal input, receiver and moment textures. AA must match the actual renderer byte-for-byte; no GPU timing claim"), indent=2) + "\n", encoding="utf-8")
+        note="Identical copied pixel-temporal input and receiver textures; controlMomentsFrozen declares the control's moment source. AA must match the actual renderer byte-for-byte; no GPU timing claim"), indent=2) + "\n", encoding="utf-8")
     print(json.dumps(dict(root=str(output))))

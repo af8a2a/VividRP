@@ -34,6 +34,7 @@ using VividRP.Editor.Tools;
     var editorProfileProperty = driver.GetProperty("profileEditor");
     bool previousProfileEditor = (bool)editorProfileProperty.GetValue(null);
     bool previousProfiler = UnityEngine.Profiling.Profiler.enabled;
+    bool playMode = Application.isPlaying;
     var previousScene = SceneManager.GetActiveScene();
     var cameras = Camera.allCameras.Select(c => (camera: c, enabled: c.enabled)).ToArray();
     string[] names = { "Diffuse GI Total", "Diffuse GI Gather and SDF Fallback", "Diffuse GI Screen Trace",
@@ -52,7 +53,8 @@ using VividRP.Editor.Tools;
         int begin = targetRenders;
         double deadline = EditorApplication.timeSinceStartup + 120;
         while (targetRenders < begin + count && EditorApplication.timeSinceStartup < deadline) {
-            game.Repaint(); EditorApplication.QueuePlayerLoopUpdate(); await System.Threading.Tasks.Task.Delay(16);
+            if (!playMode) { game.Repaint(); EditorApplication.QueuePlayerLoopUpdate(); }
+            await System.Threading.Tasks.Task.Delay(16);
         }
         if (targetRenders < begin + count) throw new InvalidOperationException("Timing probe did not render enough frames.");
         rendered += targetRenders-begin;
@@ -62,7 +64,7 @@ using VividRP.Editor.Tools;
         SceneManager.SetActiveScene(scene);
         foreach (var c in cameras) c.camera.enabled = c.camera == camera;
         setArea.Invoke(null, new object[] { gpuArea, true });
-        editorProfileProperty.SetValue(null, true);
+        editorProfileProperty.SetValue(null, !playMode);
         UnityEngine.Profiling.Profiler.enabled = true;
         RenderPipelineManager.endCameraRendering += End; active = true;
         await Render(64);
@@ -98,7 +100,7 @@ using VividRP.Editor.Tools;
             foreach (var c in cameras) if (c.camera != null) c.camera.enabled = c.enabled;
             if (previousScene.isLoaded) SceneManager.SetActiveScene(previousScene);
             System.IO.File.WriteAllText(output + "/probe.json", Newtonsoft.Json.JsonConvert.SerializeObject(new {
-                schema = "anchor-gpu-timing-probe.v2", complete, errors, samples, events, targetRenders, otherRenders, rendered,
+                schema = "anchor-gpu-timing-probe.v3", complete, errors, samples, events, targetRenders, otherRenders, rendered, playMode,
                 graphicsApi = SystemInfo.graphicsDeviceType.ToString(), gpu = SystemInfo.graphicsDeviceName,
                 previousProfiler, previousArea, previousProfileEditor,
                 restoredProfileEditor = editorProfileProperty.GetValue(null),

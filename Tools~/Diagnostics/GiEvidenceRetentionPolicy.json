@@ -4,6 +4,11 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbePayloadBudgetGuard-20261115-000048-115815",
+    "ScreenProbeInverseVpInputs-20261114-235131-623461",
+    "ScreenProbeDirectDepthHashes-20261114-234735-781902",
+    "ScreenProbePlayModeTiming-20261114-223303-488278",
+    "ScreenProbeAnchorGpuTimingProbe-20261114-223553-035",
     "ScreenProbeAnchorGpuTimingProbe-20261114-221031-612",
     "ScreenProbeAnchorGpuTimingProbe-20261114-221530-936",
     "ScreenProbeAnchorWindowRelight-20261114-205334-330163",
@@ -38,6 +43,9 @@
     "ScreenProbeFrozenChain-20261114-123903-882"
   ],
   "archiveRuns": [
+    { "run": "ScreenProbeIsolatedRays-20261114-233542-652465", "reason": "Failed isolated A/A superseded by dense depth/motion/inverse-VP input diagnosis. First observed difference and prior saved frame copied with SHA verification; no protected raw dependency. Preserve all metadata and endpoints; complete original sequence no longer reanalyzable", "requiredFiles": ["timing-qualification.json", "archive-review.json", "source-verification.json"] },
+    { "run": "ScreenProbeDenseInputHashes-20261114-233923-261783", "reason": "Failed A/A superseded by direct-depth and HZB/source diagnosis. First frame2 ray/composite/history difference and prior saved frame copied with SHA verification; preserve reports, scripts and endpoints", "requiredFiles": ["timing-qualification.json", "archive-review.json", "source-verification.json"] },
+    { "run": "ScreenProbeTraceInputHashes-20261114-234243-546604", "reason": "Failed A/A superseded by direct-depth and actual inverse-VP diagnosis. First frame2 screen-ray divergence and prior saved frame copied with SHA verification; preserve hashes, source, reports and endpoints", "requiredFiles": ["timing-qualification.json", "archive-review.json", "source-verification.json"] },
     { "run": "ScreenProbeProducerCold-20261114-094512-788", "reason": "Historical 96-frame cold producer control superseded by qualified 4608/6400-frame dense and sparse controls. Protected metadata refers to it only in a storage inventory, with no raw dependency. Capture, source fingerprints, kernel binaries, archival review and endpoint bundles retained; full interior reanalysis no longer available", "requiredFiles": ["capture.json", "source-verification.json", "archive-review.json"] },
     { "run": "ScreenProbeAnchorStorage-20261114-151333-500182", "reason": "Rejected standalone precision/storage candidate; final temporal noise worsened and runtime prototype withdrawn. No protected capture/snapshot refers to its raw frames. Reports, exact scripts, source checks and endpoint bundles retained", "requiredFiles": ["analysis.json", "qualification.json", "source-verification.json", "decision.json", "capture.json"] },
     { "run": "ScreenProbeAnchorWindow-20261114-155720-209141", "reason": "Long 6400-render baseline A/A failed; no FP32/512 candidate ran. First observed divergence frame4095 copied to preserved endpoint bundles with a hash mapping; source, CPU, rejection and capture reports retained", "requiredFiles": ["rejection.json", "failure-analysis.json", "first-observed-difference.json", "qualification.json", "source-verification.json", "capture.json"] },

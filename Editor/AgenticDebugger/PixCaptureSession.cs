@@ -38,6 +38,43 @@ namespace VividRP.AgenticDebugger
         void Cancel();
     }
 
+    internal sealed class PixCameraCaptureWindow
+    {
+        internal int Requested { get; }
+        internal int Submitted { get; private set; }
+        private int activeFrame, lastFrame;
+        private bool active;
+
+        internal PixCameraCaptureWindow(int requested)
+        {
+            if (requested < 1 || requested > 4) throw new ArgumentOutOfRangeException(nameof(requested));
+            Requested = requested;
+        }
+
+        internal void Begin(int frame)
+        {
+            if (active || Submitted >= Requested || Submitted > 0 && frame <= lastFrame)
+                throw new PixCaptureFailure("invalid_camera_frame_sequence", "PIX camera frames must be distinct, ordered and paired.");
+            activeFrame = frame;
+            active = true;
+        }
+
+        internal bool Submit(int frame)
+        {
+            if (!active || frame != activeFrame)
+                throw new PixCaptureFailure("invalid_camera_frame_sequence", "PIX camera submission does not match its begin.");
+            active = false;
+            lastFrame = frame;
+            return ++Submitted == Requested;
+        }
+
+        internal void ObserveOtherCamera()
+        {
+            if (Requested > 1 && (active || Submitted > 0) && Submitted < Requested)
+                throw new PixCaptureFailure("intervening_camera", "Another camera rendered inside the multi-frame PIX window.");
+        }
+    }
+
     // No Unity dependency: exercises the production transition/acceptance policy
     // in an ordinary .NET process, without starting Unity Test Framework.
     internal sealed class PixCaptureSession

@@ -14,6 +14,7 @@ namespace VividRP.AgenticDebugger
     public static class PixCaptureBridge
     {
         private static PixCaptureSession session;
+        private static PixOperations captureOperations;
         private static PixAnalysisJob analysis;
         private static string sessionPix, sessionAnalyzer, captureHash;
         private static readonly EditorApplication.CallbackFunction AnalysisTickCallback = TickAnalysis;
@@ -30,6 +31,15 @@ namespace VividRP.AgenticDebugger
             string pixInstall = null, string analyzerPath = null, int queueId = -1, int eventIndex = -1,
             int offset = 0, int count = 100, string marker = null, string expectedCaptureHash = null,
             int counterId = -1, int occupancyType = -1, int occupancyStage = -1, string experiment = null,
+            string analysisId = null) => Execute(action, 1, sessionId, path, cameraName, expectedPass,
+                timeoutSeconds, pixInstall, analyzerPath, queueId, eventIndex, offset, count, marker,
+                expectedCaptureHash, counterId, occupancyType, occupancyStage, experiment, analysisId);
+
+        public static JObject Execute(string action, int captureFrames, string sessionId = null, string path = null,
+            string cameraName = null, string expectedPass = null, float timeoutSeconds = 120,
+            string pixInstall = null, string analyzerPath = null, int queueId = -1, int eventIndex = -1,
+            int offset = 0, int count = 100, string marker = null, string expectedCaptureHash = null,
+            int counterId = -1, int occupancyType = -1, int occupancyStage = -1, string experiment = null,
             string analysisId = null)
         {
             try
@@ -40,6 +50,8 @@ namespace VividRP.AgenticDebugger
                     case "status": return Status();
                     case "capture":
                         if (session != null) return Error("busy", "Release the previous PIX session first.");
+                        if (captureFrames < 1 || captureFrames > 4)
+                            return Error("invalid_capture_frames", "captureFrames must be between 1 and 4.");
                         if (FrameDebuggerBridge.HasActiveCapture) return Error("busy", "Release or disable Frame Debugger before starting PIX.");
                         if (float.IsNaN(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 300)
                             return Error("invalid_timeout", "timeout_seconds must be between 1 and 300.");
@@ -78,7 +90,8 @@ namespace VividRP.AgenticDebugger
                             !string.Equals(PixNative.CanonicalPath(runtimePath.ToString()), PixNative.CanonicalPath(Path.Combine(pixInstall, "WinPixGpuCapturer.dll")), StringComparison.OrdinalIgnoreCase))
                             return Error("pix_version_mismatch", "The injected capturer and selected PIX API must come from the same PIX installation.");
                         Directory.CreateDirectory(Path.GetDirectoryName(output));
-                        var operations = new PixOperations(id, output, expectedPass, camera, Path.GetFullPath(pixInstall), Path.GetFullPath(analyzerPath));
+                        var operations = new PixOperations(id, output, expectedPass, camera, Path.GetFullPath(pixInstall), Path.GetFullPath(analyzerPath), captureFrames);
+                        captureOperations = operations;
                         sessionPix = Path.GetFullPath(pixInstall); sessionAnalyzer = Path.GetFullPath(analyzerPath); captureHash = null;
                         session = new PixCaptureSession(id, output, expectedPass, EditorApplication.timeSinceStartup + timeoutSeconds, operations, operations.BoundaryMode);
                         Subscribe();
@@ -96,6 +109,7 @@ namespace VividRP.AgenticDebugger
                         if (session.CleanupPending) return Status();
                         Unsubscribe();
                         session = null;
+                        captureOperations = null;
                         sessionPix = sessionAnalyzer = captureHash = null;
                         return Status();
                     case "analysis_status":
@@ -187,6 +201,8 @@ namespace VividRP.AgenticDebugger
                 ["capturePath"] = session.Path, ["expectedPass"] = session.ExpectedPass,
                 ["boundaryMode"] = session.BoundaryMode,
                 ["captureHash"] = captureHash, ["analysisId"] = analysis?.Id,
+                ["requestedCameraFrames"] = captureOperations?.RequestedCameraFrames,
+                ["submittedCameraFrames"] = captureOperations?.SubmittedCameraFrames,
                 ["analysisState"] = analysis?.State, ["analysisResultPath"] = analysis?.Output,
                 ["hresult"] = "0x" + unchecked((uint)session.HResult).ToString("X8"),
                 ["cleanupPending"] = session.CleanupPending,
@@ -267,14 +283,17 @@ namespace VividRP.AgenticDebugger
         private bool renderError;
         private readonly Application.LogCallback logCallback;
         private bool preparePending, armed, captureStarted;
-        private int captureFrameIndex;
+        private readonly PixCameraCaptureWindow cameraWindow;
         private int targetDepth;
         private Exception callbackFailure;
         internal string BoundaryMode { get; }
+        internal int RequestedCameraFrames => cameraWindow.Requested;
+        internal int SubmittedCameraFrames => cameraWindow.Submitted;
 
-        internal PixOperations(string id, string path, string pass, Camera camera, string pix, string analyzer)
+        internal PixOperations(string id, string path, string pass, Camera camera, string pix, string analyzer, int captureFrames = 1)
         {
             this.id = id; this.path = path; this.pass = pass; this.camera = camera; this.pix = pix; this.analyzer = analyzer;
+            cameraWindow = new PixCameraCaptureWindow(captureFrames);
             beginMarker = "VividRP.AgentCapture/" + id + "/FrameBegin";
             endMarker = "VividRP.AgentCapture/" + id + "/FrameEnd";
             logCallback = (_, __, type) => { if (type == LogType.Error || type == LogType.Exception || type == LogType.Assert) renderError = true; };
@@ -321,18 +340,25 @@ namespace VividRP.AgenticDebugger
 
         public void BeginCamera(ScriptableRenderContext context, Camera target, int frameIndex)
         {
-            if (target != camera) return;
+            if (target != camera)
+            {
+                if (captureStarted)
+                    try { cameraWindow.ObserveOtherCamera(); }
+                    catch (Exception e) { callbackFailure = e; DetachCamera(); }
+                return;
+            }
             ++targetDepth;
-            if (targetDepth != 1 || captureStarted || callbackFailure != null) return;
+            if (targetDepth != 1 || callbackFailure != null) return;
             try
             {
                 Application.logMessageReceived += logCallback;
                 if (!armed) return;
+                cameraWindow.Begin(frameIndex);
+                if (captureStarted) return;
                 // Pipeline-owned boundary, before public camera callbacks, jobs,
                 // culling and RenderGraph recording. PIX begins on the main thread.
                 Check(PixNative.VividPixBegin(token, path), "PIXBeginCapture");
                 captureStarted = true;
-                captureFrameIndex = frameIndex;
                 commands.BeginSample(beginMarker);
                 commands.EndSample(beginMarker);
                 queues.Begin(context, commands);
@@ -360,9 +386,12 @@ namespace VividRP.AgenticDebugger
                     preparePending = false;
                     return;
                 }
-                if (!captureStarted || frameIndex != captureFrameIndex) return;
-                VividCaptureHooks.Release(this);
+                if (!captureStarted) return;
                 if (renderError) throw new PixCaptureFailure("target_camera_render_error", "The target camera logged a rendering error.");
+                // A bounded multi-frame window leaves the intermediate camera
+                // submissions untouched; the final camera joins and closes once.
+                if (!cameraWindow.Submit(frameIndex)) return;
+                VividCaptureHooks.Release(this);
                 // End is guaranteed by the pipeline wrapper even when rendering,
                 // Submit or a public callback throws. Only a submitted camera can
                 // produce the closing markers used by the acceptance gate.

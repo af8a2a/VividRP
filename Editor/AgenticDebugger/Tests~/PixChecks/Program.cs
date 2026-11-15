@@ -11,6 +11,51 @@ static class Program
 
     static void Main()
     {
+        var single = new PixCameraCaptureWindow(1);
+        single.Begin(100);
+        single.ObserveOtherCamera(); // Preserve the existing single-camera invocation behavior.
+        Check(single.Submit(100) && single.Submitted == 1, "default window closes on one submitted camera");
+        var pair = new PixCameraCaptureWindow(2);
+        pair.ObserveOtherCamera(); // Preparation before the window is not captured work.
+        pair.Begin(100);
+        Check(!pair.Submit(100) && pair.Submitted == 1, "pair stays open after first camera");
+        pair.Begin(101);
+        Check(pair.Submit(101) && pair.Submitted == 2, "pair closes only after second matched camera");
+        var four = new PixCameraCaptureWindow(4);
+        for (int i = 0; i < 4; ++i)
+        {
+            four.Begin(200 + i);
+            Check(four.Submit(200 + i) == (i == 3), "maximum window closes only on its fourth camera");
+        }
+        foreach (int invalid in new[] { 0, 5 })
+        {
+            bool rejected = false;
+            try { _ = new PixCameraCaptureWindow(invalid); } catch (ArgumentOutOfRangeException) { rejected = true; }
+            Check(rejected, "reject unbounded capture length");
+        }
+        Action<PixCameraCaptureWindow>[] invalidSequences = {
+            w => w.Submit(0),
+            w => { w.Begin(1); w.Submit(2); },
+            w => { w.Begin(1); w.Begin(2); },
+            w => { w.Begin(1); w.Submit(1); w.Begin(1); },
+            w => { w.Begin(1); w.Submit(1); w.Begin(0); },
+            w => { w.Begin(1); w.Submit(1); w.Begin(2); w.Submit(2); w.Begin(3); }
+        };
+        foreach (var invalid in invalidSequences)
+        {
+            bool rejected = false;
+            try { invalid(new PixCameraCaptureWindow(2)); } catch (PixCaptureFailure e) { rejected = e.Code == "invalid_camera_frame_sequence"; }
+            Check(rejected, "reject unmatched, duplicate, reversed or excess camera frames");
+        }
+        foreach (bool betweenFrames in new[] { false, true })
+        {
+            var mixed = new PixCameraCaptureWindow(2);
+            mixed.Begin(1);
+            if (betweenFrames) mixed.Submit(1);
+            bool rejected = false;
+            try { mixed.ObserveOtherCamera(); } catch (PixCaptureFailure e) { rejected = e.Code == "intervening_camera"; }
+            Check(rejected, "reject another camera during or between captured target frames");
+        }
         Check(!Accept(null), "missing validator result");
         Check(Accept(Valid()), "accept actual proof");
         Action<PixValidationResult>[] corruptions = {

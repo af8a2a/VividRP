@@ -193,8 +193,42 @@ def verify_replay_sources(root, capture, protocol):
     for label, expected in protocol["referenceSourceSha256"].items():
         assert hashlib.sha256((root / f"reference-{label}.compute.txt").read_bytes()).hexdigest() == expected
     programs = capture["replayPrograms"]
-    assert len(programs) == 4 and {(p["reference"], p["name"]) for p in programs} == {
+    expected = {
         (label, name) for label in ("aa", "control") for name in ("FilterSdfDiffuseAtrous", "FilterSdfDiffuseAtrousFinal")}
+    if protocol.get("controlMomentChannelFrozen"):
+        expected.add(("moment-composition", "ComposeSdfMomentGuideCS"))
+    assert len(programs) == len(expected) and {(p["reference"], p["name"]) for p in programs} == expected
+
+
+def qualify_moment_channel_composition(rows, channel):
+    assert channel in ("mean", "variance")
+    component = 0 if channel == "mean" else 1
+    differences = []
+    first_output_differences = []
+    count = 0
+    for arm in ARMS:
+        for label in ("emitter-gap", "ceiling", "floor", "back"):
+            first = rows[arm, FRAMES.start, "final-" + label]
+            control_first = rows[arm, FRAMES.start, "control-" + label]
+            if any(first[k] != control_first[k] for k in ("sha256", "x", "y", "width", "height", "format")):
+                first_output_differences.append([arm, label])
+            tag = "native-moments" if label == "emitter-gap" else "native-moments-" + label
+            frozen = read(rows[arm, FRAMES.start, tag])
+            for frame in FRAMES:
+                live_row = rows[arm, frame, tag]
+                composed_row = rows[arm, frame, "control-composed-moments-" + label]
+                assert all(live_row[k] == composed_row[k] for k in ("x", "y", "width", "height", "format"))
+                expected = read(live_row).copy()
+                expected[..., component] = frozen[..., component]
+                actual = read(composed_row)
+                mismatch = int(np.count_nonzero(expected.astype("<f2").view("<u2") != actual.astype("<f2").view("<u2")))
+                if mismatch:
+                    differences.append([arm, frame, label, mismatch])
+                count += expected.size
+    return dict(qualified=not differences and not first_output_differences,
+                frozenChannel=channel, differentHalfWords=differences,
+                firstFrameOutputDifferences=first_output_differences,
+                checkedHalfWords=count, scope="All recorded ROI moments in all measured frames")
 
 
 def replay_hash_differences(rows, arms, labels):
@@ -283,6 +317,8 @@ def compare_same_frame(root, reference_root, matched_reference_subset=False):
     labels = ("emitter-gap", "ceiling", "floor", "back")
     differences = replay_hash_differences(rows, ARMS, labels)
     temporal = qualify_temporal_replay(root, capture, rows, protocol, ARMS, labels)
+    frozen_channel = protocol.get("controlMomentChannelFrozen")
+    composition = qualify_moment_channel_composition(rows, frozen_channel) if frozen_channel else None
     for arm in ARMS:
         results[arm] = {}
         for label in labels:
@@ -318,12 +354,15 @@ def compare_same_frame(root, reference_root, matched_reference_subset=False):
                             frozen_differences.append([arm, frame, label])
     return dict(schema="screen-probe-atrous-same-frame-analysis.v1", capture=str(root),
         qualified=report["qualified"] and not differences and not frozen_differences
+            and (composition is None or composition["qualified"])
             and (temporal is None or temporal["qualified"]) and not any(v["coverageDifferences"] for a in results.values() for v in a.values()),
         replayDifferences=differences, inputHashObservations=4 * 256, aaHashObservations=4 * 256,
         controlMomentsFrozen=frozen_moments, frozenMomentDifferences=frozen_differences,
+        momentChannelComposition=composition, controlFrozenMomentScales=protocol.get("controlFrozenMomentScales"),
         controlIterations=protocol.get("controlIterations", 4), temporalReplay=temporal, sourceAndReference=report, arms=results,
         limitations=["AA is byte-exact in four recorded ROIs, not a claim about unsaved full-screen pixels",
                      "Both filters consume one copied pixel-temporal input and the same receiver textures",
+                     "The control freezes only its " + frozen_channel + " guide channel; other channels stay live" if frozen_channel else
                      "The control evolves independent temporal moments" if temporal is not None else
                          "The control uses first-measured-frame frozen moments" if frozen_moments else "Both filters consume the actual current moment textures",
                      "The control isolates wavelet behavior; changes upstream of the copied input require separate validation",

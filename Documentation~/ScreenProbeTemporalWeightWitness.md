@@ -48,3 +48,5 @@
 全部原型已在当前文件仍匹配自有原型hash时精确撤回。恢复后的temporal程序22,204 B，SHA256 `1527c6fb3bc97ebe3f2d8813a30cd504f732cb503923ce89e998247a217304f8`，与原实际PSO一致；其他三个受检kernel与原版编译字节相同。最终正常帧确认128、16/8、四轮、bias0.04、源8/32，场景干净、hooks为空、override=-1、flags0、PIX idle，Playing=true / Paused=true。Console游标211→213无新error、无drop/reset，编译失败标志为false；旧日志保留。没有运行Unity Test Framework（Editor保持打开）。
 
 所有渲染默认值保持原样。新增二进制读回合计378,101,760 B，另两份原始见证包合计393,216 B；实际目录容量及未全盘重扫的范围见[GI数据保留](GiEvidenceRetention.md)。
+
+后续[精度与支持权重的最终像素对比](ScreenProbeCoordinateQuality.md)已完成：精度候选短／长检查通过，但恢复原版短检查也通过；天花板方差未改善，其他区域出现权衡。最低支持候选仍有0.125的短序列残差，另做的最终像素诊断未证明稳定收益。两者已撤回，默认行为保持原样；下一步转向anchor收敛与存储精度，保留逐位检查和实际画面指标的区别。

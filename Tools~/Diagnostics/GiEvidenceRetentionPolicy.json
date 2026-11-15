@@ -4,6 +4,8 @@
   "softLimitGiB": 125,
   "minimumFreeGiB": 64,
   "protectedRuns": [
+    "ScreenProbeUndrawnSupport-20261115-090401-998834",
+    "ScreenProbeCoordinatePrecision-20261115-084302-744764",
     "ScreenProbeTapWitness-20261115-083231-579451",
     "ScreenProbeTargetWitness-20261115-082700-193853",
     "ScreenProbeUnusedBinWitness-20261115-075715-360125",

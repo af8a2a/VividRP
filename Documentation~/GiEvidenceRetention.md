@@ -174,3 +174,9 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 [三类见证](ScreenProbeTemporalWeightWitness.md)的四个阶段共保存378,101,760 B完整读回（每阶段94,525,440 B），另后两轮各保留512份原始编码包，共393,216 B；全部SHA和解码核验通过。各阶段源指纹、实际脚本／生成器、原型与原始源码、编译程序和精确撤回资料保留，三个新增目录均加入保护。
 
 08:38 UTC容量复核只测量这三个新目录：202,507,617 B、102,187,764 B与102,757,420 B。以07:35审计为基准，估计证据 **108.764 GiB**，实时E盘可用 **127.505 GiB**，`needsFurtherReview=false`。其他目录沿用基准，没有再次全盘扫描；没有删除文件或创建链接。审计为 `ScreenProbeTapWitness-20261115-083231-579451/post-experiment-storage.json`，后续少量分析元数据不回填到该时刻的计数。
+
+## 坐标精度与最终像素质量对比
+
+[两个撤回候选](ScreenProbeCoordinateQuality.md)新增三个短序列、一个长序列与三个质量配置，保存完整载荷共 **815,342,592 B**。每个质量配置158,334,976 B，另有独立192 MiB上限；只保存指定ROI及一张全分辨率图，其余逐帧probe输入保留hash。支持权重候选复用保护的原版质量参考，通过路径与SHA核验，避免额外复制158,334,976 B。源、实际脚本／生成器、编译数据、失败及撤回决策均保留。
+
+09:16 UTC只复核两个新增目录：`ScreenProbeCoordinatePrecision-20261115-084302-744764` 为588,859,483 B，`ScreenProbeUndrawnSupport-20261115-090401-998834` 为264,289,985 B。以08:38审计为基准，估计证据 **109.559 GiB**，实时E盘可用 **126.448 GiB**，`needsFurtherReview=false`。未再次完整扫描其他目录，没有删除文件或创建临时链接。审计为后一个目录的 `post-experiment-storage.json`；后续少量元数据不回填到该审计时刻。

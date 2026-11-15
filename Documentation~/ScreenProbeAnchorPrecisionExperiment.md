@@ -1,5 +1,7 @@
 # Native Gather 的 anchor 精度与收敛窗口实验
 
+后续进展：已完成运动、统一发光响应、GPU 成本与正式参数路径验证，并将 Emissive Cornell 保存为 FP32 / 512，见[生产路径结果](ScreenProbeAnchor512Production.md)。下文保留各历史实验当时的范围与拒绝结论。
+
 ## 输入与判定范围
 
 采用纯自发光 Cornell Box 的固定机位、1920×1080、16 px 探针网格、每探针 8 条射线。太阳与天空为零，近场 AO 关闭；方向引导、分层引导、guarded anchor 预滤波及四轮全分辨率 À-trous 开启。Surface Cache 固定为 8 阶、64 样本、32 批的已收敛源。未调整曝光、反射率或反弹增益。

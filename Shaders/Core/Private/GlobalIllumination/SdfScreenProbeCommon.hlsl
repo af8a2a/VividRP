@@ -107,8 +107,8 @@ uint _SdfScreenCardLighting;
 uint _SdfScreenMaterialLookup;
 uint _SdfDiffuseRecordRayDiagnostics;
 uint _SdfDiffuseRecordFirstHitDiagnostics;
-// Editor ablations. Bits 128/256/512 restore legacy stores/centers/fine-only bounds.
-// Normal rendering binds zero and retains the original 0.85 anchor blend.
+// Bit 32 selects full-precision anchor storage. Other bits are Editor ablations.
+// Normal rendering derives precision from anchor age and retains the 0.85 blend.
 uint _SdfGatherHistoryDiagnostics;
 float _SdfProbeAnchorHistoryBlend;
 

@@ -15,7 +15,7 @@ from TemporalSamplingExperiment import metrics, paired, read
 def inspect(root):
     root = root.resolve()
     c = load(root / "capture.json")
-    assert c["schema"] == "screen-probe-coordinate-quality.v1" and c["complete"] and not c["errors"]
+    assert c["schema"] in ("screen-probe-coordinate-quality.v1", "screen-probe-anchor-quality.v1") and c["complete"] and not c["errors"]
     assert c["warmup"] == 1024 and c["measured"] == 128 and c["lastFrame"] == 1152
     assert load(root / "source-verification.json")["unchanged"]
     completed = [r for r in c["records"] if r.get("completed")]
@@ -24,8 +24,15 @@ def inspect(root):
     assert len(e) == sum("tag" in r for r in c["records"])
     states = {(r["arm"], r["frame"]): r["qualityState"] for r in c["records"] if "qualityState" in r}
     assert len(states) == 512
-    assert all(s["order"] == 8 and s["batch"] == 32 and s["updates"] == 0 and s["anchorAge"] == 128
+    anchor = c.get("anchorConfiguration", dict(maxAge=128, fullPrecision=False))
+    assert anchor["maxAge"] in (128, 512)
+    assert all(s["order"] == 8 and s["batch"] == 32 and s["updates"] == 0 and s["anchorAge"] == anchor["maxAge"]
         and s["atrous"] == 4 and abs(s["bias"] - .04) < 1e-6 for s in states.values())
+    if c["schema"] == "screen-probe-anchor-quality.v1":
+        expected_format = "R32G32B32A32_SFloat" if anchor["fullPrecision"] else "R16G16B16A16_SFloat"
+        expected_flags = 32 if anchor["fullPrecision"] and not anchor.get("settingsPath", False) else 0
+        assert all(s["flags"] == expected_flags
+            and all(s[key] == expected_format for key in ("anchorFormat", "preparedFormat", "reconstructedFormat")) for s in states.values())
     saved_bytes = 0
     for row in e.values():
         if not row["saved"]:

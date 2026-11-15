@@ -1,5 +1,7 @@
 # 长窗口 anchor 的固定轨迹验证
 
+后续进展：[生产路径验证](ScreenProbeAnchor512Production.md)已完成，Emissive Cornell 已保存为 FP32 / 512；下文的“未推广”描述对应本次运动实验结束时的状态。
+
 继 [静止 FP32/512 候选](ScreenProbeAnchorPrecisionExperiment.md) 通过门槛后，本轮只验证运动稳定性、新露出区域与板边色差。**正常 Profile 仍为 128，没有推广 512 默认值。**
 
 证据为 `E:/VividRP_GI_Evidence/ScreenProbeAnchorWindowMotion-20261114-195008-007`。原生 Screen Probe Gather 保持 1920×1080、16 px / 8 rays、guarded anchor 预滤波、四轮 À-trous，源为已收敛的 8 阶 / 64 样本 / 32 批 Radiosity，太阳、天空和附加近场遮挡为零。

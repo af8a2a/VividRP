@@ -180,3 +180,9 @@ E:/VividRP_GI_Evidence/retention-verification-20261114.json
 [两个撤回候选](ScreenProbeCoordinateQuality.md)新增三个短序列、一个长序列与三个质量配置，保存完整载荷共 **815,342,592 B**。每个质量配置158,334,976 B，另有独立192 MiB上限；只保存指定ROI及一张全分辨率图，其余逐帧probe输入保留hash。支持权重候选复用保护的原版质量参考，通过路径与SHA核验，避免额外复制158,334,976 B。源、实际脚本／生成器、编译数据、失败及撤回决策均保留。
 
 09:16 UTC只复核两个新增目录：`ScreenProbeCoordinatePrecision-20261115-084302-744764` 为588,859,483 B，`ScreenProbeUndrawnSupport-20261115-090401-998834` 为264,289,985 B。以08:38审计为基准，估计证据 **109.559 GiB**，实时E盘可用 **126.448 GiB**，`needsFurtherReview=false`。未再次完整扫描其他目录，没有删除文件或创建临时链接。审计为后一个目录的 `post-experiment-storage.json`；后续少量元数据不回填到该审计时刻。
+
+## Cornell 512 帧正式路径验证
+
+[FP32 / 512 生产路径](ScreenProbeAnchor512Production.md)的全部新数据集中在 `ScreenProbeAnchorFinalQuality-20261115-092158-108905`，并加入保护清单。复用已有基线的路径，没有再复制其原始载荷。单次质量捕帧强制限制二进制为 192 MiB，本轮完整 A/A → 两轮 ABBA 的计时限制为 384 MiB；实际脚本、hash、质量与 GPU 报告、旧接口未通过资格的结果及工具快照均保留。
+
+所有捕帧结束、正常渲染恢复检查确认回调为空后，仅统计这份新目录的 6,540 个文件，新增 **0.883 GiB**。以 09:16 的审计为基准，估计证据总量 **110.442 GiB**，实时 E 盘可用 **124.611 GiB**，`needsFurtherReview=false`，本轮删除量为零。没有完整重扫其他目录，也没有遍历或创建临时链接；审计为新目录的 `post-experiment-storage.json`。计数不含写入该审计本身及随后少量元数据，不将其他进程的磁盘变化归因于清理。

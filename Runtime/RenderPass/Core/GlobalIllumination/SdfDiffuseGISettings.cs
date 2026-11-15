@@ -166,8 +166,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Add a half-strength connected-plane reconstruction. Preserves unfiltered probe history and trace coverage; geometry edges retain the original reconstruction. Screen Probe Gather only.")]
         public BoolParameter screenProbeAnchorPreFilter = new(false);
 
-        [Tooltip("Maximum effective age of stable screen-probe energy anchors. World displacement shortens it to eight; newly exposed receivers reject history. Screen Probe Gather only.")]
-        public ClampedIntParameter screenProbeAnchorMaxAge = new(32, 32, 128);
+        [Tooltip("Maximum effective age of stable screen-probe energy anchors. Longer windows reduce noise on stationary receivers; world displacement shortens the window and newly exposed receivers reject history. Screen Probe Gather only.")]
+        public ClampedIntParameter screenProbeAnchorMaxAge = new(32, 32, 512);
 
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]
         public BoolParameter screenProbeHitDistanceFilter = new(false);

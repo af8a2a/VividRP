@@ -1,5 +1,7 @@
 # 长窗口 scalar anchor 的统一发光响应
 
+后续进展：[生产路径验证](ScreenProbeAnchor512Production.md)已补齐 GPU 成本与正式配置检查，Emissive Cornell 已保存为 FP32 / 512；下文保留本次光照响应实验结束时的状态与限制。
+
 2026-11-15，Unity 7000.0.0a16 / D3D12，Cornell Emissive Ceiling。FP32／512 已通过本轮升光、降光、关灯响应检查，仍是诊断候选；保存的 Profile 仍为 FP16／128。还没有生产路径推广、GPU 成本或完整 Lumen 质量对齐结论。
 
 证据目录：`E:/VividRP_GI_Evidence/ScreenProbeAnchorWindowRelight-20261114-205334-330163`。

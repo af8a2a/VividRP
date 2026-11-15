@@ -252,6 +252,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FilteredProbesId = Shader.PropertyToID("_SdfDiffuseFilteredProbes");
         private static readonly int ProbeAnchorDiagnosticsId = Shader.PropertyToID("_SdfProbeAnchorDiagnostics");
         private static readonly int GatherHistoryDiagnosticsId = Shader.PropertyToID("_SdfGatherHistoryDiagnostics");
+        private const int FullPrecisionAnchorFlag = 32;
         private static readonly int AnchorHistoryBlendId = Shader.PropertyToID("_SdfProbeAnchorHistoryBlend");
         private static readonly int ProbeAnchorMaxAgeId = Shader.PropertyToID("_SdfProbeAnchorMaxAge");
         private static readonly int SpatialAnchorId = Shader.PropertyToID("_SdfSpatialProbeAnchor");
@@ -852,7 +853,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool pixelTemporal = useSettings && motionConnected && m_PixelTemporalKernel >= 0
                 && IsEnabledForGather(settings.pixelTemporal, legacyGather);
             m_PixelHistoryMaxAge = pixelTemporal ? Mathf.Clamp(settings.pixelHistoryMaxAge.value, 8, 32) : 8;
-            m_ProbeAnchorMaxAge = useSettings ? Mathf.Clamp(settings.screenProbeAnchorMaxAge.value, 32, 128) : 32;
+            m_ProbeAnchorMaxAge = useSettings ? Mathf.Clamp(settings.screenProbeAnchorMaxAge.value, 32, 512) : 32;
 #if UNITY_EDITOR
             if (EditorTraceCapture != null && EditorProbeAnchorMaxAgeOverride >= 32)
                 m_ProbeAnchorMaxAge = Mathf.Clamp(EditorProbeAnchorMaxAgeOverride, 32, 512);
@@ -937,9 +938,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PreparedAnchor.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
             m_ReconstructedAnchor.Resize(m_AnchorPreFilter ? m_ProbeWidth : 1, m_AnchorPreFilter ? m_AtlasHeight : 1);
             m_CurrentAnchorStatistics.Resize(prepareAnchor ? m_ProbeWidth : 1, prepareAnchor ? m_AtlasHeight : 1);
-            bool fullPrecisionAnchor = false;
+            bool fullPrecisionAnchor = m_ProbeAnchorMaxAge > 128;
 #if UNITY_EDITOR
-            fullPrecisionAnchor = EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & 32) != 0;
+            fullPrecisionAnchor |= EditorTraceCapture != null && (EditorGatherHistoryDiagnostics & FullPrecisionAnchorFlag) != 0;
 #endif
             m_Probes.desc.ColorFormat = fullPrecisionAnchor && m_DirectionalCache ? GeometryFormat : ProbeFormat;
             m_PreparedAnchor.desc.ColorFormat = fullPrecisionAnchor && m_DirectionalCache ? GeometryFormat : ProbeFormat;
@@ -2725,12 +2726,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void BindProbeFrame(ComputeCommandBuffer cmd, ComputeShader shader)
         {
-            int diagnostics = 0;
+            int diagnostics = m_DirectionalCache && m_ProbeAnchorMaxAge > 128 ? FullPrecisionAnchorFlag : 0;
             float anchorBlend = 0.85f;
 #if UNITY_EDITOR
             if (EditorTraceCapture != null)
             {
-                diagnostics = EditorGatherHistoryDiagnostics;
+                diagnostics |= EditorGatherHistoryDiagnostics;
                 anchorBlend = Mathf.Clamp(EditorProbeAnchorHistoryBlend, 0f, 0.99f);
             }
 #endif

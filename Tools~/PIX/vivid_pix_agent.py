@@ -192,10 +192,10 @@ class Workflow:
         raise Failure("cleanup_pending", "Native cleanup is still pending; poll/release the retained session token.")
 
     def console(self, name, cursor=None):
-        command = [self.args.unity, "command", "console", "--project-path", self.args.project,
+        command = [self.args.unity, "command", "console", "get", "--project-path", self.args.project,
                    "--level", "error", "--tail", "32", "--format", "json"]
         if cursor:
-            command += ["--since", str(cursor["cursor"]), "--since_session", cursor["session"]]
+            command += ["--since", str(cursor["cursor"]), "--since-session", cursor["session"]]
         value = run_json(command, self.budget())["data"]["result"]
         save(self.directory / name, value)
         return value

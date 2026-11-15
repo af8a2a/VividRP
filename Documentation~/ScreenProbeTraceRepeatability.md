@@ -1,5 +1,7 @@
 # Screen Probe 追踪重复性定位
 
+后续已获授权重启并取得真实PIX捕帧，原dispatch常量与barrier结果见[原生PIX绑定证据](ScreenProbePixBindingCapture.md)。以下保留此前的诊断范围。
+
 2026-11-15，Unity 7000.0.0a16 / D3D12 / RTX 5070 Ti。承接 [播放模式计时与输入重复性](ScreenProbePlayModeTiming.md)。本轮仍未取得合格的 FP16/128 与 FP32/512 GPU A/B；没有性能或新增 GI 降噪结论。精度与共享 receiver 原型已撤回，实际 Editor 重新导入原 shader，保存的默认值保持 16 px、8 rays、FP16/128、guarded anchor 预滤波、四轮 À-trous。
 
 ## 已排除的输入差异

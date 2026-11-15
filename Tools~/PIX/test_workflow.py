@@ -144,6 +144,20 @@ class WorkflowChecks(unittest.TestCase):
         self.assert_failure("editor_errors_during_capture", self.workflow.take_capture)
         self.assertEqual("session", self.workflow.session)  # outer finally still owns cleanup
 
+    def test_console_command_and_cursor_follow_current_pipeline_schema(self):
+        value = {"cursor": 24, "session": "console", "entries": []}
+        with patch.object(agent, "run_json", return_value={"data": {"result": value}}) as run:
+            self.assertEqual(value, self.workflow.console("before.json"))
+            command = run.call_args.args[0]
+            self.assertEqual(["unity", "command", "console", "get"], command[:4])
+            self.assertNotIn("--since", command)
+            self.assertEqual(value, self.workflow.console("after.json", {"cursor": 0, "session": "prior"}))
+            command = run.call_args.args[0]
+            self.assertEqual("0", command[command.index("--since") + 1])
+            self.assertEqual("prior", command[command.index("--since-session") + 1])
+            self.assertNotIn("--since_session", command)
+        self.assertEqual(value, json.loads((self.path / "after.json").read_text()))
+
     def test_transient_capture_precondition_retries(self):
         attempts = []
         def command(action, **kwargs):

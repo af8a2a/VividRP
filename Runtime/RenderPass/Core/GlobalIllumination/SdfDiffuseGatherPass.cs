@@ -2354,6 +2354,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 jitter &= EditorTraceCapture == null || (EditorGatherHistoryDiagnostics & 2) == 0;
 #endif
                 cmd.SetComputeIntParam(m_GatherCompute, IntegrationJitterId, jitter ? 1 : 0);
+                bool anchorGuide = m_AnchorStatisticsHistory != null && m_PreparedAnchor.innerHandle.IsValid()
+                    && m_CurrentAnchorStatistics.innerHandle.IsValid();
+                cmd.SetComputeIntParam(m_GatherCompute, PreparedAnchorEnabledId, anchorGuide ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, PreparedAnchorId,
+                    anchorGuide ? m_PreparedAnchor.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, AnchorStatisticsId,
+                    anchorGuide ? m_CurrentAnchorStatistics.innerHandle : black);
             }
             BindReceiver(cmd, m_GatherCompute, kernel);
             BindScreenTraceHistory(cmd, m_GatherCompute, kernel, repairScreenRays, black);
@@ -2694,6 +2701,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(shader, kernel, DepthId, m_Depth.innerHandle);
                     cmd.SetComputeTextureParam(shader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
                     cmd.SetComputeTextureParam(shader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                    cmd.SetComputeTextureParam(shader, kernel, PreparedAnchorId, m_PreparedAnchor.innerHandle);
                     cmd.SetComputeTextureParam(shader, kernel, SpatialAnchorInputId, spatialAnchor);
                     cmd.SetComputeTextureParam(shader, kernel, SpatialAnchorOutputId, m_ReconstructedAnchor.innerHandle);
                     cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);

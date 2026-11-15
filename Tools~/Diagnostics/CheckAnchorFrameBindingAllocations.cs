@@ -24,10 +24,25 @@ using VividRP.Editor.Tools;
         if((int)type.GetField("m_ProbeAnchorMaxAge",inst).GetValue(pass)!=512)
             throw new InvalidOperationException("Normal Cornell age512 must be active.");
         var cmd=context.cmd;
-        for(int i=0;i<128;++i)bind(cmd,shader);
+        var gather=(ComputeShader)type.GetField("m_GatherCompute",inst).GetValue(pass);
+        int filterKernel=(int)type.GetField("m_AnchorPreFilterKernel",inst).GetValue(pass);
+        int resolveKernel=(int)type.GetField("m_DirectionalResolveKernel",inst).GetValue(pass);
+        var prepared=(TextureHandle)(RenderGraphTexture)type.GetField("m_PreparedAnchor",inst).GetValue(pass);
+        var statistics=(TextureHandle)(RenderGraphTexture)type.GetField("m_CurrentAnchorStatistics",inst).GetValue(pass);
+        int preparedId=Shader.PropertyToID("_SdfPreparedProbeAnchor"),enabledId=Shader.PropertyToID("_SdfPreparedAnchorEnabled");
+        int statisticsId=Shader.PropertyToID("_SdfAnchorStatistics");
+        if(!prepared.IsValid() || !statistics.IsValid())throw new InvalidOperationException("Missing guidance resources.");
+        void BindAll() {
+            bind(cmd,shader);
+            cmd.SetComputeTextureParam(shader,filterKernel,preparedId,prepared);
+            cmd.SetComputeIntParam(gather,enabledId,1);
+            cmd.SetComputeTextureParam(gather,resolveKernel,preparedId,prepared);
+            cmd.SetComputeTextureParam(gather,resolveKernel,statisticsId,statistics);
+        }
+        for(int i=0;i<128;++i)BindAll();
         thread=Environment.CurrentManagedThreadId;
         long before=GC.GetAllocatedBytesForCurrentThread();
-        for(int i=0;i<128;++i)bind(cmd,shader);
+        for(int i=0;i<128;++i)BindAll();
         bytes=GC.GetAllocatedBytesForCurrentThread()-before;
         done=true;
     };
@@ -37,7 +52,7 @@ using VividRP.Editor.Tools;
         double deadline=EditorApplication.timeSinceStartup+60;
         while(!done && EditorApplication.timeSinceStartup<deadline)await System.Threading.Tasks.Task.Delay(16);
         if(!done || bytes!=0)throw new InvalidOperationException("Stable BindProbeFrame allocated managed bytes: "+bytes);
-        return new {method="BindProbeFrame",warmupCalls=128,measuredCalls=128,managedBytes=bytes,thread,
+        return new {method="BindProbeFrame and anchor guidance bindings",warmupCalls=128,measuredCalls=128,managedBytes=bytes,thread,
             scope="Calling thread and frame binding only; not whole-frame allocation or GPU cost"};
     }finally {
         hook.SetValue(null,null);EditorApplication.isPaused=previousPaused;

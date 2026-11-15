@@ -522,15 +522,59 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
 
 #if defined(VIVID_SDF_PROBE_IRRADIANCE)
 uint _SdfScreenProbeIntegrationJitter;
+uint _SdfPreparedAnchorEnabled;
+Texture2D<float4> _SdfPreparedProbeAnchor;
+Texture2D<float4> _SdfAnchorStatistics;
 
-float2 GetScreenProbeInterpolationPixel(uint2 pixel, uint2 size, float3 position, float3 normal, float eyeDepth)
+float ScreenProbeStableRadianceFootprint(uint2 pixel, uint2 size, float3 position, float3 normal, float eyeDepth)
+{
+    if (_SdfPreparedAnchorEnabled == 0u)
+        return 1.0;
+    uint2 grid = ProbeGridSize(size);
+    int2 lower = int2(floor((float2(pixel) - float(ProbeSpacing / 2u)) / float(ProbeSpacing)));
+    uint2 first = uint2(clamp(lower, 0, max(int2(grid) - 2, 0)));
+    float3 minimumEnergy = 65000.0, maximumEnergy = 0.0;
+    float age = 512.0;
+    [unroll]
+    for (uint i = 0u; i < 4u; ++i)
+    {
+        uint2 tile = min(first + uint2(i & 1u, i >> 1u), grid - 1u);
+        if (_SdfDiffuseAdaptiveProbes != 0u
+            && _SdfDiffuseGeometry.Load(int3(tile + uint2(0u, grid.y), 0)).w >= 0.0)
+            return 1.0;
+        float4 geometry = _SdfDiffuseGeometry.Load(int3(tile, 0));
+        float4 anchor = _SdfPreparedProbeAnchor.Load(int3(tile, 0));
+        float3 delta = geometry.xyz - position;
+        // Adaptive/geometry discontinuities keep the existing reconstruction.
+        if (geometry.w < 0.0 || anchor.a < 0.25 || dot(normal, UnpackProbeNormal(geometry.w)) < 0.995
+            || abs(dot(delta, normal)) > clamp(0.008 * eyeDepth, 0.045, 0.12))
+            return 1.0;
+        float3 energy = max(anchor.rgb * anchor.a, 0.0);
+        minimumEnergy = min(minimumEnergy, energy);
+        maximumEnergy = max(maximumEnergy, energy);
+        float4 state = _SdfAnchorStatistics.Load(int3(tile, 0));
+        if (state.w == 3.0)
+            return 1.0;
+        age = min(age, state.x);
+    }
+    float3 difference = maximumEnergy - minimumEnergy;
+    float3 totalEnergy = maximumEnergy + minimumEnergy;
+    float contrast = dot(difference, difference) / max(dot(totalEnergy, totalEnergy), 1e-6);
+    float edge = smoothstep(0.0625, 0.4225, contrast) * smoothstep(8.0, 64.0, age);
+    // Mature radiance discontinuities retain their probe-center value. Elsewhere
+    // the original stochastic lookup and one-pixel expansion remain active.
+    return 1.0 - edge;
+}
+
+float2 GetScreenProbeInterpolationPixel(uint2 pixel, uint2 size, float3 position, float3 normal, float eyeDepth,
+    float footprint)
 {
     if (_SdfScreenProbeIntegrationJitter == 0u)
         return float2(pixel);
 
     uint seed = HashProbe(pixel.x + pixel.y * 65537u + _SdfDiffuseFrame * 0x9e3779b9u);
     float2 noise = (float2(seed & 65535u, seed >> 16u) + 0.5) / 32768.0 - 1.0;
-    float radius = 0.25 * ProbeSpacing * lerp(1.0, 0.5, saturate((eyeDepth - 5.0) / 5.0));
+    float radius = footprint * 0.25 * ProbeSpacing * lerp(1.0, 0.5, saturate((eyeDepth - 5.0) / 5.0));
     float2 candidate = clamp(float2(pixel) + noise * radius, 0.0, float2(size - 1u));
     float3 otherPosition, otherNormal;
     if (!LoadReceiver(uint2(round(candidate)), otherPosition, otherNormal) || dot(normal, otherNormal) < 0.95)
@@ -594,7 +638,7 @@ struct ScreenProbeInterpolation
 };
 
 ScreenProbeInterpolation CalculateScreenProbeInterpolation(uint2 pixel, uint2 size, uint2 grid,
-    float2 interpolationPixel, float3 position, float3 normal, float eyeDepth)
+    float2 interpolationPixel, float3 position, float3 normal, float eyeDepth, float expansion)
 {
     ScreenProbeInterpolation samples = (ScreenProbeInterpolation)0;
     int2 lower = int2(floor((interpolationPixel - float(ProbeSpacing / 2u)) / float(ProbeSpacing)));
@@ -602,8 +646,8 @@ ScreenProbeInterpolation CalculateScreenProbeInterpolation(uint2 pixel, uint2 si
     uint2 last = min(first + 1u, grid - 1u);
     float2 firstPixel = float2(ProbeReceiverPixel(first, size));
     float2 lastPixel = float2(ProbeReceiverPixel(last, size));
-    // Expand the bilinear footprint by one pixel around the actual probe centers.
-    float2 fraction = saturate((interpolationPixel - firstPixel + 1.0) / (lastPixel - firstPixel + 2.0));
+    float2 fraction = saturate((interpolationPixel - firstPixel + expansion)
+        / max(lastPixel - firstPixel + 2.0 * expansion, 1.0));
     [unroll]
     for (uint i = 0u; i < 4u; ++i)
     {
@@ -656,14 +700,15 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
 {
     uint2 grid = ProbeGridSize(size);
     float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
-    float2 interpolationPixel = GetScreenProbeInterpolationPixel(pixel, size, position, normal, eyeDepth);
+    float footprint = ScreenProbeStableRadianceFootprint(pixel, size, position, normal, eyeDepth);
+    float2 interpolationPixel = GetScreenProbeInterpolationPixel(pixel, size, position, normal, eyeDepth, footprint);
     ScreenProbeInterpolation samples = CalculateScreenProbeInterpolation(pixel, size, grid,
-        interpolationPixel, position, normal, eyeDepth);
+        interpolationPixel, position, normal, eyeDepth, footprint);
     float totalWeight = dot(samples.weights, 1.0);
     if (totalWeight < MinProbeInterpolationWeight && any(interpolationPixel != float2(pixel)))
     {
         ScreenProbeInterpolation unjittered = CalculateScreenProbeInterpolation(pixel, size, grid,
-            float2(pixel), position, normal, eyeDepth);
+            float2(pixel), position, normal, eyeDepth, footprint);
         float unjitteredWeight = dot(unjittered.weights, 1.0);
         if (unjitteredWeight > totalWeight)
         {

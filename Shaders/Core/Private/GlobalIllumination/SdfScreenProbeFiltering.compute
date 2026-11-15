@@ -1018,6 +1018,10 @@ float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4
         return center;
     float3 energy = center.rgb * center.a;
     float3 reconstructed = energy;
+    float4 guide = _SdfPreparedAnchorEnabled != 0u
+        ? _SdfPreparedProbeAnchor.Load(int3(tile, 0)) : center;
+    float3 guideEnergy = guide.rgb * guide.a;
+    float guideAge = adaptiveHistory ? _SdfAnchorStatistics.Load(int3(tile, 0)).x : 1.0;
     [loop]
     for (uint tap = 0u; tap < 24u; ++tap)
     {
@@ -1033,6 +1037,21 @@ float4 ReconstructProbeAnchor(uint2 tile, float4 geometry, float3 normal, float4
         if (adaptiveHistory && _SdfAnchorStatistics.Load(int3(candidate, 0)).w == 3.0)
             continue;
         float weight = AnchorConnectionWeight(geometry, other, normal, UnpackProbeNormal(other.w));
+        if (adaptiveHistory)
+        {
+            // Use the unfiltered temporal anchor for both diffusion passes. Mature
+            // shadow/color boundaries must not disappear merely because they are coplanar.
+            float4 otherGuide = _SdfPreparedProbeAnchor.Load(int3(candidate, 0));
+            float3 otherEnergy = otherGuide.rgb * otherGuide.a;
+            float3 difference = guideEnergy - otherEnergy;
+            float3 totalEnergy = guideEnergy + otherEnergy;
+            float contrast = dot(difference, difference) / max(dot(totalEnergy, totalEnergy), 1e-6);
+            float otherAge = _SdfAnchorStatistics.Load(int3(candidate, 0)).x;
+            float trust = smoothstep(8.0, 64.0, min(guideAge, otherAge));
+            // This pair weight is symmetric; fixed stencil normalization retains
+            // the equal-and-opposite energy flux, including rejected connections.
+            weight *= lerp(1.0, exp2(-32.0 * contrast), trust);
+        }
         // Fixed normalization over the complete 5x5 stencil. Rejected pair weights
         // remain at the center; symmetric pairwise flux preserves total plane energy.
         weight *= 0.12743124892 * exp2(-0.55 * float(dot(offset, offset)));

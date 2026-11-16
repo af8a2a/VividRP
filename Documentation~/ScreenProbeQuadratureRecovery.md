@@ -2,6 +2,8 @@
 
 停车后候选能恢复启用，重新启用附近的最终亮度连续性门槛通过。**生产默认仍未改变，GPU开销仍未获可信归因**。接下来应核对串行执行区间、事件时刻常量与回放输出，再进行原生整链候选验证。
 
+后续已核验同一捕帧的实际PSO与事件常量；原生整链控制仍未通过重复性门槛，候选继续不启用，见[原生整链检查](ScreenProbeNativeQuadrature.md)。
+
 证据根目录：`E:/VividRP_GI_Evidence/ScreenProbeQuadratureRecovery-20261116-113000`；生产源码基于`6c4cfccd`。Unity7000.0.0a16、CoreRP17.7、D3D12、RTX5070Ti。本次没有改动Runtime、shader资产、场景、Profile、Graphics Jobs设置或重启Editor。
 
 ## 停车恢复

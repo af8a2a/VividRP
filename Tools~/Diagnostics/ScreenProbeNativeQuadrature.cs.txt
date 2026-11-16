@@ -1,0 +1,25 @@
+    RenderTexture nativeQuadratureWitness=null;
+    void RecordNativeQuadratureWitness(ComputePassContext context,Texture native) {
+        var shader=(ComputeShader)type.GetField("m_GatherCompute",inst).GetValue(qualityPass);
+        int kernel=(int)type.GetField("m_DirectionalResolveKernel",inst).GetValue(qualityPass);
+        if(!object.ReferenceEquals(shader,quadratureShader) || native.width!=1920 || native.height!=1080
+            || QualityResolve("m_FilteredProbes").width!=840)
+            throw new InvalidOperationException("Native quadrature fixture changed.");
+        if(nativeQuadratureWitness==null) {
+            nativeQuadratureWitness=new RenderTexture(new RenderTextureDescriptor(1920,1080){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+            if(!nativeQuadratureWitness.Create())throw new InvalidOperationException("Native witness allocation failed.");
+        }
+        var cmd=(CommandBuffer)wrapped.GetValue(context.cmd);
+        try {
+            cmd.SetComputeTextureParam(shader,kernel,"_SdfDiffuseOutput",nativeQuadratureWitness);
+            cmd.SetComputeIntParam(shader,"_SdfGatherHistoryDiagnostics",32|67108864|134217728);
+            cmd.DispatchCompute(shader,kernel,240,135,1);
+            ReadQuality(context,nativeQuadratureWitness,"native-eligibility","pixel");
+        }finally {
+            cmd.SetComputeTextureParam(shader,kernel,"_SdfDiffuseOutput",native);
+            cmd.SetComputeIntParam(shader,"_SdfGatherHistoryDiagnostics",32|67108864);
+        }
+    }
+    void CleanupNativeQuadratureWitness() {
+        if(nativeQuadratureWitness!=null){nativeQuadratureWitness.Release();UnityEngine.Object.DestroyImmediate(nativeQuadratureWitness);}
+    }

@@ -40,7 +40,12 @@ def inspect(root):
         s=state['state']
         assert (s['order'],s['batch'],s['samples'],s['seed'])==(8,32,64,0)
         assert (s['anchorMaxAge'],s['pixelMaxAge'],s['atrous'])==(512,32,4)
-        assert s['flags']==(33554432 if protocol['corrected'] else 0)
+        expected_flags=33554432 if protocol['corrected'] else 0
+        if protocol.get('schema')=='screen-probe-native-quadrature-protocol.v1':
+            assert protocol['variant'] in ('original','control','candidate') and not protocol['corrected']
+            expected_flags=67108864 if protocol['variant']=='candidate' else 0
+            assert protocol['nativeDiagnosticsFlags']==expected_flags
+        assert s['flags']==expected_flags
         assert s['guide']==protocol['guided'] and not s['restir'] and s['traceMode']=='Hybrid'
         assert s['activeSkyType']=='None' and s['sun']==[0,0,0] and s['sky']==0
     assert {rows[f,'radiosity']['sha256'] for f in (warmup,warmup+count-1)}=={'40252e7ae82c1da6ae025dbf012a3ce232aa54ea10bfbf1ca9a7998df93270a8'}

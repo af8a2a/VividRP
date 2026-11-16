@@ -1,0 +1,36 @@
+    bool epochReset=false;
+    var epochInvalidated=new List<string>();
+    void ResetGatherHistoryEpoch() {
+        // Run between submitted frames. Preserve the already converged source cache.
+        var history=camera.GetVividCameraHistory();
+        if((bool)history.GetType().GetProperty("IsFrameActive",inst).GetValue(history))
+            throw new InvalidOperationException("Cannot reset a history epoch inside an active camera frame.");
+        var historyType=typeof(CameraHistoryTexture);
+        var valid=historyType.GetField("m_ValidHistoryCount",inst);
+        var sequence=historyType.GetField("m_LastCommittedSequence",inst);
+        var pendingWrite=historyType.GetField("m_PendingWrite",inst);
+        foreach(string name in new[]{"ProbeHistoryId","AnchorStatisticsHistoryId","GeometryHistoryId","DirectionalHistoryId","DirectionalGuideHistoryId","ProposalHistoryId","RestirHistoryId","PixelHistoryId","CoveredPixelHistoryId","ScreenProbeMomentsHistoryId","PixelGeometryHistoryId","RestirVarianceHistoryId","ScreenRadianceHistoryId","ScreenGeometryHistoryId"}) {
+            var id=(CameraHistoryId)type.GetField(name,stat).GetValue(null);
+            if(!history.TryGetTexture(id,out var texture))continue;
+            // Invalidate ownership metadata only; do not dispose submitted resources.
+            valid.SetValue(texture,0);sequence.SetValue(texture,-1L);pendingWrite.SetValue(texture,false);
+            epochInvalidated.Add(name);
+        }
+        foreach(string name in new[]{"ProbeHistoryId","AnchorStatisticsHistoryId","GeometryHistoryId","DirectionalHistoryId","DirectionalGuideHistoryId","CoveredPixelHistoryId","ScreenProbeMomentsHistoryId","PixelGeometryHistoryId"})
+            if(!epochInvalidated.Contains(name))throw new InvalidOperationException("Missing epoch history: "+name);
+        epochReset=true;
+    }
+    void CaptureEpochFirstFrame(ComputePassContext context) {
+        if(frame!=0)return;
+        if(!epochReset || (bool)type.GetField("m_HasHistory",inst).GetValue(qualityPass)
+            || (bool)type.GetField("m_AnchorStatisticsHistoryValid",inst).GetValue(qualityPass))
+            throw new InvalidOperationException("Gather epoch did not start without history.");
+        ReadQuality(context,QualityResolve("m_CurrentAnchorStatistics"),"epoch-statistics","probe");
+        ReadQuality(context,QualityResolve("m_Probes"),"epoch-anchor","probe");
+        ReadQuality(context,QualityResolve("m_HitLighting"),"epoch-raw","probe");
+        ReadQuality(context,QualityResolve("m_Geometry"),"epoch-geometry","probe");
+        records.Add(new{epochFirstFrame=frame,hasHistory=false,anchorStatisticsHistoryValid=false,
+            publishedOrder=type.GetField("m_RadiosityPublishedOrder",inst).GetValue(qualityPass),
+            batch=type.GetField("m_RadiosityBatch",inst).GetValue(qualityPass),
+            sourceUpdates=type.GetField("m_RadiosityUpdateCards",inst).GetValue(qualityPass)});
+    }

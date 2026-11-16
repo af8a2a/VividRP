@@ -2,6 +2,8 @@
 
 2026-11-16，Unity7000.0.0a16 / D3D12 / RTX5070Ti。原生整链试验未通过同配置重复性门槛，**四分层候选不进入默认行为**。此前共享输入、独立像素历史中的降噪结果仍限于[该重放实验](ScreenProbeQuadratureHistory.md)，不能当作原生整链收益。GPU成本也仍未取得合格归因。
 
+后续已新增[候选实际写入原生历史的同帧闭环](ScreenProbeNativeCandidateHistory.md)：两组静态及固定轨迹通过对应门槛，天花板时间方差下降35.61%/37.77%。该新协议保留本文跨运行控制失败，默认仍未启用，逐像素参考与GPU成本尚待验证。
+
 证据根目录：`E:/VividRP_GI_Evidence/ScreenProbeNativeQuadrature-20261116-123000`。本轮仅修改诊断工具和文档；没有修改Runtime、生产shader、场景或Profile。
 
 ## 原生路径与事前门槛

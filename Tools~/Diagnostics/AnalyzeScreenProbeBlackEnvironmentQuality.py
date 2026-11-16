@@ -45,6 +45,9 @@ def inspect(root):
             assert protocol['variant'] in ('original','control','candidate') and not protocol['corrected']
             expected_flags=67108864 if protocol['variant']=='candidate' else 0
             assert protocol['nativeDiagnosticsFlags']==expected_flags
+        if protocol.get('schema')=='screen-probe-native-quadrature-history-protocol.v1':
+            assert protocol['nativeSide']=='candidate' and protocol['irradiancePlanes']==7 and not protocol['corrected']
+            expected_flags=67108864
         assert s['flags']==expected_flags
         assert s['guide']==protocol['guided'] and not s['restir'] and s['traceMode']=='Hybrid'
         assert s['activeSkyType']=='None' and s['sun']==[0,0,0] and s['sky']==0

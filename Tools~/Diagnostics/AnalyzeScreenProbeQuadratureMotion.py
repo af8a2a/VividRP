@@ -58,7 +58,9 @@ def analyze(root):
     common_p99=b['temporalMinusCommonCurrentP99']<=a['temporalMinusCommonCurrentP99']*(1+gates['disocclusionP99IncreasePercent']/100)+1e-6
     common_max=b['temporalMinusCommonCurrentMax']<=a['temporalMinusCommonCurrentMax']*(1+gates['disocclusionMaxIncreasePercent']/100)+1e-6
     age=b['oldAgeFraction']<=a['oldAgeFraction']+gates['newlyExposedOldAgeFractionIncrease']
-    return dict(schema='screen-probe-quadrature-motion-analysis.v1',qualified=True,nativeBaselineQualified=True,
+    native_candidate=protocol.get('nativeSide')=='candidate'
+    return dict(schema='screen-probe-quadrature-motion-analysis.v1',qualified=True,
+        nativeBaselineQualified=not native_candidate,nativeCandidateQualified=native_candidate,
         fullImageResolveAaPairs=len(protocol['aaFrames']),privateHistoryAaPairs=pairs,initialState=initial,
         arms=arms,quadratureEligibility=eligibility,disocclusionP99Passed=p99,disocclusionMaxPassed=maximum,disocclusionAgePassed=age,
         commonCurrentP99Passed=common_p99,commonCurrentMaxPassed=common_max,

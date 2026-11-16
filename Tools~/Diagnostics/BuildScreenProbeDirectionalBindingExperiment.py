@@ -6,7 +6,9 @@ from pathlib import Path
 from BuildScreenProbeRecorderCadenceExperiment import build as cadence_build
 
 
-def build(template: str, output: Path) -> str:
+def build(template: str, output: Path, anchor_age: int = 128, arms: int = 8) -> str:
+    if anchor_age not in (128,512) or arms not in (2,8):
+        raise ValueError('Expected anchor age128/512 and2/8 controlled arms')
     source = cadence_build(template, output)
 
     def replace(old: str, new: str) -> None:
@@ -70,7 +72,11 @@ def build(template: str, output: Path) -> str:
 """)
     replace("if (frame<=16 || frame==warmup-1 || frame==lastFrame-1)", "if (true)")
     replace("        foreach(var mode in new[] { (false,false),(true,false),(true,true),(false,true),\n                (false,true),(true,true),(true,false),(false,false) })",
-            "        foreach(var mode in Enumerable.Repeat((false,false),8))")
+            "        foreach(var mode in Enumerable.Repeat((false,false),"+str(arms)+"))")
+    replace('recorderMode=mode.Item1; tickMode=mode.Item2; age=128;',
+            'recorderMode=mode.Item1; tickMode=mode.Item2; age='+str(anchor_age)+';')
+    replace('gi.screenProbeAnchorMaxAge.Override(128);',
+            'gi.screenProbeAnchorMaxAge.Override('+str(anchor_age)+');')
     replace("            tickIssued=tickCompleted=tickPending=0;", """            tickIssued=tickCompleted=tickPending=0;
             retainedPayloadBytes-=currentPayloads.Values.Sum(v=>(long)v.Length);
             currentPayloads.Clear();""")
@@ -140,13 +146,16 @@ def build(template: str, output: Path) -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument('--anchor-age',type=int,choices=(128,512),default=128)
+    parser.add_argument('--arms',type=int,choices=(2,8),default=8)
     args = parser.parse_args()
     template = Path(__file__).with_name("ScreenProbeAnchorGpuTimingCapture.cs")
-    source = build(template.read_text(encoding="utf-8-sig"), args.output.resolve())
+    source = build(template.read_text(encoding="utf-8-sig"), args.output.resolve(),args.anchor_age,args.arms)
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "capture-script.cs").write_text(source, encoding="utf-8")
     (args.output / "protocol.json").write_text(json.dumps({
-        "schema": "screen-probe-directional-binding-protocol.v1", "arms": 8, "frames": 64,
+        "schema": "screen-probe-directional-binding-protocol.v1", "arms": args.arms, "frames": 64,
+        "anchorAge":args.anchor_age,"automaticPrecisionBit":32 if args.anchor_age>128 else 0,
         "shaderChanged": False, "gpuInstrumentation": False, "firstPreviousFrameRead": 0,
         "allFramePreviousReads": True, "ownedPayloadBudget": 3*1024**3, "savedPayloadBudget": 192*1024**2,
         "note": "CPU-selected predicates and texture identities, not a claim of physical GPU bindings/constants"

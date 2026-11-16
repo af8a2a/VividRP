@@ -29,7 +29,10 @@ def energy_and_noise(baseline, candidate):
 
 def qualify_replay(root):
     capture, protocol, source_rows, _, _ = qualify(root)
-    assert protocol['independentPixelHistories'] and protocol['schema']=='screen-probe-quadrature-history-protocol.v1'
+    assert protocol['independentPixelHistories']
+    assert protocol['schema'] in ('screen-probe-quadrature-history-protocol.v1','screen-probe-native-quadrature-history-protocol.v1')
+    native_side=protocol.get('nativeSide','baseline')
+    assert native_side==('candidate' if protocol['schema']=='screen-probe-native-quadrature-history-protocol.v1' else 'baseline')
     warmup, count = protocol['warmup'], protocol['measuredFrames']
     frames = [0,1,2,warmup-1,*range(warmup,warmup+count)]
     rois=tuple(protocol.get('regions',ROIS))
@@ -52,19 +55,17 @@ def qualify_replay(root):
         for role in ROLES:
             for roi in (*rois, 'full'):
                 tag=role+'-'+roi
-                native,baseline=(rows[frame,tag,side] for side in ('native','baseline'))
-                assert native['sha256']==baseline['sha256'], (frame,tag)
+                native,matching=(rows[frame,tag,side] for side in ('native',native_side))
+                assert native['sha256']==matching['sha256'], (frame,tag)
                 pairs+=1
-                if roi!='full' and role=='geometry':
-                    assert baseline['sha256']==rows[frame,tag,'candidate']['sha256']
-                if frame==0 and roi!='full':
-                    assert baseline['sha256']==rows[frame,tag,'candidate']['sha256'], 'Cold paths must agree'
+                if roi!='full' and (role=='geometry' or frame==0):
+                    assert rows[frame,tag,'baseline']['sha256']==rows[frame,tag,'candidate']['sha256'], 'Cold paths/geometry must agree'
     assert pairs==capture['privateAaPairs']==len(frames)*5*(len(rois)+1)
     # The shared source final includes any renderer post-wavelet work. Requiring
     # this equality prevents reporting a pre-occlusion replay as final output.
     for frame in range(warmup,warmup+count):
         for roi in rois:
-            assert source_rows[frame,'final-'+roi]['sha256']==rows[frame,'final-'+roi,'baseline']['sha256']
+            assert source_rows[frame,'final-'+roi]['sha256']==rows[frame,'final-'+roi,native_side]['sha256']
     return capture,protocol,source_rows,rows,pairs,initial[0]
 
 
@@ -88,14 +89,17 @@ def analyze(root):
     frame_deltas={roi:100*(v['candidate']['frame_difference_rms']/max(v['baseline']['frame_difference_rms'],1e-12)-1)
                   for roi,v in final.items()}
     frame_gate=all(v<=gates['frameDifferenceRmsIncreasePercent'] for v in frame_deltas.values())
-    return dict(schema='screen-probe-quadrature-history-analysis.v1', qualified=True, nativeBaselineQualified=True,
+    native_candidate=protocol.get('nativeSide')=='candidate'
+    return dict(schema='screen-probe-quadrature-history-analysis.v1', qualified=True,
+        nativeBaselineQualified=not native_candidate,nativeCandidateQualified=native_candidate,
         fullImageResolveAaPairs=len(protocol['aaFrames']), privateHistoryAaPairs=pairs, measuredFrames=count, payloadBytes=capture['payloadBytes'],
         initialState=initial, regions=final, frameDifferenceRmsChangePercent=frame_deltas,
         finalMeanGatePassed=mean, finalCeilingNoiseGatePassed=noise, finalNoRegressionGatePassed=others,
         finalFrameDifferenceGatePassed=frame_gate, pilotPassed=mean and noise and others and frame_gate,
         productionQualified=False,
-        limits=['Native baseline is the in-memory Gather prototype with quadrature disabled, not the unchanged production PSO.',
-                'Independent full pixel recurrence on shared native probe inputs; candidate does not feed ray guidance or transport.',
+        limits=[('Native candidate writes actual pixel histories and final output; control uses independent private histories on the same native probes.' if native_candidate
+                 else 'Native baseline is the in-memory Gather prototype with quadrature disabled, not the unchanged production PSO.'),
+                'Shared probe transport: pixel output does not feed ray guidance or Surface Cache; screen source exports direct diffuse plus emission.',
                 'One static sequence, incident diffuse GI before receiver reflectance; no physical-reference, motion or GPU-cost acceptance.'])
 
 

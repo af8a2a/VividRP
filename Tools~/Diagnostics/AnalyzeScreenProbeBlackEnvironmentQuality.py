@@ -29,8 +29,11 @@ def inspect(root):
         path=Path(row['path']).resolve();assert path.is_relative_to(root.resolve())
         data=path.read_bytes();assert hashlib.sha256(data).hexdigest()==row['sha256'];payload+=len(data)
     assert payload==capture['payloadBytes']<=capture['payloadBudget']==protocol['payloadBudget']
-    rows={(r['frame'],r['tag']):r for r in capture['records'] if 'tag' in r}
-    assert len(rows)==sum('tag' in r for r in capture['records'])
+    # Independent replay paths have their own explicit side; keep source rows
+    # separate while still hashing and budgeting every payload above.
+    source_rows=[r for r in capture['records'] if 'tag' in r and 'side' not in r]
+    rows={(r['frame'],r['tag']):r for r in source_rows}
+    assert len(rows)==len(source_rows)
     states={r['frame']:r for r in capture['records'] if 'state' in r}
     assert set(states)==set(range(warmup,warmup+count))
     for state in states.values():

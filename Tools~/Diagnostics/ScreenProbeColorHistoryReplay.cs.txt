@@ -107,10 +107,27 @@
         var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);int slot=frame&1,previous=1-slot;
         var state=PrivateField("m_State");object State(string name)=>state.GetType().GetField(name,inst).GetValue(state);
         var previousVp=(Matrix4x4)State("ViewProjection");var jitter=(Vector2)PrivateField("m_ScreenJitterDelta");
+        bool useScreenRays=(bool)PrivateField("m_HasScreenHistory") && PrivateResolve("m_ScreenRays")!=null
+            && PrivateResolve("m_ScreenHzb")!=null && PrivateResolve("m_ScreenMotion")!=null;
+        // This fixture has all receiver variants. Refuse a partial shader setup
+        // instead of guessing the local receiver-kernel choice made by Record.
+        foreach(string name in new[]{"m_ReceiverCachedSunKernel","m_ReceiverCachedKernel","m_ReceiverTraceKernel"})
+            if((int)PrivateField(name)<0)throw new InvalidOperationException("Private replay requires complete receiver kernels.");
+        bool hasReceiver=(bool)PrivateField("m_UseSdf") && PrivateResolve("m_ReceiverVisibility")!=null && (int)PrivateField("m_ReceiverCount")>0;
+        bool correctReceiver=hasReceiver && (bool)PrivateField("m_CorrectReceiverSelfHits");
+        bool screenCardLighting=hasReceiver && useScreenRays && (bool)PrivateField("m_ScreenCardLightingRequested") && PrivateResolve("m_RadiosityInput")!=null;
+        var clipmap=PrivateField("m_GlobalClipmap");
+        bool useGlobalClipmap=(bool)PrivateField("m_UseSdf") && clipmap!=null && (bool)clipmap.GetType().GetField("Recorded",inst).GetValue(clipmap);
         bool hasHistory=(bool)PrivateField("m_HasHistory") && PrivateResolve("m_PreviousGeometry")!=null
+            && ((bool)PrivateField("m_DirectionalCache") || PrivateResolve("m_PreviousProbes")!=null)
+            && (bool)State("HasScreenRays")==useScreenRays
+            && (bool)State("RestirOpenPbrDiffuse")==(bool)PrivateField("m_RestirOpenPbrDiffuse")
+            && (bool)State("CorrectReceiverSelfHits")==correctReceiver && (bool)State("ScreenCardLighting")==screenCardLighting
+            && (bool)State("GlobalClipmapUsed")==useGlobalClipmap
             && (bool)State("PixelTemporal") && (int)State("PixelHistoryMaxAge")== (int)PrivateField("m_PixelHistoryMaxAge")
             && ((CameraHistoryTexture)PrivateField("m_PixelHistory")).IsValid() && ((CameraHistoryTexture)PrivateField("m_PixelGeometryHistory")).IsValid();
         bool momentsValid=hasHistory && ((CameraHistoryTexture)PrivateField("m_ScreenProbeMomentsHistory")).IsValid();
+        if(frame<3)records.Add(new{arm,frame,privateHistoryCompatibility=true,hasHistory,momentsValid,useScreenRays,previousScreenRays=State("HasScreenRays"),correctReceiver,screenCardLighting,useGlobalClipmap});
         if(!privateInitialized) {
             for(int path=0;path<2;++path) {
                 raw.CopyTexture(PrivateResolve("m_PreviousPixelLighting"),privateColor[path,previous]);

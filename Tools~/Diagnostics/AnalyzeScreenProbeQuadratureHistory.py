@@ -38,7 +38,12 @@ def qualify_replay(root):
     rois=tuple(protocol.get('regions',ROIS))
     assert rois and set(rois)<=set(ROIS)
     assert protocol['aaFrames']==frames
-    assert len(capture['quadraturePrograms'])==6 and len(capture['privatePrograms'])==4
+    covered_wavelet=protocol.get('coverageWeightedWavelet',False)
+    if covered_wavelet:
+        assert protocol['pixelOracle'] and native_side=='candidate'
+        programs=[r for r in capture['privatePrograms'] if r['file']=='covered-wavelet.compute.txt']
+        assert len(programs)==2 and {r['name'] for r in programs}=={'FilterSdfDiffuseAtrous','FilterSdfDiffuseAtrousFinal'}
+    assert len(capture['quadraturePrograms'])==6 and len(capture['privatePrograms'])==(6 if covered_wavelet else 4)
     assert capture['privateInitialized'] and capture['componentAaPairs']==len(frames)
     component = [r for r in capture['records'] if r.get('componentAa')]
     assert len(component)==2*len(frames)
@@ -58,7 +63,10 @@ def qualify_replay(root):
                 native,matching=(rows[frame,tag,side] for side in ('native',native_side))
                 assert native['sha256']==matching['sha256'], (frame,tag)
                 pairs+=1
-                if roi!='full' and (role=='geometry' or frame==0):
+                # A changed wavelet may change the cold final image. Its input
+                # temporal/color/moments and all geometry still must agree;
+                # every candidate final remains byte-exact with native above.
+                if roi!='full' and (role=='geometry' or frame==0) and not (covered_wavelet and role=='final'):
                     assert rows[frame,tag,'baseline']['sha256']==rows[frame,tag,'candidate']['sha256'], 'Cold paths/geometry must agree'
     assert pairs==capture['privateAaPairs']==len(frames)*5*(len(rois)+1)
     # The shared source final includes any renderer post-wavelet work. Requiring

@@ -53,3 +53,5 @@ python -B -m unittest discover -s Tools~/Diagnostics -p 'test_*.py'
 162项Python检查通过，包含解析面积光、反射线性、RGB协方差、表面匹配拒绝和配对MSE不确定度检查。实际DX12几何kernel及原生候选闭环编译执行；没有在活动Editor中运行Unity Test Framework。本轮无新PIX捕帧或重启。
 
 实验后运行1024个原始路径正常帧，并核验原时域/À-trous DXIL、persistent Hybrid trace、16/8、anchor512、pixel32、bias.04、源8阶/32批。回调为空、override=-1、flags0，两场景干净，播放暂停、Frame Debugger关闭、PIX idle。重复捕获8633份完整读回无损归档，复核ZIP中每个文件的SHA后才删除外部原始副本，净释放152,704,048B（约145.63MiB）。主批保留全量，报告、聚合统计、失败记录、源码、协议与独立参考均保留。完整重跑首批分析前需解压回原路径、复核SHA并移开`raw-retention.json`；主批可直接重跑。
+
+后续[coverage小波同帧诊断](ScreenProbeCoveredWavelet.md)补齐了相同完整输入的原小波重放，并将天花板参考提高到每点131072路径。颜色平均域确实影响空间误差，但两种新候选在第二独立序列仍未通过能量/空间误差门限，默认继续保持原实现。

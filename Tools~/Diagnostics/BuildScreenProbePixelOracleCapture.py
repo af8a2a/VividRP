@@ -31,7 +31,8 @@ uint _OracleCount;
 '''
 
 
-def build(output,sequence=1733):
+def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wavelet_witness=False):
+    assert covered_wavelet or not (symmetric_coverage or wavelet_witness)
     source,shaders=native_build(output,sequence,False)
     helper=Path(__file__).with_name('ScreenProbePixelOracleCapture.cs.txt').read_text(encoding='utf-8-sig')
     def replace(old,new):
@@ -49,19 +50,25 @@ def build(output,sequence=1733):
     # Guard before constructing a temporary profile, including failed startup.
     replace('    var roots = scene.GetRootGameObjects();','    if(!EditorApplication.isPlaying || !EditorApplication.isPaused)throw new InvalidOperationException("Paused PlayMode required before allocating the oracle capture.");\n    var roots = scene.GetRootGameObjects();')
     shaders['oracle-geometry.compute.txt']=GEOMETRY_SHADER
+    if covered_wavelet:
+        from ScreenProbeCoveredWavelet import install
+        source,shaders=install(source,shaders,symmetric_coverage,wavelet_witness)
     return source,shaders
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('output',type=Path);p.add_argument('--sequence',type=int,default=1733)
-    a=p.parse_args();out=a.output.resolve();source,shaders=build(out,a.sequence)
+    p.add_argument('--covered-wavelet',action='store_true')
+    p.add_argument('--symmetric-coverage',action='store_true');p.add_argument('--wavelet-witness',action='store_true')
+    a=p.parse_args();out=a.output.resolve();source,shaders=build(out,a.sequence,a.covered_wavelet,a.symmetric_coverage,a.wavelet_witness)
     out.mkdir(parents=True,exist_ok=False);(out/'capture-script.cs').write_text(source,encoding='utf-8')
     for name,body in shaders.items():(out/name).write_text(body,encoding='utf-8')
     points=targets();(out/'targets.json').write_text(json.dumps(points,indent=2)+'\n')
     protocol=dict(schema='screen-probe-native-quadrature-history-protocol.v1',corrected=False,guided=True,sequence=a.sequence,
         warmup=1024,measuredFrames=128,spacing=16,rays=8,payloadBudget=384*1024**2,historyEpoch=True,finalStatistics=True,
         quadrature=True,independentPixelHistories=True,nativeSide='candidate',irradiancePlanes=7,motion=False,regions=list(REGIONS),
-        aaFrames=[0,1,2,1023,*range(1024,1152)],pixelOracle=True,oracleTargetCount=len(points),
+        aaFrames=[0,1,2,1023,*range(1024,1152)],pixelOracle=True,oracleTargetCount=len(points),coverageWeightedWavelet=a.covered_wavelet,
+        symmetricCoverage=a.symmetric_coverage,coverageWaveletWitness=a.wavelet_witness,
         files={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir()},
         gates=dict(nativeCopiedResolveByteExact=True,nativePrivateHistoryByteExact=True,meanChangeAbsPercent=1,
             ceilingVarianceReductionPercent=5,otherVarianceIncreasePercent=2,frameDifferenceRmsIncreasePercent=2,

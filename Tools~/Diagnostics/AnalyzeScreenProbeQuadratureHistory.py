@@ -13,6 +13,16 @@ from TemporalSamplingExperiment import read, LUMA, metrics, paired
 ROLES = ('temporal', 'history', 'moments', 'geometry', 'final')
 
 
+def qualify_cold_energy_moments(temporal,baseline,candidate):
+    assert temporal.shape==baseline.shape==candidate.shape and temporal.shape[-1]==4
+    assert np.array_equal(baseline[...,1:],candidate[...,1:]),'Cold moment variance/age/coverage changed'
+    assert (candidate[...,1]==0).all(),'Cold moment variance must be zero'
+    for value,coverage in ((baseline,1.0),(candidate,temporal[...,3])):
+        expected=np.log2(1+np.maximum(temporal[...,:3],0)@LUMA*coverage).astype(np.float16)
+        ulp=np.spacing(expected).astype(float)
+        assert np.all(abs(value[...,0]-expected.astype(float))<=np.maximum(ulp,1e-7)*1.01),'Cold moment luminance domain mismatch'
+
+
 def energy_and_noise(baseline, candidate):
     assert baseline.shape == candidate.shape and baseline.shape[-1] == 4
     assert np.isfinite(baseline).all() and np.isfinite(candidate).all()
@@ -39,11 +49,16 @@ def qualify_replay(root):
     assert rois and set(rois)<=set(ROIS)
     assert protocol['aaFrames']==frames
     covered_wavelet=protocol.get('coverageWeightedWavelet',False)
+    energy_moments=protocol.get('consumedEnergyMoments',False)
+    if energy_moments:
+        assert covered_wavelet and not protocol['coverageWaveletWitness']
+        programs=[r for r in capture['privatePrograms'] if r['file']=='energy-temporal.compute.txt']
+        assert len(programs)==1 and programs[0]['name']=='ScreenProbeTemporalReprojectionWithMomentsCS'
     if covered_wavelet:
         assert protocol['pixelOracle'] and native_side=='candidate'
         programs=[r for r in capture['privatePrograms'] if r['file']=='covered-wavelet.compute.txt']
         assert len(programs)==2 and {r['name'] for r in programs}=={'FilterSdfDiffuseAtrous','FilterSdfDiffuseAtrousFinal'}
-    assert len(capture['quadraturePrograms'])==6 and len(capture['privatePrograms'])==(6 if covered_wavelet else 4)
+    assert len(capture['quadraturePrograms'])==6 and len(capture['privatePrograms'])==(6 if covered_wavelet else 4)+int(energy_moments)
     assert capture['privateInitialized'] and capture['componentAaPairs']==len(frames)
     component = [r for r in capture['records'] if r.get('componentAa')]
     assert len(component)==2*len(frames)
@@ -63,11 +78,15 @@ def qualify_replay(root):
                 native,matching=(rows[frame,tag,side] for side in ('native',native_side))
                 assert native['sha256']==matching['sha256'], (frame,tag)
                 pairs+=1
-                # A changed wavelet may change the cold final image. Its input
-                # temporal/color/moments and all geometry still must agree;
-                # every candidate final remains byte-exact with native above.
-                if roi!='full' and (role=='geometry' or frame==0) and not (covered_wavelet and role=='final'):
+                # A changed wavelet may change cold final, and a moment-domain
+                # change is checked numerically below. Cold colors and all
+                # geometry still agree; every native/candidate role remains exact.
+                if roi!='full' and (role=='geometry' or frame==0) and not (covered_wavelet and role=='final') and not (energy_moments and role=='moments'):
                     assert rows[frame,tag,'baseline']['sha256']==rows[frame,tag,'candidate']['sha256'], 'Cold paths/geometry must agree'
+    if energy_moments:
+        for roi in rois:
+            qualify_cold_energy_moments(*(read(rows[0,tag+'-'+roi,side]).astype(float)
+                for tag,side in (('temporal','candidate'),('moments','baseline'),('moments','candidate'))))
     assert pairs==capture['privateAaPairs']==len(frames)*5*(len(rois)+1)
     # The shared source final includes any renderer post-wavelet work. Requiring
     # this equality prevents reporting a pre-occlusion replay as final output.

@@ -53,6 +53,7 @@ def qualify_wavelet_inputs(rows,frames,control_side='quadrature-reference'):
 
 def analyze(capture_root,reference_root,control_side='baseline'):
     c,p,_,rows,pairs,_=qualify_replay(capture_root)
+    assert not p.get('motion',False),'Static oracle comparison cannot consume a moving camera capture'
     assert control_side in ('baseline','quadrature-reference')
     counterfactual_pairs=0
     if control_side=='quadrature-reference':
@@ -92,8 +93,13 @@ def analyze(capture_root,reference_root,control_side='baseline'):
             assert record==(refined_records if record['index'] in refined else parent_records)[record['index']]
     for point,record in zip(points,records):
         assert all(record[k]==v for k,v in point.items())
-        spec=refinement if point['index'] in refined else metadata
-        e=record['estimate'];assert (e['samples'],e['diffuseReflections'],e['seed'])==(spec['samples'],9,spec['seed']+point['index'])
+        e=record['estimate']
+        if refinement is not None and point['index'] not in refined:
+            prior=parent_records[point['index']]['estimate'];expected=(prior['samples'],prior['diffuseReflections'],prior['seed'])
+        else:
+            spec=refinement if point['index'] in refined else metadata
+            expected=(spec['samples'],9,spec['seed']+point['index'])
+        assert (e['samples'],e['diffuseReflections'],e['seed'])==expected
     ref=np.array([q['estimate']['meanRgb'] for q in records])
     cov=np.array([q['estimate']['iidCovarianceMeanRgb'] for q in records])
     sem=np.array([q['estimate']['iidStandardErrorRgb'] for q in records])
@@ -124,6 +130,7 @@ def analyze(capture_root,reference_root,control_side='baseline'):
         result['eighthOrderMeanPercentOfReference']=100*float((orders[selected,8]@LUMA).mean())/result['referenceMean']
         result['reference8ReflectionMeanY']=float((orders[selected,:9].sum(1)@LUMA).mean())
         result['referenceIidPixelYStandardErrorMedian']=float(np.median(np.sqrt(v)))
+        result['referenceSamplesPerPixel']=sorted({q['estimate']['samples'] for q in records if q['region']==region})
         regions[region]=result
     return dict(schema='cornell-pixel-oracle-analysis.v1',qualified=True,sourceIndependent=True,
         nativeResolveAaPairs=len(p['aaFrames']),nativeCandidateHistoryAaPairs=pairs,

@@ -51,3 +51,5 @@
 结束后运行1024个原路径正常帧，原时域/小波DXIL、persistent Hybrid trace、16/8、anchor512、pixel32、四轮、bias.04和源8阶/32批均核验恢复。回调为空、override=-1、flags0，两场景干净、播放暂停、Frame Debugger关闭、PIX idle。本轮未重启Editor、未产生PIX或大幅图片。
 
 `symmetric-a`保留完整读回；另三组无损ZIP归档，逐项解压核验原SHA后清理外部原始副本，净释放469,321,714B（447.58MiB），报告、统计、源码和独立参考均保留。对归档组完整重跑分析前，需解压回原路径、复核SHA并移开`raw-retention.json`。空间复核时磁盘可用107.80GiB；根目录`post-experiment-storage.json`保留本轮实测大小与继承自上轮的总量估计。
+
+后续[能量域moments实验](ScreenProbeEnergyMoments.md)统一了时域统计及小波亮度引导。两组天花板时间方差进一步下降，平均能量门限通过；第二组back仍有略超门限的参考置信上界，生产默认尚未切换。

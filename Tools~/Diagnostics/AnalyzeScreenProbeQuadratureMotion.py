@@ -59,17 +59,22 @@ def analyze(root):
     common_max=b['temporalMinusCommonCurrentMax']<=a['temporalMinusCommonCurrentMax']*(1+gates['disocclusionMaxIncreasePercent']/100)+1e-6
     age=b['oldAgeFraction']<=a['oldAgeFraction']+gates['newlyExposedOldAgeFractionIncrease']
     native_candidate=protocol.get('nativeSide')=='candidate'
+    quadrature_after_first=any(any(f>0 for f in v['perFrameFraction'][1:]) for v in eligibility.values())
+    energy_moments=protocol.get('consumedEnergyMoments',False)
     return dict(schema='screen-probe-quadrature-motion-analysis.v1',qualified=True,
         nativeBaselineQualified=not native_candidate,nativeCandidateQualified=native_candidate,
         fullImageResolveAaPairs=len(protocol['aaFrames']),privateHistoryAaPairs=pairs,initialState=initial,
         arms=arms,quadratureEligibility=eligibility,disocclusionP99Passed=p99,disocclusionMaxPassed=maximum,disocclusionAgePassed=age,
         commonCurrentP99Passed=common_p99,commonCurrentMaxPassed=common_max,
-        candidateExecutedAfterFirstMeasuredFrame=any(any(f>0 for f in v['perFrameFraction'][1:]) for v in eligibility.values()),
+        quadratureExecutedAfterFirstMeasuredFrame=quadrature_after_first,
+        energyMomentsAndWaveletsActiveAllMeasuredFrames=energy_moments,
+        energyMomentNativeAaMeasuredFrames=protocol['measuredFrames'] if energy_moments else 0,
+        candidateExecutedAfterFirstMeasuredFrame=quadrature_after_first or energy_moments,
         movingDenoisingQualityMeasured=False,
         motionPassed=p99 and maximum and age and common_p99 and common_max,productionQualified=False,
         limits=['Temporal minus own current isolates inherited history. Common native Resolve also measures changes from the interpolation itself.',
                 'Noisy Resolve is not an absolute reference; final minus common current includes spatial filtering and is descriptive.',
-                'Eligibility is reported frame by frame. A disabled candidate tests fallback/history transitions, not active moving denoising quality.',
+                'Quadrature eligibility is independent of energy moments/wavelets, which remain active when that mode is enabled. This report tests history inheritance, not absolute denoising quality.',
                 'One fixed128-frame camera cycle; no stop-and-settle recovery, dynamic-lighting or full transport feedback acceptance.'])
 
 

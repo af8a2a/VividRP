@@ -1,0 +1,63 @@
+    ComputeShader fluxShader=null;
+    RenderTexture fluxGuides=null;
+    var fluxPrograms=new List<object>();var fluxMass=new List<object>();
+    void SetupFlux() {
+        int first=privatePrograms.Count;
+        fluxShader=PrivateShader("flux-wavelet.compute.txt",new[]{"PrepareScreenProbeFluxCS","FilterScreenProbeFluxCS","FilterScreenProbeFluxFinalCS"});
+        fluxPrograms.AddRange(privatePrograms.GetRange(first,privatePrograms.Count-first));privatePrograms.RemoveRange(first,privatePrograms.Count-first);
+        fluxGuides=PrivateTexture(UnityEngine.Experimental.Rendering.GraphicsFormat.R32G32B32A32_SFloat);
+    }
+    void ReadFluxMass(CommandBuffer raw,Texture texture,int iteration,string side) {
+        int f=frame;string format=texture.graphicsFormat.ToString();
+        if(format!="R16G16B16A16_SFloat" || texture.width!=1920 || texture.height!=1080)throw new InvalidOperationException("Flux mass requires full-resolution FP16 RGBA.");
+        pending++;
+        raw.RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Flux mass readback failed.");
+                var values=request.GetData<ushort>();var sum=new double[3];var halfUlp=new double[3];
+                var alphaBytes=new byte[values.Length/2];int saturated=0,nonFinite=0,negative=0;
+                for(int p=0;p<values.Length/4;++p) {
+                    ushort bits=values[4*p+3];double alpha=Unity.Mathematics.math.f16tof32(bits);
+                    alphaBytes[2*p]=(byte)bits;alphaBytes[2*p+1]=(byte)(bits>>8);
+                    if(double.IsNaN(alpha)||double.IsInfinity(alpha))nonFinite++;
+                    if(alpha<0)negative++;
+                    for(int c=0;c<3;++c) {
+                        ushort code=values[4*p+c];double v=Unity.Mathematics.math.f16tof32(code);
+                        if(double.IsNaN(v)||double.IsInfinity(v))nonFinite++;
+                        if(v<0)negative++;
+                        if(v>=64992)saturated++;
+                        sum[c]+=v*Math.Abs(alpha);
+                        int exponent=(code>>10)&31;
+                        double ulp=Math.Pow(2,exponent==0?-24:exponent-25);
+                        halfUlp[c]+=0.5*ulp*Math.Abs(alpha);
+                    }
+                }
+                fluxMass.Add(new{frame=f,iteration,side,format,width=1920,height=1080,sum,halfUlp,alphaSha256=Hash(alphaBytes),saturated,nonFinite,negative});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void RecordFlux(ComputePassContext context,int iteration,Texture input,Texture outputTexture,Texture variance,Texture varianceOutput,Texture moments,bool native) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);bool last=iteration==3;
+        bool measure=native && (frame==warmup || frame==warmup+count-1);
+        if(measure)ReadFluxMass(raw,input,iteration,"input");
+        privateBindFrame(cmd,fluxShader);
+        cmd.SetComputeIntParam(fluxShader,"_SdfAtrousStep",1<<iteration);
+        cmd.SetComputeIntParam(fluxShader,"_SdfAtrousUseRestirDomain",0);
+        cmd.SetComputeIntParam(fluxShader,"_SdfAtrousHasVariance",1);
+        cmd.SetComputeIntParam(fluxShader,"_SdfAtrousUseScreenProbeMoments",1);
+        foreach(string name in new[]{"PrepareScreenProbeFluxCS",last?"FilterScreenProbeFluxFinalCS":"FilterScreenProbeFluxCS"}) {
+            int kernel=fluxShader.FindKernel(name);privateBindReceiver(cmd,fluxShader,kernel);
+            raw.SetComputeTextureParam(fluxShader,kernel,"_SdfAtrousInput",input);
+            raw.SetComputeTextureParam(fluxShader,kernel,"_SdfAtrousVariance",variance);
+            raw.SetComputeTextureParam(fluxShader,kernel,"_SdfAtrousScreenProbeMoments",moments);
+            raw.SetComputeTextureParam(fluxShader,kernel,"_SdfDiffuseCurrentResolved",Texture2D.blackTexture);
+            if(name=="PrepareScreenProbeFluxCS")raw.SetComputeTextureParam(fluxShader,kernel,"_SdfFluxGuidesOutput",fluxGuides);
+            else {
+                raw.SetComputeTextureParam(fluxShader,kernel,"_SdfFluxGuides",fluxGuides);
+                raw.SetComputeTextureParam(fluxShader,kernel,"_SdfDiffuseOutput",outputTexture);
+                if(!last)raw.SetComputeTextureParam(fluxShader,kernel,"_SdfAtrousVarianceOutput",varianceOutput);
+            }
+            cmd.DispatchCompute(fluxShader,kernel,240,135,1);
+        }
+        if(measure)ReadFluxMass(raw,outputTexture,iteration,"output");
+    }

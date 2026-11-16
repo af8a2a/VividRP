@@ -31,9 +31,10 @@ uint _OracleCount;
 '''
 
 
-def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wavelet_witness=False,energy_moments=False,motion=False):
+def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wavelet_witness=False,energy_moments=False,motion=False,conservative_flux=False):
     assert covered_wavelet or not (symmetric_coverage or wavelet_witness)
     assert not energy_moments or (covered_wavelet and not wavelet_witness),'Conditional-RGB witness requires matching moment units'
+    assert not conservative_flux or (energy_moments and covered_wavelet and not wavelet_witness),'Flux requires consumed-energy moments and wavelets'
     source,shaders=native_build(output,sequence,motion)
     helper=Path(__file__).with_name('ScreenProbePixelOracleCapture.cs.txt').read_text(encoding='utf-8-sig')
     def replace(old,new):
@@ -57,7 +58,27 @@ def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wa
     if energy_moments:
         from ScreenProbeEnergyMoments import install
         source,shaders=install(source,shaders)
+    if conservative_flux:
+        from ScreenProbeConservativeFlux import install
+        source,shaders=install(source,shaders)
     return source,shaders
+
+
+def snapshot_capture(output,shaders):
+    """Pin executable sources before the caller can launch the generated capture."""
+    from VerifyGiSourceSnapshot import create
+    folder=Path(__file__).resolve().parent
+    names=['BuildScreenProbePixelOracleCapture.py','ScreenProbePixelOracleCapture.cs.txt']
+    for shader,module in (('covered-wavelet.compute.txt','ScreenProbeCoveredWavelet.py'),
+                          ('energy-temporal.compute.txt','ScreenProbeEnergyMoments.py'),
+                          ('flux-wavelet.compute.txt','ScreenProbeConservativeFlux.py')):
+        if shader in shaders:names.append(module)
+    if 'flux-wavelet.compute.txt' in shaders:names.append('ScreenProbeConservativeFlux.cs.txt')
+    workspace=folder.parents[1]
+    create(output/'source-before-capture.json',workspace,
+        [(folder/name).relative_to(workspace).as_posix() for name in names],
+        [output/name for name in ('protocol.json','targets.json',*shaders)],
+        [output/'capture-script.cs'])
 
 
 if __name__=='__main__':
@@ -65,8 +86,9 @@ if __name__=='__main__':
     p.add_argument('--covered-wavelet',action='store_true')
     p.add_argument('--symmetric-coverage',action='store_true');p.add_argument('--wavelet-witness',action='store_true')
     p.add_argument('--energy-moments',action='store_true')
+    p.add_argument('--conservative-flux',action='store_true')
     p.add_argument('--motion',action='store_true')
-    a=p.parse_args();out=a.output.resolve();source,shaders=build(out,a.sequence,a.covered_wavelet,a.symmetric_coverage,a.wavelet_witness,a.energy_moments,a.motion)
+    a=p.parse_args();out=a.output.resolve();source,shaders=build(out,a.sequence,a.covered_wavelet,a.symmetric_coverage,a.wavelet_witness,a.energy_moments,a.motion,a.conservative_flux)
     out.mkdir(parents=True,exist_ok=False);(out/'capture-script.cs').write_text(source,encoding='utf-8')
     for name,body in shaders.items():(out/name).write_text(body,encoding='utf-8')
     points=targets();(out/'targets.json').write_text(json.dumps(points,indent=2)+'\n')
@@ -76,6 +98,7 @@ if __name__=='__main__':
         aaFrames=[0,1,2,1023,*range(1024,1152)],pixelOracle=True,oracleTargetCount=len(points),coverageWeightedWavelet=a.covered_wavelet,
         symmetricCoverage=a.symmetric_coverage,coverageWaveletWitness=a.wavelet_witness,
         consumedEnergyMoments=a.energy_moments,
+        conservativeFluxWavelet=a.conservative_flux,
         files={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir()},
         gates=dict(nativeCopiedResolveByteExact=True,nativePrivateHistoryByteExact=True,meanChangeAbsPercent=1,
             ceilingVarianceReductionPercent=5,otherVarianceIncreasePercent=2,frameDifferenceRmsIncreasePercent=2,
@@ -85,4 +108,11 @@ if __name__=='__main__':
     if a.motion:
         protocol.update(trajectory=dict(period=128,lateral=.28,forward=.06,yawDegrees=-7),motionRegion=[880,414,160,128])
         protocol['gates'].update(disocclusionP99IncreasePercent=5,disocclusionMaxIncreasePercent=5,newlyExposedOldAgeFractionIncrease=.01)
-    (out/'protocol.json').write_text(json.dumps(protocol,indent=2)+'\n');print(json.dumps(dict(root=str(out),targets=len(points))))
+    if a.conservative_flux:
+        protocol['gates'].update(fluxMassRoundingBound=True,fluxFp32RelativeTolerance=2e-6,fluxCoverageByteExact=True)
+        protocol['fluxMassFrames']=[1024,1151]
+        protocol['performanceQualified']=False
+        protocol['note']+=' Symmetric fixed-normalization flux overwrites each native wavelet result before its next consumer. Original native wavelet dispatch remains; quality experiment only, unsuitable for GPU timing.'
+    (out/'protocol.json').write_text(json.dumps(protocol,indent=2)+'\n')
+    snapshot_capture(out,shaders)
+    print(json.dumps(dict(root=str(out),targets=len(points))))

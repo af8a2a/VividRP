@@ -50,6 +50,11 @@ def qualify_replay(root):
     assert protocol['aaFrames']==frames
     covered_wavelet=protocol.get('coverageWeightedWavelet',False)
     energy_moments=protocol.get('consumedEnergyMoments',False)
+    if protocol.get('conservativeFluxWavelet',False):
+        assert energy_moments and covered_wavelet and not protocol['coverageWaveletWitness']
+        programs=capture['fluxPrograms']
+        assert len(programs)==3 and all(r['file']=='flux-wavelet.compute.txt' for r in programs)
+        assert {r['name'] for r in programs}=={'PrepareScreenProbeFluxCS','FilterScreenProbeFluxCS','FilterScreenProbeFluxFinalCS'}
     if energy_moments:
         assert covered_wavelet and not protocol['coverageWaveletWitness']
         programs=[r for r in capture['privatePrograms'] if r['file']=='energy-temporal.compute.txt']

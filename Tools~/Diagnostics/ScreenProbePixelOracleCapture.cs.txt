@@ -1,0 +1,61 @@
+    GraphicsBuffer oraclePixelMap=null;ComputeShader oracleGeometryShader=null;
+    RenderTexture oracleGeometry=null,oracleNormals=null;uint[] oracleCodes=null;
+    bool oracleFixtureWritten=false;var oraclePrograms=new List<object>();
+    void SetupOraclePixels() {
+        int first=privatePrograms.Count;
+        oracleGeometryShader=PrivateShader("oracle-geometry.compute.txt",new[]{"CaptureOraclePixelsCS"});
+        oraclePrograms.AddRange(privatePrograms.GetRange(first,privatePrograms.Count-first));privatePrograms.RemoveRange(first,privatePrograms.Count-first);
+        var targets=Newtonsoft.Json.Linq.JArray.Parse(System.IO.File.ReadAllText(output+"/targets.json"));oracleCodes=new uint[targets.Count];
+        for(int i=0;i<targets.Count;++i)oracleCodes[i]=(uint)((int)targets[i]["y"]*1920+(int)targets[i]["x"]);
+        oraclePixelMap=new GraphicsBuffer(GraphicsBuffer.Target.Structured,oracleCodes.Length,4);oraclePixelMap.SetData(oracleCodes);
+        RenderTexture Own() {
+            var t=new RenderTexture(new RenderTextureDescriptor(oracleCodes.Length,1){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R32G32B32A32_SFloat,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+            privateOwned.Add(t);if(!t.Create())throw new InvalidOperationException("Oracle receiver allocation failed.");return t;
+        }
+        oracleGeometry=Own();oracleNormals=Own();
+    }
+    void WriteOracleFixture(ComputePassContext context) {
+        var sceneData=PrivateField("m_Scene");var read=sceneData.GetType().GetMethod("ReadDiffuseSurface",inst);
+        float[] V(Vector3 v)=>new[]{v.x,v.y,v.z};
+        var geometry=roots.SelectMany(r=>r.GetComponentsInChildren<VividRP.Runtime.GPUDriven.MeshletRenderer>())
+            .Where(r=>r.isActiveAndEnabled && r.sourceRenderingEnabled).OrderBy(r=>r.name).Select(r=>{
+                var surface=read.Invoke(sceneData,new object[]{r});var t=surface.GetType();
+                var albedo=(Vector4)t.GetField("AlbedoAndValid").GetValue(surface);var emission=(Vector4)t.GetField("Emission").GetValue(surface);
+                if(albedo.w<=0f || emission.w!=2f)throw new InvalidOperationException("Oracle requires valid constant Cull Back Lambert surfaces: "+r.name);
+                return new{name=r.name,position=V(r.transform.position),rotation=V(r.transform.eulerAngles),scale=V(r.transform.lossyScale),
+                    meshBounds=V(r.sourceMesh.bounds.size),meshCenter=V(r.sourceMesh.bounds.center),baseColorLinear=new[]{albedo.x,albedo.y,albedo.z},
+                    emissionLinear=new[]{emission.x,emission.y,emission.z},cullMode=(int)emission.w,sourceMaterial=r.sourceMaterials[0].name,
+                    shader=r.sourceMaterials[0].shader.name};
+            }).ToArray();
+        if(geometry.Length!=8 || context.Get<VividSkyData>().activeSkyType!=SkyType.None)throw new InvalidOperationException("Oracle fixture/environment changed.");
+        var fixture=new{source=scene.path,geometry,camera=new{position=V(camera.transform.position),euler=V(camera.transform.eulerAngles),
+            verticalFov=camera.fieldOfView,aspect=1920.0/1080.0},quantity="Incident Lambert diffuse E/pi, scene linear",frame,
+            note="Effective ReadDiffuseSurface values from the current isolated scene; primary receiver normals exported separately. No source assets saved."};
+        string path=output+"/live-fixture.json";
+        if(System.IO.File.Exists(path))throw new InvalidOperationException("Refusing to overwrite oracle fixture.");
+        System.IO.File.WriteAllText(path,Newtonsoft.Json.JsonConvert.SerializeObject(fixture,Newtonsoft.Json.Formatting.Indented));oracleFixtureWritten=true;
+        records.Add(new{oracleFixturePath=path,fixtureSha256=Hash(System.IO.File.ReadAllBytes(path))});
+    }
+    void ReadOraclePixels(ComputePassContext context,Texture texture,string role,string side,bool fullPixel=false) {
+        int f=frame;string format=texture.graphicsFormat.ToString();int stride=format=="R16G16B16A16_SFloat"?8:format=="R32G32B32A32_SFloat"?16:0;
+        if(stride==0 || (fullPixel && (texture.width!=1920 || texture.height!=1080)))throw new InvalidOperationException("Unexpected oracle source descriptor.");
+        pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Oracle readback failed.");
+                var bytes=request.GetData<byte>().ToArray();var crop=new byte[oracleCodes.Length*stride];
+                for(int i=0;i<oracleCodes.Length;++i)Buffer.BlockCopy(bytes,fullPixel?(int)oracleCodes[i]*stride:i*stride,crop,i*stride,stride);
+                string path=output+"/"+arm+"/"+f.ToString("0000")+"-oracle-"+role+"-"+side+".bin";Write(path,crop);
+                records.Add(new{frame=f,tag="oracle-"+role,side,width=oracleCodes.Length,height=1,format,path,saved=true,sha256=Hash(crop)});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void CaptureOraclePixels(ComputePassContext context) {
+        if(!oracleFixtureWritten)WriteOracleFixture(context);
+        int kernel=oracleGeometryShader.FindKernel("CaptureOraclePixelsCS");var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);
+        privateBindReceiver(cmd,oracleGeometryShader,kernel);privateBindFrame(cmd,oracleGeometryShader);
+        raw.SetComputeBufferParam(oracleGeometryShader,kernel,"_OraclePixels",oraclePixelMap);
+        raw.SetComputeTextureParam(oracleGeometryShader,kernel,"_OracleGeometry",oracleGeometry);raw.SetComputeTextureParam(oracleGeometryShader,kernel,"_OracleNormals",oracleNormals);
+        cmd.SetComputeIntParam(oracleGeometryShader,"_OracleCount",oracleCodes.Length);cmd.DispatchCompute(oracleGeometryShader,kernel,(oracleCodes.Length+63)/64,1,1);
+        ReadOraclePixels(context,oracleGeometry,"geometry","source");ReadOraclePixels(context,oracleNormals,"normal","source");
+    }

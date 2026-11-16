@@ -152,6 +152,7 @@ def estimate(scene, position, normal, samples, bounces, seed):
     assert np.isfinite(values).all() and np.all(values >= 0)
     return dict(samples=samples, diffuseReflections=bounces, seed=seed,
                 meanRgb=values.mean(0).tolist(), iidStandardErrorRgb=(values.std(0, ddof=1)/np.sqrt(samples)).tolist(),
+                iidCovarianceMeanRgb=(np.cov(values,rowvar=False,ddof=1)/samples).tolist(),
                 meanRgbByOrder=by_order.mean(0).tolist())
 
 

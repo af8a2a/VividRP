@@ -60,6 +60,10 @@ class ReferenceTests(unittest.TestCase):
         after = estimate(scene, point["position"], point["normal"], 1024, 2, 8)
         np.testing.assert_allclose(after["meanRgb"], np.array(before["meanRgb"])*4, atol=1e-12)
         np.testing.assert_allclose(after["meanRgbByOrder"], np.array(before["meanRgbByOrder"])*4, atol=1e-12)
+        covariance=np.asarray(before['iidCovarianceMeanRgb'])
+        np.testing.assert_allclose(np.diag(covariance),np.asarray(before['iidStandardErrorRgb'])**2,rtol=1e-12)
+        np.testing.assert_allclose(after['iidCovarianceMeanRgb'],covariance*16,atol=1e-12)
+        self.assertGreaterEqual(np.linalg.eigvalsh(covariance).min(),-1e-12)
 
     def test_black_scene_does_not_double_count_bsdf_light_hits(self):
         scene = Scene(self.fixture)

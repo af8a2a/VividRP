@@ -55,6 +55,12 @@ def qualify_replay(root):
         programs=capture['fluxPrograms']
         assert len(programs)==3 and all(r['file']=='flux-wavelet.compute.txt' for r in programs)
         assert {r['name'] for r in programs}=={'PrepareScreenProbeFluxCS','FilterScreenProbeFluxCS','FilterScreenProbeFluxFinalCS'}
+    if protocol.get('waveletFactorial',False):
+        from ScreenProbeWaveletFactorial import VARIANTS,PROGRAMS
+        assert protocol['conservativeFluxWavelet'] and not protocol.get('motion',False)
+        assert protocol['waveletFactorialVariants']==list(VARIANTS)
+        assert {(r['file'],r['name']) for r in capture['factorialPrograms']}=={(f,n) for f,names in PROGRAMS.items() for n in names}
+        assert len(capture['factorialPrograms'])==sum(map(len,PROGRAMS.values()))
     if energy_moments:
         assert covered_wavelet and not protocol['coverageWaveletWitness']
         programs=[r for r in capture['privatePrograms'] if r['file']=='energy-temporal.compute.txt']
@@ -73,6 +79,9 @@ def qualify_replay(root):
         assert len({v['sha256'] for v in values})==1
     rows = {(r['frame'],r['tag'],r['side']):r for r in capture['records'] if 'tag' in r and 'side' in r}
     assert len(rows)==sum('tag' in r and 'side' in r for r in capture['records'])
+    if protocol.get('waveletFactorial',False):
+        from ScreenProbeWaveletFactorial import qualify_inputs
+        qualify_inputs(capture,protocol,rows)
     initial=[r for r in capture['records'] if r.get('privateInitialization')]
     assert len(initial)==1 and initial[0]['frame']==0 and not initial[0]['hasHistory'] and not initial[0]['momentsValid']
     pairs=0
@@ -101,16 +110,19 @@ def qualify_replay(root):
     return capture,protocol,source_rows,rows,pairs,initial[0]
 
 
-def analyze(root):
+def analyze(root,control_side='baseline',candidate_side='candidate'):
     capture,protocol,source_rows,rows,pairs,initial=qualify_replay(root)
     assert not protocol.get('motion',False),'Moving frames require the disocclusion analysis'
+    variants=protocol.get('waveletFactorialVariants',[]) if protocol.get('waveletFactorial',False) else []
+    assert control_side in ('baseline','candidate',*variants) and candidate_side in ('candidate',*variants)
+    assert candidate_side!=control_side
     warmup,count=protocol['warmup'],protocol['measuredFrames']
     # Temporal crops are saved only at endpoints; their independent recurrence
     # is verified by all-frame hashes, while final crops cover every frame.
     final={}
     for roi in ROIS:
         a,b=(np.stack([read(rows[f,'final-'+roi,side]).astype(float) for f in range(warmup,warmup+count)])
-             for side in ('baseline','candidate'))
+             for side in (control_side,candidate_side))
         final[roi]=energy_and_noise(a,b)
     gates=protocol['gates']
     mean=all(abs(v['comparison']['mean_change_percent'])<=gates['meanChangeAbsPercent']
@@ -124,6 +136,8 @@ def analyze(root):
     native_candidate=protocol.get('nativeSide')=='candidate'
     return dict(schema='screen-probe-quadrature-history-analysis.v1', qualified=True,
         nativeBaselineQualified=not native_candidate,nativeCandidateQualified=native_candidate,
+        comparisonControlSide=control_side,comparisonCandidateSide=candidate_side,
+        comparedCandidateOwnsNative=native_candidate and candidate_side=='candidate',
         fullImageResolveAaPairs=len(protocol['aaFrames']), privateHistoryAaPairs=pairs, measuredFrames=count, payloadBytes=capture['payloadBytes'],
         initialState=initial, regions=final, frameDifferenceRmsChangePercent=frame_deltas,
         finalMeanGatePassed=mean, finalCeilingNoiseGatePassed=noise, finalNoRegressionGatePassed=others,

@@ -1,0 +1,23 @@
+    ComputeShader factorialEnergyRne=null,factorialRowRne=null,factorialRowRtz=null,factorialFluxRtz=null;
+    var factorialPrograms=new List<object>();
+    var factorialGuideHashes=new List<object>();
+    var factorialVariants=new[]{"energy-row-native","energy-row-rne","symmetric-row-rne","symmetric-row-rtz","flux-rtz"};
+    void SetupFactorial() {
+        int first=privatePrograms.Count;
+        var rowKernels=new[]{"FilterSdfDiffuseAtrous","FilterSdfDiffuseAtrousFinal"};
+        var fluxKernels=new[]{"PrepareScreenProbeFluxCS","FilterScreenProbeFluxCS","FilterScreenProbeFluxFinalCS"};
+        factorialEnergyRne=PrivateShader("energy-row-rne.compute.txt",rowKernels);
+        factorialRowRne=PrivateShader("symmetric-row-rne.compute.txt",fluxKernels);
+        factorialRowRtz=PrivateShader("symmetric-row-rtz.compute.txt",fluxKernels);
+        factorialFluxRtz=PrivateShader("flux-rtz.compute.txt",fluxKernels);
+        factorialPrograms.AddRange(privatePrograms.GetRange(first,privatePrograms.Count-first));privatePrograms.RemoveRange(first,privatePrograms.Count-first);
+    }
+    void ReadFactorialGuides(CommandBuffer raw,string side) {
+        int f=frame;pending++;
+        raw.RequestAsyncReadback(fluxGuides,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Factorial guide readback failed.");
+                factorialGuideHashes.Add(new{frame=f,side,width=1920,height=1080,format="R32G32B32A32_SFloat",sha256=Hash(request.GetData<byte>().ToArray())});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }

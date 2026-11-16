@@ -40,25 +40,32 @@ def comparison(baseline,candidate,reference,reference_variance):
         uncertaintyScope='Independent reference sampling only; no renderer temporal independence or whole-image confidence claim')
 
 
-def qualify_wavelet_inputs(rows,frames,control_side='quadrature-reference'):
+def qualify_wavelet_inputs(rows,frames,control_side='quadrature-reference',candidate_side='candidate'):
     pairs=0
     for f in frames:
         for role in ('witness-input-full','witness-moments-full'):
-            a,b=(rows[f,role,side] for side in ('candidate',control_side))
+            a,b=(rows[f,role,side] for side in (candidate_side,control_side))
             assert all(a[key]==b[key] for key in ('sha256','width','height','format')),'Wavelet counterfactual inputs differ'
             pairs+=1
     assert pairs>0
     return pairs
 
 
-def analyze(capture_root,reference_root,control_side='baseline'):
+def analyze(capture_root,reference_root,control_side='baseline',candidate_side='candidate'):
     c,p,_,rows,pairs,_=qualify_replay(capture_root)
     assert not p.get('motion',False),'Static oracle comparison cannot consume a moving camera capture'
-    assert control_side in ('baseline','quadrature-reference')
+    factorial=p.get('waveletFactorial',False)
+    variants=p.get('waveletFactorialVariants',[]) if factorial else []
+    assert control_side in ('baseline','quadrature-reference',*variants)
+    assert candidate_side in ('candidate',*variants) and candidate_side!=control_side
     counterfactual_pairs=0
     if control_side=='quadrature-reference':
         assert p['coverageWaveletWitness'] and p['coverageWeightedWavelet']
+        assert candidate_side=='candidate'
         counterfactual_pairs=qualify_wavelet_inputs(rows,range(p['warmup'],p['warmup']+p['measuredFrames']),control_side)
+    if control_side in variants or candidate_side in variants:
+        for side in {control_side,candidate_side}-{'baseline','candidate'}:
+            counterfactual_pairs+=qualify_wavelet_inputs(rows,range(p['warmup'],p['warmup']+p['measuredFrames']),side)
     _,points,qualification=prepare(capture_root)
     metadata=json.loads((reference_root/'metadata.json').read_text());assert metadata['schema']=='cornell-pixel-oracle.v1' and metadata['complete']
     reference_capture=Path(metadata['capture']).resolve()
@@ -110,14 +117,14 @@ def analyze(capture_root,reference_root,control_side='baseline'):
     assert np.allclose(np.diagonal(cov,axis1=1,axis2=2),sem**2,rtol=1e-10,atol=1e-15)
     assert np.allclose(cov,cov.transpose(0,2,1),rtol=1e-12,atol=1e-15) and np.linalg.eigvalsh(cov).min()>=-1e-12
     paths={}
-    for side in (control_side,'candidate'):
+    for side in (control_side,candidate_side):
         values=np.stack([read(rows[f,'oracle-final',side])[0].astype(float) for f in range(p['warmup'],p['warmup']+p['measuredFrames'])])
         assert values.shape==(p['measuredFrames'],len(points),4) and (values[...,3]>=0).all()
         paths[side]=values[...,:3]*values[...,3:4]
     regions={};gates=p['gates']
     for region in p['regions']:
         selected=np.array([q['region']==region for q in points]);assert selected.any()
-        a,b=(paths[k][:,selected] for k in (control_side,'candidate'))
+        a,b=(paths[k][:,selected] for k in (control_side,candidate_side))
         v=np.maximum(np.einsum('i,nij,j->n',LUMA,cov[selected],LUMA),0)
         result=comparison(a@LUMA,b@LUMA,ref[selected]@LUMA,v)
         result['rgb']={name:comparison(a[...,i],b[...,i],ref[selected,i],cov[selected,i,i]) for i,name in enumerate(('r','g','b'))}
@@ -137,7 +144,7 @@ def analyze(capture_root,reference_root,control_side='baseline'):
         samplesPerPixel=metadata['samples'],refinedReferenceSamplesPerPixel=refinement['samples'] if refinement else None,
         refinedReferenceRegion=refinement['region'] if refinement else None,
         referenceDiffuseReflections=metadata['bounces'],points=len(points),measuredFrames=p['measuredFrames'],
-        primaryQualification=qualification,regions=regions,comparisonControlSide=control_side,
+        primaryQualification=qualification,regions=regions,comparisonControlSide=control_side,comparisonCandidateSide=candidate_side,
         waveletCounterfactualInputAaPairs=counterfactual_pairs,
         addedMeanErrorGatePassed=all(q['meanErrorGatePassed'] for q in regions.values()),
         addedMeanMapMsePointEstimateGatePassed=all(q['meanMapMsePointEstimateGatePassed'] for q in regions.values()),
@@ -152,8 +159,10 @@ def analyze(capture_root,reference_root,control_side='baseline'):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('capture',type=Path);p.add_argument('reference',type=Path);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--control-side',choices=('baseline','quadrature-reference'),default='baseline')
+    from ScreenProbeWaveletFactorial import VARIANTS
+    p.add_argument('--control-side',choices=('baseline','quadrature-reference',*VARIANTS),default='baseline')
+    p.add_argument('--candidate-side',choices=('candidate',*VARIANTS),default='candidate')
     args=p.parse_args();assert not args.output.exists(),'Refusing to overwrite an analysis'
-    report=analyze(args.capture.resolve(),args.reference.resolve(),args.control_side);args.output.write_text(json.dumps(report,indent=2)+'\n')
+    report=analyze(args.capture.resolve(),args.reference.resolve(),args.control_side,args.candidate_side);args.output.write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k not in ('regions','limits')},indent=2))
     print(json.dumps({name:dict(meanError=q['meanErrorPercent'],mapMse=q['meanMapMse'],noise=q['baseline']['relative_rms_percent'],candidateNoise=q['candidate']['relative_rms_percent']) for name,q in report['regions'].items()},indent=2))

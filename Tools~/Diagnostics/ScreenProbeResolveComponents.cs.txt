@@ -1,0 +1,81 @@
+    ComputeShader componentCopy=null;
+    const bool componentWithoutJitter=__WITHOUT_JITTER__;
+    RenderTexture componentInput=null,componentAa=null,componentPre=null;
+    var componentPrograms=new List<object>();int componentAaPairs=0;
+    var componentPending=new Dictionary<int,(string side,string hash,byte[] data)>();
+    void SetupComponents() {
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        componentCopy=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/copy-irradiance.compute.txt")});
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CompileComputeShaderVariant");
+        int kernel=componentCopy.FindKernel("CopyIrradiancePlanesCS");
+        var result=compile.Invoke(null,new object[]{componentCopy,kernel,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+        if(!(bool)result.GetType().GetProperty("Success").GetValue(result))throw new InvalidOperationException("Component copy compilation failed.");
+        var bytes=(byte[])result.GetType().GetProperty("ShaderData").GetValue(result);
+        componentPrograms.Add(new{kernel,bytes=bytes.Length,sha256=Hash(bytes)});
+    }
+    RenderTexture ComponentTexture(int width,int height) {
+        var texture=new RenderTexture(new RenderTextureDescriptor(width,height){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+        if(!texture.Create()){UnityEngine.Object.DestroyImmediate(texture);throw new InvalidOperationException("Component texture failed.");}return texture;
+    }
+    void CleanupComponents() {
+        foreach(var texture in new[]{componentInput,componentAa,componentPre})if(texture!=null){texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+        if(componentCopy!=null)UnityEngine.Object.DestroyImmediate(componentCopy);
+    }
+    void ReadComponentAa(ComputePassContext context,Texture texture,string side) {
+        int f=frame;pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Component AA readback failed.");
+                var bytes=request.GetData<byte>().ToArray();string hash=Hash(bytes);
+                records.Add(new{componentAa=true,frame=f,side,sha256=hash,width=texture.width,height=texture.height,format=texture.graphicsFormat.ToString()});
+                if(componentPending.TryGetValue(f,out var prior)) {
+                    componentPending.Remove(f);componentAaPairs++;
+                    if(prior.side==side || prior.hash!=hash) {
+                        int index=0;while(index<bytes.Length && bytes[index]==prior.data[index])index++;
+                        int pixel=index/8;
+                        foreach(var item in new[]{(prior.side,prior.data),(side,bytes)}) {
+                            var sample=new byte[8];Buffer.BlockCopy(item.Item2,pixel*8,sample,0,8);
+                            string file=output+"/capture/"+f.ToString("0000")+"-component-failure-"+item.Item1+".bin";Write(file,sample);
+                            records.Add(new{frame=f,tag="component-failure-"+item.Item1,width=1,height=1,x=pixel%1920,y=pixel/1920,format="R16G16B16A16_SFloat",path=file,saved=true,sha256=Hash(sample)});
+                        }
+                        errors.Add("Native/copied-atlas Resolve AA mismatch at frame "+f);
+                    }
+                }else componentPending.Add(f,(side,hash,bytes));
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void ReplayComponents(ComputePassContext context,Texture native) {
+        // This is called by stage0 only when native pixel temporal is active;
+        // with flags0 RecordResolve enables interpolation jitter.
+        if(componentWithoutJitter && (int)hooks["EditorGatherHistoryDiagnostics"].GetValue(null)!=0)
+            throw new InvalidOperationException("Native jitter requires diagnostics0.");
+        var shader=(ComputeShader)type.GetField("m_GatherCompute",inst).GetValue(qualityPass);
+        int kernel=(int)type.GetField("m_DirectionalResolveKernel",inst).GetValue(qualityPass);
+        var atlas=QualityResolve("m_FilteredProbes");
+        if(!EditorUtility.IsPersistent(shader) || kernel!=shader.FindKernel("ScreenProbeIntegrateCS")
+            || !(bool)type.GetField("m_RecordProbeAnchorDiagnostics",inst).GetValue(qualityPass)
+            || native.width!=1920 || native.height!=1080 || atlas.width!=2640 || atlas.height!=136
+            || atlas.graphicsFormat!=UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat)
+            throw new InvalidOperationException("Original diagnostic irradiance layout required.");
+        if(componentInput==null){componentInput=ComponentTexture(840,136);componentAa=ComponentTexture(1920,1080);componentPre=ComponentTexture(1920,1080);}
+        var cmd=(CommandBuffer)wrapped.GetValue(context.cmd);int copy=componentCopy.FindKernel("CopyIrradiancePlanesCS");
+        ReadComponentAa(context,native,"native");
+        try {
+            cmd.SetComputeTextureParam(componentCopy,copy,"_ComponentAtlas",atlas);
+            cmd.SetComputeTextureParam(componentCopy,copy,"_ComponentPlaneOutput",componentInput);
+            cmd.SetComputeIntParam(componentCopy,"_ComponentWidth",840);cmd.SetComputeIntParam(componentCopy,"_ComponentHeight",136);
+            foreach(var mode in new[]{(offset:0,output:componentAa,aa:true),(offset:componentWithoutJitter?0:840,output:componentPre,aa:false)}) {
+                cmd.SetComputeIntParam(componentCopy,"_ComponentOffset",mode.offset);cmd.DispatchCompute(componentCopy,copy,105,17,1);
+                cmd.SetComputeTextureParam(shader,kernel,"_SdfDiffuseProbeInput",componentInput);
+                cmd.SetComputeTextureParam(shader,kernel,"_SdfDiffuseOutput",mode.output);
+                if(componentWithoutJitter)cmd.SetComputeIntParam(shader,"_SdfScreenProbeIntegrationJitter",mode.aa?1:0);
+                cmd.DispatchCompute(shader,kernel,240,135,1);
+                if(mode.aa)ReadComponentAa(context,mode.output,"copied");
+                else ReadQuality(context,mode.output,componentWithoutJitter?"unjittered":"uncalibrated","pixel");
+            }
+        }finally {
+            cmd.SetComputeTextureParam(shader,kernel,"_SdfDiffuseProbeInput",atlas);
+            cmd.SetComputeTextureParam(shader,kernel,"_SdfDiffuseOutput",native);
+            if(componentWithoutJitter)cmd.SetComputeIntParam(shader,"_SdfScreenProbeIntegrationJitter",1);
+        }
+    }

@@ -1,0 +1,51 @@
+// Editor prototype. Four stratified interpolation lookups share the same traced probes.
+static int SdfQuadratureSlot = -1;
+
+float2 SdfQuadratureNoise(uint seed)
+{
+    if (SdfQuadratureSlot >= 0)
+        seed = HashProbe(seed ^ (0x68e31da4u * (uint(SdfQuadratureSlot) + 1u)));
+    float2 noise = (float2(seed & 65535u, seed >> 16u) + 0.5) / 32768.0 - 1.0;
+    if (SdfQuadratureSlot >= 0)
+    {
+        uint slot = uint(SdfQuadratureSlot);
+        noise = 0.5 * (noise + float2(slot & 1u, slot >> 1u) * 2.0 - 1.0);
+    }
+    return noise;
+}
+
+bool CanUseSdfProbeQuadrature(uint2 pixel, uint2 size, float3 position, float3 normal)
+{
+    if (_SdfScreenProbeIntegrationJitter == 0u || _SdfPreparedAnchorEnabled == 0u || _SdfNearOcclusion.z > 0.0)
+        return false;
+    float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
+    if (ScreenProbeStableRadianceFootprint(pixel, size, position, normal, eyeDepth) < 0.99)
+        return false;
+    uint2 grid = ProbeGridSize(size);
+    float radius = 0.25 * ProbeSpacing * lerp(1.0, 0.5, saturate((eyeDepth - 5.0) / 5.0));
+    int2 lower = int2(floor((float2(pixel) - radius - float(ProbeSpacing / 2u)) / float(ProbeSpacing)));
+    if (any(lower < 0) || any(lower + 2 >= int2(grid)))
+        return false;
+    [loop]
+    for (uint y = 0u; y < 3u; ++y)
+    {
+        [loop]
+        for (uint x = 0u; x < 3u; ++x)
+        {
+            uint2 tile = uint2(lower) + uint2(x, y);
+            float4 geometry = _SdfDiffuseGeometry.Load(int3(tile, 0));
+            if (geometry.w < 0.0 || dot(normal, UnpackProbeNormal(geometry.w)) < 0.995
+                || ScreenProbeBilateralWeight(tile, position, normal, eyeDepth) < 0.75)
+                return false;
+            if (_SdfDiffuseAdaptiveProbes != 0u && _SdfDiffuseGeometry.Load(int3(tile + uint2(0u, grid.y), 0)).w >= 0.0)
+                return false;
+            float4 state = _SdfAnchorStatistics.Load(int3(tile, 0));
+            if (state.x < 64.0 || state.w != 1.0
+                || _SdfDiffuseProbeInput.Load(int3(tile + uint2(6u * grid.x, 0u), 0)).a < 0.5)
+                return false;
+        }
+    }
+    // Every touched interpolation node has strong support and coverage. The
+    // resolve repair branch cannot trigger, and near-AO tracing was excluded.
+    return true;
+}

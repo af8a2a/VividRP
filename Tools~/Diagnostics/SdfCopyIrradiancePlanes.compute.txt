@@ -1,0 +1,12 @@
+#pragma kernel CopyIrradiancePlanesCS
+Texture2D<float4> _ComponentAtlas;
+RWTexture2D<float4> _ComponentPlaneOutput;
+uint _ComponentWidth;
+uint _ComponentHeight;
+uint _ComponentOffset;
+[numthreads(8,8,1)]
+void CopyIrradiancePlanesCS(uint3 id:SV_DispatchThreadID)
+{
+    if(id.x>=_ComponentWidth || id.y>=_ComponentHeight)return;
+    _ComponentPlaneOutput[id.xy]=_ComponentAtlas.Load(int3(id.x+_ComponentOffset,id.y,0));
+}

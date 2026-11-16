@@ -66,3 +66,5 @@
 最终重新预热1026个正常帧，核对原时域/小波程序hash、持久化Hybrid追踪、16/8、age512、4轮、诊断0、空回调与干净场景。恢复为Playing / Paused，Frame Debugger关闭、PIX idle。
 
 本轮按两份独立保留策略归档上一轮未推广候选的五组短窗口内部帧，释放438,470,400 B；保留完整端点、每32帧包、所有脚本、hash、报告与聚合量。旧短窗口不再完整可复算；长窗口与同帧micro证据未删除。清理记录在旧根目录的 `history-epoch-archive-apply.json` 和 `pixel-stage-archive-apply.json`，容量结算见新根目录 `post-experiment-storage.json`。
+
+后续[同帧分解与四分层插值实验](ScreenProbeResolveComponents.md)确认校准主要抵消方向噪声，并实现了通过raw门槛的插值原型，尚未推广。本页四个完成捕获的中间原始帧随后归档，保留起点/端点、每16或32帧和所有报告/聚合量；本页完整128帧结果当前不能全部重新计算。

@@ -1,0 +1,24 @@
+    ComputeShader quadratureShader=null,quadratureOriginal=null;
+    bool quadratureInstalled=false;var quadraturePrograms=new List<object>();
+    void SetupQuadrature() {
+        var field=type.GetField("m_GatherCompute",inst);quadratureOriginal=(ComputeShader)field.GetValue(qualityPass);
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        quadratureShader=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/quadrature-gather.compute.txt")});
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CompileComputeShaderVariant");
+        foreach(string name in new[]{"ResolveSdfDiffuseGI","ScreenProbeIntegrateCS","ResolveSdfRestirOpenPBR","PlaceSdfAdaptiveProbes","FilterSdfDiffuseAtrous","FilterSdfDiffuseAtrousFinal"}) {
+            int kernel=quadratureShader.FindKernel(name);
+            if(kernel!=quadratureOriginal.FindKernel(name))throw new InvalidOperationException("Quadrature kernel layout changed.");
+            var result=compile.Invoke(null,new object[]{quadratureShader,kernel,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+            if(!(bool)result.GetType().GetProperty("Success").GetValue(result))throw new InvalidOperationException("Quadrature shader compilation failed: "+name);
+            var bytes=(byte[])result.GetType().GetProperty("ShaderData").GetValue(result);quadraturePrograms.Add(new{name,kernel,bytes=bytes.Length,sha256=Hash(bytes)});
+        }
+        field.SetValue(qualityPass,quadratureShader);quadratureInstalled=true;
+    }
+    void CleanupQuadrature() {
+        if(quadratureInstalled) {
+            var field=type.GetField("m_GatherCompute",inst);
+            if(object.ReferenceEquals(field.GetValue(qualityPass),quadratureShader))field.SetValue(qualityPass,quadratureOriginal);
+            else errors.Add("Gather shader changed externally; original not overwritten.");
+        }
+        if(quadratureShader!=null)UnityEngine.Object.DestroyImmediate(quadratureShader);
+    }

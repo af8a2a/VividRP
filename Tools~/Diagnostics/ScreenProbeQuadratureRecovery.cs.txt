@@ -1,0 +1,44 @@
+    bool IsRecoveryKeyFrame(int f)=>f==0 || f==warmup || f==warmup+127 || f==warmup+128
+        || f==warmup+191 || f==warmup+192 || f==warmup+223 || f==warmup+count-1;
+    void ReadRecoveryEligibility(ComputePassContext context,Texture texture) {
+        int f=frame;pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Recovery eligibility readback failed.");
+                var values=request.GetData<ushort>();
+                foreach(var roi in privateRois) {
+                    int eligible=0;
+                    for(int y=0;y<roi.Item5;++y)for(int x=0;x<roi.Item4;++x) {
+                        float a=Unity.Mathematics.math.f16tof32(values[((roi.Item3+y)*1920+roi.Item2+x)*4+3]);
+                        if(!float.IsFinite(a) || Math.Abs(a)>1f)throw new InvalidOperationException("Invalid recovery coverage.");
+                        if(a<0){if(a>-.4995f)throw new InvalidOperationException("Weak quadrature support.");eligible++;}
+                    }
+                    records.Add(new{frame=f,recoveryEligibility=roi.Item1,eligible,pixels=roi.Item4*roi.Item5});
+                }
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void RecordRecoveryState(ComputePassContext context) {
+        object Field(string name)=>type.GetField(name,inst).GetValue(qualityPass);
+        var vp=(Matrix4x4)Field("m_ViewProjection");var matrix=new float[16];
+        for(int r=0;r<4;++r)for(int c=0;c<4;++c)matrix[r*4+c]=vp[r,c];
+        if((int)Field("m_ProbeAnchorMaxAge")!=512 || (int)Field("m_PixelHistoryMaxAge")!=32
+            || (int)Field("m_AtrousIterations")!=4 || (bool)Field("m_RestirGather") || !(bool)Field("m_DirectionalGuide")
+            || context.Get<VividSkyData>().activeSkyType!=SkyType.None || (Vector3)(Vector4)Field("m_LightColorShadow")!=Vector3.zero)
+            throw new InvalidOperationException("Recovery fixture changed.");
+        records.Add(new{frame,recoveryState=true,vp=matrix,order=Field("m_RadiosityPublishedOrder"),
+            batch=Field("m_RadiosityBatch"),updates=Field("m_RadiosityUpdateCards"),samples=Field("m_RadiositySamples"),
+            seed=Field("m_RadiositySeed"),width=Field("m_Width"),height=Field("m_Height"),
+            flags=hooks["EditorGatherHistoryDiagnostics"].GetValue(null)});
+    }
+    void ReadRecoverySource(ComputePassContext context) {
+        int f=frame;var texture=QualityResolve("m_RadiosityInput");pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError)throw new InvalidOperationException("Recovery source readback failed.");
+                string hash=Hash(request.GetData<byte>().ToArray());
+                if(hash!="40252e7ae82c1da6ae025dbf012a3ce232aa54ea10bfbf1ca9a7998df93270a8")throw new InvalidOperationException("Recovery source changed.");
+                records.Add(new{frame=f,recoverySource=true,sha256=hash});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }

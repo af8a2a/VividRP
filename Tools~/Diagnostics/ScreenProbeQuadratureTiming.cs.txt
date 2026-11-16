@@ -1,0 +1,51 @@
+    bool previousTimingProfiler=UnityEngine.Profiling.Profiler.enabled;
+    bool previousTimingGpu=UnityEditorInternal.ProfilerDriver.IsAreaEnabled(UnityEngine.Profiling.ProfilerArea.GPU);
+    bool previousTimingEditor=UnityEditorInternal.ProfilerDriver.profileEditor;
+    bool timingStarted=false;
+    string[] timingNames={"GI Quadrature Baseline Resolve","GI Quadrature Stratified Resolve"};
+    var timingRecorders=new ProfilerRecorder[2];var timingSamples=new List<object>();
+    if(UnityEngine.Profiling.Profiler.enableBinaryLog)throw new InvalidOperationException("Binary profiling already active.");
+    void StartTiming() {
+        if(timingStarted || pending!=0)throw new InvalidOperationException("Readbacks did not drain before timing.");
+        UnityEditorInternal.ProfilerDriver.SetAreaEnabled(UnityEngine.Profiling.ProfilerArea.GPU,true);
+        UnityEditorInternal.ProfilerDriver.profileEditor=false;UnityEngine.Profiling.Profiler.enabled=true;
+        const ProfilerRecorderOptions options=ProfilerRecorderOptions.StartImmediately
+            | ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.GpuRecorder;
+        for(int i=0;i<2;++i)timingRecorders[i]=ProfilerRecorder.StartNew(ProfilerCategory.Render,timingNames[i],1024,options);
+        timingStarted=true;
+    }
+    void FinishTiming() {
+        if(!timingStarted)throw new InvalidOperationException("GPU timing never started.");
+        for(int i=0;i<2;++i) {
+            var values=new List<ProfilerRecorderSample>();timingRecorders[i].CopyTo(values);
+            timingSamples.Add(new{marker=timingNames[i],valid=timingRecorders[i].Valid,count=timingRecorders[i].Count,
+                wrappedAround=timingRecorders[i].WrappedAround,samples=values.Select(v=>new{nanoseconds=v.Value,count=v.Count}).ToArray()});
+            timingRecorders[i].Stop();timingRecorders[i].Dispose();timingRecorders[i]=default;
+        }
+    }
+    void CleanupTiming() {
+        for(int i=0;i<2;++i)if(timingRecorders[i].Valid)timingRecorders[i].Dispose();
+        UnityEngine.Profiling.Profiler.enabled=previousTimingProfiler;
+        UnityEditorInternal.ProfilerDriver.profileEditor=previousTimingEditor;
+        UnityEditorInternal.ProfilerDriver.SetAreaEnabled(UnityEngine.Profiling.ProfilerArea.GPU,previousTimingGpu);
+    }
+    void CheckTimingWorkload(ComputePassContext context,Texture lighting,Texture geometry) {
+        object Field(string name)=>type.GetField(name,inst).GetValue(qualityPass);
+        if(lighting.width!=1920 || lighting.height!=1080 || geometry.width!=120 || geometry.height!=136
+            || (int)Field("m_ProbeAnchorMaxAge")!=512 || (int)Field("m_PixelHistoryMaxAge")!=32
+            || (int)Field("m_AtrousIterations")!=4 || (bool)Field("m_RestirGather")
+            || (bool)Field("m_RecordProbeAnchorDiagnostics") || !(bool)Field("m_DirectionalGuide")
+            || context.Get<VividSkyData>().activeSkyType!=SkyType.None || (Vector3)(Vector4)Field("m_LightColorShadow")!=Vector3.zero)
+            throw new InvalidOperationException("Timing workload changed.");
+    }
+    void ReadTimingSource(ComputePassContext context) {
+        int f=frame;var texture=QualityResolve("m_RadiosityInput");pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError)throw new InvalidOperationException("Timing source readback failed.");
+                string hash=Hash(request.GetData<byte>().ToArray());
+                if(hash!="40252e7ae82c1da6ae025dbf012a3ce232aa54ea10bfbf1ca9a7998df93270a8")throw new InvalidOperationException("Timing source changed.");
+                records.Add(new{frame=f,timingSource=true,sha256=hash});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }

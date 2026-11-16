@@ -31,11 +31,15 @@ uint _OracleCount;
 '''
 
 
-def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wavelet_witness=False,energy_moments=False,motion=False,conservative_flux=False,wavelet_factorial=False):
+def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wavelet_witness=False,energy_moments=False,motion=False,conservative_flux=False,wavelet_factorial=False,origin_limit=None,origin_adaptive=False,origin_trace_steps=192,origin_bound_legacy=False):
     assert covered_wavelet or not (symmetric_coverage or wavelet_witness)
     assert not energy_moments or (covered_wavelet and not wavelet_witness),'Conditional-RGB witness requires matching moment units'
     assert not conservative_flux or (energy_moments and covered_wavelet and not wavelet_witness),'Flux requires consumed-energy moments and wavelets'
     assert not wavelet_factorial or (conservative_flux and not motion),'Factorial wavelets require static conservative-flux inputs'
+    assert origin_limit is None or (covered_wavelet and energy_moments and not conservative_flux and not motion),'Origin replay requires static energy-domain original wavelets'
+    assert not origin_adaptive or origin_limit is not None
+    assert origin_trace_steps==192 or origin_adaptive
+    assert not origin_bound_legacy or (origin_adaptive and origin_trace_steps==2048)
     source,shaders=native_build(output,sequence,motion)
     helper=Path(__file__).with_name('ScreenProbePixelOracleCapture.cs.txt').read_text(encoding='utf-8-sig')
     def replace(old,new):
@@ -65,6 +69,9 @@ def build(output,sequence=1733,covered_wavelet=False,symmetric_coverage=False,wa
     if wavelet_factorial:
         from ScreenProbeWaveletFactorial import install
         source,shaders=install(source,shaders)
+    if origin_limit is not None:
+        from ScreenProbeOriginReplay import install
+        source,shaders=install(source,shaders,origin_limit,origin_adaptive,origin_trace_steps,origin_bound_legacy)
     return source,shaders
 
 
@@ -79,6 +86,7 @@ def snapshot_capture(output,shaders):
         if shader in shaders:names.append(module)
     if 'flux-wavelet.compute.txt' in shaders:names.append('ScreenProbeConservativeFlux.cs.txt')
     if 'flux-rtz.compute.txt' in shaders:names+=['ScreenProbeWaveletFactorial.py','ScreenProbeWaveletFactorial.cs.txt']
+    if 'origin-replay.compute.txt' in shaders:names+=['ScreenProbeOriginReplay.py','ScreenProbeOriginReplay.cs.txt','ScreenProbeOriginReplay.compute.txt']
     workspace=folder.parents[1]
     create(output/'source-before-capture.json',workspace,
         [(folder/name).relative_to(workspace).as_posix() for name in names],
@@ -93,8 +101,12 @@ if __name__=='__main__':
     p.add_argument('--energy-moments',action='store_true')
     p.add_argument('--conservative-flux',action='store_true')
     p.add_argument('--wavelet-factorial',action='store_true')
+    p.add_argument('--origin-limit',type=float,choices=(.04,.01))
+    p.add_argument('--origin-adaptive',action='store_true')
+    p.add_argument('--origin-trace-steps',type=int,choices=(192,384,2048),default=192)
+    p.add_argument('--origin-bound-legacy',action='store_true',help='Use the same field-based step budget for 4cm and smaller origins')
     p.add_argument('--motion',action='store_true')
-    a=p.parse_args();out=a.output.resolve();source,shaders=build(out,a.sequence,a.covered_wavelet,a.symmetric_coverage,a.wavelet_witness,a.energy_moments,a.motion,a.conservative_flux,a.wavelet_factorial)
+    a=p.parse_args();out=a.output.resolve();source,shaders=build(out,a.sequence,a.covered_wavelet,a.symmetric_coverage,a.wavelet_witness,a.energy_moments,a.motion,a.conservative_flux,a.wavelet_factorial,a.origin_limit,a.origin_adaptive,a.origin_trace_steps,a.origin_bound_legacy)
     out.mkdir(parents=True,exist_ok=False);(out/'capture-script.cs').write_text(source,encoding='utf-8')
     for name,body in shaders.items():(out/name).write_text(body,encoding='utf-8')
     points=targets();(out/'targets.json').write_text(json.dumps(points,indent=2)+'\n')
@@ -123,6 +135,14 @@ if __name__=='__main__':
         from ScreenProbeWaveletFactorial import VARIANTS
         protocol.update(waveletFactorial=True,waveletFactorialVariants=list(VARIANTS),payloadBudget=512*1024**2)
         protocol['note']+=' Same-input factorial replay at measured frames only: matched symmetric bilateral weights, fixed/row normalization and explicit RNE/RTZ; old energy-row implicit/RNE bridge. No counterfactual history writes or GPU-cost claim.'
+    if a.origin_limit is not None:
+        protocol.update(originTraceReplay=True,nativeOriginLimitMeters=a.origin_limit,configuredRayBiasMeters=.04,
+            originReplayFrames=[0,*range(1024,1152)],originAdaptiveCandidate=a.origin_adaptive,originTraceSteps=a.origin_trace_steps,
+            originIncompleteMaskComparison=True,payloadBudget=512*1024**2,performanceQualified=False)
+        protocol['originStepPolicy']='field-diagonal-all-origins' if a.origin_bound_legacy else 'field-diagonal-capped' if a.origin_trace_steps==2048 else 'fixed'
+        protocol['gates'].update(originReplayByteExact=True,blackBackHitsStayBlack=True,coveredSelfHitIncrease=0,incompleteRayIncrease=0)
+        protocol['note']=protocol['note'].replace('Original native trace unchanged.','Owned tracing changes emission origin and the selected march budget; configured4cm hit thresholds and frozen radiosity unchanged.')
+        protocol['note']+=' Native bound screen/main tracing replays on same receiver and guide state. Read-only4cm/1cm/5mm raw-ray diagnostics, independent A/A mandatory. No GPU timing claim.'
     (out/'protocol.json').write_text(json.dumps(protocol,indent=2)+'\n')
     snapshot_capture(out,shaders)
     print(json.dumps(dict(root=str(out),targets=len(points))))

@@ -11,7 +11,18 @@ from TemporalSamplingExperiment import read,LUMA,metrics
 
 def qualify(root):
     capture,protocol,rows,states=inspect(root)
-    assert protocol['historyEpoch'] and capture['epochReset'] and not capture['experimentalTracePrograms']
+    assert protocol['historyEpoch'] and capture['epochReset']
+    if protocol.get('originTraceReplay',False):
+        from ScreenProbeOriginReplay import TRACE_KERNELS,REPLAY_KERNELS
+        assert protocol['configuredRayBiasMeters']==.04 and protocol['nativeOriginLimitMeters'] in (.04,.01)
+        assert capture['originNativeLimit']==protocol['nativeOriginLimitMeters'] and capture['originInitialized']
+        assert len(capture['experimentalTracePrograms'])==len(TRACE_KERNELS)
+        assert {r['name'] for r in capture['experimentalTracePrograms']}==set(TRACE_KERNELS)
+        replay_kernels=REPLAY_KERNELS if protocol.get('originIncompleteMaskComparison',False) else REPLAY_KERNELS[:-1]
+        assert len(capture['originReplayPrograms'])==len(replay_kernels)
+        assert {r['name'] for r in capture['originReplayPrograms']}==set(replay_kernels)
+    else:
+        assert not capture['experimentalTracePrograms']
     required={'ProbeHistoryId','AnchorStatisticsHistoryId','GeometryHistoryId','DirectionalHistoryId',
         'DirectionalGuideHistoryId','CoveredPixelHistoryId','ScreenProbeMomentsHistoryId','PixelGeometryHistoryId'}
     assert required.issubset(capture['epochInvalidated'])

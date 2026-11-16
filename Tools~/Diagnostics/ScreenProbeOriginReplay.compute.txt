@@ -1,0 +1,94 @@
+#pragma kernel CaptureOriginReceiversCS VIVID_SDF_RECEIVER
+#pragma kernel ClearOrigin4CS
+#pragma kernel ClearOrigin1CS
+#pragma kernel ClearOriginCountersCS
+#pragma kernel InspectOriginCS
+#pragma kernel InitializeOriginDirectionsCS
+#pragma kernel CompareOriginIncompleteCS
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/SdfScreenProbeReceiver.hlsl"
+RWStructuredBuffer<uint4> _OriginReceiverOutput;
+StructuredBuffer<uint4> _OriginReceivers;
+Texture2D<float4> _OriginRayDiagnostics;
+Texture2D<float4> _OriginFirstHits;
+RWStructuredBuffer<uint> _OriginCounters;
+RWTexture2D<float4> _OriginClear4;
+RWTexture2D<float> _OriginClear1;
+uint2 _OriginSize;
+uint _OriginProbeWidth;
+uint _OriginAtlasHeight;
+Texture2D<float4> _OriginNativeDirections;
+Texture2D<float4> _OriginNativeRayDiagnostics;
+Texture2D<float4> _OriginLegacyRays;
+Texture2D<float4> _OriginReducedRays;
+[numthreads(8,8,1)]void CaptureOriginReceiversCS(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=_OriginSize))return;
+    uint4 result=0;
+#if defined(VIVID_SDF_RECEIVER)
+    uint2 pixel;float3 position,normal;
+    if(LoadProbeReceiverPixel(id.xy,uint2(_SdfDiffuseScreenSize.xy),pixel) && LoadReceiver(pixel,position,normal))
+    {
+        uint index=_SdfReceiverVisibility.Load(int3(pixel,0)).x-VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+        if(index<_SdfReceiverCount)result=uint4(_SdfReceiverEntities[index].xyz,1u);
+    }
+#endif
+    _OriginReceiverOutput[id.y*_OriginProbeWidth+id.x]=result;
+}
+[numthreads(8,8,1)]void ClearOrigin4CS(uint3 id:SV_DispatchThreadID)
+{if(all(id.xy<_OriginSize))_OriginClear4[id.xy]=0;}
+[numthreads(8,8,1)]void ClearOrigin1CS(uint3 id:SV_DispatchThreadID)
+{if(all(id.xy<_OriginSize))_OriginClear1[id.xy]=0;}
+[numthreads(8,8,1)]void InitializeOriginDirectionsCS(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=_OriginSize))return;
+    uint2 ray=uint2(id.x,id.y%_OriginAtlasHeight);
+    // StoreDirectionalRay deliberately does not write state0. Preserve only
+    // those undefined cells, and poison every cell the replay must overwrite.
+    bool written=uint(floor(_OriginNativeRayDiagnostics.Load(int3(ray,0)).w))!=0u;
+    _OriginClear4[id.xy]=written?float4(-32768.0,-32768.0,-32768.0,-32768.0):_OriginNativeDirections.Load(int3(id.xy,0));
+}
+[numthreads(32,1,1)]void ClearOriginCountersCS(uint3 id:SV_DispatchThreadID)
+{_OriginCounters[id.x]=0;}
+[numthreads(8,8,1)]void InspectOriginCS(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=_OriginSize))return;
+    uint2 tile=uint2(id.x/8u,id.y);
+    uint4 receiver=_OriginReceivers[tile.y*_OriginProbeWidth+tile.x];
+    if(receiver.w==0u)return;
+    InterlockedAdd(_OriginCounters[0],1u);
+    float4 ray=_OriginRayDiagnostics.Load(int3(id.xy,0));
+    if(!all(isfinite(ray))){InterlockedAdd(_OriginCounters[11],1u);return;}
+    uint state=uint(floor(ray.w)),source=state&7u;
+    InterlockedAdd(_OriginCounters[16u+source],1u);
+    if(state==0u)return;
+    InterlockedAdd(_OriginCounters[1],1u);
+    bool covered=source==RayScreenHit || source==RaySdfHit || source==RaySkyVisible || (state&RayFarCache)!=0u;
+    if(covered)InterlockedAdd(_OriginCounters[2],1u);
+    if(source==RayMissingSurface)InterlockedAdd(_OriginCounters[3],1u);
+    if(!covered)InterlockedAdd(_OriginCounters[4],1u);
+    if((state&RayMaterialBackface)!=0u)
+    {
+        InterlockedAdd(_OriginCounters[5],1u);
+        if(any(ray.rgb!=0.0))InterlockedAdd(_OriginCounters[6],1u);
+    }
+    if((state&RayTraceIncomplete)!=0u)InterlockedAdd(_OriginCounters[7],1u);
+    float4 words=_OriginFirstHits.Load(int3(id.x,id.y*3u,0));
+    uint2 entity=uint2(uint(words.x)|(uint(words.y)<<16u),uint(words.z)|(uint(words.w)<<16u));
+    if(any(entity!=0u) && all(entity==receiver.xy))
+    {
+        InterlockedAdd(_OriginCounters[8],1u);
+        if(covered)InterlockedAdd(_OriginCounters[9],1u);
+    }
+    if(_OriginFirstHits.Load(int3(id.x,id.y*3u+2u,0)).w>0.5)InterlockedAdd(_OriginCounters[10],1u);
+}
+[numthreads(8,8,1)]void CompareOriginIncompleteCS(uint3 id:SV_DispatchThreadID)
+{
+    if(any(id.xy>=_OriginSize))return;
+    uint2 tile=uint2(id.x/8u,id.y);
+    if(_OriginReceivers[tile.y*_OriginProbeWidth+tile.x].w==0u)return;
+    bool a=(uint(floor(_OriginLegacyRays.Load(int3(id.xy,0)).w))&RayTraceIncomplete)!=0u;
+    bool b=(uint(floor(_OriginReducedRays.Load(int3(id.xy,0)).w))&RayTraceIncomplete)!=0u;
+    uint slot=!a&&b?0u:a&&!b?1u:a&&b?2u:3u;
+    InterlockedAdd(_OriginCounters[slot],1u);InterlockedAdd(_OriginCounters[4],1u);
+}

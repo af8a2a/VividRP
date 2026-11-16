@@ -1,0 +1,195 @@
+    const float originNativeLimit=__ORIGIN_LIMIT__;
+    const bool originAdaptiveCandidate=__ORIGIN_ADAPTIVE__;
+    ComputeShader originInspector=null;
+    GraphicsBuffer originCounters=null,originReceivers=null;
+    bool originInitialized=false;int originAaPairs=0;
+    var originReplayPrograms=new List<object>();
+    var originNames=new List<string>();var originUniforms=new List<string>();
+    var originNative=new List<Texture>();var originScratch=new List<RenderTexture>();
+    var originPendingPairs=new Dictionary<string,(string side,string hash,byte[] bytes)>();
+    var originScreenBuffers=new GraphicsBuffer[3];
+    var originScreenBufferFields=new[]{"m_Voxels","m_FieldBuffer","m_InstanceBuffer"};
+    var originScreenBufferUniforms=new[]{"_MeshSdfVoxels","_MeshSdfFields","_MeshSdfInstances"};
+    RenderTexture originLegacyRays=null,originReducedRays=null;
+    int originMainKernel=-1,originScreenKernel=-1;
+    void SetupOriginReplay() {
+        gi.recordRayDiagnostics.Override(true);gi.recordFirstHitDiagnostics.Override(true);
+        SetupExperimentalTracing(privatePass);experimentalTrace.SetFloat("_SdfOriginLimit",originNativeLimit);
+        if(originAdaptiveCandidate)experimentalTrace.SetInt("_SdfReceiverOriginAdaptive",originNativeLimit<.04f?1:0);
+        int first=privatePrograms.Count;
+        originInspector=PrivateShader("origin-replay.compute.txt",new[]{"CaptureOriginReceiversCS","ClearOrigin4CS","ClearOrigin1CS","ClearOriginCountersCS","InspectOriginCS","InitializeOriginDirectionsCS","CompareOriginIncompleteCS"});
+        originReplayPrograms.AddRange(privatePrograms.GetRange(first,privatePrograms.Count-first));privatePrograms.RemoveRange(first,privatePrograms.Count-first);
+        originCounters=new GraphicsBuffer(GraphicsBuffer.Target.Structured,32,4);
+    }
+    GraphicsBuffer OriginSceneBuffer(string name) {
+        var sceneData=PrivateField("m_Scene");return (GraphicsBuffer)sceneData.GetType().GetField(name,inst).GetValue(sceneData);
+    }
+    void BindOriginScreenBuffers() {
+        if(!originAdaptiveCandidate)return;
+        int kernel=(int)PrivateField("m_ScreenReceiverTraceKernel");
+        for(int i=0;i<originScreenBuffers.Length;++i) {
+            var buffer=OriginSceneBuffer(originScreenBufferFields[i]);
+            if(buffer==null || !buffer.IsValid())throw new InvalidOperationException("Origin screen source buffer invalid.");
+            originScreenBuffers[i]=buffer;experimentalTrace.SetBuffer(kernel,originScreenBufferUniforms[i],buffer);
+        }
+    }
+    RenderTexture OriginTexture(Texture original) {
+        var descriptor=new RenderTextureDescriptor(original.width,original.height){graphicsFormat=original.graphicsFormat,enableRandomWrite=true};
+        var texture=new RenderTexture(descriptor){hideFlags=HideFlags.HideAndDontSave};
+        privateOwned.Add(texture);if(!texture.Create())throw new InvalidOperationException("Origin replay allocation failed.");return texture;
+    }
+    void InitializeOrigin() {
+        if(!(bool)PrivateField("m_DirectionalCache") || (bool)PrivateField("m_RestirGather") || !(bool)PrivateField("m_UseSdf")
+            || (int)PrivateField("m_ReceiverCount")<=0 || !(bool)PrivateField("m_RecordRayDiagnostics") || !(bool)PrivateField("m_RecordFirstHitDiagnostics"))
+            throw new InvalidOperationException("Origin replay requires directional receiver tracing and full diagnostics.");
+        bool sun=((TextureHandle)PrivateField("m_SunAtlas")).IsValid();
+        originMainKernel=(int)PrivateField(sun?"m_ReceiverCachedSunKernel":"m_ReceiverCachedKernel");
+        originScreenKernel=(int)PrivateField("m_ScreenReceiverTraceKernel");
+        if(originMainKernel<0 || originScreenKernel<0)throw new InvalidOperationException("Missing origin replay kernels.");
+        void Add(string name,string field,string uniform) {
+            var texture=PrivateResolve(field);if(texture==null)throw new InvalidOperationException("Missing origin output: "+field);
+            originNames.Add(name);originUniforms.Add(uniform);originNative.Add(texture);originScratch.Add(OriginTexture(texture));
+        }
+        Add("directional-rays","m_DirectionalRayTexture","_SdfDiffuseProbes");
+        Add("geometry","m_Geometry","_SdfDiffuseGeometry");Add("hit-lighting","m_HitLighting","_SdfDiffuseHitLighting");
+        Add("trace-sources","m_TraceSources","_SdfDiffuseTraceSources");Add("ray-diagnostics","m_RayDiagnostics","_SdfDiffuseRayDiagnostics");
+        Add("first-hit","m_FirstHitDiagnostics","_SdfDiffuseFirstHitDiagnostics");
+        if((bool)PrivateField("m_HitDistanceFilter"))Add("hit-samples","m_HitSamples","_SdfDiffuseHitSamples");
+        if(sun)Add("sun-hits","m_SunCacheHits","_SdfSunCacheHits");
+        Add("screen-rays","m_ScreenRays","_SdfScreenRaysOutput");
+        var geometry=originNative[1];
+        originReceivers=new GraphicsBuffer(GraphicsBuffer.Target.Structured,geometry.width*geometry.height,16);
+        originLegacyRays=OriginTexture(originNative[4]);originReducedRays=OriginTexture(originNative[4]);
+        originInitialized=true;
+    }
+    void PairOrigin(int f,string role,string side,byte[] bytes,string hash) {
+        string key=f+"/"+role;
+        if(originPendingPairs.TryGetValue(key,out var previous)) {
+            originPendingPairs.Remove(key);originAaPairs++;
+            if(previous.side==side || previous.hash!=hash) {
+                foreach(var q in new[]{(previous.side,previous.bytes,previous.hash),(side,bytes,hash)}) {
+                    string path=output+"/"+arm+"/"+f.ToString("0000")+"-origin-failure-"+role+"-"+q.Item1+".bin";Write(path,q.Item2);
+                    records.Add(new{frame=f,originFailure=role,side=q.Item1,path,sha256=q.Item3});
+                }
+                errors.Add("Origin native replay differs: "+key);
+            }
+        }else originPendingPairs.Add(key,(side,hash,bytes));
+    }
+    void ReadOrigin(CommandBuffer raw,Texture texture,string role,string side,float limit,bool pair) {
+        int f=frame,w=texture.width,h=texture.height;string format=texture.graphicsFormat.ToString();
+        bool save=side!="origin-aa" && (f==warmup || f==warmup+count-1);pending++;
+        raw.RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Origin readback failed.");
+                byte[] bytes=request.GetData<byte>().ToArray();string hash=Hash(bytes),path=save?output+"/"+arm+"/"+f.ToString("0000")+"-"+side+"-"+role+".bin":null;
+                if(save)Write(path,bytes);
+                records.Add(new{frame=f,tag="origin-"+role+"-full",side,originLimitMeters=limit,width=w,height=h,format,sha256=hash,path,saved=save});
+                if(pair)PairOrigin(f,role,side,bytes,hash);
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void ClearOrigin(ComputeCommandBuffer cmd,RenderTexture texture) {
+        var raw=(CommandBuffer)wrapped.GetValue(cmd);bool single=texture.graphicsFormat==UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat;
+        int kernel=originInspector.FindKernel(single?"ClearOrigin1CS":"ClearOrigin4CS");
+        raw.SetComputeIntParams(originInspector,"_OriginSize",texture.width,texture.height);
+        raw.SetComputeTextureParam(originInspector,kernel,single?"_OriginClear1":"_OriginClear4",texture);
+        cmd.DispatchCompute(originInspector,kernel,(texture.width+7)/8,(texture.height+7)/8,1);
+    }
+    void InspectOrigin(ComputePassContext context,Texture rays,Texture first,string side,float limit,bool pair) {
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);
+        int clear=originInspector.FindKernel("ClearOriginCountersCS"),inspect=originInspector.FindKernel("InspectOriginCS");
+        raw.SetComputeBufferParam(originInspector,clear,"_OriginCounters",originCounters);cmd.DispatchCompute(originInspector,clear,1,1,1);
+        raw.SetComputeIntParams(originInspector,"_OriginSize",rays.width,rays.height);
+        raw.SetComputeBufferParam(originInspector,inspect,"_OriginCounters",originCounters);
+        raw.SetComputeBufferParam(originInspector,inspect,"_OriginReceivers",originReceivers);
+        raw.SetComputeTextureParam(originInspector,inspect,"_OriginRayDiagnostics",rays);
+        raw.SetComputeTextureParam(originInspector,inspect,"_OriginFirstHits",first);
+        cmd.DispatchCompute(originInspector,inspect,(rays.width+7)/8,(rays.height+7)/8,1);
+        int f=frame;pending++;
+        raw.RequestAsyncReadback(originCounters,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Origin counter readback failed.");
+                var bytes=request.GetData<byte>().ToArray();var counters=request.GetData<uint>().ToArray();string hash=Hash(bytes);
+                records.Add(new{frame=f,tag="origin-counters",side,originLimitMeters=limit,counters,sha256=hash});
+                if(pair)PairOrigin(f,"counters",side,bytes,hash);
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    void ReplayOriginTrace(ComputePassContext context) {
+        if(frame!=0 && frame<warmup)return;
+        if(!originInitialized)InitializeOrigin();
+        if(originAdaptiveCandidate)for(int i=0;i<originScreenBuffers.Length;++i)
+            if(!object.ReferenceEquals(originScreenBuffers[i],OriginSceneBuffer(originScreenBufferFields[i])) || !originScreenBuffers[i].IsValid())
+                throw new InvalidOperationException("Origin screen source buffer changed after frame-begin binding.");
+        bool screen=(bool)PrivateField("m_HasScreenHistory") && PrivateResolve("m_ScreenHzb")!=null && PrivateResolve("m_ScreenMotion")!=null;
+        var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);int last=originNative.Count-1;
+        int gx=((int)PrivateField("m_ProbeWidth")+7)/8,gy=((int)PrivateField("m_AtlasHeight")+7)/8;
+        int capture=originInspector.FindKernel("CaptureOriginReceiversCS");privateBindReceiver(cmd,originInspector,capture);privateBindFrame(cmd,originInspector);
+        raw.SetComputeIntParams(originInspector,"_OriginSize",originNative[1].width,originNative[1].height);
+        cmd.SetComputeIntParam(originInspector,"_OriginProbeWidth",originNative[1].width);
+        cmd.SetComputeIntParam(originInspector,"_OriginAtlasHeight",originNative[1].height);
+        raw.SetComputeTextureParam(originInspector,capture,"_SdfReceiverVisibility",PrivateResolve("m_ReceiverVisibility"));
+        raw.SetComputeTextureParam(originInspector,capture,"_SdfAdaptivePlacement",PrivateResolve("m_AdaptivePlacement"));
+        raw.SetComputeBufferParam(originInspector,capture,"_SdfReceiverEntities",(GraphicsBuffer)PrivateField("m_ReceiverEntities"));
+        cmd.SetComputeIntParam(originInspector,"_SdfReceiverCount",(int)PrivateField("m_ReceiverCount"));
+        raw.SetComputeBufferParam(originInspector,capture,"_OriginReceiverOutput",originReceivers);cmd.DispatchCompute(originInspector,capture,gx,gy,1);
+        int receiverFrame=frame;pending++;
+        raw.RequestAsyncReadback(originReceivers,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Origin receiver readback failed.");
+                byte[] bytes=request.GetData<byte>().ToArray();string path=null;
+                if(receiverFrame==warmup || receiverFrame==warmup+count-1){path=output+"/"+arm+"/"+receiverFrame.ToString("0000")+"-origin-receivers.bin";Write(path,bytes);}
+                records.Add(new{frame=receiverFrame,tag="origin-receivers-full",side="origin-receivers",width=originNative[1].width,height=originNative[1].height,format="R32G32B32A32_UInt",sha256=Hash(bytes),path,saved=path!=null});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+        for(int i=0;i<originNative.Count;++i)if(i!=last || screen)ReadOrigin(raw,originNative[i],originNames[i],"origin-native",originNativeLimit,true);
+        InspectOrigin(context,originNative[4],originNative[5],"origin-native",originNativeLimit,true);
+        raw.CopyTexture(originNative[4],originNativeLimit==.04f?originLegacyRays:originReducedRays);
+        var modes=new[]{("origin-aa",originNativeLimit),(originNativeLimit==.04f?"origin-10mm":"origin-40mm",originNativeLimit==.04f?.01f:.04f),("origin-5mm",.005f)};
+        records.Add(new{frame,originReplayState=true,screen,mainKernel=originMainKernel,screenKernel=originScreenKernel,roles=originNames.ToArray(),originNativeLimit,originAdaptiveCandidate,originScreenBuffersVerified=true});
+        try {
+            foreach(var mode in modes) {
+                foreach(var texture in originScratch)ClearOrigin(cmd,texture);
+                int initialize=originInspector.FindKernel("InitializeOriginDirectionsCS");
+                raw.SetComputeIntParams(originInspector,"_OriginSize",originScratch[0].width,originScratch[0].height);
+                raw.SetComputeTextureParam(originInspector,initialize,"_OriginClear4",originScratch[0]);
+                raw.SetComputeTextureParam(originInspector,initialize,"_OriginNativeDirections",originNative[0]);
+                raw.SetComputeTextureParam(originInspector,initialize,"_OriginNativeRayDiagnostics",originNative[4]);
+                cmd.DispatchCompute(originInspector,initialize,(originScratch[0].width+7)/8,(originScratch[0].height+7)/8,1);
+                cmd.SetComputeFloatParam(experimentalTrace,"_SdfOriginLimit",mode.Item2);
+                if(originAdaptiveCandidate)cmd.SetComputeIntParam(experimentalTrace,"_SdfReceiverOriginAdaptive",mode.Item2<.04f?1:0);
+                if(screen) {
+                    raw.SetComputeTextureParam(experimentalTrace,originScreenKernel,"_SdfScreenRaysOutput",originScratch[last]);
+                    cmd.DispatchCompute(experimentalTrace,originScreenKernel,gx,gy,1);
+                    raw.SetComputeTextureParam(experimentalTrace,originMainKernel,"_SdfScreenRays",originScratch[last]);
+                }
+                for(int i=0;i<last;++i)raw.SetComputeTextureParam(experimentalTrace,originMainKernel,originUniforms[i],originScratch[i]);
+                cmd.DispatchCompute(experimentalTrace,originMainKernel,gx,gy,1);
+                for(int i=0;i<originScratch.Count;++i)if(i!=last || screen)ReadOrigin(raw,originScratch[i],originNames[i],mode.Item1,mode.Item2,mode.Item1=="origin-aa");
+                InspectOrigin(context,originScratch[4],originScratch[5],mode.Item1,mode.Item2,mode.Item1=="origin-aa");
+                if(mode.Item2==.04f)raw.CopyTexture(originScratch[4],originLegacyRays);
+                if(mode.Item2==.01f)raw.CopyTexture(originScratch[4],originReducedRays);
+            }
+        }finally {
+            for(int i=0;i<last;++i)raw.SetComputeTextureParam(experimentalTrace,originMainKernel,originUniforms[i],originNative[i]);
+            if(screen)raw.SetComputeTextureParam(experimentalTrace,originMainKernel,"_SdfScreenRays",originNative[last]);
+            raw.SetComputeTextureParam(experimentalTrace,originScreenKernel,"_SdfScreenRaysOutput",originNative[last]);
+            cmd.SetComputeFloatParam(experimentalTrace,"_SdfOriginLimit",originNativeLimit);
+            if(originAdaptiveCandidate)cmd.SetComputeIntParam(experimentalTrace,"_SdfReceiverOriginAdaptive",originNativeLimit<.04f?1:0);
+        }
+        int clear=originInspector.FindKernel("ClearOriginCountersCS"),compare=originInspector.FindKernel("CompareOriginIncompleteCS");
+        raw.SetComputeBufferParam(originInspector,clear,"_OriginCounters",originCounters);cmd.DispatchCompute(originInspector,clear,1,1,1);
+        raw.SetComputeIntParams(originInspector,"_OriginSize",originNative[4].width,originNative[4].height);
+        raw.SetComputeBufferParam(originInspector,compare,"_OriginCounters",originCounters);
+        raw.SetComputeBufferParam(originInspector,compare,"_OriginReceivers",originReceivers);
+        raw.SetComputeTextureParam(originInspector,compare,"_OriginLegacyRays",originLegacyRays);
+        raw.SetComputeTextureParam(originInspector,compare,"_OriginReducedRays",originReducedRays);
+        cmd.DispatchCompute(originInspector,compare,(originNative[4].width+7)/8,(originNative[4].height+7)/8,1);
+        int pairedFrame=frame;pending++;
+        raw.RequestAsyncReadback(originCounters,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Origin incomplete comparison failed.");
+                var bytes=request.GetData<byte>().ToArray();records.Add(new{frame=pairedFrame,tag="origin-incomplete-pair",side="origin-paired",counters=request.GetData<uint>().ToArray(),sha256=Hash(bytes)});
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }

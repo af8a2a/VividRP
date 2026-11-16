@@ -2,6 +2,8 @@
 
 本轮建立了使用**未修改原生追踪程序**的同帧参考，确认上一轮稳定像素不裁剪候选尚不能推广，并找到了更应优先处理的覆盖语义：纯自发光 Cornell 关闭天空后，大量已离开 SDF 场景的完整 miss 仍被记为未知覆盖。**尚未修改生产渲染，也未证明修正该分类后最终噪声会下降。**
 
+后续分类实验证明消费能量基本保留，但默认引导的边缘与长窗口方差未通过，候选已撤回；见[黑色环境分类与长窗口实验](ScreenProbeBlackEnvironment.md)。本页保留当时的参考与失败结论。
+
 起点 `28f33196`，生产渲染仍为 `7b9d8836`。证据根目录 `E:/VividRP_GI_Evidence/ScreenProbeSameFrameEnergy-20261116-071500`。保持 Unity7000.0.0a16 / D3D12、原 Cornell 机位、16 px / 每探针8 rays、原生 Gather、age512/FP32 anchor、像素历史上限32、4轮 wavelet。Radiosity 为8阶/64样本/32批，源 hash 保持 `40252e7ae82c1da6ae025dbf012a3ce232aa54ea10bfbf1ca9a7998df93270a8`。
 
 ## 参考如何固定实际输入

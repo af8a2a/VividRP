@@ -1,0 +1,108 @@
+    object qualityPass=null;
+    ComputeShader qualityDepthCopy=null;RenderTexture qualityDepth=null;
+    var qualityPixelRegions=new[]{("ceiling",912,970,96,48),("floor",912,130,96,64),("back",1100,600,96,64),("edge",880,414,160,128)};
+    var qualityProbeRegions=new[]{("ceiling",46,59,28),("floor",54,8,12),("back",68,38,8),("edge",55,26,10)};
+    var qualityPixelSums=new Dictionary<string,double[]>();var qualityPixelSquares=new Dictionary<string,double[]>();
+    var qualityPixelDeltaSquares=new Dictionary<string,double[]>();var qualityPixelPrevious=new Dictionary<string,double[]>();
+    var qualityPixelBlocks=new Dictionary<string,double[]>();var qualityPixelCounts=new Dictionary<string,int>();
+    void AccumulateQualityPixels(string name,byte[] data,int width,int height,int f) {
+        int pixels=width*height;
+        if(!qualityPixelSums.ContainsKey(name)) {
+            qualityPixelSums.Add(name,new double[pixels]);qualityPixelSquares.Add(name,new double[pixels]);
+            qualityPixelDeltaSquares.Add(name,new double[pixels]);qualityPixelPrevious.Add(name,new double[pixels]);
+            qualityPixelBlocks.Add(name,new double[(count/64)*pixels]);qualityPixelCounts.Add(name,0);
+        }
+        int index=qualityPixelCounts[name];
+        if(index!=f-warmup)throw new InvalidOperationException("Out-of-order final statistics: "+name);
+        var sum=qualityPixelSums[name];var square=qualityPixelSquares[name];var deltaSquare=qualityPixelDeltaSquares[name];
+        var previous=qualityPixelPrevious[name];var block=qualityPixelBlocks[name];
+        for(int pixel=0;pixel<pixels;++pixel) {
+            int offset=pixel*8;double alpha=Math.Abs(Unity.Mathematics.math.f16tof32(BitConverter.ToUInt16(data,offset+6)));
+            double red=Unity.Mathematics.math.f16tof32(BitConverter.ToUInt16(data,offset))*alpha;
+            double green=Unity.Mathematics.math.f16tof32(BitConverter.ToUInt16(data,offset+2))*alpha;
+            double blue=Unity.Mathematics.math.f16tof32(BitConverter.ToUInt16(data,offset+4))*alpha;
+            double y=.2126*red+.7152*green+.0722*blue;
+            if(!double.IsFinite(y))throw new InvalidOperationException("Nonfinite final statistic.");
+            sum[pixel]+=y;square[pixel]+=y*y;block[(index/64)*pixels+pixel]+=y;
+            if(index>0){double delta=y-previous[pixel];deltaSquare[pixel]+=delta*delta;}previous[pixel]=y;
+        }
+        qualityPixelCounts[name]=index+1;
+    }
+    void PublishQualityStatistics() {
+        foreach(var roi in qualityPixelRegions) {
+            string name=roi.Item1;if(qualityPixelCounts[name]!=count)throw new InvalidOperationException("Incomplete pixel statistics.");
+            WriteDoubles("final-"+name+"-sums.f64",qualityPixelSums[name]);WriteDoubles("final-"+name+"-squares.f64",qualityPixelSquares[name]);
+            WriteDoubles("final-"+name+"-delta-squares.f64",qualityPixelDeltaSquares[name]);WriteDoubles("final-"+name+"-blocks.f64",qualityPixelBlocks[name]);
+        }
+    }
+    Texture QualityResolve(string name) {
+        var value=type.GetField(name,inst).GetValue(qualityPass);
+        var handle=value is RenderGraphTexture graph?(TextureHandle)graph:(TextureHandle)value;
+        return handle.IsValid()?(Texture)handle:null;
+    }
+    void SetupQuality() {
+        qualityPass=((System.Collections.IList)passes.GetValue(null)).Cast<object>().Single(p=>p.GetType()==type);
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        qualityDepthCopy=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/depth-copy.compute.txt")});
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CompileComputeShaderVariant");
+        var result=compile.Invoke(null,new object[]{qualityDepthCopy,qualityDepthCopy.FindKernel("CopyDepthCS"),Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+        if(!(bool)result.GetType().GetProperty("Success").GetValue(result))throw new InvalidOperationException("Quality depth copy compilation failed.");
+        qualityDepth=new RenderTexture(new RenderTextureDescriptor(1920,1080){graphicsFormat=UnityEngine.Experimental.Rendering.GraphicsFormat.R32_SFloat,enableRandomWrite=true}){hideFlags=HideFlags.HideAndDontSave};
+        if(!qualityDepth.Create())throw new InvalidOperationException("Quality depth copy texture failed.");
+    }
+    void ReadQuality(ComputePassContext context,Texture texture,string role,string space) {
+        if(texture==null)throw new InvalidOperationException("Missing quality input: "+role);
+        int f=frame,width=texture.width,height=texture.height;string currentArm=arm,format=texture.graphicsFormat.ToString();
+        int stride=format=="R32G32B32A32_SFloat"?16:format=="R16G16B16A16_SFloat"?8:4;
+        pending++;
+        ((CommandBuffer)wrapped.GetValue(context.cmd)).RequestAsyncReadback(texture,0,request=>{
+            try {
+                if(request.hasError || Environment.CurrentManagedThreadId!=callbackThread)throw new InvalidOperationException("Quality readback failed: "+role);
+                var bytes=request.GetData<byte>().ToArray();
+                if(space=="hash") {
+                    records.Add(new{arm=currentArm,frame=f,tag=role,width,height,format,sha256=Hash(bytes),saved=false});return;
+                }
+                if(space=="pixel") {
+                    foreach(var roi in qualityPixelRegions) {
+                        var crop=new byte[roi.Item4*roi.Item5*stride];
+                        for(int y=0;y<roi.Item5;++y)Buffer.BlockCopy(bytes,((roi.Item3+y)*width+roi.Item2)*stride,crop,y*roi.Item4*stride,roi.Item4*stride);
+                        if(role=="final")AccumulateQualityPixels(roi.Item1,crop,roi.Item4,roi.Item5,f);
+                        bool save=count<=128 || f<warmup+64 || f==warmup+count-1;
+                        string file=save?output+"/"+currentArm+"/"+f.ToString("0000")+"-"+role+"-"+roi.Item1+".bin":null;if(save)Write(file,crop);
+                        records.Add(new{arm=currentArm,frame=f,tag=role+"-"+roi.Item1,x=roi.Item2,y=roi.Item3,width=roi.Item4,height=roi.Item5,format,sha256=Hash(crop),saved=save,path=file});
+                    }
+                    if(role=="final" && f==warmup+count-1) {
+                        string file=output+"/"+currentArm+"/"+f.ToString("0000")+"-full-final.bin";Write(file,bytes);
+                        records.Add(new{arm=currentArm,frame=f,tag="full-final",width,height,format,sha256=Hash(bytes),saved=true,path=file});
+                    }
+                    return;
+                }
+                foreach(var roi in qualityProbeRegions) {
+                    int lanes=space=="sh"?7:space.StartsWith("directional",StringComparison.Ordinal)?16:1;
+                    var crop=new byte[roi.Item4*lanes*stride];
+                    for(int lane=0;lane<lanes;++lane)for(int point=0;point<roi.Item4;++point) {
+                        int x=roi.Item2+point,y=roi.Item3;
+                        if(space=="sh")x+=lane*120;
+                        else if(space.StartsWith("directional",StringComparison.Ordinal)){x=x*16+lane;if(space=="directional-meta")y+=136;}
+                        else if(space=="pixel-points"){x=x*16+8;y=y*16+8;}
+                        Buffer.BlockCopy(bytes,(y*width+x)*stride,crop,(lane*roi.Item4+point)*stride,stride);
+                    }
+                    string file=output+"/"+currentArm+"/"+f.ToString("0000")+"-"+role+"-"+roi.Item1+".bin";Write(file,crop);
+                    records.Add(new{arm=currentArm,frame=f,tag=role+"-"+roi.Item1,width=roi.Item4,height=lanes,format,sha256=Hash(crop),saved=true,path=file});
+                }
+            }catch(Exception e){errors.Add(e.Message);}finally{pending--;}
+        });
+    }
+    Action<ComputePassContext,int,Texture> qualityStage=(context,index,texture)=>{
+        if(!active || phase!=1 || frame<warmup || context.Get<VividCameraData>().camera!=camera)return;
+        if(context.Get<VividSkyData>().activeSkyType!=SkyType.None)throw new InvalidOperationException("SkyType.None required.");
+        ReadQuality(context,texture,index==0?"resolved-points":"temporal-points","pixel-points");
+        if(index==1) {
+            ReadQuality(context,QualityResolve("m_CurrentPixelGeometry"),"pixel-geometry","hash");
+            ReadQuality(context,QualityResolve("m_GBuffer0"),"input-gbuffer0","hash");
+            ReadQuality(context,QualityResolve("m_GBuffer1"),"input-gbuffer1","hash");
+            var cmd=context.cmd;var raw=(CommandBuffer)wrapped.GetValue(cmd);int kernel=qualityDepthCopy.FindKernel("CopyDepthCS");
+            raw.SetComputeTextureParam(qualityDepthCopy,kernel,"_Source",QualityResolve("m_Depth"));raw.SetComputeTextureParam(qualityDepthCopy,kernel,"_Destination",qualityDepth);
+            cmd.DispatchCompute(qualityDepthCopy,kernel,240,135,1);ReadQuality(context,qualityDepth,"input-depth","hash");
+        }
+    };

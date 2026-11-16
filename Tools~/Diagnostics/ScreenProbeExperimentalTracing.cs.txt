@@ -1,0 +1,29 @@
+    object experimentalTraceOwner=null;
+    ComputeShader experimentalTrace=null,experimentalOriginalTrace=null;
+    bool experimentalTraceInstalled=false;
+    var experimentalTracePrograms=new List<object>();
+    void SetupExperimentalTracing(object owner) {
+        experimentalTraceOwner=owner;var field=type.GetField("m_TraceCompute",inst);
+        experimentalOriginalTrace=(ComputeShader)field.GetValue(owner);
+        var create=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CreateComputeShaderAsset" && m.GetParameters().Length==1);
+        experimentalTrace=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(output+"/candidate-tracing.compute.txt")});
+        if(EditorUtility.IsPersistent(experimentalTrace))throw new InvalidOperationException("Experimental tracing must remain in memory.");
+        var compile=typeof(ShaderUtil).GetMethods(System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic).Single(m=>m.Name=="CompileComputeShaderVariant");
+        foreach(string name in new[]{"TraceSdfDiffuseProbes","TraceSdfDiffuseCachedProbes","TraceSdfDiffuseCachedSunProbes","TraceSdfReceiverProbes","TraceSdfReceiverCachedProbes","TraceSdfReceiverCachedSunProbes","TraceDiffuseScreenRays","TraceReceiverDiffuseScreenRays","GatherScreenDiffuseProbes"}) {
+            int kernel=experimentalTrace.FindKernel(name);
+            if(kernel!=experimentalOriginalTrace.FindKernel(name))throw new InvalidOperationException("Experimental kernel layout changed.");
+            var result=compile.Invoke(null,new object[]{experimentalTrace,kernel,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+            if(!(bool)result.GetType().GetProperty("Success").GetValue(result))throw new InvalidOperationException("Experimental trace compilation failed: "+name);
+            var bytes=(byte[])result.GetType().GetProperty("ShaderData").GetValue(result);
+            experimentalTracePrograms.Add(new{name,kernel,bytes=bytes.Length,sha256=Hash(bytes)});
+        }
+        field.SetValue(owner,experimentalTrace);experimentalTraceInstalled=true;
+    }
+    void CleanupExperimentalTracing() {
+        if(experimentalTraceInstalled) {
+            var field=type.GetField("m_TraceCompute",inst);
+            if(object.ReferenceEquals(field.GetValue(experimentalTraceOwner),experimentalTrace))field.SetValue(experimentalTraceOwner,experimentalOriginalTrace);
+            else errors.Add("Experimental tracing changed externally; original was not overwritten.");
+        }
+        if(experimentalTrace!=null)UnityEngine.Object.DestroyImmediate(experimentalTrace);
+    }

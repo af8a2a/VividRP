@@ -1,0 +1,16 @@
+bool SdfKnownBlackEnvironmentMiss(float3 origin, float3 direction, float tracedDistance,
+    bool incomplete, uint screenState)
+{
+    // Editor prototype: the caller must establish SkyType.None. Unreadable
+    // screen hits and incomplete SDF walks remain unresolved.
+    if ((_SdfGatherHistoryDiagnostics & 33554432u) == 0u || incomplete || screenState != 0u
+        || _MeshSdfNodeCount == 0u)
+        return false;
+    VividMeshSdfNode root = _MeshSdfNodes[0];
+    float entry = 0.0;
+    float exit = FLT_MAX;
+    if (!VividMeshSdfClipRay(origin, direction, root.boundsMin, root.boundsMax, entry, exit))
+        return true;
+    // Do not convert a finite-range miss inside the scene into black lighting.
+    return exit + 0.001 < tracedDistance;
+}

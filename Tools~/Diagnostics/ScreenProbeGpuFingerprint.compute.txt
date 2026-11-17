@@ -1,0 +1,50 @@
+#pragma kernel HashFloatCS
+#pragma kernel HashUIntCS HASH_UINT
+
+#if defined(HASH_UINT)
+Texture2D<uint> _Source;
+#else
+Texture2D<float4> _Source;
+#endif
+RWStructuredBuffer<uint4> _Fingerprints;
+uint _Width, _Height, _Offset, _Mip;
+groupshared uint4 partial[64];
+
+uint4 Mix(uint4 value)
+{
+    value ^= value >> 16u;
+    value *= 0x7feb352du;
+    value ^= value >> 15u;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16u);
+}
+
+[numthreads(64, 1, 1)]
+#if defined(HASH_UINT)
+void HashUIntCS(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+#else
+void HashFloatCS(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+#endif
+{
+    uint4 digest = 0u;
+    for (uint index = group.x * 64u + lane; index < _Width * _Height; index += 1024u)
+    {
+        uint2 pixel = uint2(index % _Width, index / _Width);
+#if defined(HASH_UINT)
+        uint4 bits = uint4(_Source.Load(int3(pixel, _Mip)), 0u, 0u, 0u);
+#else
+        uint4 bits = asuint(_Source.Load(int3(pixel, _Mip)));
+#endif
+        digest += Mix(bits + index * 4u + uint4(0u, 1u, 2u, 3u));
+    }
+    partial[lane] = digest;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u)
+    {
+        if (lane < stride)
+            partial[lane] += partial[lane + stride];
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (lane == 0u)
+        _Fingerprints[_Offset + group.x] = partial[0];
+}

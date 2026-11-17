@@ -1,0 +1,52 @@
+#pragma kernel InspectCardCoverageCS VIVID_SDF_SURFACE_CACHE
+// The builder prepends the archived march budget; production code is unchanged.
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/SdfSurfaceCache.hlsl"
+StructuredBuffer<float4> _CardRays;
+RWStructuredBuffer<float4> _CardResults;
+uint _CardRayCount;
+uint _CardLayerMask;
+float _CardOriginLimit;
+float3 Origin(float3 p, float3 n, uint index)
+{
+    if (_CardOriginLimit >= .04) return p+n*.04;
+    VividMeshSdfInstance instance=_MeshSdfInstances[index];
+    VividMeshSdfField field=_MeshSdfFields[instance.fieldIndex];
+    float3 localNormal=float3(dot(instance.worldToLocal0.xyz,n),dot(instance.worldToLocal1.xyz,n),dot(instance.worldToLocal2.xyz,n));
+    float shell=field.signMode==2u?.5*field.shellThickness:0.0;
+    float safe=(shell+.125*field.originAndVoxelSize.w)/max(length(localNormal),1e-6);
+    float bias=min(.04,max(_CardOriginLimit,safe));
+    float3 candidate=p+n*bias;
+    float4 cp=float4(candidate,1);
+    float3 grid=float3(dot(instance.worldToLocal0,cp),dot(instance.worldToLocal1,cp),dot(instance.worldToLocal2,cp))-field.originAndVoxelSize.xyz;
+    float3 extent=float3(field.dimensions-1u)*field.originAndVoxelSize.w;
+    return any(grid<0)||any(grid>extent)||VividMeshSdfSample(field,grid)>.075*field.originAndVoxelSize.w?candidate:p+n*.04;
+}
+[numthreads(64,1,1)]void InspectCardCoverageCS(uint3 id:SV_DispatchThreadID)
+{
+    uint i=id.x;if(i>=_CardRayCount)return;
+    float4 p=_CardRays[3*i],n=_CardRays[3*i+1],d=_CardRays[3*i+2];
+    float3 origin=Origin(p.xyz,n.xyz,uint(p.w));
+    VividMeshSdfReceiver receiver=(VividMeshSdfReceiver)0;
+    receiver.entityId=_MeshSdfInstances[uint(p.w)].entityId;receiver.positionWS=p.xyz;receiver.normalWS=n.xyz;
+    VividMeshSdfHit hit;bool advanced,incomplete;
+    bool traced=VividTraceMeshSdfSceneInternal(origin,d.xyz,0,20,_CardLayerMask,0,false,receiver,hit,advanced,incomplete);
+    uint o=i*8u;
+    [unroll]for(uint j=0;j<8;++j)_CardResults[o+j]=0;
+    _CardResults[o]=float4(origin,length(origin-p.xyz));
+    _CardResults[o+7]=float4(traced,advanced,incomplete,hit.instanceIndex);
+    if(!traced)return;
+    float3 pos=origin+d.xyz*hit.distance;
+    VividMeshSdfInstance instance=_MeshSdfInstances[hit.instanceIndex];
+    DiffuseSurface surface=_SdfDiffuseSurfaces[hit.instanceIndex];
+    float4 hp=float4(pos,1);
+    float3 local=float3(dot(instance.worldToLocal0,hp),dot(instance.worldToLocal1,hp),dot(instance.worldToLocal2,hp));
+    float3 relative=(local-surface.cardMinAndFirst.xyz)/surface.cardExtent.xyz;
+    float3 lightingNormal,original;uint3 texel;float error;uint rejection;
+    bool covered=VividTrySampleSdfSurface(hit,pos,surface,lightingNormal,original,texel,error,true,rejection);
+    _CardResults[o+1]=float4(pos,hit.distance);
+    _CardResults[o+2]=float4(hit.normalLS,rejection);
+    _CardResults[o+3]=float4(relative,hit.instanceIndex);
+    _CardResults[o+4]=float4(hit.normalWS,covered);
+    _CardResults[o+5]=float4(original,texel.z);
+    _CardResults[o+6]=float4(texel.xy,error,dot(original,-d.xyz));
+}

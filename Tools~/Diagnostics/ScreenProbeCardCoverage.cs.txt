@@ -1,0 +1,59 @@
+using UnityEngine;
+using UnityEditor;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
+using System.Reflection;
+{
+    const string output="__OUTPUT__";
+    const BindingFlags inst=BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic;
+    const BindingFlags stat=BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic;
+    object Field(object o,string n)=>o.GetType().GetField(n,inst).GetValue(o);
+    string Hash(byte[] b){using var s=System.Security.Cryptography.SHA256.Create();return BitConverter.ToString(s.ComputeHash(b)).Replace("-","").ToLowerInvariant();}
+    void Write(string path,byte[] b){if(System.IO.File.Exists(path))throw new Exception("Refuse overwrite: "+path);System.IO.File.WriteAllBytes(path,b);}
+    if(!EditorApplication.isPlaying || !EditorApplication.isPaused)throw new Exception("Paused PlayMode required");
+    var t=typeof(SdfDiffuseGatherPass);
+    foreach(var n in new[]{"EditorTraceCapture","EditorLinearCapture","EditorGatherStageCapture","EditorAtrousDispatchCapture"})
+        if(t.GetField(n,stat).GetValue(null)!=null)throw new Exception("Active capture: "+n);
+    var passes=(System.Collections.IList)typeof(PassRecorder).GetField("s_RenderPasses",stat).GetValue(null);
+    var pass=passes.Cast<object>().Single(p=>p.GetType()==t);var scene=Field(pass,"m_Scene");
+    var cache=scene.GetType().GetProperty("SurfaceCache",inst).GetValue(scene);
+    var protocol=Newtonsoft.Json.Linq.JObject.Parse(System.IO.File.ReadAllText(output+"/protocol.json"));
+    int count=(int)protocol["count"];
+    byte[] input=System.IO.File.ReadAllBytes(output+"/rays.bin");if(Hash(input)!=(string)protocol["raysSha256"])throw new Exception("Input hash mismatch");
+    var values=new Vector4[count*3];var floats=new float[count*12];Buffer.BlockCopy(input,0,floats,0,input.Length);
+    for(int i=0;i<values.Length;++i)values[i]=new Vector4(floats[4*i],floats[4*i+1],floats[4*i+2],floats[4*i+3]);
+    ComputeShader shader=null;GraphicsBuffer rays=null,result=null;
+    var reports=new List<object>();
+    try {
+        string body=System.IO.File.ReadAllText(output+"/diagnostic.compute.txt");
+        var create=typeof(ShaderUtil).GetMethods(stat).Single(m=>m.Name=="CreateComputeShaderAsset"&&m.GetParameters().Length==1);
+        shader=(ComputeShader)create.Invoke(null,new object[]{body});int k=shader.FindKernel("InspectCardCoverageCS");
+        var compile=typeof(ShaderUtil).GetMethods(stat).Single(m=>m.Name=="CompileComputeShaderVariant");
+        var c=compile.Invoke(null,new object[]{shader,k,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+        if(!(bool)c.GetType().GetProperty("Success").GetValue(c))throw new Exception("Diagnostic DX12 compile failed: "+Newtonsoft.Json.JsonConvert.SerializeObject(c));
+        byte[] dxil=(byte[])c.GetType().GetProperty("ShaderData").GetValue(c);Write(output+"/diagnostic.dxil",dxil);
+        foreach(var pair in new[]{("m_Voxels","_MeshSdfVoxels"),("m_FieldBuffer","_MeshSdfFields"),("m_InstanceBuffer","_MeshSdfInstances"),("m_NodeBuffer","_MeshSdfNodes"),("m_LeafInstanceBuffer","_MeshSdfLeafInstances"),("m_DiffuseSurfaceBuffer","_SdfDiffuseSurfaces")})
+            shader.SetBuffer(k,pair.Item2,(GraphicsBuffer)Field(scene,pair.Item1));
+        shader.SetInt("_MeshSdfNodeCount",((System.Collections.IList)Field(scene,"m_Nodes")).Count);
+        shader.SetBuffer(k,"_SdfLocalCardTable",(GraphicsBuffer)cache.GetType().GetProperty("LocalCardTable",inst).GetValue(cache));
+        foreach(var pair in new[]{("m_AlbedoDepth","_SdfSurfaceAlbedoDepth"),("m_NormalCoverage","_SdfSurfaceNormalCoverage")}) {
+            var tex=(Texture2DArray)Field(cache,pair.Item1);shader.SetTexture(k,pair.Item2,tex);
+            var read=AsyncGPUReadback.Request(tex,0,TextureFormat.RGBAFloat);read.WaitForCompletion();if(read.hasError)throw new Exception("Card readback failed");
+            var b=Enumerable.Range(0,read.layerCount).SelectMany(layer=>read.GetData<byte>(layer).ToArray()).ToArray();
+            Write(output+"/"+pair.Item1+".bin",b);reports.Add(new{texture=pair.Item1,width=tex.width,height=tex.height,layers=tex.depth,bytes=b.Length,sha256=Hash(b)});
+        }
+        rays=new GraphicsBuffer(GraphicsBuffer.Target.Structured,values.Length,16);rays.SetData(values);
+        result=new GraphicsBuffer(GraphicsBuffer.Target.Structured,count*8,16);
+        shader.SetBuffer(k,"_CardRays",rays);shader.SetBuffer(k,"_CardResults",result);
+        shader.SetInt("_CardRayCount",count);shader.SetInt("_CardLayerMask",(int)protocol["layerMask"]);
+        foreach(float limit in new[]{.01f,.04f}) {
+            shader.SetFloat("_CardOriginLimit",limit);shader.Dispatch(k,(count+63)/64,1,1);
+            var read=AsyncGPUReadback.Request(result);read.WaitForCompletion();if(read.hasError)throw new Exception("Result readback failed");
+            var b=read.GetData<byte>().ToArray();string name=limit<.04f?"results-1cm.bin":"results-4cm.bin";Write(output+"/"+name,b);
+            reports.Add(new{file=name,bytes=b.Length,sha256=Hash(b)});
+        }
+        string report=Newtonsoft.Json.JsonConvert.SerializeObject(new{complete=true,count,dxilSha256=Hash(dxil),reports},Newtonsoft.Json.Formatting.Indented);
+        System.IO.File.WriteAllText(output+"/gpu-report.json",report);return report;
+    }finally{rays?.Dispose();result?.Dispose();if(shader!=null)UnityEngine.Object.DestroyImmediate(shader);}
+}

@@ -1,0 +1,63 @@
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Experimental.Rendering;
+using UnityEditor;
+using System.Reflection;
+{
+    const string source="__SOURCE__",output="__OUTPUT__";
+    const BindingFlags all=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static|BindingFlags.Instance;
+    var capture=Newtonsoft.Json.Linq.JObject.Parse(System.IO.File.ReadAllText(source+"/capture.json"));
+    var rows=(Newtonsoft.Json.Linq.JArray)capture["records"];
+    const int frame=__FRAME__;
+    var constants=rows.Single(r=>(bool?)r["coldConstants"]==true&&(int)r["frame"]==frame);
+    string Hash(byte[] b){using var h=System.Security.Cryptography.SHA256.Create();return BitConverter.ToString(h.ComputeHash(b)).Replace("-","").ToLowerInvariant();}
+    Matrix4x4 Matrix(string key){var a=constants[key].Values<int>().ToArray();var m=new Matrix4x4();for(int i=0;i<16;++i)m[i]=BitConverter.Int32BitsToSingle(a[i]);return m;}
+    var owned=new List<UnityEngine.Object>();ComputeShader shader=null;
+    var results=new List<object>();var hashes=new HashSet<string>();
+    var gpuErrors=new List<string>();
+    Application.LogCallback onLog=(message,stack,kind)=>{if(kind==LogType.Error||kind==LogType.Exception)gpuErrors.Add(message);};
+    Application.logMessageReceived+=onLog;
+    try {
+        Texture Input(string tag,bool writable=false){
+            var r=rows.Single(x=>(int?)x["frame"]==frame&&(string)x["tag"]=="cold-"+tag);
+            byte[] b=System.IO.File.ReadAllBytes((string)r["path"]);if(Hash(b)!=(string)r["sha256"])throw new Exception("Input changed: "+tag);
+            var format=(GraphicsFormat)Enum.Parse(typeof(GraphicsFormat),(string)r["format"]);
+            var texture=new Texture2D((int)r["width"],(int)r["height"],format,TextureCreationFlags.None);owned.Add(texture);
+            texture.LoadRawTextureData(b);texture.Apply(false,false);
+            if(!writable)return texture;
+            var rt=new RenderTexture(new RenderTextureDescriptor(texture.width,texture.height){graphicsFormat=format,enableRandomWrite=true});owned.Add(rt);
+            if(!rt.Create())throw new Exception("Frozen input allocation failed");Graphics.CopyTexture(texture,rt);return rt;
+        }
+        var create=typeof(ShaderUtil).GetMethods(all).Single(m=>m.Name=="CreateComputeShaderAsset"&&m.GetParameters().Length==1);
+        shader=(ComputeShader)create.Invoke(null,new object[]{System.IO.File.ReadAllText(source+"/quadrature-gather.compute.txt")});owned.Add(shader);
+        int kernel=shader.FindKernel("ScreenProbeIntegrateCS");
+        var compile=typeof(ShaderUtil).GetMethods(all).Single(m=>m.Name=="CompileComputeShaderVariant");
+        var compiled=compile.Invoke(null,new object[]{shader,kernel,Array.Empty<string>(),GraphicsDeviceType.Direct3D12,BuildTarget.StandaloneWindows64});
+        if(!(bool)compiled.GetType().GetProperty("Success").GetValue(compiled))throw new Exception("Frozen Resolve compile failed");
+        var dxil=(byte[])compiled.GetType().GetProperty("ShaderData").GetValue(compiled);System.IO.File.WriteAllBytes(output+"/resolve.dxil",dxil);
+        var expected=capture["quadraturePrograms"].Single(r=>(string)r["name"]=="ScreenProbeIntegrateCS");
+        if(Hash(dxil)!=(string)expected["sha256"])throw new Exception("Resolve compiled program changed");
+        foreach(var pair in new[]{("depth","_SdfDiffuseDepth"),("gbuffer0","_SdfDiffuseGBuffer0"),("gbuffer1-decoded","_SdfDiffuseGBuffer1"),("m_AdaptivePlacement","_SdfAdaptivePlacement"),
+            ("m_FilteredProbes","_SdfDiffuseProbeInput"),("m_PreparedAnchor","_SdfPreparedProbeAnchor"),("m_CurrentAnchorStatistics","_SdfAnchorStatistics")})
+            shader.SetTexture(kernel,pair.Item2,Input(pair.Item1));
+        shader.SetTexture(kernel,"_SdfDiffuseGeometry",Input("m_Geometry",true));
+        foreach(var name in new[]{"_SdfScreenHzb","_SdfScreenPreviousRadiance","_SdfScreenPreviousGeometry","_SdfScreenMotion"})shader.SetTexture(kernel,name,Texture2D.blackTexture);
+        shader.SetMatrix("_SdfDiffuseInverseVP",Matrix("inverseVp"));shader.SetMatrix("_SdfDiffuseVP",Matrix("vp"));shader.SetMatrix("_SdfDiffusePreviousVP",Matrix("previousVp"));
+        shader.SetVector("_SdfDiffuseScreenSize",new Vector4(1920,1080,1f/1920,1f/1080));
+        var forward=constants["cameraForward"].Values<int>().Select(BitConverter.Int32BitsToSingle).ToArray();shader.SetVector("_SdfProbeCameraForward",new Vector4(forward[0],forward[1],forward[2],forward[3]));
+        shader.SetInt("_SdfDiffuseFrame",(int)constants["frameOverride"]);shader.SetInt("_SdfDiffuseAdaptiveProbes",(bool)constants["adaptive"]?1:0);shader.SetInt("_SdfGatherHistoryDiagnostics",32);
+        shader.SetInt("_SdfRestirDense",(bool)constants["restirDense"]?1:0);
+        shader.SetInt("_SdfScreenProbeIntegrationJitter",1);shader.SetInt("_SdfPreparedAnchorEnabled",1);shader.SetInt("_SdfProbeResolveRepairMode",(bool)constants["realtimeOnly"]?1:0);shader.SetVector("_SdfNearOcclusion",Vector4.zero);
+        var target=new RenderTexture(new RenderTextureDescriptor(1920,1080){graphicsFormat=GraphicsFormat.R16G16B16A16_SFloat,enableRandomWrite=true});owned.Add(target);
+        if(!target.Create())throw new Exception("Frozen output allocation failed");shader.SetTexture(kernel,"_SdfDiffuseOutput",target);
+        for(int iteration=0;iteration<32;++iteration){
+            shader.Dispatch(kernel,240,135,1);var read=AsyncGPUReadback.Request(target);read.WaitForCompletion();if(read.hasError)throw new Exception("Frozen readback failed");
+            if(gpuErrors.Count!=0)throw new Exception(string.Join("\n",gpuErrors));
+            byte[] bytes=read.GetData<byte>().ToArray();string hash=Hash(bytes);hashes.Add(hash);results.Add(new{iteration,sha256=hash});
+            if(iteration==0)System.IO.File.WriteAllBytes(output+"/replay.bin",bytes);
+        }
+        string native=(string)rows.Single(r=>(int?)r["frame"]==frame&&(string)r["tag"]=="cold-resolved")["sha256"];
+        string report=Newtonsoft.Json.JsonConvert.SerializeObject(new{complete=true,frame,native,stable=hashes.Count==1,nativeMatch=hashes.Count==1&&hashes.Contains(native),compiledSha256=Hash(dxil),results},Newtonsoft.Json.Formatting.Indented);
+        System.IO.File.WriteAllText(output+"/replay.json",report);return report;
+    }finally{Application.logMessageReceived-=onLog;foreach(var value in owned)UnityEngine.Object.DestroyImmediate(value);}
+}

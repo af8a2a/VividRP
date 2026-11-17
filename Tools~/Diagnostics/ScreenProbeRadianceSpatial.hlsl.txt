@@ -1,0 +1,65 @@
+[numthreads(16, 1, 1)]
+void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
+{
+    uint2 tile = group.xy;
+    uint2 grid = DirectionalGrid();
+    uint2 offset = DirectionalMetadataOffset(grid);
+    uint2 address = DirectionalGatherAddress(tile, bin);
+    float4 lighting = _SdfDirectionalTemporal.Load(int3(address, 0));
+    float4 geometry = _SdfDiffuseGeometry[tile];
+    if (_SdfDiffuseSpatialFilter != 0u && geometry.w >= 0.0)
+    {
+        float3 normal = UnpackProbeNormal(geometry.w);
+        float3 direction = DirectionalGatherDirection(bin, GetLocalFrame(normal));
+        float eyeDepth = max(0.1, dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward));
+        float4 hit = _SdfDirectionalTemporal.Load(int3(address + offset, 0));
+        float3 sum = lighting.rgb;
+        float total = 1.0;
+        [unroll]
+        for (uint tap = 0u; tap < 4u; ++tap)
+        {
+            int2 candidate = int2(tile.x, tile.y % grid.y) + ProbeFilterOffsets[tap];
+            if (any(candidate < 0) || any(candidate >= int2(grid)))
+                continue;
+            uint2 neighbor = uint2(candidate);
+            float4 other = _SdfDiffuseGeometry[neighbor];
+            float weight = ProbeTraceGeometryWeight(other, geometry.xyz, normal, eyeDepth);
+            if (_SdfDiffuseAdaptiveProbes != 0u)
+            {
+                uint2 alternateTile = neighbor + uint2(0u, grid.y);
+                float4 alternate = _SdfDiffuseGeometry[alternateTile];
+                float alternateWeight = ProbeTraceGeometryWeight(alternate, geometry.xyz, normal, eyeDepth);
+                if (alternateWeight > weight)
+                {
+                    neighbor = alternateTile;
+                    other = alternate;
+                    weight = alternateWeight;
+                }
+            }
+            if (weight <= 0.0)
+                continue;
+            uint otherBin = DirectionalGatherBin(direction, GetLocalFrame(UnpackProbeNormal(other.w)));
+            uint2 otherAddress = DirectionalGatherAddress(neighbor, otherBin);
+            float4 otherLighting = _SdfDirectionalTemporal.Load(int3(otherAddress, 0));
+            float4 otherHit = _SdfDirectionalTemporal.Load(int3(otherAddress + offset, 0));
+            if (otherLighting.a <= 0.0)
+                continue;
+            float3 delta = other.xyz - geometry.xyz;
+            // Compare the SAME direction cone at the two receivers, as Lumen
+            // does, rather than comparing unrelated sampled directions in a bin.
+            float distance = otherHit.x > 0.0 ? otherHit.x : _SdfDiffuseMaxDistance;
+            if (hit.x > 0.0)
+                distance = min(distance, hit.x);
+            float3 toHit = delta + direction * distance;
+            float angle = acos(clamp(dot(toHit, direction) / max(length(toHit), 1e-5), -1.0, 1.0));
+            weight *= saturate(1.0 - angle / (PI / 18.0));
+            float relativeDepth = dot(delta, _SdfProbeCameraForward.xyz) / eyeDepth;
+            weight *= exp2(-920.0 * relativeDepth * relativeDepth);
+            sum += otherLighting.rgb * weight;
+            total += weight;
+        }
+        lighting.rgb = sum / total;
+    }
+    _SdfDirectionalFilteredOutput[address] = lighting;
+}
+

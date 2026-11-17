@@ -1,0 +1,77 @@
+// At a planar ThinShell rim the distance-field gradient points along the
+// inflated rim, not the captured material plane. Recover only a nearby actual
+// ray/plane intersection; never extend card coverage to the inflated silhouette.
+bool VividTrySampleSdfSurfaceAlongRay(VividMeshSdfHit hit, float3 rayDirectionWS, inout float3 positionWS,
+    inout DiffuseSurface surface, out float3 normalWS, out float3 originalNormalWS,
+    out uint3 cardTexel, out float surfaceError, bool diagnose, out uint rejection)
+{
+    if (VividTrySampleSdfSurface(hit, positionWS, surface, normalWS, originalNormalWS,
+        cardTexel, surfaceError, diagnose, rejection))
+        return true;
+    uint owner = (uint)surface.cardMinAndFirst.w;
+    if (hit.signMode != 2u || owner == 0u)
+        return false;
+
+    VividMeshSdfInstance instance = _MeshSdfInstances[hit.instanceIndex];
+    VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+    float4 p = float4(positionWS, 1.0);
+    float3 local = float3(dot(instance.worldToLocal0, p), dot(instance.worldToLocal1, p), dot(instance.worldToLocal2, p));
+    float3 direction = float3(dot(instance.worldToLocal0.xyz, rayDirectionWS),
+        dot(instance.worldToLocal1.xyz, rayDirectionWS), dot(instance.worldToLocal2.xyz, rayDirectionWS));
+    float3 relative = (local - surface.cardMinAndFirst.xyz) / surface.cardExtent.xyz;
+    float tolerance = field.originAndVoxelSize.w * 1.75 + field.shellThickness * 0.5;
+    uint width, height, slices;
+    _SdfSurfaceAlbedoDepth.GetDimensions(width, height, slices);
+    uint2 size = uint2(width, height);
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        // Bounds must describe an actually planar source, not an arbitrary
+        // curved or folded shell. Ordinary accepted card samples stay unchanged.
+        // Base captures expand mesh.bounds by 0.002 in VividSdfSurfaceCacheBaker.
+        // Remove that padding from the tangent bounds before accepting coverage.
+        const float capturePadding = 0.001;
+        if (surface.cardExtent[axis] > 2.0 * capturePadding + 1e-6 || abs(direction[axis]) < 1e-6)
+            continue;
+        uint face = axis * 2u + (direction[axis] < 0.0 ? 1u : 0u);
+        uint slice = owner - 1u + face;
+        uint2 tangent = axis == 0u ? uint2(1, 2) : axis == 1u ? uint2(0, 2) : uint2(0, 1);
+        float2 uv = float2(relative[tangent.x], relative[tangent.y]);
+        int2 seed = clamp(int2(uv * float2(size)), 0, int2(size) - 1);
+        float4 packed = _SdfSurfaceNormalCoverage.Load(int4(seed, slice, 0));
+        if (packed.a == 0.0)
+            continue;
+        float3 planeNormal = SafeNormalize(packed.xyz * 2.0 - 1.0);
+        if (abs(planeNormal[axis]) < 0.999 || dot(planeNormal, direction) >= 0.0)
+            continue;
+        float depth = _SdfSurfaceAlbedoDepth.Load(int4(seed, slice, 0)).a;
+        float distance = (depth - relative[axis]) * surface.cardExtent[axis] / direction[axis];
+        float3 offset = direction * distance;
+        float3 projected = (local + offset - surface.cardMinAndFirst.xyz) / surface.cardExtent.xyz;
+        float2 projectedUv = float2(projected[tangent.x], projected[tangent.y]);
+        float2 paddingUv = capturePadding / float2(surface.cardExtent[tangent.x], surface.cardExtent[tangent.y]);
+        if (hit.distance + distance <= 0.0 || length(offset) > tolerance
+            || any(projectedUv < paddingUv) || any(projectedUv > 1.0 - paddingUv))
+            continue;
+        VividMeshSdfHit projectedHit = hit;
+        projectedHit.normalLS = planeNormal;
+        VividSdfCardSample best = (VividSdfCardSample)0;
+        best.score = 2.0;
+        uint ignoredRejection = 0u;
+        VividSampleSdfCard(projectedHit, projected, axis, abs(planeNormal[axis]), surface.cardExtent[axis],
+            slice, face, size, 0.1 * field.originAndVoxelSize.w, false, ignoredRejection, best);
+        if (best.score == 2.0)
+            continue;
+        positionWS += rayDirectionWS * distance;
+        surface.albedoAndValid.rgb = best.albedo;
+        normalWS = SafeNormalize(best.normalLS.x * instance.worldToLocal0.xyz
+            + best.normalLS.y * instance.worldToLocal1.xyz + best.normalLS.z * instance.worldToLocal2.xyz);
+        originalNormalWS = normalWS * best.originalNormalSign;
+        cardTexel = best.texel;
+        surfaceError = best.depthError;
+        rejection = 0u;
+        return true;
+    }
+    return false;
+}
+

@@ -5,9 +5,8 @@
 #include "VividOpenPBROpaqueGBuffer.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
 
-// A bounded numerical directional-albedo estimate, not another energy
-// compensation term. All weights come from the vendor BSDF. The reference
-// tests can raise this count independently of the production path.
+// Importance sampling is retained for sharp specular lobes and as an independent
+// high-sample reference. Its discrete lobe selection must not set diffuse energy.
 #ifndef VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES
 #define VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES 32u
 #endif
@@ -36,9 +35,49 @@ OpenPBR_DiffuseSpecular VividIntegrateOpenPBROpaqueAlbedo(OpenPBR_PreparedBsdf p
     return openpbr_scale_diffuse_specular(albedo, 1.0 / sampleCount);
 }
 
-OpenPBR_DiffuseSpecular VividIntegrateOpenPBROpaqueAlbedo(OpenPBR_PreparedBsdf prepared)
+float3 VividIntegrateOpenPBROpaqueDiffuseAlbedo(
+    OpenPBR_PreparedBsdf prepared, float3 normalWS, float3 viewDirectionWS)
 {
-    return VividIntegrateOpenPBROpaqueAlbedo(prepared, VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES);
+    // Opaque V1 has isotropic EON diffuse with no coat/fuzz/transmission. At fixed
+    // NdotL its azimuth dependence is affine in cos(phi) on each half-circle.
+    // Evaluating their mean cosines (+/- 2/pi) integrates azimuth exactly, while
+    // eight Gauss-Legendre nodes integrate NdotL. All BSDF/energy terms still
+    // come from vendor eval; no prepared internals or replacement BRDF are used.
+    const float nodes[8] = {0.0198550718, 0.1016667613, 0.2372337950, 0.4082826788,
+        0.5917173212, 0.7627662050, 0.8983332387, 0.9801449282};
+    const float weights[8] = {0.0506142681, 0.1111905172, 0.1568533229, 0.1813418917,
+        0.1813418917, 0.1568533229, 0.1111905172, 0.0506142681};
+    float3 tangent = viewDirectionWS - dot(normalWS, viewDirectionWS) * normalWS;
+    float tangentLengthSq = dot(tangent, tangent);
+    tangent = tangentLengthSq > 1e-8 ? tangent * rsqrt(tangentLengthSq)
+        : openpbr_make_basis(normalWS).t;
+    float3 bitangent = cross(normalWS, tangent);
+    float3 azimuthX = (2.0 * INV_PI) * tangent;
+    float3 azimuthY = sqrt(1.0 - 4.0 * INV_PI * INV_PI) * bitangent;
+    float3 albedo = 0.0;
+    [loop]
+    for (uint i = 0u; i < 8u; ++i)
+    {
+        float mu = nodes[i];
+        float radius = sqrt(1.0 - mu * mu);
+        float3 positive = normalWS * mu + radius * (azimuthY + azimuthX);
+        float3 negative = normalWS * mu + radius * (azimuthY - azimuthX);
+        // eval includes NdotL; each azimuth half has measure pi.
+        albedo += (openpbr_eval(prepared, positive).diffuse
+            + openpbr_eval(prepared, negative).diffuse) * (PI * weights[i]);
+    }
+    return albedo;
+}
+
+OpenPBR_DiffuseSpecular VividIntegrateOpenPBROpaqueAlbedo(
+    OpenPBR_PreparedBsdf prepared, float3 normalWS, float3 viewDirectionWS)
+{
+    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(
+        prepared, VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES);
+    // Fixed mixture samples jump whenever a view-dependent lobe CDF crosses a
+    // sample. Diffuse multiplies already filtered GI, so those jumps never converge.
+    albedo.diffuse = VividIntegrateOpenPBROpaqueDiffuseAlbedo(prepared, normalWS, viewDirectionWS);
+    return albedo;
 }
 
 OpenPBR_DiffuseSpecular VividEvaluateOpenPBROpaqueLight(

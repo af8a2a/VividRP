@@ -8,6 +8,40 @@ namespace VividRP.Editor.Tests
     public sealed class OpenPBROpaqueDeferredTests
     {
         [Test]
+        public void DiffuseAlbedo_IsContinuousAcrossViewAngles_AndMatchesReference()
+        {
+            if (!SystemInfo.supportsComputeShaders) Assert.Ignore("Compute shaders required.");
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(VividPackagePathUtility.GetPreferredAssetPath(
+                "Tests/Editor/RenderPass/Lighting/OpenPBROpaqueDeferredTests.compute"));
+            Assert.That(shader, Is.Not.Null);
+            int kernel = shader.FindKernel("EvaluateDiffuseAlbedoContinuity");
+            var luts = PipelineResourceManager.Get<VividRPCoreResources>()?.OpenPBRLuts;
+            Assert.That(luts, Is.Not.Null);
+            Assert.That(luts.IsReady, Is.True);
+            for (int i = 0; i < VividOpenPBRLuts.Count; ++i)
+                shader.SetTexture(kernel, VividOpenPBRLuts.TextureIds[i], luts.GetTexture(i));
+            using var output = new ComputeBuffer(256 * 4 * 2, 16);
+            shader.SetBuffer(kernel, "_Output", output);
+            shader.Dispatch(kernel, 4, 4, 1);
+            var values = new Vector4[256 * 4 * 2];
+            output.GetData(values);
+            for (int material = 0; material < 4; ++material)
+                for (int angle = 0; angle < 256; ++angle)
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        int offset = (material * 256 + angle) * 2;
+                        float value = values[offset][c];
+                        Assert.That(float.IsNaN(value) || float.IsInfinity(value), Is.False);
+                        Assert.That(Mathf.Abs(value - values[offset + 1][c]), Is.LessThan(0.005f),
+                            $"Diffuse energy mismatch at material {material}, angle {angle}, channel {c}.");
+                        if (angle > 0)
+                            Assert.That(Mathf.Abs(value - values[offset - 2][c]) / Mathf.Max(value, 0.02f),
+                                Is.LessThan(0.0025f),
+                                $"Diffuse energy jump at material {material}, angle {angle}, channel {c}.");
+                    }
+        }
+
+        [Test]
         public void NativeStorageAndLighting_MatchVendor_AtProfileBoundaries()
         {
             if (!SystemInfo.supportsComputeShaders) Assert.Ignore("Compute shaders required.");

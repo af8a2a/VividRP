@@ -1,4 +1,5 @@
 #pragma kernel EvaluateNativeDeferred
+#pragma kernel EvaluateDiffuseAlbedoContinuity
 #pragma use_dxc
 
 // Standalone WARP can use embedded reference arrays without texture binding.
@@ -41,7 +42,7 @@ void EvaluateNativeDeferred(uint3 id : SV_DispatchThreadID)
     uint offset = id.x * 8u;
     _Output[offset] = float4(abs(actual.diffuse - reference.diffuse), valid ? 1.0 : 0.0);
     _Output[offset + 1u] = float4(abs(actual.specular - reference.specular), 0);
-    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared);
+    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared, inputs.normalWS, view);
     OpenPBR_DiffuseSpecular referenceAlbedo = VividIntegrateOpenPBROpaqueAlbedo(prepared, 4096u);
     _Output[offset + 2u] = float4(albedo.diffuse, 0);
     _Output[offset + 3u] = float4(albedo.specular, 0);
@@ -65,4 +66,31 @@ void EvaluateNativeDeferred(uint3 id : SV_DispatchThreadID)
     _Output[offset + 6u] = float4(error, restoredValid, invalidIorRejected, overflowRejected);
     OpenPBR_DiffuseSpecular backface = VividEvaluateOpenPBROpaqueLight(prepared, inputs.normalWS, -direction, radiance);
     _Output[offset + 7u] = float4(backface.diffuse + backface.specular, 0);
+}
+
+// A dense angle sweep detects fixed bands that a few material boundary cases miss.
+// The reference uses the independent importance-sampled estimator above.
+[numthreads(64, 1, 1)]
+void EvaluateDiffuseAlbedoContinuity(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= 256u || id.y >= 4u) return;
+    VividOpenPBROpaqueInputs inputs = (VividOpenPBROpaqueInputs)0;
+    inputs.baseWeight = 1.0;
+    inputs.baseColor = id.y < 2u ? float3(0.0085, 0.367, 0.033) : 1.0;
+    inputs.baseDiffuseRoughness = (id.y & 1u) == 0u ? 0.0 : 1.0;
+    inputs.specularWeight = 1.0;
+    inputs.specularColor = 1.0;
+    inputs.specularRoughness = 0.8;
+    inputs.specularIor = 1.5;
+    inputs.normalWS = float3(0, 0, 1);
+    float nDotV = lerp(0.25, 0.47, id.x / 255.0);
+    float3 view = float3(sqrt(1.0 - nDotV * nDotV), 0, nDotV);
+    OpenPBR_ResolvedInputs resolved;
+    VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved);
+    OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, view);
+    float3 actual = VividIntegrateOpenPBROpaqueDiffuseAlbedo(prepared, inputs.normalWS, view);
+    OpenPBR_DiffuseSpecular reference = VividIntegrateOpenPBROpaqueAlbedo(prepared, 4096u);
+    uint offset = (id.y * 256u + id.x) * 2u;
+    _Output[offset] = float4(actual, 0);
+    _Output[offset + 1u] = float4(reference.diffuse, 0);
 }

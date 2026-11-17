@@ -140,7 +140,8 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     if (dot(inputs.normalWS, viewDirectionWS) <= 0.0)
         return true;
     OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, viewDirectionWS);
-    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared);
+    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(
+        prepared, resolved.geometry_basis.n, viewDirectionWS);
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
     bool realtimeOpenPbrDiffuse = false;
     #if defined(VIVID_REALTIME_DIFFUSE_GI)

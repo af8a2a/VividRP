@@ -701,7 +701,8 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
 {
     uint2 grid = ProbeGridSize(size);
     float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
-    float footprint = ScreenProbeStableRadianceFootprint(pixel, size, position, normal, eyeDepth);
+    // Radiance filtering determines energy; scalar anchor contrast must not lock the lookup.
+    float footprint = 1.0;
     float2 interpolationPixel = GetScreenProbeInterpolationPixel(pixel, size, position, normal, eyeDepth, footprint);
     ScreenProbeInterpolation samples = CalculateScreenProbeInterpolation(pixel, size, grid,
         interpolationPixel, position, normal, eyeDepth, footprint);

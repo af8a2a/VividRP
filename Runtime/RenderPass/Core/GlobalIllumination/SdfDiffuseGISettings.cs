@@ -157,16 +157,19 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Filter neighboring screen probes before resolving diffuse GI. Enabled by default with Screen Probe Gather.")]
         public BoolParameter screenProbeSpatialFilter = new(false);
 
-        [Tooltip("Probe-grid filter footprint. Adaptive 5x5 adds an outer ring for weak probes. The ray-pair hit-distance filter uses the cross footprint.")]
+        [Tooltip("Legacy probe-grid filter footprint. Screen Probe Gather uses three directional cross passes; the ray-pair hit-distance filter also uses the cross footprint.")]
         public SdfScreenProbeSpatialKernelParameter screenProbeSpatialKernel = new(SdfScreenProbeSpatialKernel.Neighborhood3x3);
 
-        [Tooltip("Experimental conservative reconstruction of the SH energy anchor on connected coplanar screen probes. Keeps coverage and unfiltered temporal history separate. Screen Probe Gather only.")]
+        // Retained for serialized profile compatibility; directional radiance replaces scalar anchors.
+        [HideInInspector]
         public BoolParameter screenProbeSpatialAnchor = new(false);
 
-        [Tooltip("Add a half-strength connected-plane reconstruction. Preserves unfiltered probe history and trace coverage; geometry edges retain the original reconstruction. Screen Probe Gather only.")]
+        [HideInInspector]
         public BoolParameter screenProbeAnchorPreFilter = new(false);
 
-        [Tooltip("Maximum effective age of stable screen-probe energy anchors. Longer windows reduce noise on stationary receivers; world displacement shortens the window and newly exposed receivers reject history. Screen Probe Gather only.")]
+        // Preserve the serialized name and existing window settings.
+        [InspectorName("Screen Probe Radiance Max Age")]
+        [Tooltip("Maximum effective age of reprojected directional radiance. History ramps from a fresh sample after rejection. Longer windows trade lighting response for stability. Screen Probe Gather only.")]
         public ClampedIntParameter screenProbeAnchorMaxAge = new(32, 32, 512);
 
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]

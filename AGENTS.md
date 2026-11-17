@@ -62,7 +62,18 @@ Before handoff, inspect the final diff for scope, accidental generated changes, 
 
 Respond in the user's language with concise progress updates and a final explanation of the result, relevant file links, validation, and material limitations. Preserve the original objective when the user adds a correction or asks a status question. Do not claim completion or performance improvements without supporting evidence.
 
-## 6. Important Notes
+
+## 6. Performance and A/B Experiment Budget
+- Compare the same workload and settings; record cache/warmup conditions and the measured scope. Report pass timings as pass timings, not end-to-end speedups. Keep generated captures and images out of source control unless intentionally included as evidence.
+- One run is one independent process launch measured after warmup. Frames within a run are not independent samples.
+- Default protocol: interleaved A-B-A-B (4 runs). Stop and report when every B is on the same side of every A and the A/B gap exceeds the within-variant spread.
+- Extend to at most 8 interleaved runs only when the first 4 are mixed, the gap is comparable to the spread, or a run is clearly disturbed (e.g. shader compile, thermal or background spike; name the cause). Do not extend once the result is already clear.
+- If 8 runs are still inconclusive, stop and report "no measurable difference" with the observed numbers. Do not rerun to seek a clearer result. Exceeding 8 runs, or adding scenes/resolutions/settings beyond those the change affects, requires the user's approval with a stated reason.
+- Iterate on candidates with a single quick A/B or diagnostic. Run the full A-B-A-B protocol and the correctness check only for the final candidate, not for every intermediate attempt.
+- Functional changes follow the same principle: run the focused tests and one runtime check that cover the changed behavior; do not repeat a passing check for reassurance.
+
+
+## 7. Important Notes
 - Ignore shader compilation errors caused specifically by the D3D11 limit of 8 UAVs, including SPD and other shaders that exceed this limit. Treat these diagnostics as non-blocking during validation; do not change shaders or add D3D11 compatibility workarounds solely to eliminate them. This exception does not apply to other shader errors or errors on other graphics backends.
 - C# structs uploaded directly to GPU buffers must use `[StructLayout(LayoutKind.Sequential)]` or an explicitly defined layout matching HLSL; never use `LayoutKind.Auto`. Runtime upgrades can reorder fields without changing the total struct size. In Unity 7000.0.0a7, this broke `VividGPUCullingContext` and `VividGPULODSelectionContext`, producing zero visible Meshlets while RTAS still worked.
 - When changing GPU-shared structs or upgrading Unity, verify both buffer stride and individual field offsets against HLSL, including fixed arrays and padding. Extend the layout checks in `Tests/Editor/SubSystem/GPUDriven/VividGPUDrivenBufferSetTests.cs` as needed. Compilation and size-only checks do not prove layout compatibility; for missing geometry, inspect culling counters and indirect draw arguments separately from RTAS validation.

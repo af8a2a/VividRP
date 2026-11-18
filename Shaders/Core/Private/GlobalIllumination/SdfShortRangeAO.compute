@@ -80,9 +80,8 @@ void SearchBentNormalHorizons(uint3 id : SV_DispatchThreadID)
 #if !UNITY_REVERSED_Z
     view = -view;
 #endif
-    float clipW = mul(_SdfDiffuseVP, float4(position, 1.0)).w;
-    float radius = max(1.0, 0.5 * _SdfNearOcclusion.x * _SdfDiffuseScreenSize.y *
-        length(_SdfDiffuseVP[1].xyz) / max(clipW, 1e-4));
+    // The half-resolution search takes depth taps in full-resolution pixels.
+    const float radiusPixels = 2.0 * ProbeSpacing;
     float invForeground = rcp(max(0.3 * dot(float4(position, 1.0), _SdfProbeCameraForward), 1e-4));
     uint seed = HashProbe(id.x + 65537u * id.y);
     float2 noise = frac(float2(seed & 65535u, seed >> 16u) / 65536.0
@@ -105,7 +104,7 @@ void SearchBentNormalHorizons(uint3 id : SV_DispatchThreadID)
         for (uint stepIndex = 0; stepIndex < 3; ++stepIndex)
         {
             float t = (stepIndex + frac(noise.y + (slice + stepIndex * 3u) * 0.618033989)) / 3.0;
-            int2 offset = int2(round(axis * (1.0 + t * t * radius)));
+            int2 offset = int2(round(axis * (1.0 + t * t * radiusPixels)));
             horizon.x = max(horizon.x, BentHorizon(int2(pixel) - offset, position, view, normal, low.x, invForeground));
             horizon.y = max(horizon.y, BentHorizon(int2(pixel) + offset, position, view, normal, low.y, invForeground));
         }

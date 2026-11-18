@@ -722,7 +722,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
                 && HasKernel(m_NearOcclusionCompute, "ApplySdfNearOcclusion"))
                 m_NearOcclusionKernel = m_NearOcclusionCompute.FindKernel("ApplySdfNearOcclusion");
-            if (m_NearOcclusionKernel >= 0 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
+            // Reprojection reads the R32_UInt geometry history with Texture2D.Load.
+            if (m_NearOcclusionKernel >= 0 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
                 && HasKernel(m_NearOcclusionCompute, "SearchBentNormalHorizons")
                 && HasKernel(m_NearOcclusionCompute, "AccumulateBentNormal"))
             {
@@ -964,13 +965,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_DirectionalCompositeKernel >= 0 && (!legacyGather || settings.screenProbeDirectionalCache.value)
                 && DirectionalGatherBins * m_ProbeWidth <= SystemInfo.maxTextureSize && 2 * m_AtlasHeight <= SystemInfo.maxTextureSize;
             if (useSettings && m_NearOcclusionKernel >= 0 && !m_OffscreenOnly
-                && float.IsFinite(settings.nearOcclusionStrength.value) && float.IsFinite(settings.nearOcclusionRadius.value))
+                && float.IsFinite(settings.nearOcclusionStrength.value))
             {
                 float strength = settings.nearOcclusionStrength.value;
                 bool bent = strength > 0f && !m_RestirGather && settings.screenProbeBentNormalAO.value
                     && m_BentSearchKernel >= 0 && m_BentTemporalKernel >= 0;
+                float worldRadius = settings.nearOcclusionRadius.value;
+                if (!float.IsFinite(worldRadius))
+                {
+                    worldRadius = 0f;
+                    if (!bent)
+                        strength = 0f;
+                }
                 bool directional = strength > 0f && !bent && settings.directionalNearOcclusion.value;
-                m_NearOcclusion = new Vector4(settings.nearOcclusionRadius.value, strength, directional ? 1f : 0f, bent ? 1f : 0f);
+                m_NearOcclusion = new Vector4(worldRadius, strength, directional ? 1f : 0f, bent ? 1f : 0f);
                 m_DirectionalProbes |= directional && !m_RestirPixelIntegration;
             }
             m_DirectionalGuide = m_DirectionalCache && m_DirectionalGuideKernel >= 0 && settings.screenProbeSamplingGuide.value;
@@ -1113,7 +1121,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_BentNormalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, BentNormalHistoryId,
                     m_PreviousBentNormal, m_CurrentBentNormal, m_CurrentBentNormal.desc, out m_BentNormalHistory, AccessFlags.Write)
                     && motionConnected && m_PixelGeometryHistory != null && m_PixelGeometryHistory.IsValid()
-                    && m_State.NearOcclusion.Equals(m_NearOcclusion) && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
+                    && m_State.NearOcclusion.w == m_NearOcclusion.w && m_State.NearOcclusion.y == m_NearOcclusion.y
+                    && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
                 frameData.GetOrCreate<VividSdfDiffuseFrameData>().BentNormalHistory = m_BentNormalHistory;
             }
             int atlasWidth = m_ProbeWidth * (m_DirectionalProbes ? DirectionalProbePlanes : 1);
@@ -1503,7 +1512,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordAtrousDenoise(context, black, restirVarianceTemporal);
                 if (m_BentNormalHistory != null && m_PixelGeometryHistory != null)
                     RecordBentNormal(cmd, frame, pixelTemporal, black);
-                else if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
+                else if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f && m_NearOcclusion.x > 0f)
                     RecordNearOcclusion(cmd);
             }
             var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
@@ -2325,7 +2334,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = m_NearOcclusionCompute;
             BindProbeFrame(cmd, shader);
             cmd.SetComputeIntParam(shader, FrameId, frame);
-            cmd.SetComputeMatrixParam(shader, ViewProjectionId, m_ViewProjection);
             cmd.SetComputeVectorParam(shader, NearOcclusionId, m_NearOcclusion);
             BindReceiver(cmd, shader, m_BentSearchKernel);
             cmd.SetComputeTextureParam(shader, m_BentSearchKernel, BentSamplesOutputId, m_BentSamples.innerHandle);

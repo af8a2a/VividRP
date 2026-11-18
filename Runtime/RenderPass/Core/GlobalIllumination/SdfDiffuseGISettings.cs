@@ -170,9 +170,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [HideInInspector]
         public BoolParameter screenProbeAnchorPreFilter = new(false);
 
-        // Preserve the serialized name and existing window settings.
-        [InspectorName("Screen Probe Radiance Max Age")]
-        [Tooltip("Maximum effective age of reprojected directional radiance. History ramps from a fresh sample after rejection. Longer windows trade lighting response for stability. Screen Probe Gather only.")]
+        // Retained for serialized profiles and legacy probe-anchor diagnostics.
+        [HideInInspector]
         public ClampedIntParameter screenProbeAnchorMaxAge = new(32, 32, 512);
 
         [Tooltip("Downweight neighboring probes when rays in matching world directions disagree on hit distance. Requires Screen Probe Spatial Filter.")]

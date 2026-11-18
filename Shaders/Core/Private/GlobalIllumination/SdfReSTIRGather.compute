@@ -217,8 +217,8 @@ void ResampleSdfRestirTemporal(uint3 id : SV_DispatchThreadID)
             float2 uv = ScreenUv(previousClip);
             if (all(uv >= 0.0) && all(uv < 1.0))
             {
-                uint spacing = _SdfRestirDense != 0u ? RestirPixelSpacing : ProbeSpacing;
-                uint2 tile = uint2(uv * _SdfDiffuseScreenSize.xy) / spacing;
+                uint2 tile = _SdfRestirDense != 0u ? uint2(uv * _SdfDiffuseScreenSize.xy) / RestirPixelSpacing
+                    : uint2(clamp(floor(ProbeHistoryGridPosition(uv) + 0.5), 0.0, float2(grid - 1u)));
                 float eyeDepth = dot(float4(geometry.xyz, 1.0), _SdfProbeCameraForward);
                 float radius = clamp(0.025 * eyeDepth, 0.08, 0.25);
                 float4 previous = _SdfDiffusePreviousGeometry.Load(int3(tile, 0));

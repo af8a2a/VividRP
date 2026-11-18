@@ -223,7 +223,7 @@ void PrepareSdfDirectionalGuide(uint3 id : SV_DispatchThreadID)
         if (clip.w > 0.0 && all(uv >= 0.0) && all(uv < 1.0))
         {
             float bestDistance = clamp(0.015 * clip.w, 0.08, 0.35);
-            int2 lower = int2(floor(uv * _SdfDiffuseScreenSize.xy / ProbeSpacing - 0.5));
+            int2 lower = int2(floor(ProbeHistoryGridPosition(uv)));
             [unroll]
             for (uint tap = 0u; tap < 4u; ++tap)
             {

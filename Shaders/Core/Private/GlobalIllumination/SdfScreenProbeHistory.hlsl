@@ -13,7 +13,7 @@ float ProbeReprojectionWeight(float4 geometry, float3 position, float3 normal, f
 float4 AccumulateReprojectedProbe(float4 current, float3 position, float3 normal, float2 uv, inout float3x3 moments)
 {
     uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
-    float2 gridPosition = uv * _SdfDiffuseScreenSize.xy / ProbeSpacing - 0.5;
+    float2 gridPosition = ProbeHistoryGridPosition(uv);
     int2 lower = int2(floor(gridPosition));
     float2 fraction = frac(gridPosition);
     float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
@@ -82,7 +82,8 @@ float4 AccumulateProbe(float4 current, float3 position, float3 normal, inout flo
     if (_SdfProbeSpatialKernel != 0u)
         return AccumulateReprojectedProbe(current, position, normal, uv, moments);
 
-    uint2 previousTile = uint2(uv * _SdfDiffuseScreenSize.xy) / ProbeSpacing;
+    uint2 previousTile = uint2(clamp(floor(ProbeHistoryGridPosition(uv) + 0.5),
+        0.0, float2(ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy)) - 1u)));
     float4 geometry = _SdfDiffusePreviousGeometry.Load(int3(previousTile, 0));
     if (_SdfDiffuseAdaptiveProbes != 0u || _SdfDiffuseSpatialFilter != 0u)
     {

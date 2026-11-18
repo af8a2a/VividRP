@@ -81,7 +81,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId ProbeHistoryId = CameraHistoryId.Create("SdfDiffuseProbeHistory");
         private static readonly CameraHistoryId AnchorStatisticsHistoryId = CameraHistoryId.Create("SdfProbeAnchorStatistics");
         private static readonly CameraHistoryId GeometryHistoryId = CameraHistoryId.Create("SdfDiffuseGeometryHistory");
-        private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalWeightedRadianceHistoryV2");
+        private static readonly CameraHistoryId DirectionalHistoryId = CameraHistoryId.Create("SdfDirectionalCompositedRadianceHistory");
         private static readonly CameraHistoryId DirectionalGuideHistoryId = CameraHistoryId.Create("SdfDirectionalWeightedFilteredHistoryV2");
         private static readonly CameraHistoryId ProposalHistoryId = CameraHistoryId.Create("SdfDirectionalSamplingProposalHistory");
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
@@ -114,6 +114,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HasProposalHistoryId = Shader.PropertyToID("_SdfDirectionalHasProposalHistory");
         private static readonly int DirectionalRaysId = Shader.PropertyToID("_SdfDirectionalRays");
         private static readonly int DirectionalPreviousId = Shader.PropertyToID("_SdfDirectionalPrevious");
+        private static readonly int DirectionalHasMotionId = Shader.PropertyToID("_SdfDirectionalHasMotion");
         private static readonly int DirectionalCompositeId = Shader.PropertyToID("_SdfDirectionalComposite");
         private static readonly int DirectionalCompositeOutputId = Shader.PropertyToID("_SdfDirectionalCompositeOutput");
         private static readonly int DirectionalTemporalId = Shader.PropertyToID("_SdfDirectionalTemporal");
@@ -249,6 +250,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RayBiasId = Shader.PropertyToID("_SdfDiffuseRayBias");
         private static readonly int LayerMaskId = Shader.PropertyToID("_SdfDiffuseLayerMask");
         private static readonly int FrameId = Shader.PropertyToID("_SdfDiffuseFrame");
+        private static readonly int ProbePreviousFrameId = Shader.PropertyToID("_SdfProbePreviousFrame");
         private static readonly int HasHistoryId = Shader.PropertyToID("_SdfDiffuseHasHistory");
         private static readonly int DirectionalProbesId = Shader.PropertyToID("_SdfDiffuseDirectionalProbes");
         private static readonly int AdaptiveProbesId = Shader.PropertyToID("_SdfDiffuseAdaptiveProbes");
@@ -394,6 +396,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal int SkyContentHash;
             internal Vector4 SkyTextureParams, SkyTextureTint;
             internal uint Frame;
+            internal int ProbeFrame;
             internal bool SunConfigured;
             internal ulong SunCardVersion;
             internal int SunReadyCards;
@@ -441,8 +444,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ReceiverTraceKernel = -1, m_ReceiverCachedKernel = -1, m_ReceiverCachedSunKernel = -1;
         private readonly RenderGraphTexture m_PreviousProbes = RenderGraphTexture.CreateInput("Previous SDF Diffuse Probes", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousDirectional = RenderGraphTexture.CreateInput("Previous Screen Probe Composited Radiance", ProbeFormat);
-        [RenderGraphResource(Name = "Composite Probe Radiance", Access = AccessFlags.ReadWrite)]
-        [TransientResource]
         private readonly RenderGraphTexture m_CurrentDirectional = CreateScratch("Screen Probe Composited Radiance", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousProposal = RenderGraphTexture.CreateInput("Previous Screen Probe Sampling Proposal", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentProposal = CreateScratch("Screen Probe Sampling Proposal", ProbeFormat);
@@ -451,6 +452,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Spatial Probe Radiance Scratch", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_DirectionalSpatialScratch = CreateScratch("Screen Probe Spatial Radiance Scratch", ProbeFormat);
+        [RenderGraphResource(Name = "Temporal Probe Radiance", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private readonly RenderGraphTexture m_DirectionalTemporal = CreateScratch("Screen Probe Temporal Radiance", ProbeFormat);
         [RenderGraphResource(Name = "Temporal Probe Anchor", Access = AccessFlags.ReadWrite)]
         [TransientResource]
@@ -1007,7 +1010,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DirectionalGuide && !m_FrozenGuideActive ? m_AtlasHeight : 1);
             m_DirectionalRayTexture.Resize(directionalWidth, m_DirectionalCache ? DirectionalTracePlanes * m_AtlasHeight : 1);
             m_DirectionalTemporal.Resize(m_DirectionalCache ? DirectionalGatherBins * m_ProbeWidth : 1,
-                m_DirectionalCache ? DirectionalTracePlanes * m_AtlasHeight : 1);
+                m_DirectionalCache ? m_AtlasHeight : 1);
             int rayCount = m_RestirPixelIntegration ? 1 : RaysPerProbe;
             m_HitLighting.Resize(m_ProbeWidth, m_AtlasHeight);
             m_TraceSources.Resize(m_ProbeWidth, m_AtlasHeight);
@@ -1097,7 +1100,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
             bool bentNormal = m_NearOcclusion.w > 0f;
-            if (screenConfigured || pixelTemporal || bentNormal)
+            if (screenConfigured || pixelTemporal || bentNormal || m_DirectionalCache)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
                     * cameraData.GetGPUProjectionMatrixNoJitter(renderIntoTexture: true).inverse;
@@ -1144,7 +1147,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 int gatherWidth = DirectionalGatherBins * m_ProbeWidth;
                 m_CurrentDirectional.Resize(gatherWidth, DirectionalTracePlanes * m_AtlasHeight);
                 m_DirectionalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalHistoryId,
-                    m_PreviousDirectional, m_DirectionalTemporal, m_DirectionalTemporal.desc, out m_DirectionalHistory);
+                    m_PreviousDirectional, m_CurrentDirectional, m_CurrentDirectional.desc, out m_DirectionalHistory);
                 m_CurrentDirectionalFiltered.Resize(gatherWidth, m_AtlasHeight);
                 m_DirectionalGuideHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, DirectionalGuideHistoryId,
                     m_PreviousDirectionalFiltered, m_CurrentDirectionalFiltered, m_CurrentDirectionalFiltered.desc, out m_DirectionalGuideHistory);
@@ -1535,6 +1538,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalGuideHistory?.MarkWritten();
             m_ProposalHistory?.MarkWritten();
             m_State.ViewProjection = m_ViewProjection;
+            m_State.ProbeFrame = frame;
             m_State.Cache = m_Scene.SurfaceCache;
             m_State.OffscreenOnly = m_OffscreenOnly;
             m_State.TraceMode = m_TraceMode;
@@ -2766,6 +2770,12 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 kernel = m_DirectionalTemporalKernel;
                 cmd.SetComputeIntParam(shader, DirectionalHasHistoryId, hasHistory ? 1 : 0);
+                bool hasMotion = hasHistory && m_ScreenMotion != null && !ReferenceEquals(m_ScreenMotion, m_LocalMotion)
+                    && m_ScreenMotion.innerHandle.IsValid();
+                cmd.SetComputeIntParam(shader, DirectionalHasMotionId, hasMotion ? 1 : 0);
+                cmd.SetComputeTextureParam(shader, kernel, MotionId, hasMotion ? m_ScreenMotion.innerHandle : black);
+                cmd.SetComputeTextureParam(shader, kernel, PlacementId, m_AdaptiveProbes ? m_AdaptivePlacement.innerHandle : black);
+                cmd.SetComputeVectorParam(shader, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
                 cmd.SetComputeMatrixParam(shader, PreviousViewProjectionId, m_State.ViewProjection);
                 cmd.SetComputeTextureParam(shader, kernel, GeometryId, geometry);
                 cmd.SetComputeTextureParam(shader, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
@@ -2778,9 +2788,8 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 kernel = m_DirectionalFilterKernel;
                 cmd.SetComputeTextureParam(shader, kernel, GeometryId, geometry);
-                cmd.SetComputeTextureParam(shader, kernel, DirectionalTemporalId, temporal);
-                // Temporal history stays unfiltered. The final spatial field is
-                // used both for irradiance and next-frame importance sampling.
+                cmd.SetComputeTextureParam(shader, kernel, DirectionalCompositeId, composite);
+                // Use this frame's hit distances with the two-frame radiance estimate.
                 TextureHandle spatialInput = temporal;
                 int spatialPasses = m_SpatialFilter ? 3 : 1;
                 for (int pass = 0; pass < spatialPasses; ++pass)
@@ -2818,6 +2827,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 #endif
             cmd.SetComputeIntParam(shader, GatherHistoryDiagnosticsId, diagnostics);
+            cmd.SetComputeIntParam(shader, ProbePreviousFrameId, m_State.ProbeFrame);
             cmd.SetComputeVectorParam(shader, HistoryLightScaleId, PreserveRelitHistory ? m_RadiosityHistoryScale : Vector4.one);
             cmd.SetComputeFloatParam(shader, AnchorHistoryBlendId, anchorBlend);
             cmd.SetComputeFloatParam(shader, ProbeAnchorMaxAgeId, m_ProbeAnchorMaxAge);

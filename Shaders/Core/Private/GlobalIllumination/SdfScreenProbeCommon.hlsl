@@ -92,6 +92,7 @@ float4 _SdfNearOcclusion; // Radius, strength, and whether to integrate directio
 uint _SdfDiffuseLayerMask;
 uint _SdfDiffuseLightLayerMask;
 uint _SdfDiffuseFrame;
+uint _SdfProbePreviousFrame;
 uint _SdfDiffuseHasHistory;
 uint _SdfDiffuseDirectionalProbes;
 uint _SdfDiffuseAdaptiveProbes;
@@ -112,20 +113,33 @@ uint _SdfDiffuseRecordFirstHitDiagnostics;
 uint _SdfGatherHistoryDiagnostics;
 float _SdfProbeAnchorHistoryBlend;
 
-float2 ProbeHistoryGridPosition(float2 uv)
+uint2 ProbeTileJitter(uint frame)
 {
-    if ((_SdfGatherHistoryDiagnostics & 256u) != 0u)
-        return uv * _SdfDiffuseScreenSize.xy / ProbeSpacing - 0.5;
-    // ReceiverPixel is an integer texel index; its projected UV is at index + 0.5.
-    float2 pixel = uv * _SdfDiffuseScreenSize.xy - 0.5;
-    float2 probe = pixel / ProbeSpacing - 0.5;
+    // Lumen's Hammersley16(frame % 8, 8, 0), in integer pixel coordinates.
+    uint index = frame & 7u;
+    uint reversed = ((index & 1u) << 2u) | (index & 2u) | ((index & 4u) >> 2u);
+    return uint2(index, reversed) * (ProbeSpacing / 8u);
+}
+
+float2 ProbeGridPosition(float2 pixel, uint2 jitter)
+{
+    float2 probe = (pixel - float2(jitter)) / ProbeSpacing;
     uint2 grid = (uint2(_SdfDiffuseScreenSize.xy) + ProbeSpacing - 1u) / ProbeSpacing;
     float2 lower = max(float2(grid) - 2.0, 0.0);
-    float2 lowerPixel = min(lower * ProbeSpacing + ProbeSpacing / 2u, _SdfDiffuseScreenSize.xy - 1.0);
-    float2 lastPixel = min(float2(grid - 1u) * ProbeSpacing + ProbeSpacing / 2u, _SdfDiffuseScreenSize.xy - 1.0);
+    float2 lowerPixel = min(lower * ProbeSpacing + jitter, _SdfDiffuseScreenSize.xy - 1.0);
+    float2 lastPixel = min(float2(grid - 1u) * ProbeSpacing + jitter, _SdfDiffuseScreenSize.xy - 1.0);
     float2 tail = lower + (pixel - lowerPixel) / max(lastPixel - lowerPixel, 1.0);
     probe = lerp(probe, tail, float2(pixel >= lowerPixel));
     return probe * float2(grid > 1u);
+}
+
+float2 ProbeHistoryGridPosition(float2 uv)
+{
+    // History belongs to the last rendered sample, including fixed-frame captures.
+    // ReceiverPixel is an integer texel index; its projected UV is at index + 0.5.
+    float halfTexel = (_SdfGatherHistoryDiagnostics & 256u) != 0u ? 0.0 : 0.5;
+    return ProbeGridPosition(uv * _SdfDiffuseScreenSize.xy - halfTexel,
+        ProbeTileJitter(_SdfProbePreviousFrame));
 }
 
 float4 SdfRoundToNearestHalf(float4 value)
@@ -198,7 +212,7 @@ uint HashProbe(uint value)
 
 uint2 ProbeReceiverPixel(uint2 tile, uint2 screenSize)
 {
-    return min(tile * ProbeSpacing + ProbeSpacing / 2u, screenSize - 1u);
+    return min(tile * ProbeSpacing + ProbeTileJitter(_SdfDiffuseFrame), screenSize - 1u);
 }
 
 uint2 ProbeGridSize(uint2 screenSize)
@@ -216,7 +230,8 @@ bool LoadAdaptiveProbePixel(uint2 tile, out uint2 pixel)
 {
     uint encoded = (uint)_SdfAdaptivePlacement.Load(int3(tile, 0));
     uint offset = encoded - 1u;
-    pixel = tile * ProbeSpacing + uint2(offset % ProbeSpacing, offset / ProbeSpacing);
+    pixel = tile * ProbeSpacing + ProbeTileJitter(_SdfDiffuseFrame)
+        + uint2(offset % ProbeSpacing, offset / ProbeSpacing);
     return encoded != 0u;
 }
 

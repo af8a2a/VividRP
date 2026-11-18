@@ -33,6 +33,7 @@ void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
 
     uint encoded = 0u;
     float worstCoverage = 0.22;
+    uint2 origin = id.xy * ProbeSpacing + ProbeTileJitter(_SdfDiffuseFrame);
     // Check the original four samples first. Search the finer grid only until
     // an unsupported receiver is found, keeping one adaptive slot per tile.
     uint sampleCount = _SdfProbeResolveRepairMode != 0u ? 20u : 4u;
@@ -41,18 +42,17 @@ void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
     {
         uint2 offset = sampleIndex < 4u ? uint2(sampleIndex & 1u, sampleIndex >> 1u) * 8u + 4u
             : uint2((sampleIndex - 4u) & 3u, (sampleIndex - 4u) >> 2u) * 4u + 2u;
-        uint2 pixel = id.xy * ProbeSpacing + offset;
+        uint2 pixel = origin + offset;
         float3 position, normal;
         if (any(pixel >= screenSize) || !LoadReceiver(pixel, position, normal))
             continue;
 
         float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
-        int2 low = int2(id.xy) + int2(offset / (ProbeSpacing / 2u)) - 1;
         float coverage = 0.0;
         [unroll]
         for (uint neighbor = 0u; neighbor < 4u; ++neighbor)
         {
-            uint2 tile = uint2(clamp(low + int2(neighbor & 1u, neighbor >> 1u), 0, int2(grid) - 1));
+            uint2 tile = min(id.xy + uint2(neighbor & 1u, neighbor >> 1u), grid - 1u);
             float3 otherPosition, otherNormal;
             if (LoadReceiver(ProbeReceiverPixel(tile, screenSize), otherPosition, otherNormal))
                 coverage = max(coverage, ProbeGeometryWeight(otherPosition - position, normal, otherNormal, eyeDepth));
@@ -179,7 +179,7 @@ bool FindProbeResolveRepair(uint2 pixel, uint2 size, uint2 grid, float3 position
     confidence = 0.0;
     float bestScore = 0.0;
     float tolerance = clamp(0.0025 * eyeDepth, 0.012, 0.04);
-    int2 center = int2(pixel / ProbeSpacing);
+    int2 center = int2(floor(ProbeGridPosition(float2(pixel), ProbeTileJitter(_SdfDiffuseFrame)) + 0.5));
     [loop]
     for (int y = -1; y <= 1; ++y)
     {
@@ -471,7 +471,7 @@ void ResolveSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
             visibility = contact.w;
             bentNormal = SafeNormalize(normal + contact.xyz / max(visibility, 1e-5));
         }
-        float2 grid = (float2(id.xy) + 0.5) / ProbeSpacing - 0.5;
+        float2 grid = ProbeGridPosition(float2(id.xy), ProbeTileJitter(_SdfDiffuseFrame));
         int2 low = int2(floor(grid));
         float2 fraction = frac(grid);
         uint2 probeGrid = ProbeGridSize(screenSize);
@@ -532,7 +532,7 @@ float ScreenProbeStableRadianceFootprint(uint2 pixel, uint2 size, float3 positio
     if (_SdfPreparedAnchorEnabled == 0u)
         return 1.0;
     uint2 grid = ProbeGridSize(size);
-    int2 lower = int2(floor((float2(pixel) - float(ProbeSpacing / 2u)) / float(ProbeSpacing)));
+    int2 lower = int2(floor(ProbeGridPosition(float2(pixel), ProbeTileJitter(_SdfDiffuseFrame))));
     uint2 first = uint2(clamp(lower, 0, max(int2(grid) - 2, 0)));
     float3 minimumEnergy = 65000.0, maximumEnergy = 0.0;
     float age = 512.0;
@@ -642,7 +642,7 @@ ScreenProbeInterpolation CalculateScreenProbeInterpolation(uint2 pixel, uint2 si
     float2 interpolationPixel, float3 position, float3 normal, float eyeDepth, float expansion)
 {
     ScreenProbeInterpolation samples = (ScreenProbeInterpolation)0;
-    int2 lower = int2(floor((interpolationPixel - float(ProbeSpacing / 2u)) / float(ProbeSpacing)));
+    int2 lower = int2(floor(ProbeGridPosition(interpolationPixel, ProbeTileJitter(_SdfDiffuseFrame))));
     uint2 first = uint2(clamp(lower, 0, max(int2(grid) - 2, 0)));
     uint2 last = min(first + 1u, grid - 1u);
     float2 firstPixel = float2(ProbeReceiverPixel(first, size));

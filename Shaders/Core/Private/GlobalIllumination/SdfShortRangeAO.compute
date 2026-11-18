@@ -1,4 +1,6 @@
 #pragma kernel ApplySdfNearOcclusion
+#pragma kernel SearchBentNormalHorizons
+#pragma kernel AccumulateBentNormal
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfShortRangeAOCommon.hlsl"
@@ -16,4 +18,246 @@ void ApplySdfNearOcclusion(uint3 id : SV_DispatchThreadID)
     // The legacy scalar mode applies only to realtime lighting after temporal accumulation.
     lighting.rgb *= EvaluateNearDiffuseVisibility(id.xy, position, normal, false).w;
     _SdfDiffuseOutput[id.xy] = lighting;
+}
+
+// Half resolution: unit world-space direction and visibility. Full resolution history:
+// RGB is the direction scaled by visibility, alpha is accepted frame count (zero for sky).
+RWTexture2D<float4> _SdfBentSamplesOutput;
+Texture2D<float4> _SdfBentSamples;
+Texture2D<float4> _SdfBentPrevious;
+RWTexture2D<float4> _SdfBentOutput;
+uint _SdfBentWriteGeometry;
+
+uint2 BentPhase()
+{
+    return uint2(_SdfDiffuseFrame & 1u, (_SdfDiffuseFrame >> 1u) & 1u);
+}
+
+uint2 BentReceiverPixel(uint2 cell)
+{
+    return min(cell * 2u + BentPhase(), uint2(_SdfDiffuseScreenSize.xy) - 1u);
+}
+
+float BentHorizon(int2 pixel, float3 position, float3 view, float3 normal, float low, float invForeground)
+{
+    float3 delta = LoadContactDelta(pixel, position);
+    float distSq = dot(delta, delta);
+    // A snapped depth tap on the receiver plane cannot occlude that plane.
+    if (distSq < 1e-10 || dot(normal, delta) <= 1e-5)
+        return low;
+    float cosine = dot(view, delta) * rsqrt(distSq);
+    float rejection = saturate(abs(dot(delta, _SdfProbeCameraForward.xyz)) * invForeground);
+    return lerp(cosine, low, rejection);
+}
+
+// Cosine-weighted visible arc and first directional moment of a GTAO slice.
+float3 BentSliceIntegral(float2 h, float n)
+{
+    float2 sn = sin(h + n);
+    float momentT = (dot(6.0 * sin(h - n) - sin(3.0 * h - n) - 3.0 * sn, 1.0.xx) + 16.0 * sin(n)) / 12.0;
+    float momentV = (8.0 * cos(n) - dot(cos(3.0 * h - n) + 3.0 * cos(h + n), 1.0.xx)) / 12.0;
+    float arc = 0.25 * dot(cos(n) + 2.0 * h * sin(n) - cos(2.0 * h - n), 1.0.xx);
+    return float3(momentT, momentV, arc);
+}
+
+[numthreads(8, 8, 1)]
+void SearchBentNormalHorizons(uint3 id : SV_DispatchThreadID)
+{
+    if (any(2u * id.xy >= uint2(_SdfDiffuseScreenSize.xy)))
+        return;
+    uint2 pixel = BentReceiverPixel(id.xy);
+    float3 position, normal;
+    if (!LoadReceiver(pixel, position, normal))
+    {
+        _SdfBentSamplesOutput[id.xy] = 0;
+        return;
+    }
+    float2 uv = (pixel + 0.5) * _SdfDiffuseScreenSize.zw;
+    float depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
+    // The direction between two clip depths also handles orthographic cameras.
+    float3 view = SafeNormalize(ComputeWorldSpacePosition(uv, 0.8, _SdfDiffuseInverseVP)
+        - ComputeWorldSpacePosition(uv, 0.2, _SdfDiffuseInverseVP));
+#if !UNITY_REVERSED_Z
+    view = -view;
+#endif
+    float clipW = mul(_SdfDiffuseVP, float4(position, 1.0)).w;
+    float radius = max(1.0, 0.5 * _SdfNearOcclusion.x * _SdfDiffuseScreenSize.y *
+        length(_SdfDiffuseVP[1].xyz) / max(clipW, 1e-4));
+    float invForeground = rcp(max(0.3 * dot(float4(position, 1.0), _SdfProbeCameraForward), 1e-4));
+    uint seed = HashProbe(id.x + 65537u * id.y);
+    float2 noise = frac(float2(seed & 65535u, seed >> 16u) / 65536.0
+        + float(_SdfDiffuseFrame & 65535u) * float2(0.754877666, 0.569840291));
+    float visibility = 0;
+    float3 bent = 0;
+    bool blocked = false;
+    [unroll]
+    for (uint slice = 0; slice < 2; ++slice)
+    {
+        float phi = (slice + noise.x) * (0.5 * PI);
+        float2 axis = float2(cos(phi), sin(phi));
+        float3 lateral = ComputeWorldSpacePosition(uv + axis * _SdfDiffuseScreenSize.zw * 8.0, depth, _SdfDiffuseInverseVP) - position;
+        float3 tangent = SafeNormalize(lateral - view * dot(lateral, view));
+        float2 projected = float2(dot(normal, tangent), max(dot(normal, view), 1e-6));
+        float n = atan2(projected.x, projected.y);
+        float2 low = cos(n + float2(-HALF_PI, HALF_PI));
+        float2 horizon = low;
+        [unroll]
+        for (uint stepIndex = 0; stepIndex < 3; ++stepIndex)
+        {
+            float t = (stepIndex + frac(noise.y + (slice + stepIndex * 3u) * 0.618033989)) / 3.0;
+            int2 offset = int2(round(axis * (1.0 + t * t * radius)));
+            horizon.x = max(horizon.x, BentHorizon(int2(pixel) - offset, position, view, normal, low.x, invForeground));
+            horizon.y = max(horizon.y, BentHorizon(int2(pixel) + offset, position, view, normal, low.y, invForeground));
+        }
+        blocked = blocked || any(horizon > low + 1e-5);
+        float2 angles = float2(-1, 1) * acos(clamp(horizon, -1.0, 1.0));
+        float3 integral = BentSliceIntegral(angles, n) * length(projected);
+        bent += tangent * integral.x + view * integral.y;
+        visibility += integral.z;
+    }
+    float strength = _SdfNearOcclusion.y;
+    float accessibility = blocked ? lerp(1.0, clamp(visibility * 0.5, 0.03, 1.0), strength) : 1.0;
+    float3 direction = blocked && dot(bent, bent) > 1e-8 ? SafeNormalize(lerp(normal, normalize(bent), strength)) : normal;
+    _SdfBentSamplesOutput[id.xy] = float4(direction, accessibility);
+}
+
+float4 UpsampleBentNormal(uint2 pixel, float3 position, float3 normal, out int2 center)
+{
+    float2 halfPixel = (float2(pixel) - float2(BentPhase())) * 0.5;
+    int2 lower = int2(floor(halfPixel));
+    float2 f = frac(halfPixel);
+    int2 last = (int2(_SdfDiffuseScreenSize.xy) - 1) / 2;
+    center = clamp(int2(round(halfPixel)), 0, last);
+    float4 sum = 0;
+    float total = 0, best = 0;
+    float tolerance = clamp(0.006 * dot(float4(position, 1), _SdfProbeCameraForward), 0.02, 0.1);
+    [unroll]
+    for (uint i = 0; i < 4; ++i)
+    {
+        int2 offset = int2(i & 1u, i >> 1u);
+        int2 cell = clamp(lower + offset, 0, last);
+        float4 sample = _SdfBentSamples.Load(int3(cell, 0));
+        if (sample.w <= 0)
+            continue;
+        uint2 receiver = BentReceiverPixel(cell);
+        float3 sampleNormal = VividDecodeSurfaceSummaryNormal(_SdfDiffuseGBuffer1.Load(int3(receiver, 0)).xy);
+        float2 wf = lerp(1.0 - f, f, float2(offset));
+        float plane = abs(dot(LoadContactDelta(receiver, position), normal));
+        float weight = wf.x * wf.y * saturate(1.0 - plane / tolerance) * saturate((dot(sampleNormal, normal) - 0.9) * 10.0);
+        sum += weight * sample;
+        total += weight;
+        if (weight > best)
+        {
+            best = weight;
+            center = cell;
+        }
+    }
+    return total > 1e-5 ? float4(SafeNormalize(sum.xyz), sum.w / total) : float4(normal, 1);
+}
+
+float4 ClampBentHistory(float4 history, int2 center, float4 current)
+{
+    float4 sum = current, squares = current * current;
+    float count = 1;
+    int2 last = (int2(_SdfDiffuseScreenSize.xy) - 1) / 2;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            if (x == 0 && y == 0)
+                continue;
+            float4 sample = _SdfBentSamples.Load(int3(clamp(center + int2(x, y), 0, last), 0));
+            if (sample.w <= 0)
+                continue;
+            sum += sample;
+            squares += sample * sample;
+            count++;
+        }
+    }
+    float4 mean = sum / count;
+    float4 extent = sqrt(max(0, squares / count - mean * mean));
+    return clamp(history, mean - extent, mean + extent);
+}
+
+bool ReadBentHistory(uint2 pixel, float3 position, float3 normal, out float4 value, out float age)
+{
+    value = 0;
+    age = 0;
+    float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1));
+    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0, 0);
+    if (clip.w <= 0 || clip.z <= 0 || clip.z > clip.w || PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
+        return false;
+    float2 motion;
+    DecodeMotionVector(packedMotion, motion);
+    float2 previous = float2(pixel) + (_SdfScreenJitterDelta - motion) * _SdfDiffuseScreenSize.xy;
+    float2 uv = (previous + 0.5) * _SdfDiffuseScreenSize.zw;
+    if (any(uv < 0) || any(uv >= 1)) return false;
+    float depth = clip.z / clip.w;
+    float3 expected = ComputeWorldSpacePosition(uv, depth, _SdfScreenPreviousInverseVP);
+    float eyeDepth = dot(float4(position, 1), _SdfProbeCameraForward);
+    int2 lower = int2(floor(previous));
+    float2 f = frac(previous);
+    float weightSum = 0;
+    [unroll]
+    for (uint i = 0; i < 4; ++i)
+    {
+        int2 offset = int2(i & 1u, i >> 1u);
+        int2 tap = lower + offset;
+        if (any(tap < 0) || any(tap >= int2(_SdfDiffuseScreenSize.xy))) continue;
+        uint geom = _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0));
+        float previousDepth = f16tof32(geom & 65535u);
+        if (previousDepth <= 0 || dot(normal, UnpackProbeNormal(float(geom >> 16u))) < 0.92) continue;
+        float2 tapUv = (float2(tap) + 0.5) * _SdfDiffuseScreenSize.zw;
+        float3 tapPosition = ComputeWorldSpacePosition(tapUv, previousDepth, _SdfScreenPreviousInverseVP);
+        float3 tapExpected = ComputeWorldSpacePosition(tapUv, depth, _SdfScreenPreviousInverseVP);
+        if (distance(tapPosition, tapExpected) > clamp(0.008 * eyeDepth, 0.025, 0.12)
+            || abs(dot(tapPosition - expected, normal)) > clamp(0.006 * eyeDepth, 0.02, 0.10)) continue;
+        float4 sample = _SdfBentPrevious.Load(int3(tap, 0));
+        if (sample.w <= 0) continue;
+        float2 wf = lerp(1.0 - f, f, float2(offset));
+        float weight = wf.x * wf.y;
+        float visibility = length(sample.xyz);
+        value += weight * float4(sample.xyz / max(visibility, 1e-5), saturate(visibility));
+        age += weight * sample.w;
+        weightSum += weight;
+    }
+    if (weightSum < 0.35) return false;
+    value /= weightSum;
+    // Missing taps lower confidence and shorten the effective history.
+    return true;
+}
+
+[numthreads(8, 8, 1)]
+void AccumulateBentNormal(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_SdfDiffuseScreenSize.xy))) return;
+    float3 position, normal;
+    bool valid = LoadReceiver(id.xy, position, normal);
+    if (_SdfBentWriteGeometry != 0u)
+    {
+        uint geometry = valid ? f32tof16(_SdfDiffuseDepth.Load(int3(id.xy, 0))) | (uint(PackProbeNormal(normal)) << 16u) : 0u;
+        _SdfDiffusePixelGeometryOutput[id.xy] = geometry;
+    }
+    if (!valid)
+    {
+        _SdfBentOutput[id.xy] = 0;
+        return;
+    }
+    int2 center;
+    float4 current = UpsampleBentNormal(id.xy, position, normal, center);
+    float4 previous;
+    float age = 1, previousAge;
+    if (_SdfDiffuseHasHistory != 0u && ReadBentHistory(id.xy, position, normal, previous, previousAge))
+    {
+        age = min(1.0 + previousAge, 10.0);
+        current = lerp(ClampBentHistory(previous, center, current), current, rcp(age));
+    }
+    float visibility = saturate(current.w);
+    float3 bent = dot(current.xyz, current.xyz) > 1e-8 ? normalize(current.xyz) : normal;
+    _SdfBentOutput[id.xy] = float4(bent * visibility, age);
+    float4 lighting = _SdfDiffuseOutput[id.xy];
+    float3 albedo = min(saturate(_SdfDiffuseGBuffer0.Load(int3(id.xy, 0)).rgb), 0.5);
+    _SdfDiffuseOutput[id.xy] = float4(lighting.rgb * GTAOMultiBounce(visibility, albedo), lighting.a);
 }

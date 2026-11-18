@@ -28,10 +28,32 @@ uint _VividOpenPBRLutsReady;
 
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
 Texture2D<float4> _RealtimeDiffuseGI;
+Texture2D<float4> _RealtimeBentNormal;
+uint _RealtimeBentNormalEnabled;
 uint _RealtimeDiffuseGIEnabled;
 uint _RealtimeDiffuseGIOnly;
 uint _RealtimeOpenPbrDiffuse;
 #endif
+
+float VividBentSpecularVisibility(uint2 pixelCoord, float3 normal, float3 view, float roughness)
+{
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+    if (_RealtimeBentNormalEnabled != 0u)
+    {
+        float4 history = _RealtimeBentNormal.Load(int3(pixelCoord, 0));
+        float visibility = saturate(length(history.xyz));
+        if (history.w > 0.0 && visibility < 0.999)
+        {
+            float openAngle = visibility * PI;
+            float lobeAngle = max(roughness, 0.1) * PI;
+            float separation = acos(clamp(dot(history.xyz, reflect(-view, normal)) / max(visibility, 0.001), -1.0, 1.0));
+            float overlap = (openAngle + lobeAngle - separation) / max(2.0 * min(openAngle, lobeAngle), 1e-5);
+            return smoothstep(0.0, 1.0, overlap) * saturate((openAngle - 0.1) / 0.2);
+        }
+    }
+#endif
+    return 1.0;
+}
 
 float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord)
 {
@@ -560,15 +582,18 @@ float3 VividEvaluateDeferredSurfacePixel(
         ? nativeDiffuseBounce
         : max(lightLoopOutput.diffuseLighting - lightLoopOutput.indirectDiffuseLighting, 0.0);
     float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
-    float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting, 0.0));
+    float specularVisibility = VividBentSpecularVisibility(pixelCoord, summary.normalWS,
+        SafeNormalize(GetWorldSpaceViewDir(positionWS)), summary.perceptualRoughness);
+    float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting
+        - (1.0 - specularVisibility) * lightLoopOutput.indirectSpecularLighting, 0.0));
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, summary);
     float reflectionWeight = screenSpaceReflection.a;
     float3 preExposedReplaceableSpecular = VividApplyPreExposure(max(lightLoopOutput.screenSpaceReplaceableSpecularLighting, 0.0));
-    specularLighting = max(specularLighting - preExposedReplaceableSpecular * reflectionWeight, 0.0)
+    specularLighting = max(specularLighting - preExposedReplaceableSpecular * (reflectionWeight * specularVisibility), 0.0)
         + screenSpaceReflection.rgb * lightLoopOutput.screenSpaceReflectionFGD * reflectionWeight;
     float3 lighting = diffuseLighting + specularLighting;
     float3 indirectLighting = VividApplyPreExposure(max(
-        lightLoopOutput.indirectDiffuseLighting + lightLoopOutput.indirectSpecularLighting, 0.0));
+        lightLoopOutput.indirectDiffuseLighting + lightLoopOutput.indirectSpecularLighting * specularVisibility, 0.0));
     debugLighting = float4(indirectLighting, reflectionWeight);
     return emission + lighting;
 }

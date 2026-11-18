@@ -130,11 +130,14 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Maximum distance from the receiver for a far-cache hit.")]
         public MinFloatParameter farTraceDistance = new(64f, 1f);
 
-        [Tooltip("Strength of current-frame contact occlusion on realtime diffuse GI.")]
+        [Tooltip("Strength of short-range occlusion on realtime indirect lighting.")]
         public ClampedFloatParameter nearOcclusionStrength = new(0f, 0f, 1f);
 
         [Tooltip("Apply directional near-field visibility during diffuse integration. Uses the receiver shading normal and keeps GI coverage separate.")]
         public BoolParameter directionalNearOcclusion = new(true);
+
+        [Tooltip("Use half-resolution horizon search and a separate per-camera bent-normal history for Screen Probe Gather. Overrides directional near occlusion.")]
+        public BoolParameter screenProbeBentNormalAO = new(false);
 
         [Tooltip("World-space radius of realtime diffuse contact occlusion.")]
         public ClampedFloatParameter nearOcclusionRadius = new(0.35f, 0.05f, 1f);

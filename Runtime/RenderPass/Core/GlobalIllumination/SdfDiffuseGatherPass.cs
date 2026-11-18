@@ -19,6 +19,8 @@ namespace VividRP.Runtime.RenderPass.Core
     internal sealed class VividSdfDiffuseFrameData : ContextItem
     {
         internal RenderGraphTexture Output;
+        internal CameraHistoryTexture BentNormalHistory;
+        internal TextureHandle BentNormalOutput;
         internal bool SkyHandled;
         internal bool RealtimeOnly;
         internal SdfDiffuseGatherPass OpenPbrSource;
@@ -26,6 +28,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Reset()
         {
             Output = null;
+            BentNormalHistory = null;
+            BentNormalOutput = default;
             SkyHandled = false;
             RealtimeOnly = false;
             OpenPbrSource = null;
@@ -85,6 +89,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId CoveredPixelHistoryId = CameraHistoryId.Create("SdfScreenProbeCoveredPixelHistory");
         private static readonly CameraHistoryId ScreenProbeMomentsHistoryId = CameraHistoryId.Create("SdfScreenProbePixelMoments");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
+        private static readonly CameraHistoryId BentNormalHistoryId = CameraHistoryId.Create("SdfShortRangeBentNormal");
         private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenLambertRadianceHistory");
         private static readonly CameraHistoryId ScreenGeometryHistoryId = CameraHistoryId.Create("SdfDiffuseScreenGeometryHistory");
@@ -189,6 +194,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FarDistanceId = Shader.PropertyToID("_SdfFarTraceDistance");
         private static readonly int FarWindowId = Shader.PropertyToID("_SdfFarWindow");
         private static readonly int NearOcclusionId = Shader.PropertyToID("_SdfNearOcclusion");
+        private static readonly int BentSamplesId = Shader.PropertyToID("_SdfBentSamples");
+        private static readonly int BentSamplesOutputId = Shader.PropertyToID("_SdfBentSamplesOutput");
+        private static readonly int BentPreviousId = Shader.PropertyToID("_SdfBentPrevious");
+        private static readonly int BentOutputId = Shader.PropertyToID("_SdfBentOutput");
+        private static readonly int BentWriteGeometryId = Shader.PropertyToID("_SdfBentWriteGeometry");
         private static readonly int HzbId = Shader.PropertyToID("_SdfScreenHzb");
         private static readonly int MotionId = Shader.PropertyToID("_SdfScreenMotion");
         private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
@@ -465,6 +475,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_PreviousPixelGeometry = RenderGraphTexture.CreateInput("Previous SDF Diffuse Pixel Geometry", PixelGeometryFormat);
         private readonly RenderGraphTexture m_CurrentPixelLighting = CreateOutput("SDF Diffuse Pixel Lighting History", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentPixelGeometry = CreateOutput("SDF Diffuse Pixel Geometry History", PixelGeometryFormat);
+        [RenderGraphResource(Name = "Short Range Bent Normal Samples", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_BentSamples = CreateScratch("Short Range Bent Normal Samples", ProbeFormat);
+        private readonly RenderGraphTexture m_PreviousBentNormal = RenderGraphTexture.CreateInput("Previous Short Range Bent Normal", ProbeFormat);
+        private readonly RenderGraphTexture m_CurrentBentNormal = CreateOutput("Short Range Bent Normal History", ProbeFormat);
+        private CameraHistoryTexture m_BentNormalHistory;
+        private bool m_BentNormalHistoryValid;
+        private int m_BentSearchKernel = -1, m_BentTemporalKernel = -1;
         private readonly RenderGraphTexture m_PreviousScreenProbeMoments = RenderGraphTexture.CreateInput("Previous Screen Probe Moments", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentScreenProbeMoments = CreateOutput("Screen Probe Moments", ProbeFormat);
         [RenderGraphResource(Name = "Raw Resolved Diffuse GI", Access = AccessFlags.ReadWrite)]
@@ -704,6 +722,13 @@ namespace VividRP.Runtime.RenderPass.Core
             if (SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
                 && HasKernel(m_NearOcclusionCompute, "ApplySdfNearOcclusion"))
                 m_NearOcclusionKernel = m_NearOcclusionCompute.FindKernel("ApplySdfNearOcclusion");
+            if (m_NearOcclusionKernel >= 0 && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
+                && HasKernel(m_NearOcclusionCompute, "SearchBentNormalHorizons")
+                && HasKernel(m_NearOcclusionCompute, "AccumulateBentNormal"))
+            {
+                m_BentSearchKernel = m_NearOcclusionCompute.FindKernel("SearchBentNormalHorizons");
+                m_BentTemporalKernel = m_NearOcclusionCompute.FindKernel("AccumulateBentNormal");
+            }
             m_ResolveKernel = m_GatherCompute.FindKernel("ResolveSdfDiffuseGI");
             if (HasKernel(m_GatherCompute, "ResolveSdfRestirOpenPBR"))
             {
@@ -803,6 +828,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalHistoryValid = m_DirectionalGuideHistoryValid = false;
             m_RestirHistory = m_RestirVarianceHistory = null;
             m_PixelHistory = m_PixelGeometryHistory = null;
+            m_BentNormalHistory = null;
+            m_BentNormalHistoryValid = false;
+            m_BentSamples.Resize(1, 1);
             m_ScreenProbeMomentsHistory = null;
             m_SunHistory = null;
             m_SunAtlas = default;
@@ -939,8 +967,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && float.IsFinite(settings.nearOcclusionStrength.value) && float.IsFinite(settings.nearOcclusionRadius.value))
             {
                 float strength = settings.nearOcclusionStrength.value;
-                bool directional = strength > 0f && settings.directionalNearOcclusion.value;
-                m_NearOcclusion = new Vector4(settings.nearOcclusionRadius.value, strength, directional ? 1f : 0f, 0f);
+                bool bent = strength > 0f && !m_RestirGather && settings.screenProbeBentNormalAO.value
+                    && m_BentSearchKernel >= 0 && m_BentTemporalKernel >= 0;
+                bool directional = strength > 0f && !bent && settings.directionalNearOcclusion.value;
+                m_NearOcclusion = new Vector4(settings.nearOcclusionRadius.value, strength, directional ? 1f : 0f, bent ? 1f : 0f);
                 m_DirectionalProbes |= directional && !m_RestirPixelIntegration;
             }
             m_DirectionalGuide = m_DirectionalCache && m_DirectionalGuideKernel >= 0 && settings.screenProbeSamplingGuide.value;
@@ -1058,7 +1088,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenRays.desc.ColorFormat = storeScreenPixel ? GeometryFormat : ProbeFormat;
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
-            if (screenConfigured || pixelTemporal)
+            bool bentNormal = m_NearOcclusion.w > 0f;
+            if (screenConfigured || pixelTemporal || bentNormal)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
                     * cameraData.GetGPUProjectionMatrixNoJitter(renderIntoTexture: true).inverse;
@@ -1067,8 +1098,24 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             if (screenConfigured)
                 PrepareScreenHistory(frameData, camera, temporal);
+            if (pixelTemporal || bentNormal)
+            {
+                m_CurrentPixelGeometry.Resize(m_Width, m_Height);
+                CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelGeometryHistoryId,
+                    m_PreviousPixelGeometry, m_CurrentPixelGeometry, m_CurrentPixelGeometry.desc, out m_PixelGeometryHistory, AccessFlags.Write);
+            }
             if (pixelTemporal)
                 PreparePixelHistory(camera);
+            if (bentNormal)
+            {
+                m_BentSamples.Resize(CoreUtils.DivRoundUp(m_Width, 2), CoreUtils.DivRoundUp(m_Height, 2));
+                m_CurrentBentNormal.Resize(m_Width, m_Height);
+                m_BentNormalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, BentNormalHistoryId,
+                    m_PreviousBentNormal, m_CurrentBentNormal, m_CurrentBentNormal.desc, out m_BentNormalHistory, AccessFlags.Write)
+                    && motionConnected && m_PixelGeometryHistory != null && m_PixelGeometryHistory.IsValid()
+                    && m_State.NearOcclusion.Equals(m_NearOcclusion) && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
+                frameData.GetOrCreate<VividSdfDiffuseFrameData>().BentNormalHistory = m_BentNormalHistory;
+            }
             int atlasWidth = m_ProbeWidth * (m_DirectionalProbes ? DirectionalProbePlanes : 1);
             m_Probes.Resize(m_RestirPixelIntegration ? 1 : atlasWidth, m_RestirPixelIntegration ? 1 : m_AtlasHeight);
             bool needsProbeScratch = m_SpatialFilter || m_RestirGather || m_DirectionalCache;
@@ -1454,11 +1501,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordRestirDenoise(cmd, pixelTemporal, restirVarianceTemporal);
                 if (atrous)
                     RecordAtrousDenoise(context, black, restirVarianceTemporal);
-                if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
+                if (m_BentNormalHistory != null && m_PixelGeometryHistory != null)
+                    RecordBentNormal(cmd, frame, pixelTemporal, black);
+                else if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f)
                     RecordNearOcclusion(cmd);
             }
             var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
             diffuse.Output = m_Output;
+            diffuse.BentNormalOutput = m_BentNormalHistory != null && m_PixelGeometryHistory != null ? m_CurrentBentNormal.innerHandle : default;
             diffuse.SkyHandled = m_SkyTextureParams.w > 0.5f;
             diffuse.RealtimeOnly = m_RealtimeOnly;
             diffuse.OpenPbrSource = m_RestirOpenPbrDiffuse ? this : null;
@@ -1591,7 +1641,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityAccumulationKernel = m_RadiosityPublishKernel = -1;
             m_RadiosityPublishCardsKernel = m_RadiosityClearKernel = -1;
             m_RadiosityRescaleKernel = -1;
-            m_FarKernel = m_NearOcclusionKernel = -1;
+            m_FarKernel = m_NearOcclusionKernel = m_BentSearchKernel = m_BentTemporalKernel = -1;
             m_OpenPbrResolveKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_DirectionalGuideKernel = m_DirectionalCompositeKernel = m_DirectionalTemporalKernel = -1;
@@ -2269,6 +2319,39 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorArrayParam(m_TraceCompute, GlobalScrollId, m_GlobalClipmap.Scroll);
         }
 
+        private void RecordBentNormal(ComputeCommandBuffer cmd, int frame, bool geometryWritten, TextureHandle black)
+        {
+            using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
+            var shader = m_NearOcclusionCompute;
+            BindProbeFrame(cmd, shader);
+            cmd.SetComputeIntParam(shader, FrameId, frame);
+            cmd.SetComputeMatrixParam(shader, ViewProjectionId, m_ViewProjection);
+            cmd.SetComputeVectorParam(shader, NearOcclusionId, m_NearOcclusion);
+            BindReceiver(cmd, shader, m_BentSearchKernel);
+            cmd.SetComputeTextureParam(shader, m_BentSearchKernel, BentSamplesOutputId, m_BentSamples.innerHandle);
+            cmd.DispatchCompute(shader, m_BentSearchKernel, CoreUtils.DivRoundUp(m_Width, GroupSize * 2),
+                CoreUtils.DivRoundUp(m_Height, GroupSize * 2), 1);
+
+            BindReceiver(cmd, shader, m_BentTemporalKernel);
+            cmd.SetComputeMatrixParam(shader, PreviousViewProjectionId, m_State.ViewProjection);
+            cmd.SetComputeMatrixParam(shader, PreviousInverseVpId, m_State.ViewProjection.inverse);
+            cmd.SetComputeVectorParam(shader, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
+            cmd.SetComputeIntParam(shader, HasHistoryId, m_BentNormalHistoryValid && m_ScreenMotion.innerHandle.IsValid() ? 1 : 0);
+            cmd.SetComputeIntParam(shader, BentWriteGeometryId, geometryWritten ? 0 : 1);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, MotionId, m_ScreenMotion.innerHandle.IsValid() ? m_ScreenMotion.innerHandle : black);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, PreviousPixelGeometryId, m_PreviousPixelGeometry.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, PixelGeometryOutputId, m_CurrentPixelGeometry.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, BentSamplesId, m_BentSamples.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, BentPreviousId, m_PreviousBentNormal.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, BentOutputId, m_CurrentBentNormal.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_BentTemporalKernel, OutputId, m_Output.innerHandle);
+            cmd.DispatchCompute(shader, m_BentTemporalKernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
+                CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+            m_BentNormalHistory.MarkWritten();
+            if (!geometryWritten)
+                m_PixelGeometryHistory.MarkWritten();
+        }
+
         private void RecordNearOcclusion(ComputeCommandBuffer cmd)
         {
             using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
@@ -2458,7 +2541,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private void PreparePixelHistory(Camera camera)
         {
             m_CurrentPixelLighting.Resize(m_Width, m_Height);
-            m_CurrentPixelGeometry.Resize(m_Width, m_Height);
             // Native Screen Probe stores premultiplied energy; other gather
             // paths retain their existing conditional-radiance history format.
             var lightingHistoryId = m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0
@@ -2466,8 +2548,6 @@ namespace VividRP.Runtime.RenderPass.Core
             CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, lightingHistoryId,
                 m_PreviousPixelLighting, m_CurrentPixelLighting, m_CurrentPixelLighting.desc, out m_PixelHistory,
                 m_RestirPixelIntegration ? AccessFlags.ReadWrite : AccessFlags.Write);
-            CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelGeometryHistoryId,
-                m_PreviousPixelGeometry, m_CurrentPixelGeometry, m_CurrentPixelGeometry.desc, out m_PixelGeometryHistory, AccessFlags.Write);
             if (m_DirectionalCache && m_AtrousIterations > 0 && m_ScreenProbeTemporalKernel >= 0 && m_ScreenProbeMomentsKernel >= 0)
             {
                 m_CurrentScreenProbeMoments.Resize(m_Width, m_Height);

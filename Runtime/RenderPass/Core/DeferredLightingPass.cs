@@ -34,6 +34,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DiffuseIrradianceId = Shader.PropertyToID("_DiffuseIrradiance");
         private static readonly int RealtimeDiffuseGIId = Shader.PropertyToID("_RealtimeDiffuseGI");
         private static readonly int RealtimeDiffuseGIEnabledId = Shader.PropertyToID("_RealtimeDiffuseGIEnabled");
+        private static readonly int BentNormalId = Shader.PropertyToID("_RealtimeBentNormal");
+        private static readonly int BentNormalEnabledId = Shader.PropertyToID("_RealtimeBentNormalEnabled");
         private static readonly int RealtimeDiffuseGIOnlyId = Shader.PropertyToID("_RealtimeDiffuseGIOnly");
         private static readonly int RealtimeOpenPbrDiffuseId = Shader.PropertyToID("_RealtimeOpenPbrDiffuse");
         private static readonly int RealtimeDiffuseSkyHandledId = Shader.PropertyToID("_RealtimeDiffuseSkyHandled");
@@ -192,6 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClearSdfScreenSourceKernel = -1;
         private readonly int[] m_SdfScreenSourceKernels = new int[DeferredVariantCount];
         private VividSdfScreenTraceData m_SdfScreenSource;
+        private TextureHandle m_BentNormal;
         private TextureHandle m_SdfScreenSourceRadiance;
         private TextureHandle m_SdfScreenSourceGeometry;
         private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1 };
@@ -377,6 +380,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
+            m_BentNormal = frameData.Contains<VividSdfDiffuseFrameData>()
+                ? CameraHistoryRenderGraphBridge.ImportForPass(this, frameData.Get<VividSdfDiffuseFrameData>().BentNormalHistory, 0, AccessFlags.Read)
+                : default;
             m_SdfScreenSource = m_ClearSdfScreenSourceKernel >= 0 && frameData.Contains<VividSdfScreenTraceData>()
                 ? frameData.Get<VividSdfScreenTraceData>() : null;
             m_SdfScreenSourceRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this,
@@ -642,14 +648,18 @@ namespace VividRP.Runtime.RenderPass.Core
             bool skyHandled = false;
             bool realtimeOnly = false;
             bool openPbrDiffuse = false;
+            bool bentNormal = false;
             if (hasRealtimeGI && context.TryGet<VividSdfDiffuseFrameData>(out var diffuse)
                 && ReferenceEquals(diffuse.Output, m_RealtimeDiffuseGI))
             {
+                bentNormal = m_BentNormal.IsValid() && diffuse.BentNormalOutput == m_BentNormal;
                 skyHandled = diffuse.SkyHandled;
                 realtimeOnly = diffuse.RealtimeOnly;
                 openPbrDiffuse = diffuse.OpenPbrSource?.MatchesOpenPbrReceiver(
                     m_DepthTexture, m_GBuffer0, m_GBuffer1, m_GBuffer4, m_LayerAux0, m_LayerAux1) == true;
             }
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, BentNormalId, bentNormal ? m_BentNormal : rgDefaultResource.blackTexture);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, BentNormalEnabledId, bentNormal ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseSkyHandledId, skyHandled ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIOnlyId, realtimeOnly ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeOpenPbrDiffuseId, openPbrDiffuse ? 1 : 0);

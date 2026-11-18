@@ -428,6 +428,9 @@ MonoBehaviour:
   directionalNearOcclusion:
     m_OverrideState: 1
     m_Value: 0
+  screenProbeBentNormalAO:
+    m_OverrideState: 1
+    m_Value: 1
   nearOcclusionRadius:
     m_OverrideState: 1
     m_Value: 0.35

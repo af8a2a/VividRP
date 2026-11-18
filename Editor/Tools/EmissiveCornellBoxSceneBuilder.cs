@@ -190,6 +190,7 @@ namespace VividRP.Editor.Tools
                 gi.surfaceCacheFullUpdateCardLimit.Override(128);
                 gi.nearOcclusionStrength.Override(1f);
                 gi.directionalNearOcclusion.Override(false);
+                gi.screenProbeBentNormalAO.Override(true);
                 gi.screenProbeSpatialKernel.Override(SdfScreenProbeSpatialKernel.Adaptive5x5);
                 gi.screenProbeSpatialAnchor.Override(true);
                 gi.screenProbeAnchorMaxAge.Override(32);

@@ -423,11 +423,11 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 64
   nearOcclusionStrength:
-    m_OverrideState: 0
-    m_Value: 0
-  directionalNearOcclusion:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
+  directionalNearOcclusion:
+    m_OverrideState: 1
+    m_Value: 0
   nearOcclusionRadius:
     m_OverrideState: 1
     m_Value: 0.35
@@ -460,7 +460,7 @@ MonoBehaviour:
     m_Value: 1
   screenProbeAnchorMaxAge:
     m_OverrideState: 1
-    m_Value: 512
+    m_Value: 32
   screenProbeHitDistanceFilter:
     m_OverrideState: 0
     m_Value: 0
@@ -478,10 +478,10 @@ MonoBehaviour:
     m_Value: 1
   pixelHistoryMaxAge:
     m_OverrideState: 1
-    m_Value: 32
+    m_Value: 10
   spatialDenoise:
     m_OverrideState: 1
-    m_Value: 4
+    m_Value: 0
   correctReceiverSelfHits:
     m_OverrideState: 1
     m_Value: 1

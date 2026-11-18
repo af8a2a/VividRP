@@ -12,7 +12,9 @@
 
 ## GI 基准
 
-使用独立的 `Emissive Ceiling Profile.asset` 与 `Emissive Ceiling Surface Cache.asset`，固定 EV100 = 4。保持原生 Screen Probe Gather、16 px 网格、每探针 8 根光线，以及 Hybrid 追踪、Adaptive 5×5 探针滤波、空间 anchor、方向重要性引导、32 帧像素历史和两轮 À-Trous。启用接收面自相交修正。
+本场景的 GI 重建设置参考 UE 5.7.4 的 Epic 档（`GlobalIlluminationQuality@3`）。使用独立的 `Emissive Ceiling Profile.asset` 与 `Emissive Ceiling Surface Cache.asset`，固定 EV100 = 4。Screen Probe Gather 使用 16 px 网格、每探针 8 条射线、Hybrid 追踪、方向重要性引导及接收面自相交修正。UE 同档的追踪分辨率为 8×8，每探针射线预算高于本场景。
+
+方向辐亮度经过三轮探针空间滤波，全分辨率 GI 的像素历史上限为 10 帧。场景将额外的全分辨率 À-Trous 设为零轮（`Spatial Denoise = Legacy`），并在像素时间累计后应用强度 1、半径 0.35 m 的标量短程 AO。UE 默认关闭可选的探针时间滤波，VividRP 的方向缓存始终累计，场景取其支持的最短窗口 32 帧。UE Epic 的 Bent Normal AO 拥有独立时域历史，当前标量 AO 仅对齐了应用顺序。
 
 Surface Cache 使用 64 × 64 卡片，覆盖房间、遮挡块和顶部面片。Radiosity 使用 8 阶额外反弹，每阶每批 64 样本，累计 32 批；小场景每帧可更新完整卡片扫描。等待约 256 帧以上以收敛缓存和探针历史。
 

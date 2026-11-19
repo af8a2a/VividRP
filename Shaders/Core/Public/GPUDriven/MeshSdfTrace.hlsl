@@ -22,7 +22,9 @@ struct VividMeshSdfInstance
     uint layerMask;
     uint2 entityId;
     float distanceScale;
-    uint3 padding;
+    uint motionFrame;
+    uint2 padding;
+    float4 previousLocalToWorld0, previousLocalToWorld1, previousLocalToWorld2;
 };
 
 struct VividMeshSdfNode

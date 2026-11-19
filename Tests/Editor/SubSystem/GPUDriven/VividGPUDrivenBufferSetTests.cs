@@ -98,7 +98,7 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding), 44);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Instance).IsLayoutSequential, Is.True);
-            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(80));
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(128));
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal0), 0);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal1), 16);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.WorldToLocal2), 32);
@@ -107,9 +107,12 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdLow), 56);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.EntityIdHigh), 60);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.DistanceScale), 64);
-            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.Padding0), 68);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.MotionFrame), 68);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.Padding1), 72);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.Padding2), 76);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.PreviousLocalToWorld0), 80);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.PreviousLocalToWorld1), 96);
+            AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.PreviousLocalToWorld2), 112);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Node).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Node>(), Is.EqualTo(48));

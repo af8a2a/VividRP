@@ -39,7 +39,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public Vector4 WorldToLocal0, WorldToLocal1, WorldToLocal2;
             public uint FieldIndex, LayerMask, EntityIdLow, EntityIdHigh;
             public float DistanceScale;
-            public uint Padding0, Padding1, Padding2;
+            public uint MotionFrame, Padding1, Padding2;
+            public Vector4 PreviousLocalToWorld0, PreviousLocalToWorld1, PreviousLocalToWorld2;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -609,7 +610,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         private void UpdateInstancesAndBvh(bool rebuildBvh)
         {
-            m_InstanceUpload.Clear();
+            uint motionFrame = unchecked((uint)Time.frameCount);
             if (rebuildBvh)
             {
                 m_Leaves.Clear();
@@ -637,8 +638,23 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     m_Leaves[m_LeafSlotsByInstance[i]] = leaf;
                 }
 
-                m_InstanceUpload.Add(new Instance
+                bool sameEntity = i < m_Instances.Count && m_Instances[i].EntityId == source.EntityId;
+                Instance previous = sameEntity ? m_InstanceUpload[i] : default;
+                bool moved = sameEntity && !source.LocalToWorld.Equals(m_Instances[i].LocalToWorld);
+                if (moved && previous.MotionFrame != motionFrame)
                 {
+                    var previousTransform = m_Instances[i].LocalToWorld;
+                    previous.PreviousLocalToWorld0 = previousTransform.GetRow(0);
+                    previous.PreviousLocalToWorld1 = previousTransform.GetRow(1);
+                    previous.PreviousLocalToWorld2 = previousTransform.GetRow(2);
+                    previous.MotionFrame = motionFrame;
+                }
+                var instance = new Instance
+                {
+                    MotionFrame = sameEntity ? previous.MotionFrame : uint.MaxValue,
+                    PreviousLocalToWorld0 = previous.PreviousLocalToWorld0,
+                    PreviousLocalToWorld1 = previous.PreviousLocalToWorld1,
+                    PreviousLocalToWorld2 = previous.PreviousLocalToWorld2,
                     WorldToLocal0 = source.WorldToLocal.GetRow(0),
                     WorldToLocal1 = source.WorldToLocal.GetRow(1),
                     WorldToLocal2 = source.WorldToLocal.GetRow(2),
@@ -647,8 +663,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     EntityIdLow = (uint)source.EntityId,
                     EntityIdHigh = (uint)(source.EntityId >> 32),
                     DistanceScale = CalculateDistanceScale(source.WorldToLocal),
-                });
+                };
+                if (i < m_InstanceUpload.Count)
+                    m_InstanceUpload[i] = instance;
+                else
+                    m_InstanceUpload.Add(instance);
             }
+            if (m_InstanceUpload.Count > m_NextInstances.Count)
+                m_InstanceUpload.RemoveRange(m_NextInstances.Count, m_InstanceUpload.Count - m_NextInstances.Count);
 
             if (rebuildBvh)
             {

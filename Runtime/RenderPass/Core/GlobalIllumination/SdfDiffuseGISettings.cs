@@ -148,6 +148,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [HideInInspector]
         public BoolParameter screenProbeDirectionalCache = new(false);
 
+        [Tooltip("Trace a world-space 8×8 equal-area octahedron per Screen Probe. Disable for the eight-ray cosine hemisphere.")]
+        public BoolParameter screenProbeFullSphere = new(true);
+
+        [Tooltip("Blend the previous probe radiance before spatial filtering. The lighting sampling guide retains its own filtered history.")]
+        public BoolParameter screenProbeTemporalFilter = new(false);
+
+        [Tooltip("Maximum weighted ray channel in pre-exposed space before scattering. Zero disables the limit.")]
+        public MinFloatParameter screenProbeMaxRayIntensity = new(10f, 0f);
+
         [Tooltip("Use reprojected radiance to subdivide bright directions while retaining cosine coverage across the hemisphere.")]
         public BoolParameter screenProbeSamplingGuide = new(true);
 

@@ -85,6 +85,11 @@ float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 c
 {
     if ((_SdfGatherHistoryDiagnostics & 1u) != 0u)
         return history;
+#if defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
+    // Sparse probe samples can move the whole neighborhood together on static geometry.
+    if (fastUpdate <= 0.0 || (_SdfGatherHistoryDiagnostics & 1048576u) != 0u)
+        return history;
+#endif
     int2 size = int2(_SdfDiffuseScreenSize.xy);
     float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
     float4 material = _SdfDiffuseGBuffer0.Load(int3(pixel, 0));
@@ -163,6 +168,9 @@ float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 c
     float3 delta = historyColor - mean;
     float3 normalized = abs(delta) / extent;
     float3 bounded = max(0.0, SdfHistoryRgb(mean + delta / max(1.0, Max3(normalized.x, normalized.y, normalized.z))));
+#if defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
+    return bounded;
+#else
     // A sparse sample can change color abruptly across the entire 3x3 neighborhood.
     // Shorten stable history only for a large, spatially coherent luminance change.
     float lumaScale = max(0.05, max(historyColor.x, mean.x));
@@ -174,6 +182,7 @@ float3 RectifyPixelHistory(uint2 pixel, float3 position, float3 normal, float4 c
     // Weak rectification on stable pixels lets the long window absorb sparse trace noise.
     return (_SdfGatherHistoryDiagnostics & 1048576u) != 0u
         ? history : lerp(history, bounded, lerp(0.10, 1.0, fastUpdate));
+#endif
 }
 
 #if !defined(VIVID_SDF_SCREEN_PROBE_TEMPORAL)
@@ -504,6 +513,15 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     return true;
 }
 
+// Stored age includes the last observation. At saturation all N prior frames
+// still contribute alongside the current observation with weight 1 / (1 + N).
+Texture2D<float> _SdfResolvedMoving;
+
+float ScreenProbePriorFrameCount(float storedAge, float confidence, float fastUpdate)
+{
+    return min(storedAge * confidence, (1.0 - fastUpdate) * _SdfPixelHistoryMaxAge);
+}
+
 [numthreads(8, 8, 1)]
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
 void ScreenProbeTemporalReprojectionWithMomentsCS(uint3 id : SV_DispatchThreadID)
@@ -533,7 +551,9 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         if (coverageAgreement >= 0.35)
         {
             float3 historyLighting = history.coveredLighting / history.coverage;
-            float fastUpdate = SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels);
+            float moving = _SdfResolvedMoving.Load(int3(id.xy, 0));
+            float lightingFastUpdate = clamp((saturate(10.0 * moving) - 0.2) / 0.8, 0.0, 0.9);
+            float fastUpdate = max(lightingFastUpdate, SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels));
             float3 rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
             // Trace coverage is a stochastic lighting estimate. It must not
             // select the current sample's averaging weight on stable geometry.
@@ -544,22 +564,23 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
             if (history.momentCoverage >= 0.35)
             {
-                float momentAge = 1.0 + min(history.momentAge, _SdfPixelHistoryMaxAge - 1.0)
-                    * ageConfidence * (1.0 - fastUpdate) * saturate(history.momentCoverage);
+                float momentAge = 1.0 + ScreenProbePriorFrameCount(history.momentAge,
+                    ageConfidence * saturate(history.momentCoverage), fastUpdate);
                 float weight = rcp(momentAge);
                 float mean = history.logMean + ScreenProbeLogLuminance(rectified) - ScreenProbeLogLuminance(historyLighting);
                 float delta = currentLog - mean;
                 // Central variance avoids cancellation in half-precision history.
                 // Keep observation variance conservative: sparse probes are correlated.
                 moments = float3(lerp(mean, currentLog, weight),
-                    (1.0 - weight) * (history.logVariance + weight * delta * delta), momentAge);
+                    (1.0 - weight) * (history.logVariance + weight * delta * delta), min(momentAge, _SdfPixelHistoryMaxAge));
             }
 #endif
-            age += min(history.age, _SdfPixelHistoryMaxAge - 1.0) * ageConfidence * (1.0 - fastUpdate);
+            float priorFrames = ScreenProbePriorFrameCount(history.age, ageConfidence, fastUpdate);
+            age = min(1.0 + priorFrames, _SdfPixelHistoryMaxAge);
             historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
                 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
 
-            float currentWeight = rcp(age);
+            float currentWeight = rcp(1.0 + priorFrames);
             float3 covered = lerp(rectified * history.coverage, result.rgb * result.a, currentWeight);
             result.a = lerp(history.coverage, result.a, currentWeight);
             result.rgb = min(covered / max(result.a, 1e-5), 65000.0);

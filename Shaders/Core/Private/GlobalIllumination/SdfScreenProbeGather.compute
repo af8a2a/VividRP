@@ -16,6 +16,8 @@
 #endif
 #if defined(VIVID_SDF_PROBE_IRRADIANCE)
 #include "SdfScreenProbeIrradiance.hlsl"
+Texture2D<float> _SdfProbeMoving;
+RWTexture2D<float> _SdfResolvedMovingOutput;
 #endif
 
 // 0: baked fallback is available, 1: same-surface repair, 2: also trace screen radiance.
@@ -697,8 +699,9 @@ float3 ResolveScreenProbeIrradiance(SdfProbeIrradiance sh, float3 normal, float4
     return irradiance;
 }
 
-float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, float3 normal)
+float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, float3 normal, out float moving)
 {
+    moving = 0.0;
     uint2 grid = ProbeGridSize(size);
     float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
     // Radiance filtering determines energy; scalar anchor contrast must not lock the lookup.
@@ -727,9 +730,13 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
         for (uint i = 0u; i < 4u; ++i)
         {
             if (samples.weights[i] > 0.0)
+            {
+                moving += samples.weights[i] * _SdfProbeMoving.Load(int3(samples.tileX[i], samples.tileY[i], 0));
                 AccumulateScreenProbeIrradiance(uint2(samples.tileX[i], samples.tileY[i]), stride,
                     samples.weights[i], sh, coveredWeight);
+            }
         }
+        moving /= totalWeight;
     }
     if (coveredWeight <= 0.0 && _SdfProbeResolveRepairMode == 0u)
         return 0.0;
@@ -775,8 +782,10 @@ void ScreenProbeIntegrateCS(uint3 id : SV_DispatchThreadID)
 
     float3 position, normal;
     float4 lighting = 0.0;
+    float moving = 0.0;
     if (LoadReceiver(id.xy, position, normal))
-        lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal);
+        lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal, moving);
+    _SdfResolvedMovingOutput[id.xy] = moving;
     _SdfDiffuseOutput[id.xy] = lighting;
 }
 #endif

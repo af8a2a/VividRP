@@ -22,7 +22,8 @@ Texture2D<float4> _SdfOpenPbrAux1;
 
 static const uint ProbeSpacing = 16u;
 static const uint RestirPixelSpacing = 2u;
-static const uint RaysPerProbe = 8u;
+static const uint RaysPerProbe = 8u; // Legacy hemisphere and ReSTIR layouts.
+uint _SdfScreenProbeFullSphere;
 static const float ProbeMomentScale = 0.25;
 static const uint RayScreenHit = 1u;
 static const uint RaySdfHit = 2u;
@@ -223,7 +224,14 @@ uint2 ProbeGridSize(uint2 screenSize)
 
 uint ProbeRayCount()
 {
-    return _SdfRestirDense != 0u ? 1u : RaysPerProbe;
+    return _SdfRestirDense != 0u ? 1u : (_SdfScreenProbeFullSphere != 0u ? 64u : RaysPerProbe);
+}
+
+uint2 ProbeTraceAddress(uint2 tile, uint ray)
+{
+    if (_SdfScreenProbeFullSphere != 0u)
+        return tile * 8u + uint2(ray & 7u, ray >> 3u);
+    return uint2(tile.x * ProbeRayCount() + ray, tile.y);
 }
 
 bool LoadAdaptiveProbePixel(uint2 tile, out uint2 pixel)

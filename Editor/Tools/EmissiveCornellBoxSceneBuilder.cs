@@ -197,6 +197,9 @@ namespace VividRP.Editor.Tools
                 gi.screenProbeAnchorPreFilter.Override(true);
                 gi.screenProbeSamplingGuide.Override(true);
                 gi.screenProbeHierarchicalGuide.Override(true);
+                gi.screenProbeFullSphere.Override(true);
+                gi.screenProbeTemporalFilter.Override(false);
+                gi.screenProbeMaxRayIntensity.Override(10f);
                 gi.spatialDenoise.Override(SdfDiffuseSpatialDenoise.Legacy);
                 gi.pixelTemporal.Override(true);
                 gi.pixelHistoryMaxAge.Override(10);

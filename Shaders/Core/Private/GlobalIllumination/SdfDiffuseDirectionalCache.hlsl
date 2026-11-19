@@ -20,12 +20,12 @@ uint2 DirectionalGrid()
 
 uint2 DirectionalAddress(uint2 tile, uint bin)
 {
-    return uint2(tile.x * DirectionalBinCount + bin, tile.y);
+    return ProbeTraceAddress(tile, bin);
 }
 
 uint2 DirectionalMetadataOffset(uint2 grid)
 {
-    return uint2(0u, grid.y * (1u + _SdfDiffuseAdaptiveProbes));
+    return uint2(0u, grid.y * (1u + _SdfDiffuseAdaptiveProbes) * (_SdfScreenProbeFullSphere != 0u ? 8u : 1u));
 }
 
 float4 PackDirectionalHitPlane(float3 normal, uint instanceIndex)
@@ -78,6 +78,34 @@ uint DirectionalBin(float3 direction, float3x3 basis)
 float DirectionalRandom(uint value)
 {
     return float(HashProbe(value) >> 8u) * (1.0 / 16777216.0);
+}
+
+uint _SdfDirectionalHasMotion;
+
+bool GetDirectionalHistoryUV(uint2 tile, float3 position, out float2 uv)
+{
+    if (_SdfDirectionalHasMotion != 0u)
+    {
+        uint2 pixel;
+        if (LoadProbeReceiverPixel(tile, uint2(_SdfDiffuseScreenSize.xy), pixel))
+        {
+            float4 packed = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+            if (!PixelSetAsNoMotionVectors(packed) && all(isfinite(packed.xy)))
+            {
+                float2 motion;
+                DecodeMotionVector(packed, motion);
+                uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw + _SdfScreenJitterDelta - motion;
+                return all(uv >= 0.0) && all(uv < 1.0);
+            }
+        }
+    }
+
+    float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
+    uv = 0.0;
+    if (clip.w <= 0.0)
+        return false;
+    uv = ScreenUv(clip);
+    return all(uv >= 0.0) && all(uv < 1.0);
 }
 
 bool DirectionalUsesFrozenProposals()
@@ -141,23 +169,53 @@ float3 DirectionalOctDirection(float2 uv, float3x3 basis)
 }
 
 static const uint DirectionalOctSize = 4u;
-static const uint DirectionalGatherBinCount = DirectionalOctSize * DirectionalOctSize;
+#define DirectionalGatherBinCount (_SdfScreenProbeFullSphere != 0u ? 64u : 16u)
+
+// Equal solid angle per texel. Unity Z/X/Y correspond to Unreal forward/right/up.
+float3 ProbeSphereDirection(float2 uv)
+{
+    float2 p = 2.0 * uv - 1.0;
+    float z = 1.0 - abs(p.x) - abs(p.y);
+    float r = 1.0 - abs(z);
+    float phi = (PI * 0.25) * (1.0 + (abs(p.y) - abs(p.x)) / max(r, 1e-8));
+    float s, c;
+    sincos(phi, s, c);
+    float xy = r * sqrt(2.0 - r * r);
+    return float3(sign(p.y) * xy * s, sign(z) * (1.0 - r * r), sign(p.x) * xy * c);
+}
+
+uint ProbeSphereBin(float3 direction)
+{
+    float3 d = normalize(direction).zxy;
+    float r = sqrt(saturate(1.0 - abs(d.z)));
+    float phi = atan2(abs(d.y), max(abs(d.x), 1e-20)) * (2.0 / PI);
+    float2 p = r * float2(1.0 - phi, phi);
+    if (d.z < 0.0)
+        p = 1.0 - p.yx;
+    p *= float2(d.x < 0.0 ? -1.0 : 1.0, d.y < 0.0 ? -1.0 : 1.0);
+    uint2 cell = min(uint2(saturate(p * 0.5 + 0.5) * 8.0), 7u);
+    return cell.x + cell.y * 8u;
+}
 static const int DirectionalOctScreen = -3;
 static const int DirectionalOctWorld = -4;
 
 uint2 DirectionalGatherAddress(uint2 tile, uint bin)
 {
-    return uint2(tile.x * DirectionalGatherBinCount + bin, tile.y);
+    return _SdfScreenProbeFullSphere != 0u ? ProbeTraceAddress(tile, bin) : uint2(tile.x * 16u + bin, tile.y);
 }
 
 float3 DirectionalGatherDirection(uint bin, float3x3 basis)
 {
+    if (_SdfScreenProbeFullSphere != 0u)
+        return ProbeSphereDirection((float2(bin & 7u, bin >> 3u) + 0.5) / 8.0);
     return DirectionalOctDirection((float2(bin % DirectionalOctSize, bin / DirectionalOctSize) + 0.5)
         / DirectionalOctSize, basis);
 }
 
 uint DirectionalGatherBin(float3 direction, float3x3 basis)
 {
+    if (_SdfScreenProbeFullSphere != 0u)
+        return ProbeSphereBin(direction);
     // Invert the concentric disk warp used by DirectionalOctDirection.
     float2 p = mul(basis, direction).xy;
     float radius = length(p);
@@ -185,6 +243,22 @@ float3 SampleDiffuseProbeRay(uint2 tile, uint ray, uint seed, float3x3 basis, ou
     inverseRelativePdf = 1.0;
     if (_SdfDirectionalCacheEnabled == 0u)
         return ProbeRayDirection(ray, seed, basis);
+
+    if (_SdfScreenProbeFullSphere != 0u)
+    {
+        // One stratified offset per probe; guide and trace must use the same descriptor.
+        uint code = _SdfDirectionalGuideEnabled != 0u
+            ? uint(_SdfDirectionalGuide.Load(int3(ProbeTraceAddress(tile, ray), 0)).x) : ray;
+        bin = code & 63u;
+        uint child = code >> 6u; // 0 = original cell, 1..4 = quadrants.
+        float2 offset = clamp(DirectionalTemporalSample(tile, 0u, seed), 1e-5, 1.0 - 1e-5);
+        if (child != 0u)
+        {
+            offset = 0.5 * (offset + float2((child - 1u) & 1u, (child - 1u) >> 1u));
+            inverseRelativePdf = 0.25;
+        }
+        return ProbeSphereDirection((float2(bin & 7u, bin >> 3u) + offset) / 8.0);
+    }
 
     float2 sampleUv = DirectionalTemporalSample(tile, ray, seed);
     if (_SdfDirectionalGuideEnabled != 0u)

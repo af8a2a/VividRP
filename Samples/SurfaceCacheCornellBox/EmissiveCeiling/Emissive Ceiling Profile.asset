@@ -440,6 +440,15 @@ MonoBehaviour:
   screenProbeDirectionalCache:
     m_OverrideState: 0
     m_Value: 1
+  screenProbeFullSphere:
+    m_OverrideState: 1
+    m_Value: 1
+  screenProbeTemporalFilter:
+    m_OverrideState: 1
+    m_Value: 0
+  screenProbeMaxRayIntensity:
+    m_OverrideState: 1
+    m_Value: 10
   screenProbeSamplingGuide:
     m_OverrideState: 1
     m_Value: 1

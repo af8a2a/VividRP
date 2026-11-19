@@ -1,4 +1,5 @@
 #pragma kernel PrepareSdfDirectionalGuide
+#pragma kernel PrepareSphereDirectionalGuide
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfRadianceCacheCommon.hlsl"
@@ -11,6 +12,106 @@ Texture2D<float4> _SdfDirectionalProposalHistory;
 Texture2D<float4> _SdfDirectionalPrevious;
 
 RWTexture2D<float4> _SdfDirectionalGuideOutput;
+
+bool FindDirectionalWorldProbe(float3 position, float3 normal, out int3 cell);
+float DirectionalWorldImportance(int3 cell, float3 offset, float3 direction);
+groupshared float4 SphereReceiverNormals[64];
+groupshared float SphereLuminanceSum[64];
+groupshared float SphereScore[64];
+groupshared uint SphereSorted[64];
+
+[numthreads(8, 8, 1)]
+void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint2 tile = group.xy;
+    uint2 grid = DirectionalGrid();
+    float3 position, normal;
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy);
+    uint2 receiverPixel = 0u;
+    position = normal = 0.0;
+    bool valid = LoadProbeReceiverPixel(tile, size, receiverPixel) && LoadReceiver(receiverPixel, position, normal);
+    float eyeDepth = max(dot(float4(position, 1.0), _SdfProbeCameraForward), 0.1);
+    uint2 coord = uint2(lane & 7u, lane >> 3u);
+    int2 offset = all(coord == 4u) ? 0 : int2(coord) * 4 - 14;
+    uint2 pixel = uint2(clamp(int2(receiverPixel) + offset, 0, int2(size) - 1));
+    float3 samplePosition, sampleNormal;
+    bool visible = LoadReceiver(pixel, samplePosition, sampleNormal);
+    float relativePlane = dot(position - samplePosition, sampleNormal) / eyeDepth;
+    bool supported = valid && visible && (all(coord == 4u) || exp2(-10000.0 * relativePlane * relativePlane) > 0.1);
+    SphereReceiverNormals[lane] = supported ? float4(sampleNormal, 1.0) : 0.0;
+    float3 direction = ProbeSphereDirection((float2(lane & 7u, lane >> 3u) + 0.5) / 8.0);
+    float lighting = 0.0;
+    float count = 0.0;
+    if (valid && _SdfDirectionalHasHistory != 0u)
+    {
+        float2 uv;
+        if (GetDirectionalHistoryUV(tile, position, uv))
+        {
+            int2 lower = int2(floor(ProbeHistoryGridPosition(uv)));
+            [unroll]
+            for (uint tap = 0u; tap < 4u; ++tap)
+            {
+                uint2 neighbor = uint2(clamp(lower + int2(tap & 1u, tap >> 1u), 0, int2(grid) - 1));
+                float4 g = _SdfDiffusePreviousGeometry.Load(int3(neighbor, 0));
+                float plane = dot(g.xyz - position, normal) / eyeDepth;
+                if (g.w < 0.0 || exp2(-10000.0 * plane * plane) <= 0.1)
+                    continue;
+                float3 L = _SdfDirectionalPrevious.Load(int3(ProbeTraceAddress(neighbor, lane), 0)).rgb;
+                lighting += max(dot(L * _SdfHistoryLightScale.rgb, float3(0.2126, 0.7152, 0.0722)), 0.0);
+                count++;
+            }
+        }
+    }
+    lighting /= max(count, 1.0);
+    if (count < 4.0)
+    {
+        int3 cell;
+        if (valid && FindDirectionalWorldProbe(position, normal, cell))
+            lighting += (1.0 - count * 0.25) * DirectionalWorldImportance(cell, FarProbePosition(cell) - position, direction);
+        else
+            lighting = 1.0;
+    }
+    SphereLuminanceSum[lane] = lighting;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint step = 32u; step > 0u; step >>= 1u)
+    {
+        if (lane < step)
+            SphereLuminanceSum[lane] += SphereLuminanceSum[lane + step];
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float probability = lighting / max(SphereLuminanceSum[0], 0.0001);
+    // SH projection is linear. Average the diffuse transfer of the supported material normals.
+    float brdf = 0.0, normalCount = 0.0;
+    [loop]
+    for (uint n = 0u; n < 64u; ++n)
+    {
+        float4 material = SphereReceiverNormals[n];
+        float cosine = dot(material.xyz, direction);
+        brdf += material.w * (0.09375 + 0.5 * cosine + 0.46875 * cosine * cosine);
+        normalCount += material.w;
+    }
+    brdf = max(brdf / max(normalCount, 1.0), 0.0);
+    float score = brdf * (64.0 * probability);
+    score = brdf >= 0.1 ? max(score, 0.1) : score;
+    SphereScore[lane] = score;
+    GroupMemoryBarrierWithGroupSync();
+    uint rank = 0u;
+    [unroll]
+    for (uint i = 0u; i < 64u; ++i)
+        rank += SphereScore[i] < score || (SphereScore[i] == score && i > lane);
+    SphereSorted[rank] = lane;
+    GroupMemoryBarrierWithGroupSync();
+    uint code = lane;
+    uint packet = rank < 48u ? rank / 3u : 63u - rank;
+    if (valid && packet < 16u && SphereScore[SphereSorted[3u * packet + 2u]] < 0.1)
+    {
+        uint parent = SphereSorted[63u - packet];
+        uint child = rank < 48u ? 2u + rank % 3u : 1u;
+        code = parent | (child << 6u);
+    }
+    _SdfDirectionalGuideOutput[ProbeTraceAddress(tile, lane)] = float4(code, probability, score, 0.0);
+}
 
 uint PackDirectionalOctRect(uint4 rect)
 {

@@ -16,6 +16,9 @@
 #include "SdfDiffuseDirectionalCache.hlsl"
 
 #include "SdfScreenProbeIrradiance.hlsl"
+#include "../../Public/AutoExposure.hlsl"
+
+float _SdfProbeMaxRayIntensity;
 
 RWTexture2D<float4> _SdfDirectionalPlaneIdentityOutput;
 
@@ -265,19 +268,18 @@ RWTexture2D<float4> _SdfDirectionalCompositeOutput;
 RWTexture2D<float4> _SdfDirectionalTemporalOutput;
 RWTexture2D<float4> _SdfDirectionalFilteredOutput;
 uint _SdfDirectionalHasHistory;
-uint _SdfDirectionalHasMotion;
 
-groupshared float4 SharedTraceRadiance[RaysPerProbe];
-groupshared float4 SharedTraceMetadata[RaysPerProbe];
-groupshared float4 SharedTracePlane[RaysPerProbe];
+groupshared float4 SharedTraceRadiance[64];
+groupshared float4 SharedTraceMetadata[64];
+groupshared float4 SharedTracePlane[64];
 
-[numthreads(16, 1, 1)]
+[numthreads(64, 1, 1)]
 void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
 {
     uint2 tile = group.xy;
     uint2 offset = DirectionalMetadataOffset(DirectionalGrid());
     float4 geometry = _SdfDiffuseGeometry[tile];
-    if (bin < RaysPerProbe)
+    if (bin < ProbeRayCount())
     {
         float4 sample = 0.0;
         float4 metadata = 0.0;
@@ -289,13 +291,24 @@ void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin 
             metadata = _SdfDirectionalRays.Load(int3(address + offset, 0));
             plane = _SdfDirectionalRays.Load(int3(address + 2u * offset, 0));
             float3 direction = VividDecodeSurfaceSummaryNormal(metadata.zw);
-            metadata.x = DirectionalGatherBin(direction, GetLocalFrame(UnpackProbeNormal(geometry.w)));
+            // Full-sphere descriptors carry the exact parent even at half-float octahedron seams.
+            if (_SdfScreenProbeFullSphere == 0u)
+                metadata.x = DirectionalGatherBin(direction, GetLocalFrame(UnpackProbeNormal(geometry.w)));
+            if (_SdfProbeMaxRayIntensity > 0.0)
+            {
+                float mass = metadata.y * (float(DirectionalGatherBinCount) / ProbeRayCount());
+                float peak = Max3(sample.r, sample.g, sample.b) * mass * VividGetPreExposure();
+                sample.rgb *= min(1.0, _SdfProbeMaxRayIntensity / max(peak, 1e-8));
+            }
         }
         SharedTraceRadiance[bin] = sample;
         SharedTraceMetadata[bin] = metadata;
         SharedTracePlane[bin] = plane;
     }
     GroupMemoryBarrierWithGroupSync();
+
+    if (bin >= DirectionalGatherBinCount)
+        return;
 
     // The tracing stage has already selected one winner per ray. Scatter its
     // cosine mass to the gather chart and reduce in ray order at each bin.
@@ -308,8 +321,8 @@ void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin 
     float3 firstNormal = 0.0;
     float4 firstPlane = 0.0;
     bool planeConsistent = true;
-    [unroll]
-    for (uint ray = 0u; ray < RaysPerProbe; ++ray)
+    [loop]
+    for (uint ray = 0u; ray < ProbeRayCount(); ++ray)
     {
         float4 metadata = SharedTraceMetadata[ray];
         if (uint(metadata.x) != bin)
@@ -553,41 +566,17 @@ float3 QuantizeRadianceHistory(float3 radiance, uint2 address)
     return f16tof32(lower + uint3(random < probability));
 }
 
-bool GetDirectionalHistoryUV(uint2 tile, float3 position, out float2 uv)
-{
-    if (_SdfDirectionalHasMotion != 0u)
-    {
-        uint2 pixel;
-        if (LoadProbeReceiverPixel(tile, uint2(_SdfDiffuseScreenSize.xy), pixel))
-        {
-            float4 packed = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
-            if (!PixelSetAsNoMotionVectors(packed) && all(isfinite(packed.xy)))
-            {
-                float2 motion;
-                DecodeMotionVector(packed, motion);
-                uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw + _SdfScreenJitterDelta - motion;
-                return all(uv >= 0.0) && all(uv < 1.0);
-            }
-        }
-    }
-
-    float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
-    uv = 0.0;
-    if (clip.w <= 0.0)
-        return false;
-    uv = ScreenUv(clip);
-    return all(uv >= 0.0) && all(uv < 1.0);
-}
-
 float3 CompositedDirectionalRadiance(float4 sample)
 {
     // Alpha is covered inverse-PDF mass. An undrawn cell is a zero observation.
-    return sample.rgb * (sample.a * float(DirectionalGatherBinCount) / float(RaysPerProbe));
+    return sample.rgb * (sample.a * float(DirectionalGatherBinCount) / float(ProbeRayCount()));
 }
 
-[numthreads(16, 1, 1)]
+[numthreads(64, 1, 1)]
 void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
 {
+    if (bin >= DirectionalGatherBinCount)
+        return;
     uint2 tile = group.xy;
     uint2 address = DirectionalGatherAddress(tile, bin);
     float4 geometry = _SdfDiffuseGeometry[tile];
@@ -620,7 +609,7 @@ void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, ui
 
             // VividRP stores a receiver-local hemisphere. Match the same world direction.
             uint oldBin = bin;
-            if (geometry.w != other.w)
+            if (_SdfScreenProbeFullSphere == 0u && geometry.w != other.w)
             {
                 float3 oldNormal = UnpackProbeNormal(other.w);
                 if (dot(direction, oldNormal) <= 0.0)
@@ -639,9 +628,11 @@ void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, ui
 }
 
 
-[numthreads(16, 1, 1)]
+[numthreads(64, 1, 1)]
 void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
 {
+    if (bin >= DirectionalGatherBinCount)
+        return;
     uint2 tile = group.xy;
     uint2 grid = DirectionalGrid();
     uint2 offset = DirectionalMetadataOffset(grid);
@@ -913,7 +904,7 @@ void ScreenProbePrepareAnchorNoPixelHistoryCS(uint3 id : SV_DispatchThreadID)
             anchor += float4(traced.rgb * traced.a, traced.a);
         }
         anchor.rgb /= max(anchor.a, 1e-5);
-        anchor.a = saturate(anchor.a / RaysPerProbe);
+        anchor.a = saturate(anchor.a / ProbeRayCount());
         anchor = AccumulateDirectionalProbeAnchor(anchor, geometry.xyz, UnpackProbeNormal(geometry.w), statistics);
     }
     _SdfPreparedProbeAnchorOutput[id.xy] = RoundSdfAnchorHistory(anchor);
@@ -1091,7 +1082,7 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
     {
         float3 normal = UnpackProbeNormal(geometry.w);
         float3x3 basis = GetLocalFrame(normal);
-        const float cellMass = float(RaysPerProbe) / float(DirectionalGatherBinCount);
+        float cellMass = float(ProbeRayCount()) / float(DirectionalGatherBinCount);
         [loop]
         for (uint bin = 0u; bin < DirectionalGatherBinCount; ++bin)
         {
@@ -1104,7 +1095,7 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
                 float4 unfiltered = _SdfDirectionalTemporal.Load(int3(address, 0));
                 float weight = cellMass * max(unfiltered.a, 0.0);
                 ProjectSdfProbeIrradiance(unfilteredSh,
-                    unfiltered.rgb * weight / max(dot(normal, direction), 0.25), direction);
+                    unfiltered.rgb * weight * (_SdfScreenProbeFullSphere != 0u ? 4.0 : rcp(max(dot(normal, direction), 0.25))), direction);
                 unfilteredCovered += weight;
             }
             float4 filtered = _SdfDirectionalFiltered.Load(int3(address, 0));
@@ -1112,26 +1103,27 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
             // including zero contributions. Alpha only validates the receiver.
             float weight = cellMass * max(filtered.a, 0.0);
             float3 sample = filtered.rgb * weight;
-            ProjectSdfProbeIrradiance(sh, sample / max(dot(normal, direction), 0.25), direction);
-            cosineIntegral += sample;
+            float cosine = saturate(dot(normal, direction));
+            ProjectSdfProbeIrradiance(sh, sample * (_SdfScreenProbeFullSphere != 0u ? 4.0 : rcp(max(cosine, 0.25))), direction);
+            cosineIntegral += sample * (_SdfScreenProbeFullSphere != 0u ? 4.0 * cosine : 1.0);
             covered += weight;
         }
         if (_SdfProbeAnchorDiagnostics != 0u)
         {
             rawAnchor.rgb /= max(rawAnchor.a, 1e-5);
-            rawAnchor.a = saturate(rawAnchor.a / RaysPerProbe);
+            rawAnchor.a = saturate(rawAnchor.a / ProbeRayCount());
             StoreProbeAnchorDiagnostics(id.xy + 7u * stride, stride,
-                sh, rcp(max(covered, 1e-5)), saturate(covered / RaysPerProbe));
+                sh, rcp(max(covered, 1e-5)), saturate(covered / ProbeRayCount()));
         }
         // Compensate cosine-chart SH truncation using the SAME filtered field.
         // There is no independent scalar history or spatial energy anchor.
-        float3 correction = cosineIntegral - EvaluateSdfProbeIrradiance(sh, normal);
+        float3 correction = _SdfScreenProbeFullSphere != 0u ? 0.0 : cosineIntegral - EvaluateSdfProbeIrradiance(sh, normal);
         sh.r0.w += correction.r;
         sh.g0.w += correction.g;
         sh.b0.w += correction.b;
     }
     float invCovered = rcp(max(covered, 1e-5));
-    float coverage = saturate(covered / RaysPerProbe);
+    float coverage = saturate(covered / ProbeRayCount());
     // Retain the scalar summary for diagnostics; directional tracing does not
     // feed this summary back into either radiance history or SH reconstruction.
     _SdfDiffuseProbes[id.xy] = RoundSdfHistory(float4(cosineIntegral * invCovered, coverage));
@@ -1147,7 +1139,7 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
         if (geometry.w < 0.0)
             StoreProbeAnchorDiagnostics(id.xy + 7u * stride, stride, (SdfProbeIrradiance)0, 1.0, 0.0);
         StoreProbeAnchorDiagnostics(id.xy + 14u * stride, stride, unfilteredSh,
-            rcp(max(unfilteredCovered, 1e-5)), saturate(unfilteredCovered / RaysPerProbe));
+            rcp(max(unfilteredCovered, 1e-5)), saturate(unfilteredCovered / ProbeRayCount()));
         _SdfDiffuseFilteredProbes[id.xy + 21u * stride] = rawAnchor;
     }
 }

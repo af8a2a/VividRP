@@ -12,6 +12,7 @@ namespace VividRP.Runtime
         static BlueNoise s_Instance;
 
         public static BlueNoise Instance => s_Instance;
+        internal TextureHandle VectorAtlas => m_VSMSTBNVec2Handle;
         public bool SupportsBnd256 =>
             m_ScramblingTile != null
             && m_RankingTile != null

@@ -68,7 +68,7 @@ void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
 {
     uint2 tile = id.xy;
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
-    if (any(tile >= ProbeGridSize(screenSize) * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+    if (any(tile >= uint2(ProbeGridSize(screenSize).x, ProbeAtlasHeight(ProbeGridSize(screenSize)))))
         return;
 
     float3 position = 0.0, normal = 0.0;
@@ -80,6 +80,7 @@ void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
     }
     float3x3 basis = DiffuseProbeFrame(receiver ? normal : float3(0.0, 1.0, 0.0));
     float3 origin = position + normal * _SdfDiffuseRayBias;
+    float screenLimit = receiver && WorldCacheCovers(origin) ? min(_SdfDiffuseMaxDistance, WorldNearDistance) : _SdfDiffuseMaxDistance;
     uint2 probePixel;
     float probeSpeed = 0.0;
     if (_SdfDirectionalCacheEnabled != 0u && receiver && LoadProbeReceiverPixel(tile, screenSize, probePixel))
@@ -96,7 +97,7 @@ void TraceDiffuseScreenRays(uint3 id : SV_DispatchThreadID)
         float inverseRelativePdf;
         float3 rayDirection = SampleDiffuseProbeRay(tile, ray, seed, basis, bin, inverseRelativePdf);
         if (receiver && TraceScreenGeometry(origin, rayDirection,
-            _SdfDiffuseMaxDistance, hit))
+            screenLimit, hit))
         {
             encodedHit = -hit.distance;
             bool compatible = true;
@@ -205,14 +206,14 @@ void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 directi
 
 #if !defined(VIVID_SDF_SCREEN_ONLY)
 bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver receiver, float screenDistance,
-    uint screenState, out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete,
+    uint screenState, float nearLimit, bool stopAtCache, out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete,
     out uint traceState, out float tracedDistance)
 {
     traceState = 0u;
     advancedReceiver = false;
     bool segmented = _SdfMeshDetailDistance > 0.0;
     float overlap = max(0.04, 2.0 * _SdfDiffuseRayBias);
-    float middleEnd = segmented ? min(_SdfDiffuseMaxDistance, screenDistance + overlap) : _SdfDiffuseMaxDistance;
+    float middleEnd = segmented ? min(nearLimit, screenDistance + overlap) : nearLimit;
     float start = 0.0;
     float end = segmented ? min(_SdfMeshDetailDistance, middleEnd) : middleEnd;
     const uint detailStage = 0u, candidateStage = 1u, middleStage = 2u, farStage = 3u;
@@ -254,7 +255,7 @@ bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver rec
         }
         else
         {
-            if (_SdfFarTraceDistance <= middleEnd || screenState != 0u)
+            if (stopAtCache || _SdfFarTraceDistance <= middleEnd || screenState != 0u)
                 return false;
             // Reconstruct at the first hit on the continuous receiver ray.
             start = 0.0;
@@ -271,7 +272,7 @@ void TraceProbe(uint3 id)
     uint2 screenSize = uint2(_SdfDiffuseScreenSize.xy);
     uint2 tile = id.xy;
     uint rayCount = ProbeRayCount();
-    if (any(tile >= ProbeGridSize(screenSize) * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+    if (any(tile >= uint2(ProbeGridSize(screenSize).x, ProbeAtlasHeight(ProbeGridSize(screenSize)))))
         return;
 
     float3 position, normal;
@@ -310,6 +311,7 @@ void TraceProbe(uint3 id)
 
     float3x3 basis = DiffuseProbeFrame(normal);
     float3 origin = position + normal * _SdfDiffuseRayBias;
+    bool coveredByWorldCache = WorldCacheCovers(origin);
     #if !defined(VIVID_SDF_SCREEN_ONLY)
         VividMeshSdfReceiver receiver = (VividMeshSdfReceiver)0;
     #endif
@@ -423,8 +425,22 @@ void TraceProbe(uint3 id)
         bool incomplete;
         uint traceState;
         float tracedDistance;
-        bool traced = TraceSdfGatherHit(origin, direction, receiver, screenDistance, screenState,
-            hit, advancedReceiver, incomplete, traceState, tracedDistance);
+        bool useWorld = coveredByWorldCache && screenState == 0u;
+        float3 worldRadiance = 0.0;
+        float worldDistance = 0.0;
+        float fullLimit = _SdfScreenProbeFullSphere != 0u ? max(_SdfFarTraceDistance, _SdfDiffuseMaxDistance) : _SdfDiffuseMaxDistance;
+        bool traced;
+        // A missing directional texel retries the same traversal out to the far limit.
+        // Keep one traversal body in the shader for both ranges.
+        [loop] for (uint attempt = 0u; ; ++attempt)
+        {
+            traced = TraceSdfGatherHit(origin, direction, receiver, screenDistance, screenState,
+                useWorld && attempt == 0u ? WorldNearDistance : fullLimit, useWorld,
+                hit, advancedReceiver, incomplete, traceState, tracedDistance);
+            if (!useWorld || attempt != 0u || traced || incomplete) break;
+            if (SampleWorldCache(origin, direction, worldRadiance, worldDistance)) break;
+            worldDistance = 0.0;
+        }
         uint rayState = screenState | traceState;
         if (!traced || incomplete)
         {
@@ -433,7 +449,14 @@ void TraceProbe(uint3 id)
             float farDistance = 0.0;
             #if defined(VIVID_SDF_SURFACE_CACHE)
                 [branch]
-                if (_SdfMeshDetailDistance <= 0.0 && _SdfFarTraceDistance > 0.0 && !incomplete && screenState == 0u)
+                if (worldDistance > 0.0)
+                {
+                    radiance = worldRadiance;
+                    farDistance = worldDistance;
+                    missState |= RayFarCache;
+                    farHits++;
+                }
+                else if (_SdfScreenProbeFullSphere == 0u && _SdfMeshDetailDistance <= 0.0 && _SdfFarTraceDistance > 0.0 && !incomplete && screenState == 0u)
                 {
                     if (TryLoadFarRadiance(origin, direction, radiance, farDistance))
                     {
@@ -529,7 +552,7 @@ void TraceProbe(uint3 id)
         float cacheCoverage = 0.0;
         float3 cacheLighting = 0.0;
         #if defined(VIVID_SDF_SURFACE_CACHE)
-            if (farSegment)
+            if (farSegment && _SdfScreenProbeFullSphere == 0u)
                 cacheLighting = ReconstructFarRadiance(origin + _SdfDiffuseMaxDistance * direction, hitPosition, hit, cacheCoverage);
         #endif
         float3 radiance = cacheLighting;

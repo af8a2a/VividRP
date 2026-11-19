@@ -1,14 +1,19 @@
 #pragma kernel UpdateSdfFarRadiance VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
+#pragma kernel ClearWorldProbeDemand VIVID_SDF_WORLD
+#pragma kernel MarkWorldProbeDemand VIVID_SDF_WORLD
+#pragma kernel SelectWorldProbeUpdates VIVID_SDF_WORLD
+#pragma kernel UpdateWorldProbes VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
+#pragma kernel UpdateWorldProbesWithSky VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_SDF_WORLD_SKY
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
 #include "SdfRadianceCacheCommon.hlsl"
 
-#if defined(VIVID_SDF_FAR_UPDATE)
 RWTexture2D<float4> _SdfFarOutput;
+uint _SdfFarClear;
+#if defined(VIVID_SDF_FAR_UPDATE)
 RWStructuredBuffer<uint> _SdfFarHitIdsOutput;
 float4 _SdfFarUpdates[64];
-uint _SdfFarClear;
 
 [numthreads(8, 8, 1)]
 void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
@@ -27,4 +32,103 @@ void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
     if (lane == 0u)
         _SdfFarOutput[FarAtlasAddress(cell, FarDirections)] = float4(float3(cell), 1.0);
 }
+#endif
+
+#if defined(VIVID_SDF_WORLD)
+RWTexture2D<uint> _SdfWorldWork;
+
+int3 DemandCell(uint slot)
+{
+    int3 origin = int3(_SdfFarWindow.xyz);
+    return origin + ((int3(slot & 15u, slot >> 8u, (slot >> 4u) & 15u) - origin) & 15);
+}
+
+[numthreads(8,8,1)]
+void ClearWorldProbeDemand(uint3 id : SV_DispatchThreadID)
+{
+    _SdfWorldWork[id.xy] = 0u;
+    if (_SdfFarClear != 0u)
+        _SdfFarOutput[WorldKeyAddress(DemandCell(id.x + 64u * id.y))] = 0.0;
+}
+
+[numthreads(8,8,1)]
+void MarkWorldProbeDemand(uint3 id : SV_DispatchThreadID)
+{
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(id.xy >= ProbeGridSize(size))) return;
+    float3 position, normal;
+    if (!LoadReceiver(ProbeReceiverPixel(id.xy, size), position, normal)) return;
+    int3 lower = int3(floor(position / FarCellSize - 0.5));
+    [unroll] for (uint i = 0u; i < 8u; ++i)
+    {
+        int3 cell = lower + WorldCorner(i);
+        if (any(uint3(cell - int3(_SdfFarWindow.xyz)) >= FarGridSize)) continue;
+        uint slot = WorldSlot(cell);
+        InterlockedOr(_SdfWorldWork[uint2(slot & 63u, slot >> 6u)], 1u);
+    }
+}
+
+// Each lane owns a disjoint subset of world cells. Prefer missing keys, then
+// the least recently updated visible cell. There is no GPU-to-CPU scheduling latency.
+[numthreads(16,1,1)]
+void SelectWorldProbeUpdates(uint lane : SV_GroupIndex)
+{
+    uint chosen = 0u;
+    float oldest = 1e30;
+    [loop] for (uint slot = lane; slot < 4096u; slot += 16u)
+    {
+        if (_SdfWorldWork[uint2(slot & 63u, slot >> 6u)] == 0u) continue;
+        int3 cell = DemandCell(slot);
+        float4 key = _SdfFarOutput[WorldKeyAddress(cell)];
+        float stamp = all(key.xyz == float3(cell)) ? key.w : 0.0;
+        if (stamp < oldest) { chosen = slot + 1u; oldest = stamp; }
+        if (stamp <= 0.0) break;
+    }
+    _SdfWorldWork[uint2(lane,64u)] = chosen;
+}
+
+#if defined(VIVID_SDF_FAR_UPDATE)
+groupshared uint WorldReuse;
+groupshared uint WorldTicket;
+[numthreads(8,8,1)]
+#if defined(VIVID_SDF_WORLD_SKY)
+void UpdateWorldProbesWithSky(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+#else
+void UpdateWorldProbes(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+#endif
+{
+    if (all(lane.xy == 0u))
+    {
+        WorldTicket = _SdfWorldWork[uint2(group.x,64u)];
+        if (WorldTicket != 0u)
+        {
+            int3 requested = DemandCell(WorldTicket - 1u);
+            float4 key = _SdfFarOutput[WorldKeyAddress(requested)];
+            WorldReuse = key.w > 0.0 && all(key.xyz == float3(requested));
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (WorldTicket == 0u) return;
+    int3 cell = DemandCell(WorldTicket - 1u);
+    uint2 keyAddress = WorldKeyAddress(cell);
+    uint seed = HashProbe(WorldSlot(cell) ^ HashProbe(_SdfDiffuseFrame));
+    float2 jitter = (float2(seed & 65535u, seed >> 16u) + 0.5) / 65536.0;
+    [loop] for (uint y = lane.y; y < WorldResolution; y += 8u)
+    [loop] for (uint x = lane.x; x < WorldResolution; x += 8u)
+    {
+        uint2 xy = uint2(x,y), address = WorldTexelAddress(cell, xy);
+        float3 dir = ProbeSphereDirection((xy + jitter) / WorldResolution);
+        uint instance;
+        float4 fresh = TraceFarProbe(FarProbePosition(cell), dir, instance);
+        if (WorldReuse != 0u)
+        {
+            float4 previous = _SdfFarOutput[address];
+            if (fresh.w > 0.0 && previous.w > 0.0 && abs(fresh.w - previous.w) < 0.1 * fresh.w)
+                fresh.rgb = lerp(previous.rgb, fresh.rgb, 0.25);
+        }
+        _SdfFarOutput[address] = fresh;
+    }
+    if (all(lane.xy == 0u)) _SdfFarOutput[keyAddress] = float4(float3(cell), float(_SdfDiffuseFrame + 1u));
+}
+#endif
 #endif

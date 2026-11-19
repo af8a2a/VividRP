@@ -3,6 +3,11 @@
 #pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
 #pragma require wavebasic : VIVID_SDF_RESTIR_OPENPBR
 #pragma kernel PlaceSdfAdaptiveProbes
+#pragma kernel MarkAdaptiveCandidates
+#pragma kernel PruneAdaptiveCandidates
+#pragma kernel PrefixAdaptiveRows
+#pragma kernel PrefixAdaptiveAtlas
+#pragma kernel WriteAdaptiveAtlas
 // Full-resolution wavelet reconstruction stabilizes uncertainty within each native radiance footprint.
 #pragma kernel FilterSdfDiffuseAtrous VIVID_SDF_ATROUS VIVID_SDF_ATROUS_GEOMETRY_GUARD
 #pragma kernel FilterSdfDiffuseAtrousFinal VIVID_SDF_ATROUS VIVID_SDF_ATROUS_FINAL VIVID_SDF_ATROUS_GEOMETRY_GUARD
@@ -24,6 +29,143 @@ RWTexture2D<float> _SdfResolvedMovingOutput;
 uint _SdfProbeResolveRepairMode;
 static const float MinProbeInterpolationWeight = 0.01;
 static const float MinProbeInterpolationFallbackWeight = 0.0001;
+
+
+// Placement must predict the same coverage that full-resolution integration can use.
+float ScreenProbeSurfaceWeight(float3 delta, float3 normal, float3 probeNormal, float eyeDepth)
+{
+    float receiverPlane = abs(dot(delta, normal));
+    float depthWeight = exp2(-200.0 * receiverPlane / eyeDepth);
+    if (_SdfScreenProbeFullSphere != 0u)
+        return depthWeight;
+    float plane = max(receiverPlane, abs(dot(delta, probeNormal)));
+    float tolerance = clamp(0.008 * eyeDepth, 0.045, 0.12);
+    return depthWeight * saturate(1.0 - plane / tolerance)
+        * smoothstep(0.88, 0.99, dot(normal, probeNormal));
+}
+
+float AdaptiveScreenProbeFootprint(uint2 probePixel, uint2 receiverPixel)
+{
+    float2 distanceInTiles = abs(float2(probePixel) - float2(receiverPixel)) / float(ProbeSpacing);
+    if (_SdfScreenProbeFullSphere != 0u)
+        return saturate(1.0 - min(distanceInTiles.x, distanceInTiles.y));
+    return saturate(min(1.0 - min(distanceInTiles.x, distanceInTiles.y),
+        4.0 * (1.0 - max(distanceInTiles.x, distanceInTiles.y))));
+}
+
+float CandidatePlaneWeight(uint2 otherPixel, float3 position, float3 normal, float eyeDepth)
+{
+    float3 other, otherNormal;
+    if (!LoadReceiver(otherPixel, other, otherNormal)) return 0.0;
+    return ScreenProbeSurfaceWeight(other - position, normal, otherNormal, eyeDepth);
+}
+
+[numthreads(8,8,1)]
+void MarkAdaptiveCandidates(uint3 id : SV_DispatchThreadID)
+{
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy), grid = ProbeGridSize(size), tile = id.xy;
+    if (any(tile >= grid)) return;
+    uint mask = 0u;
+    [loop] for (uint i = 0u; i < 8u; ++i)
+    {
+        uint2 pixel = AdaptiveCandidatePixel(tile, i);
+        float3 p, n;
+        if (any(pixel >= size) || !LoadReceiver(pixel, p, n)) continue;
+        float depth = max(dot(float4(p, 1), _SdfProbeCameraForward), 0.1);
+        uint2 first = min(tile, max(grid, 2u) - 2u), last = min(first + 1u, grid - 1u);
+        float2 f = saturate((float2(pixel) - float2(ProbeReceiverPixel(first, size)) + 1.0)
+            / (float2(ProbeReceiverPixel(last, size) - ProbeReceiverPixel(first, size)) + 2.0));
+        float total = 0;
+        [unroll] for (uint j = 0u; j < 4u; ++j)
+        {
+            uint2 offset = uint2(j & 1u, j >> 1u);
+            float2 w = lerp(1.0 - f, f, float2(offset));
+            total += w.x * w.y * CandidatePlaneWeight(ProbeReceiverPixel(min(first + offset, last), size), p, n, depth);
+        }
+        if (total < MinProbeInterpolationWeight) mask |= 1u << i;
+    }
+    _SdfAdaptivePlacementOutput[tile] = float(mask);
+}
+
+[numthreads(8,8,1)]
+void PruneAdaptiveCandidates(uint3 id : SV_DispatchThreadID)
+{
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy), grid = ProbeGridSize(size), tile = id.xy;
+    if (any(tile >= grid)) return;
+    uint mask = (uint)_SdfAdaptivePlacementOutput[tile], result = mask;
+    while (mask != 0u)
+    {
+        uint i = firstbitlow(mask);
+        mask &= mask - 1u;
+        uint2 pixel = AdaptiveCandidatePixel(tile, i);
+        float3 p, n;
+        LoadReceiver(pixel, p, n);
+        float depth = max(dot(float4(p, 1), _SdfProbeCameraForward), 0.1), total = 0;
+        uint2 first = min(tile, max(grid, 2u) - 2u);
+        [loop] for (uint j = 0u; j < 4u && total < MinProbeInterpolationWeight; ++j)
+        {
+            uint2 neighbor = first + uint2(j & 1u, j >> 1u);
+            if (any(neighbor >= grid)) continue;
+            uint earlier = (uint)_SdfAdaptivePlacementOutput[neighbor] & ((1u << i) - 1u);
+            float best = 0;
+            while (earlier != 0u)
+            {
+                uint2 q = AdaptiveCandidatePixel(neighbor, firstbitlow(earlier));
+                earlier &= earlier - 1u;
+                best = max(best, AdaptiveScreenProbeFootprint(q, pixel) * CandidatePlaneWeight(q, p, n, depth));
+            }
+            total += best;
+        }
+        if (total >= MinProbeInterpolationWeight) result &= ~(1u << i);
+    }
+    _SdfAdaptivePlacementOutput[tile + uint2(0u, grid.y)] = float(result);
+}
+
+[numthreads(64,1,1)]
+void PrefixAdaptiveRows(uint row : SV_DispatchThreadID)
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    if (row >= grid.y) return;
+    uint count = 0u;
+    for (uint x = 0u; x < grid.x; ++x)
+    {
+        _SdfAdaptivePlacementOutput[uint2(x, row + 2u * grid.y)] = float(count);
+        count += countbits((uint)_SdfAdaptivePlacementOutput[uint2(x, row + grid.y)]);
+    }
+    _SdfAdaptivePlacementOutput[uint2(0u, 3u * grid.y + row)] = float(count);
+}
+
+[numthreads(1,1,1)]
+void PrefixAdaptiveAtlas()
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    uint count = 0u;
+    for (uint row = 0u; row < grid.y; ++row)
+    {
+        uint2 address = uint2(0u, 3u * grid.y + row);
+        uint rowCount = (uint)_SdfAdaptivePlacementOutput[address];
+        _SdfAdaptivePlacementOutput[address] = float(count);
+        count += rowCount;
+    }
+    _SdfAdaptivePlacementOutput[uint2(0u, 5u * grid.y)] = float(min(count, grid.x * grid.y / 2u));
+}
+
+[numthreads(8,8,1)]
+void WriteAdaptiveAtlas(uint3 id : SV_DispatchThreadID)
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy)), tile = id.xy;
+    if (any(tile >= grid)) return;
+    uint mask = (uint)_SdfAdaptivePlacementOutput[tile + uint2(0u, grid.y)];
+    uint start = (uint)_SdfAdaptivePlacementOutput[tile + uint2(0u, 2u * grid.y)]
+        + (uint)_SdfAdaptivePlacementOutput[uint2(0u, 3u * grid.y + tile.y)];
+    while (mask != 0u && start < grid.x * grid.y / 2u)
+    {
+        uint code = 8u * (tile.x + grid.x * tile.y) + firstbitlow(mask);
+        _SdfAdaptivePlacementOutput[AdaptiveAtlasSlot(start, grid) + uint2(0u, 3u * grid.y)] = float(code);
+        mask &= mask - 1u;
+        ++start;
+    }
+}
 
 [numthreads(8, 8, 1)]
 void PlaceSdfAdaptiveProbes(uint3 id : SV_DispatchThreadID)
@@ -596,23 +738,7 @@ float ScreenProbeBilateralWeight(uint2 tile, float3 position, float3 normal, flo
     if (geometry.w < 0.0)
         return 0.0;
 
-    float3 probeNormal = UnpackProbeNormal(geometry.w);
-    float3 delta = geometry.xyz - position;
-    float receiverPlane = abs(dot(delta, normal));
-    float plane = max(receiverPlane, abs(dot(delta, probeNormal)));
-    float tolerance = clamp(0.008 * eyeDepth, 0.045, 0.12);
-    // Use depth-relative plane falloff so coplanar samples at grazing angles
-    // can still contribute. Bound the plane and normal support at thin edges.
-    return exp2(-200.0 * receiverPlane / eyeDepth) * saturate(1.0 - plane / tolerance)
-        * smoothstep(0.88, 0.99, dot(normal, probeNormal));
-}
-
-float AdaptiveScreenProbeFootprint(uint2 probePixel, uint2 receiverPixel)
-{
-    float2 distanceInTiles = abs(float2(probePixel) - float2(receiverPixel)) / float(ProbeSpacing);
-    // Let probes beside an edge supply support along it. Fade out near the end of the local footprint.
-    return saturate(min(1.0 - min(distanceInTiles.x, distanceInTiles.y),
-        4.0 * (1.0 - max(distanceInTiles.x, distanceInTiles.y))));
+    return ScreenProbeSurfaceWeight(geometry.xyz - position, normal, UnpackProbeNormal(geometry.w), eyeDepth);
 }
 
 void AccumulateScreenProbeIrradiance(uint2 tile, uint2 stride, float weight,
@@ -666,10 +792,13 @@ ScreenProbeInterpolation CalculateScreenProbeInterpolation(uint2 pixel, uint2 si
             float weight = spatial.x * spatial.y * ScreenProbeBilateralWeight(tile, position, normal, eyeDepth);
             if (_SdfDiffuseAdaptiveProbes != 0u && weight < MinProbeInterpolationWeight)
             {
-                uint2 samplePixel;
-                if (LoadAdaptiveProbePixel(tile, samplePixel))
+                uint2 owner = tile;
+                uint2 range = _SdfScreenProbeFullSphere != 0u ? CompactAdaptiveRange(owner, grid) : uint2(0u, 1u);
+                [loop] for (uint j = 0u; j < range.y; ++j)
                 {
-                    uint2 adaptive = tile + uint2(0u, grid.y);
+                    uint2 adaptive = _SdfScreenProbeFullSphere != 0u ? AdaptiveAtlasSlot(range.x + j, grid) : owner + uint2(0u, grid.y);
+                    uint2 samplePixel;
+                    if (!LoadProbeReceiverPixel(adaptive, size, samplePixel)) continue;
                     float candidate = AdaptiveScreenProbeFootprint(samplePixel, pixel)
                         * ScreenProbeBilateralWeight(adaptive, position, normal, eyeDepth);
                     if (candidate > weight)

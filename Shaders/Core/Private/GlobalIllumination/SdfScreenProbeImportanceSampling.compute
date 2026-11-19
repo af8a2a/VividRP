@@ -65,9 +65,13 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
     lighting /= max(count, 1.0);
     if (count < 4.0)
     {
-        int3 cell;
-        if (valid && FindDirectionalWorldProbe(position, normal, cell))
-            lighting += (1.0 - count * 0.25) * DirectionalWorldImportance(cell, FarProbePosition(cell) - position, direction);
+        float3 worldLight;
+        float worldDistance;
+        float2 offsetInTexel = DirectionalTemporalSample(tile, 0u, ProbeSeed(tile));
+        float3 worldDirection = ProbeSphereDirection((float2(coord) + offsetInTexel) / 8.0);
+        if (_SdfDirectionalWorldGuide != 0u && valid && WorldCacheCovers(position)
+            && SampleWorldCache(position, worldDirection, worldLight, worldDistance))
+            lighting += (1.0 - count * 0.25) * dot(worldLight, float3(0.2126, 0.7152, 0.0722));
         else
             lighting = 1.0;
     }

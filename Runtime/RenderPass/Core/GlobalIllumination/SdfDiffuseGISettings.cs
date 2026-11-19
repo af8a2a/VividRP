@@ -151,6 +151,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Trace a world-space 8×8 equal-area octahedron per Screen Probe. Disable for the eight-ray cosine hemisphere.")]
         public BoolParameter screenProbeFullSphere = new(true);
 
+        [Tooltip("Stochastically scatter each traced direction to neighboring octahedral texels before filtering.")]
+        public BoolParameter screenProbeDitherTraceDirections = new(false);
+
         [Tooltip("Blend the previous probe radiance before spatial filtering. The lighting sampling guide retains its own filtered history.")]
         public BoolParameter screenProbeTemporalFilter = new(false);
 

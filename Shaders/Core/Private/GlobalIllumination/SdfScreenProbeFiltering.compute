@@ -147,7 +147,7 @@ void FilterProbeLighting(uint2 tile, uint2 grid, float4 center, float4 geometry,
 void FilterSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
 {
     uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
-    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+    if (any(id.xy >= uint2(grid.x, ProbeAtlasHeight(grid))))
         return;
 
     float4 center = _SdfDiffuseProbeInput.Load(int3(id.xy, 0));
@@ -272,6 +272,26 @@ uint _SdfDirectionalHasHistory;
 groupshared float4 SharedTraceRadiance[64];
 groupshared float4 SharedTraceMetadata[64];
 groupshared float4 SharedTracePlane[64];
+Texture2D<float2> _SdfScatterNoise;
+uint _SdfHasScatterNoise;
+uint _SdfDitherTraceDirections;
+
+uint DitherSphereBin(uint2 tile, uint ray)
+{
+    uint seed = ProbeSeed(tile), parent;
+    float mass;
+    float2 continuous = SphereRayTexel(tile, ray, seed, parent, mass) - 0.5;
+    uint2 pixel;
+    LoadProbeReceiverPixel(tile, uint2(_SdfDiffuseScreenSize.xy), pixel);
+    uint2 address = (pixel / ProbeSpacing) & 127u;
+    address.y = 8191u - (((_SdfDiffuseFrame + 32u) & 63u) * 128u + address.y);
+    float2 threshold = _SdfHasScatterNoise != 0u ? _SdfScatterNoise.Load(int3(address, 0))
+        : float2(DirectionalRandom(seed ^ 0x21ab8c65u), DirectionalRandom(seed ^ 0x12ed3749u));
+    int2 q = int2(floor(continuous)) + int2(frac(continuous) >= threshold);
+    if (q.x < 0 || q.x > 7) q = int2(clamp(q.x, 0, 7), 7 - q.y);
+    if (q.y < 0 || q.y > 7) q = int2(7 - q.x, clamp(q.y, 0, 7));
+    return uint(q.x + 8 * q.y);
+}
 
 [numthreads(64, 1, 1)]
 void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
@@ -291,9 +311,10 @@ void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin 
             metadata = _SdfDirectionalRays.Load(int3(address + offset, 0));
             plane = _SdfDirectionalRays.Load(int3(address + 2u * offset, 0));
             float3 direction = VividDecodeSurfaceSummaryNormal(metadata.zw);
-            // Full-sphere descriptors carry the exact parent even at half-float octahedron seams.
             if (_SdfScreenProbeFullSphere == 0u)
                 metadata.x = DirectionalGatherBin(direction, GetLocalFrame(UnpackProbeNormal(geometry.w)));
+            else if (_SdfDitherTraceDirections != 0u)
+                metadata.x = DitherSphereBin(tile, bin);
             if (_SdfProbeMaxRayIntensity > 0.0)
             {
                 float mass = metadata.y * (float(DirectionalGatherBinCount) / ProbeRayCount());
@@ -647,10 +668,16 @@ void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_Gro
         float4 hit = _SdfDirectionalComposite.Load(int3(address + offset, 0));
         float3 sum = lighting.rgb;
         float total = 1.0;
+        uint2 owner = uint2(tile.x, tile.y % grid.y);
+        if (_SdfScreenProbeFullSphere != 0u && tile.y >= grid.y)
+        {
+            uint2 pixel;
+            CompactReceiver(tile, grid, owner, pixel);
+        }
         [unroll]
         for (uint tap = 0u; tap < 4u; ++tap)
         {
-            int2 candidate = int2(tile.x, tile.y % grid.y) + ProbeFilterOffsets[tap];
+            int2 candidate = int2(owner) + ProbeFilterOffsets[tap];
             if (any(candidate < 0) || any(candidate >= int2(grid)))
                 continue;
             uint2 neighbor = uint2(candidate);
@@ -658,14 +685,19 @@ void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_Gro
             float weight = ProbeTraceGeometryWeight(other, geometry.xyz, normal, eyeDepth);
             if (_SdfDiffuseAdaptiveProbes != 0u)
             {
-                uint2 alternateTile = neighbor + uint2(0u, grid.y);
-                float4 alternate = _SdfDiffuseGeometry[alternateTile];
-                float alternateWeight = ProbeTraceGeometryWeight(alternate, geometry.xyz, normal, eyeDepth);
-                if (alternateWeight > weight)
+                uint2 regularTile = neighbor;
+                uint2 range = _SdfScreenProbeFullSphere != 0u ? CompactAdaptiveRange(regularTile, grid) : uint2(0u, 1u);
+                [loop] for (uint j = 0u; j < range.y; ++j)
                 {
-                    neighbor = alternateTile;
-                    other = alternate;
-                    weight = alternateWeight;
+                    uint2 alternateTile = _SdfScreenProbeFullSphere != 0u ? AdaptiveAtlasSlot(range.x + j, grid) : regularTile + uint2(0u, grid.y);
+                    float4 alternate = _SdfDiffuseGeometry[alternateTile];
+                    float alternateWeight = ProbeTraceGeometryWeight(alternate, geometry.xyz, normal, eyeDepth);
+                    if (alternateWeight > weight)
+                    {
+                        neighbor = alternateTile;
+                        other = alternate;
+                        weight = alternateWeight;
+                    }
                 }
             }
             if (weight <= 0.0)
@@ -890,7 +922,7 @@ void ScreenProbePrepareAnchorNoPixelHistoryCS(uint3 id : SV_DispatchThreadID)
 #endif
 {
     uint2 grid = DirectionalGrid();
-    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+    if (any(id.xy >= uint2(grid.x, ProbeAtlasHeight(grid))))
         return;
     float4 geometry = _SdfDiffuseGeometry[id.xy];
     float4 anchor = 0.0;
@@ -1040,7 +1072,7 @@ bool AnchorPreFilterNearGeometryEdge(uint2 tile, float4 center, float3 normal)
 void ScreenProbeFilterAnchorCS(uint3 id : SV_DispatchThreadID)
 {
     uint2 grid = DirectionalGrid();
-    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+    if (any(id.xy >= uint2(grid.x, ProbeAtlasHeight(grid))))
         return;
     float4 geometry = _SdfDiffuseGeometry[id.xy];
     float4 center = _SdfSpatialProbeAnchorInput.Load(int3(id.xy, 0));
@@ -1067,7 +1099,7 @@ void StoreProbeAnchorDiagnostics(uint2 address, uint2 stride, SdfProbeIrradiance
 void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
 {
     uint2 grid = DirectionalGrid();
-    if (any(id.xy >= grid * uint2(1u, 1u + _SdfDiffuseAdaptiveProbes)))
+    if (any(id.xy >= uint2(grid.x, ProbeAtlasHeight(grid))))
         return;
 
     float4 geometry = _SdfDiffuseGeometry[id.xy];

@@ -190,6 +190,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal uint RadiosityLayoutVersion { get; private set; }
         internal uint RadiosityDiscontinuityVersion { get; private set; }
         internal uint TransportVersion { get; private set; }
+        internal uint NonMotionVersion { get; private set; }
         internal uint EmissionVersion { get; private set; }
         private Vector4 m_EmissionMaximum, m_PreviousEmissionMaximum;
         private bool m_LinearEmissionChange;
@@ -227,7 +228,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             cmd.SetComputeIntParam(shader, NodeCountId, NodeCount);
         }
 
-        internal void Update(VividMeshletRendererDatabase database)
+        internal void Update(VividMeshletRendererDatabase database) => Update(database, Time.frameCount);
+
+        internal void Update(VividMeshletRendererDatabase database, int frameIndex)
         {
             CollectSources(database);
             if (m_NextInstances.Count == 0)
@@ -239,8 +242,18 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
             bool fieldsChanged = NodeCount == 0 || !SameSources(m_Fields, m_NextFields);
             bool instancesChanged = fieldsChanged || !SameSources(m_Instances, m_NextInstances);
-            bool smallTransform = instancesChanged && !fieldsChanged && HasSameInstanceOrder() && HasSmallTransformChanges();
-            if (instancesChanged && !UpdateGeometry(fieldsChanged))
+            bool transformOnly = instancesChanged && !fieldsChanged && HasSameInstanceOrder();
+            if (transformOnly)
+            {
+                for (int i = 0; i < m_Instances.Count; i++)
+                    if (m_Instances[i].FieldIndex != m_NextInstances[i].FieldIndex || m_Instances[i].LayerMask != m_NextInstances[i].LayerMask)
+                    {
+                        transformOnly = false;
+                        break;
+                    }
+            }
+            bool smallTransform = transformOnly && HasSmallTransformChanges();
+            if (instancesChanged && !UpdateGeometry(fieldsChanged, unchecked((uint)frameIndex)))
                 return;
 
             bool surfacesChanged = m_NextDiffuseSurfaces != null
@@ -299,6 +312,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (instancesChanged || surfacesChanged)
             {
                 Revision++;
+                if (!transformOnly || surfacesChanged)
+                    NonMotionVersion++;
                 if (transportChanged)
                     TransportVersion++;
                 if (!smallTransform || surfacesChanged)
@@ -358,7 +373,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             return (previous.GetColumn(3) - current.GetColumn(3)).sqrMagnitude <= 0.0025f; // Five cm; unchanged basis.
         }
 
-        private bool UpdateGeometry(bool fieldsChanged)
+        private bool UpdateGeometry(bool fieldsChanged, uint motionFrame)
         {
             bool rebuildBvh = NodeCount == 0 || !HasSameInstanceOrder();
             // A failed or interrupted upload cannot leave the previous scene marked ready.
@@ -366,7 +381,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (fieldsChanged && !UploadFields())
                 return false;
 
-            UpdateInstancesAndBvh(rebuildBvh);
+            UpdateInstancesAndBvh(rebuildBvh, motionFrame);
             Upload(ref m_InstanceBuffer, m_InstanceUpload, "Mesh SDF Instances");
             Upload(ref m_NodeBuffer, m_Nodes, "Mesh SDF BVH");
             (m_Fields, m_NextFields) = (m_NextFields, m_Fields);
@@ -608,9 +623,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             return true;
         }
 
-        private void UpdateInstancesAndBvh(bool rebuildBvh)
+        private void UpdateInstancesAndBvh(bool rebuildBvh, uint motionFrame)
         {
-            uint motionFrame = unchecked((uint)Time.frameCount);
             if (rebuildBvh)
             {
                 m_Leaves.Clear();
@@ -811,6 +825,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             RadiosityLayoutVersion++;
             RadiosityDiscontinuityVersion++;
             TransportVersion++;
+            NonMotionVersion++;
             EmissionVersion++;
             RadiosityCardCount = 0;
             m_SurfaceLightingInstanceBuffer = null;

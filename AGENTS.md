@@ -73,7 +73,32 @@ Respond in the user's language with concise progress updates and a final explana
 - Functional changes follow the same principle: run the focused tests and one runtime check that cover the changed behavior; do not repeat a passing check for reassurance.
 
 
-## 7. Important Notes
+## 7. Reference Code Porting Rules (Ground Truth Contract)
+
+When porting, migrating, or adapting code from a mature reference implementation (e.g., Unreal Engine 5, official TechSamples, papers' reference code):
+
+1. **Verbatim-First Mandate (原样搬运优先)**
+  - Treat the reference implementation as the **numerical and algorithmic Ground Truth**.
+  - **DO NOT** rewrite, simplify, "clean up", or "modernize" core algorithms, math expressions, magic numbers, bit-hacks, or branching logic from scratch.
+  - Preserve exact mathematical ordering (e.g., multiply-add order, clamping bounds, epsilon values) to guarantee bit-level or visual parity.
+
+2. **Thin Adapter Layer Only (仅编写胶水适配层)**
+  - Restrict modifications strictly to **API/type translation and resource binding** (e.g., mapping `FVector` -> `float3`, `Texture2D` sampling macros, buffer layouts, or engine-specific headers).
+  - Keep the reference function structure, variable naming, and control flow intact whenever possible so line-by-line diffing against the source remains trivial.
+
+3. **Zero Silent Approximations (禁止静默近似)**
+  - Never replace a complex reference step with a "simpler equivalent" or heuristic approximation without explicit user approval.
+  - If a hardware feature, intrinsic, or API is missing in the target environment, **STOP and report the gap** instead of silently inventing a fallback.
+
+4. **Mandatory Deviation Log (变更审计)**
+  - Before finishing a port, list every non-syntactic deviation from the reference (e.g., coordinate system handedness, Y-flip, reversed-Z, precision downgrade `fp32` -> `fp16`). If there are no algorithmic deviations, explicitly state: `Deviation: None (verbatim logic port)`.
+
+### Anti-Patterns (Strictly Forbidden)
+- ❌ Re-deriving math formulas from memory instead of copying the provided reference code.
+- ❌ Dropping "seemingly redundant" guards, bias terms, or performance optimizations (e.g., loop unrolling, wave intrinsics, precomputed LUTs).
+- ❌ Refactoring a reference file into new abstractions/classes before parity is verified.
+
+## 8. Important Notes
 - Ignore shader compilation errors caused specifically by the D3D11 limit of 8 UAVs, including SPD and other shaders that exceed this limit. Treat these diagnostics as non-blocking during validation; do not change shaders or add D3D11 compatibility workarounds solely to eliminate them. This exception does not apply to other shader errors or errors on other graphics backends.
 - C# structs uploaded directly to GPU buffers must use `[StructLayout(LayoutKind.Sequential)]` or an explicitly defined layout matching HLSL; never use `LayoutKind.Auto`. Runtime upgrades can reorder fields without changing the total struct size. In Unity 7000.0.0a7, this broke `VividGPUCullingContext` and `VividGPULODSelectionContext`, producing zero visible Meshlets while RTAS still worked.
 - When changing GPU-shared structs or upgrading Unity, verify both buffer stride and individual field offsets against HLSL, including fixed arrays and padding. Extend the layout checks in `Tests/Editor/SubSystem/GPUDriven/VividGPUDrivenBufferSetTests.cs` as needed. Compilation and size-only checks do not prove layout compatibility; for missing geometry, inspect culling counters and indirect draw arguments separately from RTAS validation.

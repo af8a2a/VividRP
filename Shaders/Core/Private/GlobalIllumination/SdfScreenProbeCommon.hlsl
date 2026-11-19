@@ -234,6 +234,83 @@ uint2 ProbeTraceAddress(uint2 tile, uint ray)
     return uint2(tile.x * ProbeRayCount() + ray, tile.y);
 }
 
+// Equal solid angle per texel. Unity Z/X/Y correspond to Unreal forward/right/up.
+float3 ProbeSphereDirection(float2 uv)
+{
+    float2 p = 2.0 * uv - 1.0;
+    float z = 1.0 - abs(p.x) - abs(p.y);
+    float r = 1.0 - abs(z);
+    float phi = (PI * 0.25) * (1.0 + (abs(p.y) - abs(p.x)) / max(r, 1e-8));
+    float s, c;
+    sincos(phi, s, c);
+    float xy = r * sqrt(2.0 - r * r);
+    return float3(sign(p.y) * xy * s, sign(z) * (1.0 - r * r), sign(p.x) * xy * c);
+}
+
+float2 ProbeSphereUV(float3 direction)
+{
+    float3 d = normalize(direction).zxy;
+    float r = sqrt(saturate(1.0 - abs(d.z)));
+    float phi = atan2(abs(d.y), max(abs(d.x), 1e-20)) * (2.0 / PI);
+    float2 p = r * float2(1.0 - phi, phi);
+    if (d.z < 0.0)
+        p = 1.0 - p.yx;
+    p *= float2(d.x < 0.0 ? -1.0 : 1.0, d.y < 0.0 ? -1.0 : 1.0);
+    return saturate(p * 0.5 + 0.5);
+}
+
+
+// Compact placement texture: mark/pruned masks, tile prefix, row prefix,
+// and a reverse map from assigned atlas slots to their receiver samples.
+uint ProbeAtlasHeight(uint2 grid)
+{
+    return grid.y + _SdfDiffuseAdaptiveProbes * (_SdfScreenProbeFullSphere != 0u ? (grid.y + 1u) / 2u : grid.y);
+}
+
+uint2 AdaptiveCandidatePixel(uint2 tile, uint index)
+{
+    // GetAdaptiveSampleCoord uses Rand3DPCG16(tile, SCREEN_TEMPORAL_INDEX)
+    // and the same eight-frame index as the uniform probe lattice.
+    uint temporalIndex = _SdfDiffuseFrame & 7u;
+    uint3 v = uint3(tile, temporalIndex) * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    uint2 seed = v.xy >> 16u;
+    float2 h = float2(frac(float(index) / 8.0 + float(seed.x) * (1.0 / 65536.0)),
+        float((reversebits(index) >> 16u) ^ seed.y) * (1.0 / 65536.0));
+    return tile * ProbeSpacing + ProbeTileJitter(temporalIndex) + uint2(clamp(h * ProbeSpacing, 0.0, ProbeSpacing - 1u));
+}
+
+uint2 AdaptiveAtlasSlot(uint slot, uint2 grid)
+{
+    return uint2(slot % grid.x, grid.y + slot / grid.x);
+}
+
+uint2 CompactAdaptiveRange(uint2 tile, uint2 grid)
+{
+    uint start = (uint)_SdfAdaptivePlacement.Load(int3(tile + uint2(0u, 2u * grid.y), 0))
+        + (uint)_SdfAdaptivePlacement.Load(int3(0u, 3u * grid.y + tile.y, 0));
+    uint count = countbits((uint)_SdfAdaptivePlacement.Load(int3(tile + uint2(0u, grid.y), 0)));
+    uint budget = grid.x * grid.y / 2u;
+    return uint2(start, min(count, budget - min(start, budget)));
+}
+
+bool CompactReceiver(uint2 atlas, uint2 grid, out uint2 owner, out uint2 pixel)
+{
+    uint index = (atlas.y - grid.y) * grid.x + atlas.x;
+    owner = pixel = 0u;
+    if (index >= (uint)_SdfAdaptivePlacement.Load(int3(0u, 5u * grid.y, 0))) return false;
+    uint code = (uint)_SdfAdaptivePlacement.Load(int3(atlas + uint2(0u, 3u * grid.y), 0));
+    uint tile = code >> 3u;
+    owner = uint2(tile % grid.x, tile / grid.x);
+    pixel = AdaptiveCandidatePixel(owner, code & 7u);
+    return true;
+}
+
 bool LoadAdaptiveProbePixel(uint2 tile, out uint2 pixel)
 {
     uint encoded = (uint)_SdfAdaptivePlacement.Load(int3(tile, 0));
@@ -256,6 +333,11 @@ bool LoadProbeReceiverPixel(uint2 atlas, uint2 screenSize, out uint2 pixel)
     {
         pixel = ProbeReceiverPixel(atlas, screenSize);
         return true;
+    }
+    if (_SdfScreenProbeFullSphere != 0u)
+    {
+        uint2 owner;
+        return CompactReceiver(atlas, ProbeGridSize(screenSize), owner, pixel);
     }
     return LoadAdaptiveProbePixel(atlas - uint2(0, gridHeight), pixel);
 }

@@ -35,6 +35,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RealtimeDiffuseGIId = Shader.PropertyToID("_RealtimeDiffuseGI");
         private static readonly int RealtimeDiffuseGIEnabledId = Shader.PropertyToID("_RealtimeDiffuseGIEnabled");
         private static readonly int BentNormalId = Shader.PropertyToID("_RealtimeBentNormal");
+        private static readonly int PackedBentNormalId = Shader.PropertyToID("_RealtimePackedBentNormal");
         private static readonly int BentNormalEnabledId = Shader.PropertyToID("_RealtimeBentNormalEnabled");
         private static readonly int RealtimeDiffuseGIOnlyId = Shader.PropertyToID("_RealtimeDiffuseGIOnly");
         private static readonly int RealtimeOpenPbrDiffuseId = Shader.PropertyToID("_RealtimeOpenPbrDiffuse");
@@ -649,17 +650,22 @@ namespace VividRP.Runtime.RenderPass.Core
             bool realtimeOnly = false;
             bool openPbrDiffuse = false;
             bool bentNormal = false;
+            bool compositeBent = false;
             if (hasRealtimeGI && context.TryGet<VividSdfDiffuseFrameData>(out var diffuse)
                 && ReferenceEquals(diffuse.Output, m_RealtimeDiffuseGI))
             {
                 bentNormal = m_BentNormal.IsValid() && diffuse.BentNormalOutput == m_BentNormal;
+                compositeBent = bentNormal && diffuse.CompositeBentNormal;
                 skyHandled = diffuse.SkyHandled;
                 realtimeOnly = diffuse.RealtimeOnly;
                 openPbrDiffuse = diffuse.OpenPbrSource?.MatchesOpenPbrReceiver(
                     m_DepthTexture, m_GBuffer0, m_GBuffer1, m_GBuffer4, m_LayerAux0, m_LayerAux1) == true;
             }
-            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, BentNormalId, bentNormal ? m_BentNormal : rgDefaultResource.blackTexture);
-            cmd.SetComputeIntParam(m_DeferredLitCompute, BentNormalEnabledId, bentNormal ? 1 : 0);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, BentNormalId,
+                bentNormal && !compositeBent ? m_BentNormal : rgDefaultResource.blackTexture);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, PackedBentNormalId,
+                compositeBent ? m_BentNormal : rgDefaultResource.blackTexture);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, BentNormalEnabledId, compositeBent ? 2 : bentNormal ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseSkyHandledId, skyHandled ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIOnlyId, realtimeOnly ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeOpenPbrDiffuseId, openPbrDiffuse ? 1 : 0);

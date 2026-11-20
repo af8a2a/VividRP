@@ -27,8 +27,10 @@ uint _VividSlabLutReady;
 uint _VividOpenPBRLutsReady;
 
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
+#include "VividBentNormalPacking.hlsl"
 Texture2D<float4> _RealtimeDiffuseGI;
 Texture2D<float4> _RealtimeBentNormal;
+Texture2D<uint> _RealtimePackedBentNormal;
 uint _RealtimeBentNormalEnabled;
 uint _RealtimeDiffuseGIEnabled;
 uint _RealtimeDiffuseGIOnly;
@@ -38,7 +40,21 @@ uint _RealtimeOpenPbrDiffuse;
 float VividBentSpecularVisibility(uint2 pixelCoord, float3 normal, float3 view, float roughness)
 {
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
-    if (_RealtimeBentNormalEnabled != 0u)
+    if (_RealtimeBentNormalEnabled == 2u)
+    {
+        // LumenScreenSpaceBentNormal.ush::CalculateSpecularOcclusion.
+        float3 BentNormal = UnpackScreenBentNormal(_RealtimePackedBentNormal.Load(int3(pixelCoord, 0)));
+        float AO = saturate(length(BentNormal));
+        float ReflectionConeAngle = max(roughness, .1f) * PI;
+        float UnoccludedAngle = AO * PI;
+        float3 ReflectionVector = reflect(-view, normal);
+        float AngleBetween = VividBentNormalAcosFast(clamp(dot(BentNormal, ReflectionVector) / max(AO, .001f), -1, 1));
+        float AngleDifference = abs(ReflectionConeAngle - UnoccludedAngle);
+        float SpecularOcclusion = smoothstep(0, 1.0, 1.0 - saturate(
+            (AngleBetween - AngleDifference) / (ReflectionConeAngle + UnoccludedAngle - AngleDifference)));
+        return lerp(0, SpecularOcclusion, saturate((UnoccludedAngle - .1f) / .2f));
+    }
+    if (_RealtimeBentNormalEnabled == 1u)
     {
         float4 history = _RealtimeBentNormal.Load(int3(pixelCoord, 0));
         float visibility = saturate(length(history.xyz));
@@ -55,12 +71,23 @@ float VividBentSpecularVisibility(uint2 pixelCoord, float3 normal, float3 view, 
     return 1.0;
 }
 
-float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord)
+float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord, float3 diffuseAlbedo)
 {
     #if defined(VIVID_REALTIME_DIFFUSE_GI)
         if (_RealtimeDiffuseGIEnabled != 0u)
         {
             float4 gi = _RealtimeDiffuseGI.Load(int3(pixelCoord, 0));
+            if (_RealtimeBentNormalEnabled == 2u)
+            {
+                float3 BentNormal = UnpackScreenBentNormal(_RealtimePackedBentNormal.Load(int3(pixelCoord, 0)));
+                half AO = saturate(length(BentNormal));
+                // DeferredShadingCommon.ush::AOMultiBounce with the Lumen albedo cap.
+                half3 BaseColor = min(diffuseAlbedo, 0.5f);
+                half3 a = 2.0404 * BaseColor - 0.3324;
+                half3 b = -4.7951 * BaseColor + 0.6417;
+                half3 c = 2.7552 * BaseColor + 0.6903;
+                gi.rgb *= max(AO, ((AO * a + b) * AO + c) * AO);
+            }
             // Compose the covered energy over black when fallback is suppressed.
             return _RealtimeDiffuseGIOnly != 0u ? float4(gi.rgb * gi.a, 1.0) : gi;
         }
@@ -171,7 +198,7 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     #endif
     result = VividEvaluateOpenPBROpaqueIndirect(inputs, albedo, lightLoop,
         positionWS, viewDirectionWS, saturate(summary.ambientOcclusion),
-        LoadVividRealtimeDiffuseGI(pixelCoord), realtimeOpenPbrDiffuse);
+        LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo), realtimeOpenPbrDiffuse);
     [loop]
     for (uint i = 0u; i < _DirectionalLightCount; ++i)
     {
@@ -223,7 +250,7 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
         VividPrepareSimpleSlabDeferredLighting(slab, viewDirectionWS);
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
     VividSimpleSlabIndirectLighting indirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        summary, slab, preLight, lightLoop, positionWS, viewDirectionWS, LoadVividRealtimeDiffuseGI(pixelCoord));
+        summary, slab, preLight, lightLoop, positionWS, viewDirectionWS, LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo));
     VividSimpleSlabDirectLighting directLighting = VividCreateEmptySimpleSlabDirectLighting();
 
     [loop]
@@ -379,11 +406,12 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     float3 baseEnvironmentWeight = isVerticalLayer
         ? lerp(1.0.xxx, environmentTransmittance, layerWeight)
         : (1.0 - layerWeight).xxx;
-    float4 realtimeDiffuseGI = LoadVividRealtimeDiffuseGI(pixelCoord);
     VividSimpleSlabIndirectLighting baseIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS, realtimeDiffuseGI);
+        baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS,
+        LoadVividRealtimeDiffuseGI(pixelCoord, baseSummary.diffuseAlbedo));
     VividSimpleSlabIndirectLighting topIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS, realtimeDiffuseGI);
+        topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS,
+        LoadVividRealtimeDiffuseGI(pixelCoord, topSummary.diffuseAlbedo));
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

@@ -3,9 +3,11 @@
 #pragma kernel AccumulateBentNormal
 #pragma kernel BuildShortRangeAOFurthestHZB
 #pragma kernel ScreenSpaceShortRangeAOCS
+#pragma kernel ScreenSpaceShortRangeAOHalfCS VIVID_SDF_HALF_AO
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfShortRangeAOCommon.hlsl"
+#include "SdfShortRangeAOReconstruction.hlsl"
 
 RWTexture2D<float> _SdfBentFurthestHZBOutput;
 Texture2D<float> _SdfBentFurthestHZB;
@@ -36,19 +38,11 @@ void BuildShortRangeAOFurthestHZB(uint2 DispatchThreadId : SV_DispatchThreadID)
     _SdfBentFurthestHZBOutput[DispatchThreadId] = MinDeviceZ;
 }
 
-// LumenScreenSpaceBentNormal.usf, SCREEN_SPACE + HORIZON_SEARCH + HZB + OUTPUT_BENT_NORMAL.
+// LumenScreenSpaceBentNormal.usf, SCREEN_SPACE + HORIZON_SEARCH + OUTPUT_BENT_NORMAL.
 float3 ShortRangeAOViewPosition(float2 ScreenUV, float DeviceZ)
 {
     float4 ViewPosition = mul(_SdfBentInverseProjection, ComputeClipSpacePosition(ScreenUV, DeviceZ));
     return (ViewPosition.xyz / ViewPosition.w) * float3(1, 1, -1);
-}
-
-float acosFast(float inX)
-{
-    float x = abs(inX);
-    float res = -0.156583f * x + (0.5 * PI);
-    res *= sqrt(1.0f - x);
-    return (inX >= 0) ? res : PI - res;
 }
 
 float3x3 BuildRotationMatrix(float3 FromDirection, float3 ToDirection)
@@ -82,8 +76,14 @@ void UpdateOccludedHorizonForStep(float2 SampleScreenPos, float3 ViewSpacePositi
     float2 ScreenPositionScale, float InvForegroundDistance, float LowHorizonCos, inout float HorizonCos)
 {
     float2 SampleScreenPosUV = SampleScreenPos * ScreenPositionScale + 0.5f;
+#if defined(VIVID_SDF_HALF_AO)
+    // Epic scalability selects CalcSceneDepth rather than the furthest HZB.
+    uint2 DepthPixel = min(uint2(SampleScreenPosUV * _SdfDiffuseScreenSize.xy), uint2(_SdfDiffuseScreenSize.xy) - 1u);
+    float DeviceHZB = _SdfDiffuseDepth.Load(int3(DepthPixel, 0));
+#else
     uint2 HZBPixel = uint2(SampleScreenPosUV * _SdfDiffuseScreenSize.xy * 0.5f);
     float DeviceHZB = _SdfBentFurthestHZB.Load(int3(HZBPixel, 0));
+#endif
     float3 SampleViewPos = ShortRangeAOViewPosition(SampleScreenPosUV, DeviceHZB);
     float3 SampleDelta = SampleViewPos - ViewSpacePosition;
     float SampleDist = length(SampleDelta);
@@ -139,7 +139,7 @@ float3 CalculateAOHorizonSearch(uint2 Pixel, float DeviceZ, float3 WorldNormal)
         float SignNorm = sign(dot(OrthogonalSliceDirection, ProjectedNormal));
         float ProjectedNormalLength = length(ProjectedNormal);
         float CosNormal = (float)saturate(dot(ProjectedNormal, ViewVector) / ProjectedNormalLength);
-        float NormalAngle = SignNorm * acosFast(CosNormal);
+        float NormalAngle = SignNorm * VividBentNormalAcosFast(CosNormal);
 
         float LowHorizonCos0 = cos(NormalAngle + .5f * PI);
         float LowHorizonCos1 = cos(NormalAngle - .5f * PI);
@@ -163,8 +163,8 @@ float3 CalculateAOHorizonSearch(uint2 Pixel, float DeviceZ, float3 WorldNormal)
                     ScreenPositionScale, InvForegroundDistance, LowHorizonCos1, HorizonCos1);
         }
 
-        float H0 = -acosFast(HorizonCos1);
-        float H1 = acosFast(HorizonCos0);
+        float H0 = -VividBentNormalAcosFast(HorizonCos1);
+        float H1 = VividBentNormalAcosFast(HorizonCos0);
         float IntegralArc0 = (CosNormal + 2 * H0 * sin(NormalAngle) - cos(2 * H0 - NormalAngle)) / 4.0f;
         float IntegralArc1 = (CosNormal + 2 * H1 * sin(NormalAngle) - cos(2 * H1 - NormalAngle)) / 4.0f;
         float SliceVisibility = ProjectedNormalLength * (IntegralArc0 + IntegralArc1);
@@ -191,6 +191,23 @@ void ScreenSpaceShortRangeAOCS(uint2 DispatchThreadId : SV_DispatchThreadID)
     {
         float DeviceZ = _SdfDiffuseDepth.Load(int3(DispatchThreadId, 0));
         BentNormal = CalculateAOHorizonSearch(DispatchThreadId, DeviceZ, WorldNormal);
+    }
+    _SdfLumenBentNormalOutput[DispatchThreadId] = PackScreenBentNormal(BentNormal);
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceShortRangeAOHalfCS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(DispatchThreadId * 2u >= uint2(_SdfDiffuseScreenSize.xy)))
+        return;
+
+    uint2 Pixel = BentDownsampledReceiver(DispatchThreadId);
+    float3 Position, WorldNormal;
+    float3 BentNormal = float3(0, 1, 0);
+    if (LoadReceiver(Pixel, Position, WorldNormal))
+    {
+        float DeviceZ = _SdfDiffuseDepth.Load(int3(Pixel, 0));
+        BentNormal = CalculateAOHorizonSearch(Pixel, DeviceZ, WorldNormal);
     }
     _SdfLumenBentNormalOutput[DispatchThreadId] = PackScreenBentNormal(BentNormal);
 }

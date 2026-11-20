@@ -21,6 +21,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal RenderGraphTexture Output;
         internal CameraHistoryTexture BentNormalHistory;
         internal TextureHandle BentNormalOutput;
+        internal bool CompositeBentNormal;
         internal bool SkyHandled;
         internal bool RealtimeOnly;
         internal SdfDiffuseGatherPass OpenPbrSource;
@@ -30,6 +31,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Output = null;
             BentNormalHistory = null;
             BentNormalOutput = default;
+            CompositeBentNormal = false;
             SkyHandled = false;
             RealtimeOnly = false;
             OpenPbrSource = null;
@@ -244,6 +246,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int BentFurthestHzbId = Shader.PropertyToID("_SdfBentFurthestHZB");
         private static readonly int BentFurthestHzbOutputId = Shader.PropertyToID("_SdfBentFurthestHZBOutput");
         private static readonly int BentBlueNoiseId = Shader.PropertyToID("_SdfBentBlueNoise");
+        private static readonly int BentScalarNoiseId = Shader.PropertyToID("_SdfBentScalarNoise");
+        private static readonly int BentFlipYId = Shader.PropertyToID("_SdfBentFlipY");
+        private static readonly int BentHistoryValidId = Shader.PropertyToID("_SdfBentHistoryValid");
         private static readonly int BentWorldToViewId = Shader.PropertyToID("_SdfBentWorldToView");
         private static readonly int BentInverseProjectionId = Shader.PropertyToID("_SdfBentInverseProjection");
         private static readonly int LumenBentNormalId = Shader.PropertyToID("_SdfLumenBentNormal");
@@ -564,6 +569,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_BentSearchKernel = -1, m_BentTemporalKernel = -1;
         private int m_BentFurthestHzbKernel = -1, m_LumenBentKernel = -1;
         private TextureHandle m_BentBlueNoise;
+        private TextureHandle m_BentScalarNoise;
+        private int m_LumenBentHalfKernel = -1;
+        private bool m_BentComposite, m_BentFlipY;
         private Matrix4x4 m_BentWorldToView, m_BentInverseProjection;
         private bool m_BentDuringIntegration;
         private readonly RenderGraphTexture m_PreviousScreenProbeMoments = RenderGraphTexture.CreateInput("Previous Screen Probe Moments", ProbeFormat);
@@ -730,6 +738,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_AtrousKernel = -1, m_AtrousFinalKernel = -1, m_AtrousIterations;
         private int m_PixelTemporalKernel = -1, m_ScreenProbeTemporalKernel = -1, m_RestirPixelTemporalKernel = -1;
         private int m_ScreenProbeMomentsKernel = -1;
+        private int m_ScreenProbeAoKernel = -1, m_ScreenProbeMomentsAoKernel = -1;
         private int m_PixelHistoryMaxAge, m_ProbeAnchorMaxAge;
         private int m_RestirVarianceTemporalKernel = -1;
         private int m_Width, m_Height, m_ProbeWidth, m_ProbeHeight, m_LayerMask, m_LightLayerMask;
@@ -855,6 +864,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_BentFurthestHzbKernel = m_NearOcclusionCompute.FindKernel("BuildShortRangeAOFurthestHZB");
                 m_LumenBentKernel = m_NearOcclusionCompute.FindKernel("ScreenSpaceShortRangeAOCS");
             }
+            if (m_NearOcclusionKernel >= 0
+                && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
+                && HasKernel(m_NearOcclusionCompute, "ScreenSpaceShortRangeAOHalfCS"))
+                m_LumenBentHalfKernel = m_NearOcclusionCompute.FindKernel("ScreenSpaceShortRangeAOHalfCS");
             m_ResolveKernel = m_GatherCompute.FindKernel("ResolveSdfDiffuseGI");
             if (HasKernel(m_GatherCompute, "ResolveSdfRestirOpenPBR"))
             {
@@ -871,6 +884,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ScreenProbeTemporalKernel = m_GatherTemporalCompute.FindKernel("ScreenProbeTemporalReprojectionCS");
                 if (HasKernel(m_GatherTemporalCompute, "ScreenProbeTemporalReprojectionWithMomentsCS"))
                     m_ScreenProbeMomentsKernel = m_GatherTemporalCompute.FindKernel("ScreenProbeTemporalReprojectionWithMomentsCS");
+                if (HasKernel(m_GatherTemporalCompute, "ScreenProbeTemporalReprojectionWithAOCS"))
+                    m_ScreenProbeAoKernel = m_GatherTemporalCompute.FindKernel("ScreenProbeTemporalReprojectionWithAOCS");
+                if (HasKernel(m_GatherTemporalCompute, "ScreenProbeTemporalReprojectionWithMomentsAndAOCS"))
+                    m_ScreenProbeMomentsAoKernel = m_GatherTemporalCompute.FindKernel("ScreenProbeTemporalReprojectionWithMomentsAndAOCS");
                 if (HasKernel(m_GatherTemporalCompute, "TemporalSdfRestirDiffuseGI"))
                     m_RestirPixelTemporalKernel = m_GatherTemporalCompute.FindKernel("TemporalSdfRestirDiffuseGI");
                 if (HasKernel(m_GatherTemporalCompute, "TemporalSdfRestirVariance"))
@@ -978,6 +995,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BentFurthestHzb.Resize(1, 1);
             m_LumenBentNormal.Resize(1, 1);
             m_BentBlueNoise = default;
+            m_BentScalarNoise = default;
+            m_BentComposite = false;
             m_BentDuringIntegration = false;
             m_ScreenProbeMomentsHistory = null;
             m_FastUpdateHistory = null;
@@ -1152,12 +1171,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 float strength = settings.nearOcclusionStrength.value;
                 bool bent = strength > 0f && !m_RestirGather && settings.screenProbeBentNormalAO.value
                     && m_BentSearchKernel >= 0 && m_BentTemporalKernel >= 0;
-                if (bent && m_FullSphere && settings.screenProbeBentNormalApplyDuringIntegration.value
-                    && m_LumenBentKernel >= 0 && BlueNoise.Instance != null)
+                if (bent && m_FullSphere && BlueNoise.Instance != null)
                 {
                     m_BentBlueNoise = BlueNoise.Instance.VectorAtlas;
-                    m_BentDuringIntegration = m_BentBlueNoise.IsValid();
-                    if (m_BentDuringIntegration && !m_ScatterNoise.IsValid())
+                    m_BentDuringIntegration = settings.screenProbeBentNormalApplyDuringIntegration.value
+                        && m_LumenBentKernel >= 0 && m_BentBlueNoise.IsValid();
+                    if (!settings.screenProbeBentNormalApplyDuringIntegration.value && m_DirectionalCache && pixelTemporal
+                        && m_LumenBentHalfKernel >= 0 && m_ScreenProbeAoKernel >= 0 && m_ScreenProbeMomentsAoKernel >= 0
+                        && m_BentBlueNoise.IsValid())
+                    {
+                        m_BentScalarNoise = BlueNoise.Instance.ScalarAtlas;
+                        m_BentComposite = m_BentScalarNoise.IsValid();
+                        if (m_BentComposite)
+                            PassRecorder.RegisterImportedTextureForPass(this, m_BentScalarNoise);
+                    }
+                    if ((m_BentDuringIntegration || m_BentComposite) && !m_ScatterNoise.IsValid())
                         PassRecorder.RegisterImportedTextureForPass(this, m_BentBlueNoise);
                 }
                 float worldRadius = settings.nearOcclusionRadius.value;
@@ -1169,7 +1197,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 bool directional = strength > 0f && !bent && settings.directionalNearOcclusion.value;
                 m_NearOcclusion = new Vector4(worldRadius, strength, directional ? 1f : 0f,
-                    m_BentDuringIntegration ? 2f : bent ? 1f : 0f);
+                    m_BentComposite ? 3f : m_BentDuringIntegration ? 2f : bent ? 1f : 0f);
                 m_DirectionalProbes |= directional && !m_RestirPixelIntegration;
             }
             m_DirectionalGuide = m_DirectionalCache && (m_FullSphere ? m_SphereGuideKernel : m_DirectionalGuideKernel) >= 0 && settings.screenProbeSamplingGuide.value;
@@ -1257,13 +1285,19 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             var view = cameraData.GetViewMatrix();
             m_ProbeCameraForward = -view.GetRow(2);
-            if (m_BentDuringIntegration)
+            if (m_BentDuringIntegration || m_BentComposite)
             {
                 m_BentWorldToView = view;
                 m_BentInverseProjection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true).inverse;
+                m_BentFlipY = (m_BentInverseProjection.m11 > 0f) != SystemInfo.graphicsUVStartsAtTop;
+            }
+            if (m_BentDuringIntegration)
+            {
                 m_BentFurthestHzb.Resize(CoreUtils.DivRoundUp(m_Width, 2), CoreUtils.DivRoundUp(m_Height, 2));
                 m_LumenBentNormal.Resize(m_Width, m_Height);
             }
+            if (m_BentComposite)
+                m_LumenBentNormal.Resize(CoreUtils.DivRoundUp(m_Width, 2), CoreUtils.DivRoundUp(m_Height, 2));
             m_LayerMask = camera.cullingMask;
             m_TraceDistance = float.IsFinite(m_MaxDistance) ? Mathf.Max(0.1f, m_MaxDistance) : 12f;
             if (useSettings && m_UseSdf && !m_OffscreenOnly && settings.segmentedSdfTracing.value)
@@ -1307,7 +1341,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
-            bool bentNormal = m_NearOcclusion.w == 1f;
+            bool bentNormal = m_NearOcclusion.w == 1f || m_BentComposite;
             if (screenConfigured || pixelTemporal || bentNormal || m_DirectionalCache)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
@@ -1327,7 +1361,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 PreparePixelHistory(camera);
             if (bentNormal)
             {
-                m_BentSamples.Resize(CoreUtils.DivRoundUp(m_Width, 2), CoreUtils.DivRoundUp(m_Height, 2));
+                if (!m_BentComposite)
+                    m_BentSamples.Resize(CoreUtils.DivRoundUp(m_Width, 2), CoreUtils.DivRoundUp(m_Height, 2));
+                m_CurrentBentNormal.desc.ColorFormat = m_BentComposite ? PixelGeometryFormat : ProbeFormat;
                 m_CurrentBentNormal.Resize(m_Width, m_Height);
                 m_BentNormalHistoryValid = CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, BentNormalHistoryId,
                     m_PreviousBentNormal, m_CurrentBentNormal, m_CurrentBentNormal.desc, out m_BentNormalHistory, AccessFlags.Write)
@@ -1596,6 +1632,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_PreviousPixelGeometry.innerHandle.IsValid();
             bool restirVarianceTemporal = pixelTemporal && m_RestirVarianceHistory != null
                 && m_PreviousRestirVariance.innerHandle.IsValid() && m_CurrentRestirVariance.innerHandle.IsValid();
+            bool compositeBent = pixelTemporal && m_BentComposite && m_BentNormalHistory != null
+                && m_PreviousBentNormal.innerHandle.IsValid() && m_CurrentBentNormal.innerHandle.IsValid()
+                && m_LumenBentNormal.innerHandle.IsValid();
             m_RestirOpenPbrDiffuse &= m_OpenPbrParameters?.innerHandle.IsValid() == true
                 && m_OpenPbrAux0?.innerHandle.IsValid() == true && m_OpenPbrAux1?.innerHandle.IsValid() == true;
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
@@ -1745,8 +1784,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, FilteredProbesId, m_FilteredProbes.innerHandle);
                     cmd.DispatchCompute(m_FilterCompute, m_FilterKernel, groupsX, groupsY, 1);
                 }
-                if (m_BentDuringIntegration)
-                    RecordLumenBentNormal(cmd, frame);
+                if (m_BentDuringIntegration || compositeBent)
+                    RecordLumenBentNormal(cmd, frame, compositeBent);
                 RecordResolve(context, placement, pixelTemporal, repairScreenRays, black);
 #if UNITY_EDITOR
                 if (m_DirectionalCache && pixelTemporal)
@@ -1756,7 +1795,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordPixelTemporal(cmd, hasHistory && m_State.PixelHistoryMaxAge == m_PixelHistoryMaxAge
                         && (m_State.NearOcclusion.w == 2f) == m_BentDuringIntegration
                         && (!m_BentDuringIntegration || m_State.NearOcclusion.y == m_NearOcclusion.y)
-                        && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
+                        && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal, compositeBent, frame);
 #if UNITY_EDITOR
                 if (m_DirectionalCache && pixelTemporal)
                     EditorGatherStageCapture?.Invoke(context, 1, m_Output.innerHandle.ResolveTexture());
@@ -1768,14 +1807,17 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordRestirDenoise(cmd, pixelTemporal, restirVarianceTemporal);
                 if (atrous)
                     RecordAtrousDenoise(context, black, restirVarianceTemporal);
-                if (m_BentNormalHistory != null && m_PixelGeometryHistory != null)
+                if (!m_BentComposite && m_BentNormalHistory != null && m_PixelGeometryHistory != null)
                     RecordBentNormal(cmd, frame, pixelTemporal, black);
-                else if (!m_BentDuringIntegration && m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f && m_NearOcclusion.x > 0f)
+                else if (!m_BentComposite && !m_BentDuringIntegration && m_NearOcclusion.y > 0f
+                    && m_NearOcclusion.z == 0f && m_NearOcclusion.x > 0f)
                     RecordNearOcclusion(cmd);
             }
             var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
             diffuse.Output = m_Output;
-            diffuse.BentNormalOutput = m_BentNormalHistory != null && m_PixelGeometryHistory != null ? m_CurrentBentNormal.innerHandle : default;
+            diffuse.BentNormalOutput = m_BentNormalHistory != null && m_PixelGeometryHistory != null
+                && (!m_BentComposite || compositeBent) ? m_CurrentBentNormal.innerHandle : default;
+            diffuse.CompositeBentNormal = compositeBent;
             diffuse.SkyHandled = m_SkyTextureParams.w > 0.5f;
             diffuse.RealtimeOnly = m_RealtimeOnly;
             diffuse.OpenPbrSource = m_RestirOpenPbrDiffuse ? this : null;
@@ -1917,6 +1959,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityPublishCardsKernel = m_RadiosityClearKernel = -1;
             m_RadiosityRescaleKernel = -1;
             m_FarKernel = m_NearOcclusionKernel = m_BentSearchKernel = m_BentTemporalKernel = -1;
+            m_LumenBentHalfKernel = -1;
             m_BentFurthestHzbKernel = m_LumenBentKernel = -1;
             m_OpenPbrResolveKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
@@ -1930,6 +1973,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AtrousKernel = m_AtrousFinalKernel = -1;
             m_PixelTemporalKernel = m_ScreenProbeTemporalKernel = m_RestirPixelTemporalKernel = -1;
             m_ScreenProbeMomentsKernel = -1;
+            m_ScreenProbeAoKernel = m_ScreenProbeMomentsAoKernel = -1;
             m_RestirVarianceTemporalKernel = -1;
         }
 
@@ -2669,25 +2713,31 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorArrayParam(shader, GlobalScrollId, m_GlobalClipmap.Scroll);
         }
 
-        private void RecordLumenBentNormal(ComputeCommandBuffer cmd, int frame)
+        private void RecordLumenBentNormal(ComputeCommandBuffer cmd, int frame, bool halfResolution)
         {
             using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
             var shader = m_NearOcclusionCompute;
             BindProbeFrame(cmd, shader);
-            cmd.SetComputeTextureParam(shader, m_BentFurthestHzbKernel, DepthId, m_Depth.innerHandle);
-            cmd.SetComputeTextureParam(shader, m_BentFurthestHzbKernel, BentFurthestHzbOutputId, m_BentFurthestHzb.innerHandle);
-            cmd.DispatchCompute(shader, m_BentFurthestHzbKernel, CoreUtils.DivRoundUp(m_Width, GroupSize * 2),
-                CoreUtils.DivRoundUp(m_Height, GroupSize * 2), 1);
-
-            BindReceiver(cmd, shader, m_LumenBentKernel);
+            int kernel = halfResolution ? m_LumenBentHalfKernel : m_LumenBentKernel;
+            if (!halfResolution)
+            {
+                cmd.SetComputeTextureParam(shader, m_BentFurthestHzbKernel, DepthId, m_Depth.innerHandle);
+                cmd.SetComputeTextureParam(shader, m_BentFurthestHzbKernel, BentFurthestHzbOutputId, m_BentFurthestHzb.innerHandle);
+                cmd.DispatchCompute(shader, m_BentFurthestHzbKernel, CoreUtils.DivRoundUp(m_Width, GroupSize * 2),
+                    CoreUtils.DivRoundUp(m_Height, GroupSize * 2), 1);
+                cmd.SetComputeTextureParam(shader, kernel, BentFurthestHzbId, m_BentFurthestHzb.innerHandle);
+            }
+            else
+                cmd.SetComputeIntParam(shader, BentFlipYId, m_BentFlipY ? 1 : 0);
+            BindReceiver(cmd, shader, kernel);
             cmd.SetComputeIntParam(shader, FrameId, frame);
             cmd.SetComputeMatrixParam(shader, BentWorldToViewId, m_BentWorldToView);
             cmd.SetComputeMatrixParam(shader, BentInverseProjectionId, m_BentInverseProjection);
-            cmd.SetComputeTextureParam(shader, m_LumenBentKernel, BentBlueNoiseId, m_BentBlueNoise);
-            cmd.SetComputeTextureParam(shader, m_LumenBentKernel, BentFurthestHzbId, m_BentFurthestHzb.innerHandle);
-            cmd.SetComputeTextureParam(shader, m_LumenBentKernel, LumenBentNormalOutputId, m_LumenBentNormal.innerHandle);
-            cmd.DispatchCompute(shader, m_LumenBentKernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
-                CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+            cmd.SetComputeTextureParam(shader, kernel, BentBlueNoiseId, m_BentBlueNoise);
+            cmd.SetComputeTextureParam(shader, kernel, LumenBentNormalOutputId, m_LumenBentNormal.innerHandle);
+            int groupSize = halfResolution ? GroupSize * 2 : GroupSize;
+            cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_Width, groupSize),
+                CoreUtils.DivRoundUp(m_Height, groupSize), 1);
         }
 
         private void RecordBentNormal(ComputeCommandBuffer cmd, int frame, bool geometryWritten, TextureHandle black)
@@ -2959,7 +3009,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory, bool restirVarianceTemporal)
+        private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory, bool restirVarianceTemporal,
+            bool compositeBent, int frame)
         {
             using var scope = new ProfilingScope(cmd, m_RestirGather ? RestirPixelTemporalSampler : PixelTemporalSampler);
             int kernel = m_PixelTemporalKernel;
@@ -2967,7 +3018,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_ScreenProbeMomentsHistory != null && m_CurrentScreenProbeMoments.innerHandle.IsValid();
             if (m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0)
             {
-                kernel = screenProbeMoments ? m_ScreenProbeMomentsKernel : m_ScreenProbeTemporalKernel;
+                kernel = compositeBent
+                    ? (screenProbeMoments ? m_ScreenProbeMomentsAoKernel : m_ScreenProbeAoKernel)
+                    : (screenProbeMoments ? m_ScreenProbeMomentsKernel : m_ScreenProbeTemporalKernel);
                 hasHistory &= m_FastUpdateHistory.IsValid();
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousFastUpdateId, m_PreviousFastUpdate.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, FastUpdateOutputId, m_CurrentFastUpdate.innerHandle);
@@ -2996,6 +3049,16 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_CurrentScreenProbeMoments.innerHandle);
             }
             BindProbeFrame(cmd, m_GatherTemporalCompute);
+            if (compositeBent)
+            {
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, FrameId, frame);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, BentFlipYId, m_BentFlipY ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, BentHistoryValidId, m_BentNormalHistoryValid ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, BentScalarNoiseId, m_BentScalarNoise);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, LumenBentNormalId, m_LumenBentNormal.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, BentPreviousId, m_PreviousBentNormal.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, BentOutputId, m_CurrentBentNormal.innerHandle);
+            }
             cmd.SetComputeMatrixParam(m_GatherTemporalCompute, PreviousViewProjectionId, m_State.ViewProjection);
             cmd.SetComputeIntParam(m_GatherTemporalCompute, HasHistoryId, hasHistory ? 1 : 0);
             cmd.SetComputeFloatParam(m_GatherTemporalCompute, PixelHistoryMaxAgeId, m_PixelHistoryMaxAge);
@@ -3012,6 +3075,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelHistory.MarkWritten();
             m_FastUpdateHistory?.MarkWritten();
             m_PixelGeometryHistory.MarkWritten();
+            if (compositeBent)
+                m_BentNormalHistory.MarkWritten();
             if (screenProbeMoments)
                 m_ScreenProbeMomentsHistory.MarkWritten();
             if (restirVarianceTemporal)

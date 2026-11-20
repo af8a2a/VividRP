@@ -1,9 +1,199 @@
 #pragma kernel ApplySdfNearOcclusion
 #pragma kernel SearchBentNormalHorizons
 #pragma kernel AccumulateBentNormal
+#pragma kernel BuildShortRangeAOFurthestHZB
+#pragma kernel ScreenSpaceShortRangeAOCS
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfShortRangeAOCommon.hlsl"
+
+RWTexture2D<float> _SdfBentFurthestHZBOutput;
+Texture2D<float> _SdfBentFurthestHZB;
+Texture2D<float2> _SdfBentBlueNoise;
+RWTexture2D<uint> _SdfLumenBentNormalOutput;
+float4x4 _SdfBentWorldToView;
+float4x4 _SdfBentInverseProjection;
+
+// HZB.usf::HZBBuildCS, DIM_FURTHEST at mip 0. The search never reads deeper mips.
+[numthreads(8, 8, 1)]
+void BuildShortRangeAOFurthestHZB(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 LastPixel = uint2(_SdfDiffuseScreenSize.xy) - 1u;
+    uint2 Pixel = DispatchThreadId * 2u;
+    if (any(Pixel > LastPixel))
+        return;
+
+    float4 DeviceZ;
+    DeviceZ.x = _SdfDiffuseDepth.Load(int3(Pixel, 0));
+    DeviceZ.y = _SdfDiffuseDepth.Load(int3(min(Pixel + uint2(1, 0), LastPixel), 0));
+    DeviceZ.z = _SdfDiffuseDepth.Load(int3(min(Pixel + uint2(0, 1), LastPixel), 0));
+    DeviceZ.w = _SdfDiffuseDepth.Load(int3(min(Pixel + uint2(1, 1), LastPixel), 0));
+#if UNITY_REVERSED_Z
+    float MinDeviceZ = min(min(min(DeviceZ.x, DeviceZ.y), DeviceZ.z), DeviceZ.w);
+#else
+    float MinDeviceZ = max(max(max(DeviceZ.x, DeviceZ.y), DeviceZ.z), DeviceZ.w);
+#endif
+    _SdfBentFurthestHZBOutput[DispatchThreadId] = MinDeviceZ;
+}
+
+// LumenScreenSpaceBentNormal.usf, SCREEN_SPACE + HORIZON_SEARCH + HZB + OUTPUT_BENT_NORMAL.
+float3 ShortRangeAOViewPosition(float2 ScreenUV, float DeviceZ)
+{
+    float4 ViewPosition = mul(_SdfBentInverseProjection, ComputeClipSpacePosition(ScreenUV, DeviceZ));
+    return (ViewPosition.xyz / ViewPosition.w) * float3(1, 1, -1);
+}
+
+float acosFast(float inX)
+{
+    float x = abs(inX);
+    float res = -0.156583f * x + (0.5 * PI);
+    res *= sqrt(1.0f - x);
+    return (inX >= 0) ? res : PI - res;
+}
+
+float3x3 BuildRotationMatrix(float3 FromDirection, float3 ToDirection)
+{
+    const float e = dot(FromDirection, ToDirection);
+    const float f = abs(e);
+    if (f > float(1.0f - 0.0003f))
+        return float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+
+    const float3 v = cross(FromDirection, ToDirection);
+    const float h = (1.0) / (1.0 + e);
+    const float hvx = h * v.x;
+    const float hvz = h * v.z;
+    const float hvxy = hvx * v.y;
+    const float hvxz = hvx * v.z;
+    const float hvyz = hvz * v.y;
+    float3x3 mtx;
+    mtx[0][0] = e + hvx * v.x;
+    mtx[0][1] = hvxy - v.z;
+    mtx[0][2] = hvxz + v.y;
+    mtx[1][0] = hvxy + v.z;
+    mtx[1][1] = e + h * v.y * v.y;
+    mtx[1][2] = hvyz - v.x;
+    mtx[2][0] = hvxz - v.y;
+    mtx[2][1] = hvyz + v.x;
+    mtx[2][2] = e + hvz * v.z;
+    return mtx;
+}
+
+void UpdateOccludedHorizonForStep(float2 SampleScreenPos, float3 ViewSpacePosition, float3 ViewVector,
+    float2 ScreenPositionScale, float InvForegroundDistance, float LowHorizonCos, inout float HorizonCos)
+{
+    float2 SampleScreenPosUV = SampleScreenPos * ScreenPositionScale + 0.5f;
+    uint2 HZBPixel = uint2(SampleScreenPosUV * _SdfDiffuseScreenSize.xy * 0.5f);
+    float DeviceHZB = _SdfBentFurthestHZB.Load(int3(HZBPixel, 0));
+    float3 SampleViewPos = ShortRangeAOViewPosition(SampleScreenPosUV, DeviceHZB);
+    float3 SampleDelta = SampleViewPos - ViewSpacePosition;
+    float SampleDist = length(SampleDelta);
+    float3 ToSample = SampleDelta / SampleDist;
+    float NewHorizonCos = dot(ToSample, ViewVector);
+    const float ForegroundSampleRejectPower = 1.0f;
+    NewHorizonCos = lerp(NewHorizonCos, LowHorizonCos,
+        saturate(pow(abs(SampleDelta.z) * InvForegroundDistance, ForegroundSampleRejectPower)));
+    HorizonCos = max(HorizonCos, NewHorizonCos);
+}
+
+float3 CalculateAOHorizonSearch(uint2 Pixel, float DeviceZ, float3 WorldNormal)
+{
+    const float2 ScreenUV = (Pixel + 0.5f) * _SdfDiffuseScreenSize.zw;
+    // SliceDirection is expressed in view space. Undo both the render-target
+    // projection flip and ComputeClipSpacePosition's NDC convention here.
+    float2 ScreenPositionScale = 0.5f * sign(float2(_SdfBentInverseProjection._m00, _SdfBentInverseProjection._m11));
+#if UNITY_UV_STARTS_AT_TOP
+    ScreenPositionScale.y = -ScreenPositionScale.y;
+#endif
+    float2 ScreenPos = (ScreenUV - 0.5f) / ScreenPositionScale;
+    float3 ViewSpacePosition = ShortRangeAOViewPosition(ScreenUV, DeviceZ);
+    float SceneDepth = ViewSpacePosition.z;
+    const float ForegroundSampleRejectDistanceFraction = .3f;
+    float InvForegroundDistance = 1.0f / (SceneDepth * ForegroundSampleRejectDistanceFraction);
+    float DistanceToCamera = length(ViewSpacePosition);
+    float3 ViewVector = -ViewSpacePosition / DistanceToCamera;
+    float3 ViewNormal = mul((float3x3)_SdfBentWorldToView, WorldNormal) * float3(1, 1, -1);
+
+    uint2 SvPosition = Pixel;
+    if (ScreenPositionScale.y > 0.0)
+        SvPosition.y = uint(_SdfDiffuseScreenSize.y) - 1u - SvPosition.y;
+    uint3 WrappedCoordinate = uint3(SvPosition, _SdfDiffuseFrame) & uint3(127u, 127u, 63u);
+    // Unity imports the STBN strip with its rows reversed relative to UE.
+    uint3 TextureCoordinate = uint3(WrappedCoordinate.x, 8191u - (WrappedCoordinate.z * 128u + WrappedCoordinate.y), 0);
+    float2 UniformRandom = _SdfBentBlueNoise.Load(TextureCoordinate, 0).xy;
+    const float EffectiveSliceCount = 2.0f;
+    const float StepsPerSliceForAO = 3.0f;
+    float2 MaxScreenFractionForAO = (ProbeSpacing * 2.0f) * _SdfDiffuseScreenSize.zw;
+    float Visibility = 0;
+    float3 ViewBentNormal = 0;
+
+    for (float SliceIndex = 0; SliceIndex < EffectiveSliceCount; SliceIndex++)
+    {
+        float SliceFraction = (SliceIndex + UniformRandom.x) / EffectiveSliceCount;
+        float Phi = SliceFraction * PI;
+        float CosPhi = cos(Phi);
+        float SinPhi = sin(Phi);
+        float3 SliceDirection = float3(CosPhi, SinPhi, 0);
+        float3 OrthogonalSliceDirection = SliceDirection - (dot(SliceDirection, ViewVector) * ViewVector);
+        float3 AxisVector = normalize(cross(OrthogonalSliceDirection, ViewVector));
+        float3 ProjectedNormal = ViewNormal - AxisVector * dot(ViewNormal, AxisVector);
+        float SignNorm = sign(dot(OrthogonalSliceDirection, ProjectedNormal));
+        float ProjectedNormalLength = length(ProjectedNormal);
+        float CosNormal = (float)saturate(dot(ProjectedNormal, ViewVector) / ProjectedNormalLength);
+        float NormalAngle = SignNorm * acosFast(CosNormal);
+
+        float LowHorizonCos0 = cos(NormalAngle + .5f * PI);
+        float LowHorizonCos1 = cos(NormalAngle - .5f * PI);
+        float HorizonCos0 = LowHorizonCos0;
+        float HorizonCos1 = LowHorizonCos1;
+
+        for (float StepIndex = 0; StepIndex < StepsPerSliceForAO; StepIndex++)
+        {
+            float StepBaseNoise = float(SliceIndex + StepIndex * StepsPerSliceForAO) * 0.6180339887498948482f;
+            float StepNoise = frac(UniformRandom.y + StepBaseNoise);
+            float StepFraction = (StepIndex + StepNoise) / StepsPerSliceForAO;
+            float2 StepRadius = StepFraction * StepFraction * MaxScreenFractionForAO;
+            float2 SampleOffset = 2.0f * (StepRadius + _SdfDiffuseScreenSize.zw) * SliceDirection.xy;
+            float2 SampleScreenPos0 = ScreenPos + SampleOffset;
+            if (all(SampleScreenPos0 > -1) && all(SampleScreenPos0 < 1))
+                UpdateOccludedHorizonForStep(SampleScreenPos0, ViewSpacePosition, ViewVector,
+                    ScreenPositionScale, InvForegroundDistance, LowHorizonCos0, HorizonCos0);
+            float2 SampleScreenPos1 = ScreenPos - SampleOffset;
+            if (all(SampleScreenPos1 > -1) && all(SampleScreenPos1 < 1))
+                UpdateOccludedHorizonForStep(SampleScreenPos1, ViewSpacePosition, ViewVector,
+                    ScreenPositionScale, InvForegroundDistance, LowHorizonCos1, HorizonCos1);
+        }
+
+        float H0 = -acosFast(HorizonCos1);
+        float H1 = acosFast(HorizonCos0);
+        float IntegralArc0 = (CosNormal + 2 * H0 * sin(NormalAngle) - cos(2 * H0 - NormalAngle)) / 4.0f;
+        float IntegralArc1 = (CosNormal + 2 * H1 * sin(NormalAngle) - cos(2 * H1 - NormalAngle)) / 4.0f;
+        float SliceVisibility = ProjectedNormalLength * (IntegralArc0 + IntegralArc1);
+        float t0 = (6 * sin(H0 - NormalAngle) - sin(3 * H0 - NormalAngle) + 6 * sin(H1 - NormalAngle) - sin(3 * H1 - NormalAngle) + 16 * sin(NormalAngle) - 3 * (sin(H0 + NormalAngle) + sin(H1 + NormalAngle))) / 12.0f;
+        float t1 = (-cos(3 * H0 - NormalAngle) - cos(3 * H1 - NormalAngle) + 8 * cos(NormalAngle) - 3 * (cos(H0 + NormalAngle) + cos(H1 + NormalAngle))) / 12.0f;
+        float3 LocalBentNormal = float3(SliceDirection.x * t0, SliceDirection.y * t0, -t1);
+        LocalBentNormal = mul(BuildRotationMatrix(float3(0, 0, -1), ViewVector), LocalBentNormal) * ProjectedNormalLength;
+        ViewBentNormal += LocalBentNormal;
+        Visibility += SliceVisibility;
+    }
+
+    Visibility = max(Visibility / EffectiveSliceCount, 0.03f);
+    return mul(normalize(ViewBentNormal) * float3(1, 1, -1), (float3x3)_SdfBentWorldToView) * Visibility;
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceShortRangeAOCS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(DispatchThreadId >= uint2(_SdfDiffuseScreenSize.xy)))
+        return;
+    float3 Position, WorldNormal;
+    float3 BentNormal = float3(0, 1, 0);
+    if (LoadReceiver(DispatchThreadId, Position, WorldNormal))
+    {
+        float DeviceZ = _SdfDiffuseDepth.Load(int3(DispatchThreadId, 0));
+        BentNormal = CalculateAOHorizonSearch(DispatchThreadId, DeviceZ, WorldNormal);
+    }
+    _SdfLumenBentNormalOutput[DispatchThreadId] = PackScreenBentNormal(BentNormal);
+}
 
 [numthreads(8, 8, 1)]
 void ApplySdfNearOcclusion(uint3 id : SV_DispatchThreadID)

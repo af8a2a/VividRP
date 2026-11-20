@@ -35,5 +35,25 @@ float3 EvaluateSdfProbeIrradiance(SdfProbeIrradiance sh, float3 normal)
         + sh.c * (normal.x * normal.x - normal.y * normal.y);
 }
 
+// SHCommon.ush::EvaluateSHIrradiance. Apply each zonal factor to the corresponding
+// cosine-convolved band. The packed constant also carries the band-2 Z term.
+float3 EvaluateSHIrradiance(float3 Direction, float AO, SdfProbeIrradiance SH)
+{
+    float CosA = sqrt(saturate(1.0f - AO));
+    float SinA = sqrt(saturate(1.0f - CosA * CosA));
+    float Z0 = SinA * SinA;
+    float Z1 = (1.0f - CosA * CosA * CosA);
+    float Z2 = SinA * SinA * (1.0f + 3.0f * CosA * CosA);
+
+    float3 Constant = float3(SH.r0.w, SH.g0.w, SH.b0.w);
+    float3 Band0 = Constant + float3(SH.r1.z, SH.g1.z, SH.b1.z) / 3.0f;
+    float3 Band1 = float3(dot(SH.r0.xyz, Direction), dot(SH.g0.xyz, Direction), dot(SH.b0.xyz, Direction));
+    float4 Products = Direction.xyzz * Direction.yzzx;
+    float3 Band2 = Constant - Band0
+        + float3(dot(SH.r1, Products), dot(SH.g1, Products), dot(SH.b1, Products))
+        + SH.c * (Direction.x * Direction.x - Direction.y * Direction.y);
+    return max(float3(0, 0, 0), Band0 * Z0 + Band1 * Z1 + Band2 * Z2);
+}
+
 #endif
 

@@ -142,6 +142,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Use half-resolution horizon search and a separate per-camera bent-normal history for Screen Probe Gather. Overrides directional near occlusion.")]
         public BoolParameter screenProbeBentNormalAO = new(false);
 
+        [Tooltip("Use Lumen's full-resolution short-range AO during SH3 integration. With this disabled, Bent Normal AO uses its separate history.")]
+        public BoolParameter screenProbeBentNormalApplyDuringIntegration = new(false);
+
         [Tooltip("World-space radius for scalar and directional contact occlusion. Bent Normal AO uses two screen probe spacings.")]
         public ClampedFloatParameter nearOcclusionRadius = new(0.35f, 0.05f, 1f);
 

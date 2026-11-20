@@ -226,6 +226,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int NearOcclusionId = Shader.PropertyToID("_SdfNearOcclusion");
         private static readonly int BentSamplesId = Shader.PropertyToID("_SdfBentSamples");
         private static readonly int BentSamplesOutputId = Shader.PropertyToID("_SdfBentSamplesOutput");
+        private static readonly int BentFurthestHzbId = Shader.PropertyToID("_SdfBentFurthestHZB");
+        private static readonly int BentFurthestHzbOutputId = Shader.PropertyToID("_SdfBentFurthestHZBOutput");
+        private static readonly int BentBlueNoiseId = Shader.PropertyToID("_SdfBentBlueNoise");
+        private static readonly int BentWorldToViewId = Shader.PropertyToID("_SdfBentWorldToView");
+        private static readonly int BentInverseProjectionId = Shader.PropertyToID("_SdfBentInverseProjection");
+        private static readonly int LumenBentNormalId = Shader.PropertyToID("_SdfLumenBentNormal");
+        private static readonly int LumenBentNormalOutputId = Shader.PropertyToID("_SdfLumenBentNormalOutput");
         private static readonly int BentPreviousId = Shader.PropertyToID("_SdfBentPrevious");
         private static readonly int BentOutputId = Shader.PropertyToID("_SdfBentOutput");
         private static readonly int BentWriteGeometryId = Shader.PropertyToID("_SdfBentWriteGeometry");
@@ -529,11 +536,21 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Short Range Bent Normal Samples", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_BentSamples = CreateScratch("Short Range Bent Normal Samples", ProbeFormat);
+        [RenderGraphResource(Name = "Short Range AO Furthest HZB", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_BentFurthestHzb = CreateScratch("Short Range AO Furthest HZB", GraphicsFormat.R16_SFloat);
+        [RenderGraphResource(Name = "Lumen Short Range Bent Normal", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_LumenBentNormal = CreateScratch("Lumen Short Range Bent Normal", PixelGeometryFormat);
         private readonly RenderGraphTexture m_PreviousBentNormal = RenderGraphTexture.CreateInput("Previous Short Range Bent Normal", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentBentNormal = CreateOutput("Short Range Bent Normal History", ProbeFormat);
         private CameraHistoryTexture m_BentNormalHistory;
         private bool m_BentNormalHistoryValid;
         private int m_BentSearchKernel = -1, m_BentTemporalKernel = -1;
+        private int m_BentFurthestHzbKernel = -1, m_LumenBentKernel = -1;
+        private TextureHandle m_BentBlueNoise;
+        private Matrix4x4 m_BentWorldToView, m_BentInverseProjection;
+        private bool m_BentDuringIntegration;
         private readonly RenderGraphTexture m_PreviousScreenProbeMoments = RenderGraphTexture.CreateInput("Previous Screen Probe Moments", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentScreenProbeMoments = CreateOutput("Screen Probe Moments", ProbeFormat);
         private readonly RenderGraphTexture m_PreviousFastUpdate = RenderGraphTexture.CreateInput("Previous Screen Probe Fast Update", GraphicsFormat.R16_SFloat);
@@ -809,6 +826,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_BentSearchKernel = m_NearOcclusionCompute.FindKernel("SearchBentNormalHorizons");
                 m_BentTemporalKernel = m_NearOcclusionCompute.FindKernel("AccumulateBentNormal");
             }
+            if (m_NearOcclusionKernel >= 0
+                && SystemInfo.IsFormatSupported(PixelGeometryFormat, GraphicsFormatUsage.LoadStore)
+                && SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, GraphicsFormatUsage.LoadStore)
+                && HasKernel(m_NearOcclusionCompute, "BuildShortRangeAOFurthestHZB")
+                && HasKernel(m_NearOcclusionCompute, "ScreenSpaceShortRangeAOCS"))
+            {
+                m_BentFurthestHzbKernel = m_NearOcclusionCompute.FindKernel("BuildShortRangeAOFurthestHZB");
+                m_LumenBentKernel = m_NearOcclusionCompute.FindKernel("ScreenSpaceShortRangeAOCS");
+            }
             m_ResolveKernel = m_GatherCompute.FindKernel("ResolveSdfDiffuseGI");
             if (HasKernel(m_GatherCompute, "ResolveSdfRestirOpenPBR"))
             {
@@ -929,6 +955,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BentNormalHistory = null;
             m_BentNormalHistoryValid = false;
             m_BentSamples.Resize(1, 1);
+            m_BentFurthestHzb.Resize(1, 1);
+            m_LumenBentNormal.Resize(1, 1);
+            m_BentBlueNoise = default;
+            m_BentDuringIntegration = false;
             m_ScreenProbeMomentsHistory = null;
             m_FastUpdateHistory = null;
             m_SunHistory = null;
@@ -1100,6 +1130,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 float strength = settings.nearOcclusionStrength.value;
                 bool bent = strength > 0f && !m_RestirGather && settings.screenProbeBentNormalAO.value
                     && m_BentSearchKernel >= 0 && m_BentTemporalKernel >= 0;
+                if (bent && m_FullSphere && settings.screenProbeBentNormalApplyDuringIntegration.value
+                    && m_LumenBentKernel >= 0 && BlueNoise.Instance != null)
+                {
+                    m_BentBlueNoise = BlueNoise.Instance.VectorAtlas;
+                    m_BentDuringIntegration = m_BentBlueNoise.IsValid();
+                    if (m_BentDuringIntegration && !m_ScatterNoise.IsValid())
+                        PassRecorder.RegisterImportedTextureForPass(this, m_BentBlueNoise);
+                }
                 float worldRadius = settings.nearOcclusionRadius.value;
                 if (!float.IsFinite(worldRadius))
                 {
@@ -1108,7 +1146,8 @@ namespace VividRP.Runtime.RenderPass.Core
                         strength = 0f;
                 }
                 bool directional = strength > 0f && !bent && settings.directionalNearOcclusion.value;
-                m_NearOcclusion = new Vector4(worldRadius, strength, directional ? 1f : 0f, bent ? 1f : 0f);
+                m_NearOcclusion = new Vector4(worldRadius, strength, directional ? 1f : 0f,
+                    m_BentDuringIntegration ? 2f : bent ? 1f : 0f);
                 m_DirectionalProbes |= directional && !m_RestirPixelIntegration;
             }
             m_DirectionalGuide = m_DirectionalCache && (m_FullSphere ? m_SphereGuideKernel : m_DirectionalGuideKernel) >= 0 && settings.screenProbeSamplingGuide.value;
@@ -1196,6 +1235,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             var view = cameraData.GetViewMatrix();
             m_ProbeCameraForward = -view.GetRow(2);
+            if (m_BentDuringIntegration)
+            {
+                m_BentWorldToView = view;
+                m_BentInverseProjection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true).inverse;
+                m_BentFurthestHzb.Resize(CoreUtils.DivRoundUp(m_Width, 2), CoreUtils.DivRoundUp(m_Height, 2));
+                m_LumenBentNormal.Resize(m_Width, m_Height);
+            }
             m_LayerMask = camera.cullingMask;
             m_TraceDistance = float.IsFinite(m_MaxDistance) ? Mathf.Max(0.1f, m_MaxDistance) : 12f;
             if (useSettings && m_UseSdf && !m_OffscreenOnly && settings.segmentedSdfTracing.value)
@@ -1239,7 +1285,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
-            bool bentNormal = m_NearOcclusion.w > 0f;
+            bool bentNormal = m_NearOcclusion.w == 1f;
             if (screenConfigured || pixelTemporal || bentNormal || m_DirectionalCache)
             {
                 var jitter = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true)
@@ -1677,6 +1723,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(m_FilterCompute, m_FilterKernel, FilteredProbesId, m_FilteredProbes.innerHandle);
                     cmd.DispatchCompute(m_FilterCompute, m_FilterKernel, groupsX, groupsY, 1);
                 }
+                if (m_BentDuringIntegration)
+                    RecordLumenBentNormal(cmd, frame);
                 RecordResolve(context, placement, pixelTemporal, repairScreenRays, black);
 #if UNITY_EDITOR
                 if (m_DirectionalCache && pixelTemporal)
@@ -1684,6 +1732,8 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
                 if (pixelTemporal)
                     RecordPixelTemporal(cmd, hasHistory && m_State.PixelHistoryMaxAge == m_PixelHistoryMaxAge
+                        && (m_State.NearOcclusion.w == 2f) == m_BentDuringIntegration
+                        && (!m_BentDuringIntegration || m_State.NearOcclusion.y == m_NearOcclusion.y)
                         && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal);
 #if UNITY_EDITOR
                 if (m_DirectionalCache && pixelTemporal)
@@ -1698,7 +1748,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordAtrousDenoise(context, black, restirVarianceTemporal);
                 if (m_BentNormalHistory != null && m_PixelGeometryHistory != null)
                     RecordBentNormal(cmd, frame, pixelTemporal, black);
-                else if (m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f && m_NearOcclusion.x > 0f)
+                else if (!m_BentDuringIntegration && m_NearOcclusion.y > 0f && m_NearOcclusion.z == 0f && m_NearOcclusion.x > 0f)
                     RecordNearOcclusion(cmd);
             }
             var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
@@ -1845,6 +1895,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityPublishCardsKernel = m_RadiosityClearKernel = -1;
             m_RadiosityRescaleKernel = -1;
             m_FarKernel = m_NearOcclusionKernel = m_BentSearchKernel = m_BentTemporalKernel = -1;
+            m_BentFurthestHzbKernel = m_LumenBentKernel = -1;
             m_OpenPbrResolveKernel = -1;
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_SphereGuideKernel = m_DirectionalGuideKernel = m_DirectionalCompositeKernel = m_DirectionalTemporalKernel = -1;
@@ -2571,6 +2622,27 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorArrayParam(shader, GlobalScrollId, m_GlobalClipmap.Scroll);
         }
 
+        private void RecordLumenBentNormal(ComputeCommandBuffer cmd, int frame)
+        {
+            using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
+            var shader = m_NearOcclusionCompute;
+            BindProbeFrame(cmd, shader);
+            cmd.SetComputeTextureParam(shader, m_BentFurthestHzbKernel, DepthId, m_Depth.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_BentFurthestHzbKernel, BentFurthestHzbOutputId, m_BentFurthestHzb.innerHandle);
+            cmd.DispatchCompute(shader, m_BentFurthestHzbKernel, CoreUtils.DivRoundUp(m_Width, GroupSize * 2),
+                CoreUtils.DivRoundUp(m_Height, GroupSize * 2), 1);
+
+            BindReceiver(cmd, shader, m_LumenBentKernel);
+            cmd.SetComputeIntParam(shader, FrameId, frame);
+            cmd.SetComputeMatrixParam(shader, BentWorldToViewId, m_BentWorldToView);
+            cmd.SetComputeMatrixParam(shader, BentInverseProjectionId, m_BentInverseProjection);
+            cmd.SetComputeTextureParam(shader, m_LumenBentKernel, BentBlueNoiseId, m_BentBlueNoise);
+            cmd.SetComputeTextureParam(shader, m_LumenBentKernel, BentFurthestHzbId, m_BentFurthestHzb.innerHandle);
+            cmd.SetComputeTextureParam(shader, m_LumenBentKernel, LumenBentNormalOutputId, m_LumenBentNormal.innerHandle);
+            cmd.DispatchCompute(shader, m_LumenBentKernel, CoreUtils.DivRoundUp(m_Width, GroupSize),
+                CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+        }
+
         private void RecordBentNormal(ComputeCommandBuffer cmd, int frame, bool geometryWritten, TextureHandle black)
         {
             using var scope = new ProfilingScope(cmd, NearOcclusionSampler);
@@ -2716,6 +2788,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 : m_RestirOpenPbrDiffuse ? m_OpenPbrResolveKernel : m_ResolveKernel;
             if (m_DirectionalCache)
             {
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, LumenBentNormalId, m_LumenBentNormal.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, ProbeMovingId, m_ProbeMoving.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, ResolvedMovingOutputId, m_ResolvedMoving.innerHandle);
                 bool jitter = pixelTemporal;

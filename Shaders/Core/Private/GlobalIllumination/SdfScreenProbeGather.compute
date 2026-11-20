@@ -22,6 +22,7 @@
 #if defined(VIVID_SDF_PROBE_IRRADIANCE)
 #include "SdfScreenProbeIrradiance.hlsl"
 Texture2D<float> _SdfProbeMoving;
+Texture2D<uint> _SdfLumenBentNormal;
 RWTexture2D<float> _SdfResolvedMovingOutput;
 #endif
 
@@ -816,8 +817,14 @@ ScreenProbeInterpolation CalculateScreenProbeInterpolation(uint2 pixel, uint2 si
     return samples;
 }
 
-float3 ResolveScreenProbeIrradiance(SdfProbeIrradiance sh, float3 normal, float4 contact)
+float3 ResolveScreenProbeIrradiance(SdfProbeIrradiance sh, float3 normal, float4 contact, float4 bentNormalAO)
 {
+    if (_SdfNearOcclusion.w == 2.0)
+    {
+        // LumenScreenProbeGather.usf::EvaluateDiffuse, SHORT_RANGE_AO_BENT_NORMAL + SH3.
+        float3 ProbeLightingNormal = normalize(lerp(bentNormalAO.xyz, normal, bentNormalAO.w));
+        return EvaluateSHIrradiance(ProbeLightingNormal, bentNormalAO.w, sh);
+    }
     float3 irradiance = max(0.0, EvaluateSdfProbeIrradiance(sh, normal));
     if (contact.w < 1.0)
     {
@@ -874,10 +881,20 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     if (_SdfNearOcclusion.z > 0.0)
         contact = EvaluateNearDiffuseVisibility(pixel, position, normal, true);
 
+    float4 bentNormalAO = float4(normal, 1.0);
+    if (_SdfNearOcclusion.w == 2.0)
+    {
+        float3 BentNormal = UnpackScreenBentNormal(_SdfLumenBentNormal.Load(int3(pixel, 0)));
+        float AO = length(BentNormal);
+        float3 UnitBentNormal = AO > 0 ? BentNormal / AO : normal;
+        AO = saturate(AO);
+        bentNormalAO = float4(UnitBentNormal, lerp(1.0f, AO, _SdfNearOcclusion.y));
+    }
+
     float4 result = 0.0;
     if (coveredWeight > 0.0)
     {
-        float3 irradiance = ResolveScreenProbeIrradiance(sh, normal, contact);
+        float3 irradiance = ResolveScreenProbeIrradiance(sh, normal, contact, bentNormalAO);
         // Covered black still contributes its full share of the coverage.
         result = float4(min(irradiance / coveredWeight, 65000.0),
             saturate(coveredWeight / max(totalWeight, MinProbeInterpolationWeight)));
@@ -891,7 +908,7 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
             SdfProbeIrradiance repair = (SdfProbeIrradiance)0;
             float repairCoverage = 0.0;
             AccumulateScreenProbeIrradiance(tile, stride, 1.0, repair, repairCoverage);
-            float3 irradiance = ResolveScreenProbeIrradiance(repair, normal, contact);
+            float3 irradiance = ResolveScreenProbeIrradiance(repair, normal, contact, bentNormalAO);
             result = BlendProbeResolveRepair(result,
                 float4(min(irradiance / max(repairCoverage, 1e-5), 65000.0), repairCoverage), confidence);
         }

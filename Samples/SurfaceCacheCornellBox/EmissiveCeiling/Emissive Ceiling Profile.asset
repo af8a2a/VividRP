@@ -401,6 +401,9 @@ MonoBehaviour:
   screenHitCardLighting:
     m_OverrideState: 0
     m_Value: 1
+  lumenScreenTracing:
+    m_OverrideState: 0
+    m_Value: 1
   traceMode:
     m_OverrideState: 1
     m_Value: 2
@@ -429,6 +432,9 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 0
   screenProbeBentNormalAO:
+    m_OverrideState: 1
+    m_Value: 1
+  screenProbeBentNormalApplyDuringIntegration:
     m_OverrideState: 1
     m_Value: 1
   nearOcclusionRadius:

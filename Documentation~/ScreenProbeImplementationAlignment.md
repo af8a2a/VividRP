@@ -140,6 +140,25 @@ UE 5.7.4 导出了 8 个网格的全部 24 层稀疏距离场。Unity 导入后�
 - 原材质图集为 4096×4096，Cornell 占用区域为 1024×128。物理 texel 地址和原始 BC 块得到保留，页的归一化图集坐标按导入尺寸更新。页更新时间和光照历史从零开始。
 - 导入快照只提供捕获时驻留的材质页。动态压缩写入和 Vivid 距离场烘焙器后续实现。当前渲染的卡片间接光仍由原 8 阶求解，原生 Global SDF 的覆盖与 mip 追踪、probe radiosity 的滤波、SH 积分和 FinalLighting 反馈需单独接入。上述输入读回未验收最终 GI 能量与半影。
 
+### 第 4 步 Cornell 短程 AO 与 SH3 积分（2026-11-20）
+
+对照 UE 5.7.4 `LumenScreenSpaceBentNormal.usf::CalculateAOHorizonSearch` 的软件 HZB、Bent Normal、关闭 Short Range GI 的分支，以及 `SHCommon.ush::EvaluateSHIrradiance`。使用两个视空间切片、每侧三步、前景拒绝距离比例 0.3，搜索半径为两个探针间距，即当前 32 px，另加参考实现的 1 texel 起始偏移。通过最远 HZB mip 0 搜索地平线，输出 11/11/10 位方向乘可见度，按 UE 的 `ApplyDuringIntegration=1` 路径在全分辨率积分。按可见锥分别缩放三个 SH 频带，之后进入现有像素历史。Volume 开关 `screenProbeBentNormalApplyDuringIntegration` 选择该模式，关闭时走原独立 AO 历史。
+
+以 `4eec045c` 的 Cornell 输入为起点，同机位 1920×1080、64 条射线、10 帧像素历史。最终线性 GI 按像素累计 `RGB × coverage`，A 和 B 各取第 512–639 帧。UE 列复用既有同机位 SH3 读回。
+
+| 指标 | A 独立 AO | B SH3 AO | UE |
+| --- | ---: | ---: | ---: |
+| 矮箱接触对比度 | 66.03% | 65.96% | 64.51% |
+| 高箱半影 10–90% 宽度 | 12.12 px | 11.81 px | 12.52 px |
+| 高箱半影中点 y | 905.40 px | 905.86 px | 903.80 px |
+| 背墙能量相对 UE | +1.20% | +1.54% | 0% |
+| 背墙带通 RMS | 2.287% | 2.253% | 2.100% |
+| 高箱半影相邻帧平均亮度差 | 2.94% | 3.15% | — |
+
+首次 GPU 读回定位到视空间切片与 Unity 渲染目标 Y 的方向不一致，地面可见度均值为 0.152。修正后复采 B，地面均值为 0.948，UE 参考帧为 0.939。高箱剖面的可见度均值为 0.714 / 0.713（Vivid / UE），单帧逐点 RMS 差为 0.214，两端使用各自的深度、法线与采样序列。SH3 笛卡尔布局与 UE 球谐基的 8,192 对离线计算最大绝对差为 2.19×10⁻⁶。
+
+**移植差异。** Unity 按 GPU 逆投影重建视空间坐标，处理渲染目标 Y、视空间 Z 与 UE 的 ZXY 打包轴序。只生成搜索实际读取的最远 HZB mip 0，以 2×2 最远设备深度归约后写 R16F。复用 Vivid 的 STBN 图集、渲染帧索引、GBuffer 和笛卡尔 SH 表示，并保留 AO 强度调节。Cornell 以强度 1 验收。UE Epic 默认的半分辨率独立 AO 时域路径、材质与反射通道的 AO 组合属于其他分支。
+
 ## Cornell 三方线性对照（基线 `e8bac5af`）
 
 同机位 1920×1080，64 条射线，静态取第 512–639 帧。Vivid 用 Game View 每帧实际消费的 `GI.rgb × GI.a`，UE 用 DiffuseIndirectComposite 真实输入除以预曝光 1/16。UE 采用软件 Lumen、Epic GI、8×8 tracing、Bent Normal，并显式启用 ApplyDuringIntegration 取得 SH3。Vivid 使用 32 px AO、10 帧像素历史。两端均在显示变换之前读取。UE 保留 TSR 的相机子像素抖动，Vivid 相机 AA 关闭。解析相机校验的几何有效性分歧为零，UE 深度相对误差 P99 为 0.162%，平均法线点积为 0.99991。

@@ -7,6 +7,7 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -114,8 +115,7 @@ def unpack_unsigned_float(bits, mantissa):
 
 def unreal_resource(dump, descriptor, resource_id):
     # Resource ids contain literal '[0]'; glob would treat this as a character class.
-    prefix = resource_id + ".v00000000000000000000.bin"
-    path = next(p for p in (dump / "Resources").iterdir() if p.name == prefix)
+    path = dump / "Resources" / (resource_id + ".v00000000000000000000.bin")
     h, w = descriptor["ExtentY"], descriptor["ExtentX"]
     fmt = descriptor["Format"]
     if fmt == "PF_FloatRGBA":
@@ -134,7 +134,7 @@ def unreal_resource(dump, descriptor, resource_id):
     raise ValueError("Unsupported actual GPU format: " + fmt)
 
 
-def read_unreal(root):
+def unreal_capture(root):
     request = json.loads((root / "capture-request.json").read_text(encoding="utf-8-sig"))
     dump = next((root / "dump").iterdir())
     if (dump / "Base/Status.txt").read_text().strip() != "ok":
@@ -144,6 +144,11 @@ def read_unreal(root):
     console_text = (dump / "Base/ConsoleVariables.csv").read_text(encoding="utf-8-sig")
     rendering_controls = {}
     diagnostic_controls = dict(command.split(maxsplit=1) for command in request.get("diagnostic_commands", []))
+    if request.get("bent_normal_sh3"):
+        diagnostic_controls.update({"sg.GlobalIlluminationQuality": 3,
+                                    "r.Lumen.ScreenProbeGather.TracingOctahedronResolution": 8,
+                                    "r.Lumen.ScreenProbeGather.ShortRangeAO.BentNormal": 1,
+                                    "r.Lumen.ScreenProbeGather.ShortRangeAO.ApplyDuringIntegration": 1})
     for row in csv.reader(console_text.splitlines()):
         if row and (row[0] in diagnostic_controls or row[0] in ("r.EyeAdaptation.PreExposureOverride", "r.ScreenPercentage",
                               "r.Lumen.ScreenProbeGather.ShortRangeAO", "r.Lumen.HardwareRayTracing",
@@ -154,7 +159,7 @@ def read_unreal(root):
         if key not in rendering_controls or float(rendering_controls[key]["value"]) != float(expected):
             raise ValueError("Actual diagnostic control mismatch: " + key)
     for key, expected in {"r.EyeAdaptation.PreExposureOverride": request["pre_exposure"],
-                          "r.ScreenPercentage": 100, "r.Lumen.ScreenProbeGather.ShortRangeAO": 0,
+                          "r.ScreenPercentage": 100, "r.Lumen.ScreenProbeGather.ShortRangeAO": int(request.get("short_range_ao", False)),
                           "r.Lumen.HardwareRayTracing": 0}.items():
         if key not in rendering_controls or float(rendering_controls[key]["value"]) != expected:
             raise ValueError("Actual GPU dump rendering control mismatch: " + key)
@@ -164,18 +169,38 @@ def read_unreal(root):
         if field not in request or float(rendering_controls[key]["value"]) != request[field]:
             raise ValueError("Missing/mismatched exposure-dependent clamp control: " + key)
     selected = [p for p in passes if p["EventName"].startswith("DiffuseIndirectComposite")]
-    if len(selected) != 1:
-        raise ValueError("Ambiguous composite pass/view.")
+    if len(selected) != request.get("frame_count", 1):
+        raise ValueError("Missing or duplicate composite passes.")
+    first_frame = None
+    for index, p in enumerate(selected):
+        matches = [m for scope in p["ParentEventScopes"] if (m := re.fullmatch(r"Frame (\d+) \(.*\)", scope))]
+        if len(matches) != 1:
+            raise ValueError("Missing or ambiguous composite frame number.")
+        frame = int(matches[0][1])
+        if index == 0:
+            first_frame = frame
+        if frame != first_frame + index:
+            raise ValueError("Composite frames are not consecutive.")
     descriptors = {d["UniqueResourceName"]: d for d in json_sequence(dump / "Base/ResourceDescs.json")}
 
-    def get(name):
-        for resource_id in selected[0]["InputResources"]:
+    def get(name, frame=0):
+        for resource_id in selected[frame]["InputResources"]:
             desc = descriptors[resource_id.split(".")[0]]
             if desc["Name"] == name:
                 return unreal_resource(dump, desc, resource_id)
         raise ValueError("Missing native input " + name)
 
+    return request, dump, rendering_controls, selected, get
+
+
+def read_unreal(root):
+    request, dump, rendering_controls, selected, get = unreal_capture(root)
     native_gi = get("Lumen.ScreenProbeGather.DiffuseIndirect")
+    if len(selected) > 1:
+        total = native_gi.astype(np.float64)
+        for frame in range(1, len(selected)):
+            total += get("Lumen.ScreenProbeGather.DiffuseIndirect", frame)
+        native_gi = (total / len(selected)).astype(np.float32)
     albedo = get("GBufferC")
     normal = (get("GBufferA") * 2 - 1)[..., [1, 2, 0]]  # UE -> Unity world axes
     normal /= np.maximum(np.linalg.norm(normal, axis=-1, keepdims=True), 1e-6)
@@ -279,7 +304,7 @@ def compare(a_root, b_root, report):
     mask &= minimum_filter(ids, 5) == maximum_filter(ids, 5)
     y_a, y_b = [x @ np.array([0.2126, 0.7152, 0.0722], np.float32) for x in [a, b]]
     result = {"a": str(a_root), "b": str(b_root), "quantity": "consumed E/pi, scene linear; no gain fitting",
-              "sample_scope": "one exported frame per input, not a temporal/converged-error benchmark", "regions": {}}
+              "sample_scope": "exported linear images; frame counts are recorded in source metadata", "regions": {}}
     for label, selection in [("all", mask)] + [(name, mask & (ids == int(i))) for i, name in ma["objects"].items()]:
         if not selection.any():
             continue

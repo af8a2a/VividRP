@@ -30,7 +30,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public uint Width, Height, Depth, WordOffset;
             public uint SignMode, PageOffset;
             public float ShellThickness;
-            public uint Padding;
+            public uint MostlyTwoSided;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -93,7 +93,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 && Layout.Width == other.Layout.Width && Layout.Height == other.Layout.Height && Layout.Depth == other.Layout.Depth
                 && Layout.OriginAndVoxelSize.Equals(other.Layout.OriginAndVoxelSize)
                 && Layout.SignMode == other.Layout.SignMode
-                && Layout.ShellThickness.Equals(other.Layout.ShellThickness);
+                && Layout.ShellThickness.Equals(other.Layout.ShellThickness)
+                && Layout.MostlyTwoSided == other.Layout.MostlyTwoSided;
         }
 
         private struct InstanceSource : IEquatable<InstanceSource>
@@ -492,6 +493,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                             Depth = (uint)texture.depth,
                             SignMode = (uint)asset.SignMode,
                             ShellThickness = asset.ShellThickness,
+                            MostlyTwoSided = asset.MostlyTwoSided ? 1u : 0u,
                         },
                     });
                 }

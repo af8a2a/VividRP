@@ -95,7 +95,7 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.SignMode), 32);
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.PageOffset), 36);
             AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.ShellThickness), 40);
-            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.Padding), 44);
+            AssertFieldOffset<VividMeshSdfGpuScene.Field>(nameof(VividMeshSdfGpuScene.Field.MostlyTwoSided), 44);
 
             Assert.That(typeof(VividMeshSdfGpuScene.Instance).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Instance>(), Is.EqualTo(128));
@@ -170,6 +170,27 @@ namespace VividRP.Editor.Tests
             }
             Assert.That(volume, Is.EqualTo(resolution * resolution * resolution
                 - (reset ? 0 : overlapSize.x * overlapSize.y * overlapSize.z)));
+        }
+
+        [Test]
+        public void GlobalSdfObjectGrid_ReusesBuffersAndRebuildsWhenThePageWindowMoves()
+        {
+            using var scene = new VividMeshSdfGpuScene();
+            using var grid = new VividGlobalSdfObjectGrid();
+            Vector3 position = new(-1f, 2f, -3f);
+            grid.Prepare(position, scene, 1);
+            var table = grid.Table;
+            grid.Dirty = false;
+            grid.Prepare(position, scene, 1);
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 32; ++i)
+                grid.Prepare(position, scene, 1);
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.That(allocated, Is.Zero);
+            Assert.That(grid.Dirty, Is.False);
+            grid.Prepare(position + Vector3.left * 2f, scene, 1);
+            Assert.That(grid.Dirty, Is.True);
+            Assert.That(grid.Table, Is.SameAs(table));
         }
 
         [Test]

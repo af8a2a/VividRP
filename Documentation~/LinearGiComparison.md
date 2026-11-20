@@ -84,4 +84,6 @@ python Tools~/Diagnostics/LinearGiExport.py compare <dataset-A> <dataset-B> <rep
 python -B Tools~/Diagnostics/test_linear_gi_export.py
 ```
 
+复现 2026-11-19 的静态 SH3 对照时，给 `CaptureLinearGI.ps1` 传入新的 `-Output` 目录及 `-BentNormalSH3 -WarmupFrames 512 -FrameCount 128`。导出器检查 GPU dump 中的 CVar、逐帧 Composite 数量和帧号连续性，以浮点求和生成线性 GI 均值。几何通道取首帧，整图导出适用于固定相机与静止几何。运动分析用 `unreal_capture` 逐帧读取 GI 与深度，按实际轮廓移动对齐停止帧。三方 ROI 结果见[实现对照](ScreenProbeImplementationAlignment.md)。
+
 Python 依赖为 numpy、scipy、OpenEXR。采集与导出拒绝覆盖已有输出，请为复跑使用新的目录。Windows 受限沙盒中的原生 OpenEXR DLL 可能无法访问 AppContainer 临时目录；本轮文件写入与测试在获准的本机执行环境中完成，没有修改测试判断。

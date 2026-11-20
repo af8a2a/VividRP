@@ -406,10 +406,10 @@ MonoBehaviour:
     m_Value: 2
   segmentedSdfTracing:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
   meshSdfDetailDistance:
-    m_OverrideState: 0
-    m_Value: 2
+    m_OverrideState: 1
+    m_Value: 1.8
   occludedSky:
     m_OverrideState: 1
     m_Value: 0
@@ -418,7 +418,7 @@ MonoBehaviour:
     m_Value: 64
   farRadianceCache:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
   farTraceDistance:
     m_OverrideState: 0
     m_Value: 64
@@ -441,6 +441,9 @@ MonoBehaviour:
     m_OverrideState: 0
     m_Value: 1
   screenProbeFullSphere:
+    m_OverrideState: 1
+    m_Value: 1
+  screenProbeDitherTraceDirections:
     m_OverrideState: 1
     m_Value: 1
   screenProbeTemporalFilter:

@@ -56,4 +56,5 @@ MonoBehaviour:
   m_SampleOrigin: {x: -0.8625, y: -0.0625, z: -0.6625}
   m_VoxelSize: 0.0125
   m_SignMode: 2
+  m_MostlyTwoSided: 1
   m_ShellThickness: 0.025

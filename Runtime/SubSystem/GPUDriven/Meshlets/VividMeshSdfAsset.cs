@@ -19,6 +19,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         [SerializeField] private VividMeshSdfSignMode m_SignMode;
         [SerializeField] private float m_ShellThickness;
 
+        [SerializeField, Tooltip("Use the mostly two-sided Mesh Cards depth bias for this distance field.")] private bool m_MostlyTwoSided;
+
+        public bool MostlyTwoSided => m_MostlyTwoSided;
         public Mesh SourceMesh => m_SourceMesh;
         public Texture3D DistanceField => m_DistanceField;
         public Bounds GeometryBounds => m_GeometryBounds;

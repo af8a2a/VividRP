@@ -152,7 +152,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public BoolParameter screenProbeFullSphere = new(true);
 
         [Tooltip("Stochastically scatter each traced direction to neighboring octahedral texels before filtering.")]
-        public BoolParameter screenProbeDitherTraceDirections = new(false);
+        public BoolParameter screenProbeDitherTraceDirections = new(true);
 
         [Tooltip("Blend the previous probe radiance before spatial filtering. The lighting sampling guide retains its own filtered history.")]
         public BoolParameter screenProbeTemporalFilter = new(false);

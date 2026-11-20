@@ -12,7 +12,7 @@ struct VividMeshSdfField
     uint signMode;
     uint pageOffset;
     float shellThickness;
-    uint padding;
+    uint mostlyTwoSided;
 };
 
 struct VividMeshSdfInstance

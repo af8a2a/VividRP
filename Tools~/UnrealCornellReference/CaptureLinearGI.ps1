@@ -4,6 +4,8 @@ param(
     [string]$Output = 'E:/UnrealProjects/VividGICornellReference/Saved/LinearGI-20261113/physical-clamp',
     [ValidateRange(0.001,4)][double]$PreExposure = 0.0625,
     [int]$WarmupFrames = 512,
+    [ValidateRange(1,256)][int]$FrameCount = 1,
+    [switch]$BentNormalSH3,
     [ValidatePattern('^[a-zA-Z0-9_-]*$')][string]$CaseName = '',
     [string[]]$DiagnosticCommands = @()
 )
@@ -22,26 +24,34 @@ $commandList = @(
     'r.ScreenPercentage 100', 'r.DynamicRes.OperationMode 0',
     'sg.GlobalIlluminationQuality 3', 'sg.ReflectionQuality 3',
     'r.Lumen.HardwareRayTracing 0', 'r.Lumen.TraceMeshSDFs 1',
-    'r.Lumen.ScreenProbeGather.ShortRangeAO 0', 'r.AmbientOcclusionLevels 0',
+    "r.Lumen.ScreenProbeGather.ShortRangeAO $([int]$BentNormalSH3.IsPresent)", 'r.AmbientOcclusionLevels 0',
     'r.SetNearClipPlane 10', "r.EyeAdaptation.PreExposureOverride $preExposureText",
     "r.Lumen.ScreenProbeGather.MaxRayIntensity $probeMax",
     "r.LumenScene.Radiosity.MaxRayIntensity $radiosityMax",
     "r.Lumen.Reflections.MaxRayIntensity $reflectionMax"
-) + $DiagnosticCommands + @(
+)
+if ($BentNormalSH3) {
+    $commandList += @('r.Lumen.ScreenProbeGather.ShortRangeAO.BentNormal 1',
+        'r.Lumen.ScreenProbeGather.ShortRangeAO.ApplyDuringIntegration 1',
+        'r.Lumen.ScreenProbeGather.TracingOctahedronResolution 8')
+}
+$commandList += $DiagnosticCommands + @(
     'r.DumpGPU.Root DiffuseIndirectComposite*', 'r.DumpGPU.Texture 2',
     'r.DumpGPU.Buffer 0', 'r.DumpGPU.Upload 0', 'r.DumpGPU.Explore 0',
-    "r.DumpGPU.Directory $caseDirectory/dump", "r.DumpGPU.FrameDelay $WarmupFrames", 'DumpGPU'
+    "r.DumpGPU.Directory $caseDirectory/dump", "r.DumpGPU.FrameDelay $WarmupFrames",
+    "r.DumpGPU.FrameCount $FrameCount", 'DumpGPU'
 )
 $commands = $commandList -join ','
 # Benchmark uses 30 simulation ticks per second in this build. Keep ample room after the dump.
-$seconds = [math]::Ceiling(($WarmupFrames + 128) / 30.0)
+$seconds = [math]::Ceiling(($WarmupFrames + $FrameCount + 128) / 30.0)
 $captureMap = '/Game/VividReference/Maps/CornellBoxEmissiveCeiling?game=/Game/VividReference/Capture/BP_LinearGICaptureGameMode.BP_LinearGICaptureGameMode_C'
 $arguments = @($Project, $captureMap,
     '-game', '-RenderOffscreen', '-unattended', '-nop4', '-nosplash', '-nosound', '-d3d12',
     '-windowed', '-ResX=1920', '-ResY=1080', '-ForceRes', '-benchmark', "-seconds=$seconds",
     ('-ExecCmds="' + $commands + '"'), "-abslog=$caseDirectory/capture.log")
 @{ engine = 'Unreal 5.7.4'; pre_exposure = $PreExposure; width = 1920; height = 1080;
-   quantity = 'irradiance_over_pi'; receiving_albedo_in_rgb = $false; short_range_ao = $false;
+   quantity = 'irradiance_over_pi'; receiving_albedo_in_rgb = $false; short_range_ao = [bool]$BentNormalSH3;
+   bent_normal_sh3 = [bool]$BentNormalSH3; frame_count = $FrameCount;
    camera = @(-380,0,150); near_clip_cm = 10; warmup_frames = $WarmupFrames;
    probe_max_ray_intensity = [double]$probeMax; radiosity_max_ray_intensity = [double]$radiosityMax;
    reflection_max_ray_intensity = $reflectionMax; physical_clamp_policy = 'Preserve EV4 native cutoffs (10/40/40 at pre-exposure 1/16)';

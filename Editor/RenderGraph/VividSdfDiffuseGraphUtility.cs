@@ -78,6 +78,35 @@ namespace VividRP.Editor.RenderGraph
             AssetDatabase.ImportAsset(graphPath, ImportAssetOptions.ForceSynchronousImport);
         }
 
+        public static void ConnectGlobalSdf(string graphPath)
+        {
+            var graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(graphPath)
+                ?? throw new ArgumentException("Expected a VividRP Render Graph asset.", nameof(graphPath));
+            var scope = graph.GetNodes().OfType<ISubgraphNode>().Select(node => node.GetSubgraph())
+                .OfType<RenderGraphEditorGraph>().Where(child => GraphDatabase.GetGraphAssetPath(child) == graphPath)
+                .Prepend(graph).Single(child => child.GetNodes().OfType<RenderPassNodeData>()
+                    .Any(node => node.GetPassType() == typeof(SdfDiffuseGatherPass)));
+            var nodes = scope.GetNodes().OfType<RenderPassNodeData>().ToArray();
+            var gather = nodes.Single(node => node.GetPassType() == typeof(SdfDiffuseGatherPass));
+            var input = gather.GetInputPortByName("m_ClipmapNear");
+            var producer = nodes.SingleOrDefault(node => node.GetPassType() == typeof(GlobalSdfClipmapPass));
+            if (input.IsConnected)
+            {
+                if (producer != null && ReferenceEquals(input.FirstConnectedPort.GetNode(), producer)) return;
+                throw new InvalidOperationException("The GI clipmap already has a different producer.");
+            }
+            if (producer == null)
+            {
+                producer = (RenderPassNodeData)Activator.CreateInstance(RenderPassNodeRegistry.GetNodeType(typeof(GlobalSdfClipmapPass)));
+                producer.Position = gather.Position + new Vector2(-280f, 320f);
+                scope.AddNode(producer);
+            }
+            if (!scope.Connect(producer.GetOutputPortByName("m_Near"), input))
+                throw new InvalidOperationException("Could not connect the Global SDF to the GI gather.");
+            GraphDatabase.SaveGraph(graph);
+            AssetDatabase.ImportAsset(graphPath, ImportAssetOptions.ForceSynchronousImport);
+        }
+
         private static bool RemoveLegacyGatherWire(RenderGraphEditorGraph graph, RenderPassNodeData gather, IPort input)
         {
             const BindingFlags instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;

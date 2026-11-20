@@ -1,6 +1,11 @@
+#pragma use_dxc
 #pragma kernel UpdateSdfFarRadiance VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
+#pragma kernel BuildGlobalObjectPages VIVID_GLOBAL_OBJECT_PRODUCER
 #pragma kernel ClearWorldProbeDemand VIVID_SDF_WORLD
 #pragma kernel MarkWorldProbeDemand VIVID_SDF_WORLD
+#pragma kernel ReuseWorldProbes VIVID_SDF_WORLD
+#pragma kernel AllocateWorldProbes VIVID_SDF_WORLD
+#pragma kernel BuildWorldTickets VIVID_SDF_WORLD
 #pragma kernel SelectWorldProbeUpdates VIVID_SDF_WORLD
 #pragma kernel UpdateWorldProbes VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
 #pragma kernel UpdateWorldProbesWithSky VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_SDF_WORLD_SKY
@@ -27,7 +32,7 @@ void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
     int3 cell = int3(_SdfFarUpdates[group.x].xyz);
     uint2 address = FarAtlasAddress(cell, lane);
     uint instance;
-    _SdfFarOutput[address] = TraceFarProbe(FarProbePosition(cell), FarProbeDirection(lane), instance);
+    _SdfFarOutput[address] = TraceFarProbe(FarProbePosition(cell), FarProbeDirection(lane), 0.0f, instance);
     _SdfFarHitIdsOutput[FarHitIndex(address)] = instance;
     if (lane == 0u)
         _SdfFarOutput[FarAtlasAddress(cell, FarDirections)] = float4(float3(cell), 1.0);
@@ -37,59 +42,124 @@ void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
 #if defined(VIVID_SDF_WORLD)
 RWTexture2D<uint> _SdfWorldWork;
 
-int3 DemandCell(uint slot)
-{
-    int3 origin = int3(_SdfFarWindow.xyz);
-    return origin + ((int3(slot & 15u, slot >> 8u, (slot >> 4u) & 15u) - origin) & 15);
-}
+// Demand uses one uint per logical cell. The following rows hold the free
+// list, frame counters, trace tickets and each physical slot's priority.
+uint2 DemandAddress(uint index) { return uint2(index & 1023u, index >> 10u); }
+uint2 FreeAddress(uint index) { return uint2(index & 1023u, 432u + (index >> 10u)); }
+uint2 PriorityAddress(uint slot) { return uint2(slot & 1023u, 437u + (slot >> 10u)); }
+uint2 Counter(uint index) { return uint2(index, 436u); }
+uint2 Ticket(uint index) { return Counter(64u + index); }
 
 [numthreads(8,8,1)]
 void ClearWorldProbeDemand(uint3 id : SV_DispatchThreadID)
 {
+    uint index = id.x + 1024u * id.y;
     _SdfWorldWork[id.xy] = 0u;
-    if (_SdfFarClear != 0u)
-        _SdfFarOutput[WorldKeyAddress(DemandCell(id.x + 64u * id.y))] = 0.0;
+    _SdfFarOutput[WorldIndirection(index)] = 0.0f;
+    if (index < 64u + WorldBudget) _SdfWorldWork[Counter(index)] = 0u;
 }
 
 [numthreads(8,8,1)]
 void MarkWorldProbeDemand(uint3 id : SV_DispatchThreadID)
 {
     uint2 size = uint2(_SdfDiffuseScreenSize.xy);
-    if (any(id.xy >= ProbeGridSize(size))) return;
+    uint2 gridSize = ProbeGridSize(size);
+    if (id.x >= gridSize.x || id.y >= ProbeAtlasHeight(gridSize)) return;
     float3 position, normal;
-    if (!LoadReceiver(ProbeReceiverPixel(id.xy, size), position, normal)) return;
-    int3 lower = int3(floor(position / FarCellSize - 0.5));
+    if (!LoadProbeReceiver(id.xy, size, position, normal)) return;
+    position += normal * _SdfDiffuseRayBias;
+    uint level = GetRadianceProbeClipmap(position, 0.0f);
+    if (level == WorldClipmaps) return;
+    int3 lower = int3(floor(GetRadianceProbeCoordFloat(position, level) - 0.5f));
     [unroll] for (uint i = 0u; i < 8u; ++i)
+        InterlockedOr(_SdfWorldWork[DemandAddress(WorldCellIndex(lower + WorldCorner(i), level))], 1u);
+}
+
+[numthreads(64,1,1)]
+void ReuseWorldProbes(uint slot : SV_DispatchThreadID)
+{
+    _SdfWorldWork[PriorityAddress(slot)] = 0u;
+    uint2 keyAddress = WorldKeyAddress(slot);
+    float4 key = _SdfFarOutput[keyAddress];
+    if (_SdfFarClear == 0u && key.w > 0.0f)
     {
-        int3 cell = lower + WorldCorner(i);
-        if (any(uint3(cell - int3(_SdfFarWindow.xyz)) >= FarGridSize)) continue;
-        uint slot = WorldSlot(cell);
-        InterlockedOr(_SdfWorldWork[uint2(slot & 63u, slot >> 6u)], 1u);
+        uint level = uint(key.w) - 1u;
+        int3 coord = int3(key.xyz) - WorldOrigin(level);
+        if (all(uint3(coord) < WorldGrid))
+        {
+            uint index = WorldCellIndex(coord, level);
+            float4 age = _SdfFarOutput[WorldAgeAddress(slot)];
+            bool used = _SdfWorldWork[DemandAddress(index)] != 0u;
+            if (used || _SdfDiffuseFrame + 1u - uint(age.y) < 8u)
+            {
+                if (used) _SdfWorldWork[DemandAddress(index)] = slot + 2u;
+                if (age.x > 0.0f) _SdfFarOutput[WorldIndirection(index)] = float(slot + 1u);
+                return;
+            }
+        }
+    }
+    _SdfFarOutput[keyAddress] = 0.0f;
+    uint freeIndex;
+    InterlockedAdd(_SdfWorldWork[Counter(0)], 1u, freeIndex);
+    _SdfWorldWork[FreeAddress(freeIndex)] = slot;
+}
+
+[numthreads(8,8,1)]
+void AllocateWorldProbes(uint3 id : SV_DispatchThreadID)
+{
+    uint marker = _SdfWorldWork[id.xy];
+    if (marker == 0u) return;
+    uint index = id.x + 1024u * id.y;
+    uint level = index / (48u * 48u * 48u);
+    uint slot = marker - 2u;
+    uint lastTraced = 0u;
+    if (marker == 1u)
+    {
+        uint freeIndex;
+        InterlockedAdd(_SdfWorldWork[Counter(1)], 1u, freeIndex);
+        if (freeIndex >= _SdfWorldWork[Counter(0)]) return;
+        slot = _SdfWorldWork[FreeAddress(freeIndex)];
+        int3 local = int3(index % 48u, (index / 48u) % 48u, (index / 2304u) % 48u);
+        _SdfFarOutput[WorldKeyAddress(slot)] = float4(WorldOrigin(level) + local, level + 1u);
+    }
+    else lastTraced = uint(_SdfFarOutput[WorldAgeAddress(slot)].x);
+    uint frame = _SdfDiffuseFrame + 1u;
+    _SdfFarOutput[WorldAgeAddress(slot)] = float4(lastTraced, frame, 0, 0);
+    // GetPriorityBucketIndex, LumenRadianceCacheUpdate.usf.
+    uint bucket = 0u;
+    if (lastTraced != 0u)
+    {
+        uint framesBetweenTracedAndUsed = frame > lastTraced ? frame - lastTraced : 1u;
+        float importance = framesBetweenTracedAndUsed / (level + 1.0f);
+        bucket = 15.0f - clamp(log2(importance), 0.0f, 14.0f);
+    }
+    _SdfWorldWork[PriorityAddress(slot)] = bucket + 1u;
+    InterlockedAdd(_SdfWorldWork[Counter(2u + bucket)], 1u);
+}
+
+[numthreads(1,1,1)]
+void SelectWorldProbeUpdates(uint3 id : SV_DispatchThreadID)
+{
+    uint sum = 0u;
+    for (uint bucket = 0u; bucket < 16u; ++bucket)
+    {
+        _SdfWorldWork[Counter(18u + bucket)] = sum;
+        sum += _SdfWorldWork[Counter(2u + bucket)];
     }
 }
 
-// Each lane owns a disjoint subset of world cells. Prefer missing keys, then
-// the least recently updated visible cell. There is no GPU-to-CPU scheduling latency.
-[numthreads(16,1,1)]
-void SelectWorldProbeUpdates(uint lane : SV_GroupIndex)
+[numthreads(64,1,1)]
+void BuildWorldTickets(uint slot : SV_DispatchThreadID)
 {
-    uint chosen = 0u;
-    float oldest = 1e30;
-    [loop] for (uint slot = lane; slot < 4096u; slot += 16u)
-    {
-        if (_SdfWorldWork[uint2(slot & 63u, slot >> 6u)] == 0u) continue;
-        int3 cell = DemandCell(slot);
-        float4 key = _SdfFarOutput[WorldKeyAddress(cell)];
-        float stamp = all(key.xyz == float3(cell)) ? key.w : 0.0;
-        if (stamp < oldest) { chosen = slot + 1u; oldest = stamp; }
-        if (stamp <= 0.0) break;
-    }
-    _SdfWorldWork[uint2(lane,64u)] = chosen;
+    uint priority = _SdfWorldWork[PriorityAddress(slot)];
+    if (priority == 0u) return;
+    uint ticket;
+    InterlockedAdd(_SdfWorldWork[Counter(17u + priority)], 1u, ticket);
+    if (ticket < WorldBudget)
+        _SdfWorldWork[Ticket(ticket)] = (slot + 1u) | (priority == 1u ? 0u : 0x10000u);
 }
 
 #if defined(VIVID_SDF_FAR_UPDATE)
-groupshared uint WorldReuse;
-groupshared uint WorldTicket;
 [numthreads(8,8,1)]
 #if defined(VIVID_SDF_WORLD_SKY)
 void UpdateWorldProbesWithSky(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
@@ -97,38 +167,225 @@ void UpdateWorldProbesWithSky(uint3 group : SV_GroupID, uint3 lane : SV_GroupThr
 void UpdateWorldProbes(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
 #endif
 {
-    if (all(lane.xy == 0u))
-    {
-        WorldTicket = _SdfWorldWork[uint2(group.x,64u)];
-        if (WorldTicket != 0u)
-        {
-            int3 requested = DemandCell(WorldTicket - 1u);
-            float4 key = _SdfFarOutput[WorldKeyAddress(requested)];
-            WorldReuse = key.w > 0.0 && all(key.xyz == float3(requested));
-        }
-    }
-    GroupMemoryBarrierWithGroupSync();
-    if (WorldTicket == 0u) return;
-    int3 cell = DemandCell(WorldTicket - 1u);
-    uint2 keyAddress = WorldKeyAddress(cell);
-    uint seed = HashProbe(WorldSlot(cell) ^ HashProbe(_SdfDiffuseFrame));
+    uint ticket = _SdfWorldWork[Ticket(group.z)];
+    if (ticket == 0u) return;
+    uint slot = (ticket & 0xffffu) - 1u;
+    float4 key = _SdfFarOutput[WorldKeyAddress(slot)];
+    int3 cell = int3(key.xyz);
+    uint level = uint(key.w) - 1u;
+    uint index = WorldCellIndex(cell - WorldOrigin(level), level);
+    uint seed = HashProbe(index ^ HashProbe(_SdfDiffuseFrame));
     float2 jitter = (float2(seed & 65535u, seed >> 16u) + 0.5) / 65536.0;
-    [loop] for (uint y = lane.y; y < WorldResolution; y += 8u)
-    [loop] for (uint x = lane.x; x < WorldResolution; x += 8u)
+    uint2 xy = group.xy * 8u + lane.xy;
+    uint2 address = WorldTexelAddress(slot, xy);
+    float3 dir = ProbeSphereDirection((xy + jitter) / WorldResolution);
+    uint instance;
+    float4 fresh = TraceFarProbe(float3(cell) * WorldCellSize(level), dir, WorldProbeTMin(level), instance);
+    if ((ticket & 0x10000u) != 0u)
     {
-        uint2 xy = uint2(x,y), address = WorldTexelAddress(cell, xy);
-        float3 dir = ProbeSphereDirection((xy + jitter) / WorldResolution);
-        uint instance;
-        float4 fresh = TraceFarProbe(FarProbePosition(cell), dir, instance);
-        if (WorldReuse != 0u)
-        {
-            float4 previous = _SdfFarOutput[address];
-            if (fresh.w > 0.0 && previous.w > 0.0 && abs(fresh.w - previous.w) < 0.1 * fresh.w)
-                fresh.rgb = lerp(previous.rgb, fresh.rgb, 0.25);
-        }
-        _SdfFarOutput[address] = fresh;
+        float4 previous = _SdfFarOutput[address];
+        if (fresh.w > 0.0 && previous.w > 0.0 && abs(fresh.w - previous.w) < 0.1 * fresh.w)
+            fresh.rgb = lerp(previous.rgb, fresh.rgb, 0.25);
     }
-    if (all(lane.xy == 0u)) _SdfFarOutput[keyAddress] = float4(float3(cell), float(_SdfDiffuseFrame + 1u));
+    _SdfFarOutput[address] = fresh;
+    if (all(xy == 0u))
+    {
+        _SdfFarOutput[WorldIndirection(index)] = float(slot + 1u);
+        _SdfFarOutput[WorldAgeAddress(slot)] = float4(_SdfDiffuseFrame + 1u, _SdfDiffuseFrame + 1u, 0, 0);
+    }
 }
 #endif
+#endif
+
+#if defined(VIVID_GLOBAL_OBJECT_PRODUCER)
+RWStructuredBuffer<uint4> _SdfObjectGridWrite;
+uint _SdfObjectPageCount;
+struct FDFObjectData
+{
+    uint GPUSceneInstanceIndex;
+    float3 VolumePositionExtent, VolumeToWorldScale;
+    float VolumeScale;
+    float3x4 WorldToVolume;
+    float3 LocalCenter;
+    float LocalExtentMax;
+};
+FDFObjectData LoadDFObjectData(uint index)
+{
+    FDFObjectData obj;
+
+    obj.GPUSceneInstanceIndex = index;
+    VividMeshSdfInstance inst = _MeshSdfInstances[index];
+    VividMeshSdfField field = _MeshSdfFields[inst.fieldIndex];
+    float3 localExtent = 0.5f * float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
+    obj.LocalCenter = field.originAndVoxelSize.xyz + localExtent;
+    obj.LocalExtentMax = max(localExtent.x, max(localExtent.y, localExtent.z));
+    float localToVolume = 1.0f / obj.LocalExtentMax;
+    obj.VolumePositionExtent = localExtent * localToVolume;
+    obj.VolumeToWorldScale = obj.LocalExtentMax / float3(length(inst.worldToLocal0.xyz), length(inst.worldToLocal1.xyz), length(inst.worldToLocal2.xyz));
+    obj.VolumeScale = min(obj.VolumeToWorldScale.x, min(obj.VolumeToWorldScale.y, obj.VolumeToWorldScale.z));
+    obj.WorldToVolume = localToVolume * float3x4(inst.worldToLocal0 - float4(0,0,0,obj.LocalCenter.x),
+        inst.worldToLocal1 - float4(0,0,0,obj.LocalCenter.y), inst.worldToLocal2 - float4(0,0,0,obj.LocalCenter.z));
+
+    return obj;
+}
+
+float DistanceToMeshSurfaceStandalone(float3 clampedVolumePosition,FDFObjectData data)
+{
+    VividMeshSdfField field = _MeshSdfFields[_MeshSdfInstances[data.GPUSceneInstanceIndex].fieldIndex];
+    float3 localPosition = clampedVolumePosition * data.LocalExtentMax + data.LocalCenter;
+    float distance = VividMeshSdfSample(field, localPosition - field.originAndVoxelSize.xyz);
+    // VividMeshSdfBaker stores distance to the mesh minus half the shell thickness.
+    // Object-grid ranking compares distances to source surfaces, before tracing expansion.
+    if (field.signMode == 2u)
+        distance += 0.5f * field.shellThickness;
+    return distance / data.LocalExtentMax;
+}
+float DistanceToNearestSurfaceForObject(FDFObjectData DFObjectData, float3 WorldPosition, float MaxDistance)
+{
+	const float3 VolumePosition = mul(DFObjectData.WorldToVolume, float4(WorldPosition, 1.0f));
+
+	const float3 ClampedVolumePosition = clamp(VolumePosition, -DFObjectData.VolumePositionExtent, DFObjectData.VolumePositionExtent);
+
+	const float3 ToBox = (abs(VolumePosition) - DFObjectData.VolumePositionExtent) * DFObjectData.VolumeToWorldScale;
+	const float DistanceToBoxOutside = length(max(0.0f, ToBox));
+	const float DistanceToBoxInside = min(0.0f, max(ToBox.x, max(ToBox.y, ToBox.z)));
+	const float DistanceToBox = DistanceToBoxOutside + DistanceToBoxInside;
+
+	float DistanceToOccluder = MaxDistance;
+
+    [branch]
+	if (DistanceToBox < MaxDistance)
+	{
+		DistanceToOccluder = DistanceToMeshSurfaceStandalone(ClampedVolumePosition, DFObjectData) * DFObjectData.VolumeScale + max(0.0f, DistanceToBox);
+
+		// Don't allow negative SDF distance to stick out of the bounding box
+		DistanceToOccluder = max(DistanceToOccluder, DistanceToBox);
+	}
+
+	return DistanceToOccluder;
+}
+
+
+struct FObjectGridCell
+{
+	uint4 PackedIndex4;
+};
+
+FObjectGridCell InitObjectGridCell()
+{
+	FObjectGridCell GridCell;
+	GridCell.PackedIndex4 = uint4(0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu);
+	return GridCell;
+}
+
+struct FObjectGridCellIndex
+{
+	uint GPUSceneInstanceIndex;
+	bool bValid;
+};
+
+uint PackObjectGridCellIndex(uint GPUSceneInstanceIndex, float Distance, float ObjectGridCellWorldExtent, float MaxQueryDistance)
+{
+	float NormalizedPackedDistance = saturate((Distance + 0.25f * ObjectGridCellWorldExtent) / (MaxQueryDistance + 0.25f * ObjectGridCellWorldExtent));
+	uint PackedDistanceUInt = uint(clamp(NormalizedPackedDistance * (0xFF + 1.0f), 0, 0xFF));
+	uint GridCellElement = (GPUSceneInstanceIndex & 0xFFFFFF) | (PackedDistanceUInt << 24);
+	return GridCellElement;
+}
+
+// Unpack GPUSceneInstanceIndex
+FObjectGridCellIndex UnpackObjectGridCellIndex(uint PackedIndex)
+{
+	FObjectGridCellIndex ObjectGridCellIndex;
+	ObjectGridCellIndex.bValid = PackedIndex < 0xffffffffu;
+	ObjectGridCellIndex.GPUSceneInstanceIndex = PackedIndex & 0xFFFFFF;
+	return ObjectGridCellIndex;
+}
+
+// Unordered add to a grid cell
+void AddToObjectGridCell(inout FObjectGridCell ObjectGridCell, uint GPUSceneInstanceIndex, float Distance, float ObjectGridCellWorldExtent, float MaxQueryDistance)
+{
+	if (abs(Distance) < MaxQueryDistance)
+	{
+		uint PackedIndexToInsert = PackObjectGridCellIndex(GPUSceneInstanceIndex, Distance, ObjectGridCellWorldExtent, MaxQueryDistance);
+
+		uint MaxPackedIndex = 0;
+		for (uint IndexInList = 0; IndexInList < 4u; ++IndexInList)
+		{
+			MaxPackedIndex = max(MaxPackedIndex, ObjectGridCell.PackedIndex4[IndexInList]);
+		}
+
+		if (PackedIndexToInsert < MaxPackedIndex)
+		{
+			for (uint IndexInList = 0; IndexInList < 4u; ++IndexInList)
+			{
+				if (ObjectGridCell.PackedIndex4[IndexInList] == MaxPackedIndex)
+				{
+					ObjectGridCell.PackedIndex4[IndexInList] = PackedIndexToInsert;
+					break;
+				}
+			}
+		}
+	}
+}
+
+// Sort grid cell elements by distance
+void SortObjectGridCell(inout FObjectGridCell ObjectGridCell)
+{
+	for (uint PassIndex = 0; PassIndex < 4u - 1; ++PassIndex)
+	{
+		for (uint ElementIndex = 0; ElementIndex < 4u - PassIndex - 1; ++ElementIndex)
+		{
+			uint MinIndex = min(ObjectGridCell.PackedIndex4[ElementIndex], ObjectGridCell.PackedIndex4[ElementIndex + 1]);
+			uint MaxIndex = max(ObjectGridCell.PackedIndex4[ElementIndex], ObjectGridCell.PackedIndex4[ElementIndex + 1]);
+			ObjectGridCell.PackedIndex4[ElementIndex] = MinIndex;
+			ObjectGridCell.PackedIndex4[ElementIndex + 1] = MaxIndex;
+		}
+	}
+}
+
+[numthreads(4,4,4)]
+void BuildGlobalObjectPages(uint3 group : SV_GroupID, uint3 cell : SV_GroupThreadID)
+{
+    uint slot = group.x + 256u * group.y;
+    if (slot >= _SdfObjectPageCount) return;
+    float4 page = _SdfObjectPageWork[slot];
+    float voxel = ObjectGridVoxel(uint(page.w));
+    float3 center = (page.xyz * 7.0f + float3(cell) * 2.0f) * voxel + 0.5f * voxel;
+    float extent = (0.5f * voxel) * 7.0f / 4.0f;
+    float range = 3.0f * (0.5f * voxel);
+    float maxQuery = 1.44f * extent + range;
+    FObjectGridCell result = InitObjectGridCell();
+    uint nodeIndex = 0u;
+    [loop] while (nodeIndex < _MeshSdfNodeCount)
+    {
+        VividMeshSdfNode node = _MeshSdfNodes[nodeIndex];
+        float3 gap = max(0.0f, max(node.boundsMin - center, center - node.boundsMax) - extent);
+        if ((node.layerMask & _GlobalSdfLayerMask) == 0u || dot(gap, gap) > range*range)
+        {
+            nodeIndex = node.escapeIndex;
+            continue;
+        }
+        ++nodeIndex;
+        for (uint n = 0u; n < node.leafCount; ++n)
+        {
+            uint index = _MeshSdfLeafInstances[node.firstLeaf + n];
+            VividMeshSdfInstance inst = _MeshSdfInstances[index];
+            if ((inst.layerMask & _GlobalSdfLayerMask) == 0u) continue;
+            FDFObjectData data = LoadDFObjectData(index);
+            // The leaf BVH may combine several instances. Test each source AABB.
+            float3 a = inst.worldToLocal0.xyz, b = inst.worldToLocal1.xyz, c = inst.worldToLocal2.xyz;
+            float3 cx = cross(b,c), cy = cross(c,a), cz = cross(a,b);
+            float det = dot(a,cx);
+            float3 q = data.LocalCenter - float3(inst.worldToLocal0.w, inst.worldToLocal1.w, inst.worldToLocal2.w);
+            float3 boundsCenter = (cx*q.x + cy*q.y + cz*q.z) / det;
+            float3 h = data.VolumePositionExtent * data.LocalExtentMax;
+            float3 boundsExtent = (abs(cx)*h.x + abs(cy)*h.y + abs(cz)*h.z) / abs(det);
+            float3 distance = max(0.0f, abs(center-boundsCenter) - (extent+boundsExtent));
+            if (dot(distance,distance) <= range*range)
+                AddToObjectGridCell(result, index, DistanceToNearestSurfaceForObject(data, center, maxQuery), extent, maxQuery);
+        }
+    }
+    SortObjectGridCell(result);
+    _SdfObjectGridWrite[slot * 64u + ObjectGridMorton(cell)] = result.PackedIndex4;
+}
 #endif

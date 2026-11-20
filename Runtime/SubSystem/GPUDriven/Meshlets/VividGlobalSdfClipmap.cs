@@ -230,6 +230,83 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         }
     }
 
+    // Object identities belong to the gather scene. Keep its page table separate
+    // from the distance atlas, whose unbordered bricks have a different lattice.
+    internal sealed class VividGlobalSdfObjectGrid : IDisposable
+    {
+        internal const int Resolution = 36;
+        private const int PagesPerLevel = Resolution * Resolution * Resolution;
+        private readonly uint[] m_PageTable = new uint[PagesPerLevel * VividGlobalSdfClipmap.LevelCount];
+        private readonly List<Vector4> m_Work = new();
+        private readonly int3[] m_Origins = new int3[VividGlobalSdfClipmap.LevelCount];
+        private uint m_Revision;
+        private int m_LayerMask;
+        internal GraphicsBuffer Table, PageWork, Objects;
+        internal bool Dirty;
+        internal int PageCount => m_Work.Count;
+
+        internal void Prepare(Vector3 camera, VividMeshSdfGpuScene scene, int mask)
+        {
+            bool rebuild = Table == null || m_Revision != scene.Revision || m_LayerMask != mask;
+            for (int level = 0; level < m_Origins.Length; ++level)
+            {
+                float size = (50f / Resolution) * (1 << level);
+                int3 origin = (int3)math.floor((float3)camera / size + 0.5f) - Resolution / 2;
+                rebuild |= math.any(origin != m_Origins[level]);
+                m_Origins[level] = origin;
+            }
+            if (!rebuild) return;
+            Dirty = true;
+            m_Revision = scene.Revision;
+            m_LayerMask = mask;
+            Array.Clear(m_PageTable, 0, m_PageTable.Length);
+            m_Work.Clear();
+            var nodes = scene.BvhNodes;
+            for (int level = 0; level < m_Origins.Length; ++level)
+            {
+                float pageSize = (50f / Resolution) * (1 << level);
+                // Expand the BVH broad phase by the UE card interpolation range.
+                float margin = 3f * (0.5f * pageSize / 7f) + pageSize;
+                int3 origin = m_Origins[level], last = origin + (Resolution - 1);
+                for (int n = 0; n < nodes.Count; ++n)
+                {
+                    var node = nodes[n];
+                    if (node.LeafCount == 0 || (node.LayerMask & (uint)mask) == 0) continue;
+                    int3 lo = math.max(origin, (int3)math.floor(((float3)node.Min - margin) / pageSize));
+                    int3 hi = math.min(last, (int3)math.floor(((float3)node.Max + margin) / pageSize));
+                    for (int z = lo.z; z <= hi.z; ++z)
+                    for (int y = lo.y; y <= hi.y; ++y)
+                    for (int x = lo.x; x <= hi.x; ++x)
+                    {
+                        int3 key = ((new int3(x, y, z) % Resolution) + Resolution) % Resolution;
+                        int index = key.x + Resolution * (key.y + Resolution * key.z) + level * PagesPerLevel;
+                        if (m_PageTable[index] != 0u) continue;
+                        m_Work.Add(new Vector4(x, y, z, level));
+                        m_PageTable[index] = (uint)m_Work.Count;
+                    }
+                }
+            }
+            Table ??= new GraphicsBuffer(GraphicsBuffer.Target.Structured, m_PageTable.Length, sizeof(uint));
+            int count = Mathf.NextPowerOfTwo(math.max(1, m_Work.Count));
+            if (PageWork == null || PageWork.count < count)
+            {
+                PageWork?.Dispose();
+                Objects?.Dispose();
+                PageWork = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 16);
+                Objects = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * 64, 16);
+            }
+            Table.SetData(m_PageTable);
+            if (m_Work.Count != 0) PageWork.SetData(m_Work);
+        }
+
+        public void Dispose()
+        {
+            Objects?.Dispose();
+            PageWork?.Dispose();
+            Table?.Dispose();
+        }
+    }
+
     internal sealed class VividGlobalSdfFrameData : ContextItem
     {
         internal readonly Vector4[] Levels = new Vector4[VividGlobalSdfClipmap.LevelCount];

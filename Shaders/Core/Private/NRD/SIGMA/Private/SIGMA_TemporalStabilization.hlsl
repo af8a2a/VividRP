@@ -8,6 +8,8 @@ distribution of this software and related documentation without an express
 license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorEncoding.hlsl"
+
 groupshared float s_Penumbra[ BUFFER_Y ][ BUFFER_X ];
 groupshared SIGMA_TYPE s_Shadow_Translucency[ BUFFER_Y ][ BUFFER_X ];
 
@@ -112,7 +114,7 @@ NRD_EXPORT void NRD_CS_MAIN( NRD_CS_MAIN_ARGS )
     float3 Xv = Geometry::ReconstructViewPosition( pixelUv, gFrustum, viewZ, gOrthoMode );
     float3 X = Geometry::RotateVectorInverse( gWorldToView, Xv );
 
-    float3 mv = float3( gIn_Mv[ WithRectOrigin( pixelPos ) ] * gMvScale.xy, 0.0 );
+    float3 mv = float3( VividDecodeMotionUV(gIn_Mv[ WithRectOrigin( pixelPos ) ]) * gMvScale.xy, 0.0 );
     float3 Xprev = X;
     float2 smbPixelUv = pixelUv + mv.xy;
 

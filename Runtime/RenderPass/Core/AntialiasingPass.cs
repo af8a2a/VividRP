@@ -44,6 +44,7 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
         private ComputeShader m_ComputeShader;
         private Material m_CopyMaterial;
+        private Material m_MotionDecodeMaterial;
         private CMAA2Pass m_Cmaa2Pass;
         private PassResource m_Cmaa2Resources;
         private FSR3UpscalerPass m_Fsr3Pass;
@@ -72,7 +73,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(AntialiasingPass));
             Color = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
-            MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", MotionVectorPass.MotionVectorFormat);
             CameraDepth = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_DefaultColor = Color;
             m_DefaultMotionVectors = MotionVectors;
@@ -92,6 +93,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_ComputeShader != null)
                 m_TaaKernel = m_ComputeShader.FindKernel("TemporalAA");
 
+            m_MotionDecodeMaterial = MotionVectorPass.CreateMotionDecodeMaterial();
             m_CopyMaterial = CoreUtils.CreateEngineMaterial(resources?.BlitShader);
 
             m_Cmaa2Pass = new CMAA2Pass();
@@ -208,6 +210,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CopyMaterial = null;
             }
 
+            CoreUtils.Destroy(m_MotionDecodeMaterial);
+            m_MotionDecodeMaterial = null;
             m_Cmaa2Pass?.Dispose();
             m_Cmaa2Pass = null;
             m_Cmaa2Resources = null;
@@ -527,7 +531,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 noiseTexture = noiseTexture,
                 inputColor = Color.innerHandle,
                 inputDepth = CameraDepth.innerHandle,
-                inputMotion = MotionVectors.innerHandle,
+                inputMotion = MotionVectorPass.DecodeMotionUV(context.RenderGraph, MotionVectors.innerHandle, m_MotionDecodeMaterial),
                 destination = outputHandle,
                 historyContext = historyContext,
                 enableHwDrs = false,

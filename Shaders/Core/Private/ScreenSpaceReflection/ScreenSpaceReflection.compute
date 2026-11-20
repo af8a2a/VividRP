@@ -2947,10 +2947,19 @@ float2 ClampSsrHDRPMotionVectorUV(float2 screenUV)
 
 float2 LoadSsrMotionVector(float2 screenUV)
 {
-    float2 motionVectorNDC;
     float2 motionVectorUV = ClampSsrHDRPMotionVectorUV(screenUV) * _RTHandleScale.xy;
-    DecodeMotionVector(_CameraMotionVectorsTexture.SampleLevel(sampler_LinearClamp, motionVectorUV, 0), motionVectorNDC);
-    return motionVectorNDC;
+    // The public velocity is gamma encoded. Interpolate signed UV after decoding.
+    uint width, height;
+    _CameraMotionVectorsTexture.GetDimensions(width, height);
+    float2 pixel = motionVectorUV * float2(width, height) - 0.5;
+    int2 lo = int2(floor(pixel));
+    int2 last = int2(width, height) - 1;
+    float2 f = frac(pixel);
+    float2 a = VividDecodeMotionUV(_CameraMotionVectorsTexture.Load(int3(clamp(lo, 0, last), 0)));
+    float2 b = VividDecodeMotionUV(_CameraMotionVectorsTexture.Load(int3(clamp(lo + int2(1, 0), 0, last), 0)));
+    float2 c = VividDecodeMotionUV(_CameraMotionVectorsTexture.Load(int3(clamp(lo + int2(0, 1), 0, last), 0)));
+    float2 d = VividDecodeMotionUV(_CameraMotionVectorsTexture.Load(int3(clamp(lo + 1, 0, last), 0)));
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
 }
 
 float4 EncodeSsrHitMotionConsistencyDebug(float2 hitData, float2 hitMotion)

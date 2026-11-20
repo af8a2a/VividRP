@@ -185,7 +185,7 @@ bool ReadBentHistory(uint2 pixel, float3 position, float3 normal, out float4 val
     value = 0;
     age = 0;
     float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1));
-    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0, 0);
+    float4 packedMotion = _SdfScreenMotion.Load(int3(pixel, 0));
     if (clip.w <= 0 || clip.z <= 0 || clip.z > clip.w || PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
         return false;
     float2 motion;
@@ -193,7 +193,7 @@ bool ReadBentHistory(uint2 pixel, float3 position, float3 normal, out float4 val
     float2 previous = float2(pixel) + (_SdfScreenJitterDelta - motion) * _SdfDiffuseScreenSize.xy;
     float2 uv = (previous + 0.5) * _SdfDiffuseScreenSize.zw;
     if (any(uv < 0) || any(uv >= 1)) return false;
-    float depth = clip.z / clip.w;
+    float depth = VividPreviousDeviceZ(packedMotion, _SdfDiffuseDepth.Load(int3(pixel, 0)), clip.z / clip.w);
     float3 expected = ComputeWorldSpacePosition(uv, depth, _SdfScreenPreviousInverseVP);
     float eyeDepth = dot(float4(position, 1), _SdfProbeCameraForward);
     int2 lower = int2(floor(previous));

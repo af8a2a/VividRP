@@ -17,7 +17,7 @@ Shader "Hidden/VividRP/ObjectMotionVectorFallback"
         {
             Name "ObjectMotionVectorFallback"
             Tags { "LightMode" = "ObjectMotionVectorFallback" }
-            ColorMask RG
+            ColorMask RGBA
             Cull Back
             ZWrite On
             ZTest LEqual

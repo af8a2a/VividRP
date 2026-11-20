@@ -2,12 +2,14 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule.Util;
 using UnityEngine.Serialization;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class MotionVectorPass : RasterPass
+    public class MotionVectorPass : RasterPass, IRenderGraphPreparePass
     {
+        internal const GraphicsFormat MotionVectorFormat = GraphicsFormat.R16G16B16A16_UNorm;
         internal const string CameraMotionVectorsShaderName = "Hidden/VividRP/CameraMotionVectors";
         internal const string ObjectMotionVectorFallbackShaderName = "Hidden/VividRP/ObjectMotionVectorFallback";
         internal const string MotionVectorsShaderTagName = "MotionVectors";
@@ -45,11 +47,33 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_MotionVectorTexture;
 
+        private static readonly int MotionVisibilityId = Shader.PropertyToID("_MotionVisibility");
         private Material m_CameraMotionMaterial;
+        private Material m_MeshletMotionMaterial;
+        private readonly MaterialPropertyBlock m_CameraInputs = new();
+        private TextureHandle m_Visibility;
         private Material m_ObjectMotionVectorFallbackMaterial;
         private Camera m_Camera;
         private readonly string[] m_MotionVectorShaderTagNames;
         private readonly string[] m_FallbackShaderTagNames;
+
+        internal static Material CreateMotionDecodeMaterial()
+        {
+            var shader = PipelineResourceManager.Get<VividRPCoreResources>()?.CameraMotionVectorsShader;
+            return CoreUtils.CreateEngineMaterial(shader != null ? shader : Shader.Find(CameraMotionVectorsShaderName));
+        }
+
+        internal static TextureHandle DecodeMotionUV(RenderGraph graph, TextureHandle source, Material material)
+        {
+            var descriptor = graph.GetTextureDesc(source);
+            if (descriptor.format != MotionVectorFormat)
+                return source;
+            descriptor.format = GraphicsFormat.R16G16_SFloat;
+            descriptor.name = "Decoded Motion UV";
+            var output = graph.CreateTexture(descriptor);
+            graph.AddBlitPass(new RenderGraphUtils.BlitMaterialParameters(source, output, material, 1), descriptor.name);
+            return output;
+        }
 
         public MotionVectorPass()
         {
@@ -72,6 +96,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 desc = new RenderGraphRenderListDesc
                 {
                     ShaderTagNames = m_FallbackShaderTagNames,
+                    ExcludeObjectMotionVectors = true,
                     RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                     SortingCriteria = SortingCriteria.CommonOpaque,
                     RendererConfiguration = PerObjectData.MotionVectors,
@@ -79,8 +104,8 @@ namespace VividRP.Runtime.RenderPass.Core
             };
 
             m_CameraDepthStencilTexture = RenderGraphTexture.CreateInput("CameraDepthStencil", GraphicsFormat.None, DepthBits.Depth32);
-            m_MotionVectorTexture = RenderGraphTexture.CreateColorTarget("MotionVectors", GraphicsFormat.R16G16_SFloat);
-            m_MotionVectorTexture.desc.ClearBuffer = false;
+            m_MotionVectorTexture = RenderGraphTexture.CreateColorTarget("MotionVectors", MotionVectorPass.MotionVectorFormat);
+            m_MotionVectorTexture.desc.ClearBuffer = true;
             m_MotionVectorTexture.desc.ClearColor = Color.clear;
         }
 
@@ -99,6 +124,19 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureRenderLists();
             ConfigureTargets(cameraData);
+        }
+
+        public void PrepareRenderGraph(ContextContainer frameData)
+        {
+            m_Visibility = default;
+            if (!frameData.Contains<VividSdfReceiverFrameData>())
+                return;
+            var receiver = frameData.Get<VividSdfReceiverFrameData>();
+            if (!ReferenceEquals(receiver.Depth, m_CameraDepthStencilTexture) || receiver.Visibility == null)
+                return;
+            m_Visibility = receiver.Visibility.innerHandle;
+            if (m_Visibility.IsValid())
+                PassRecorder.RegisterImportedTextureForPass(this, m_Visibility, AccessFlags.Read);
         }
 
         public override void Record(RasterPassContext context)
@@ -128,16 +166,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (cameraDepthTexture == null || !cameraDepthTexture.innerHandle.IsValid())
                     return;
 
-                m_CameraMotionMaterial.SetTexture(CameraDepthTextureId, cameraDepthTexture.innerHandle);
-                m_CameraMotionMaterial.SetInt(StencilRefId, ObjectMotionVectorStencilBit);
-                m_CameraMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
+                m_CameraInputs.Clear();
+                m_CameraInputs.SetTexture(CameraDepthTextureId, cameraDepthTexture.innerHandle);
+                bool hasVisibility = m_Visibility.IsValid();
+                if (hasVisibility)
+                    m_CameraInputs.SetTexture(MotionVisibilityId, m_Visibility);
+                var material = hasVisibility ? m_MeshletMotionMaterial : m_CameraMotionMaterial;
                 context.cmd.DrawProcedural(
                     Matrix4x4.identity,
-                    m_CameraMotionMaterial,
+                    material,
                     CameraMotionVectorsPassIndex,
                     MeshTopology.Triangles,
                     3,
-                    1);
+                    1,
+                    m_CameraInputs);
             }
         }
 
@@ -145,6 +187,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (m_CameraMotionMaterial != null)
             {
+                CoreUtils.Destroy(m_MeshletMotionMaterial);
+                m_MeshletMotionMaterial = null;
                 CoreUtils.Destroy(m_CameraMotionMaterial);
                 m_CameraMotionMaterial = null;
             }
@@ -167,7 +211,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 var cameraShader = resources?.CameraMotionVectorsShader;
                 cameraShader ??= Shader.Find(CameraMotionVectorsShaderName);
                 if (cameraShader != null)
+                {
                     m_CameraMotionMaterial = CoreUtils.CreateEngineMaterial(cameraShader);
+                    m_CameraMotionMaterial.SetInt(StencilRefId, ObjectMotionVectorStencilBit);
+                    m_CameraMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
+                    m_MeshletMotionMaterial = CoreUtils.CreateEngineMaterial(cameraShader);
+                    m_MeshletMotionMaterial.SetInt(StencilRefId, ObjectMotionVectorStencilBit);
+                    m_MeshletMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
+                    m_MeshletMotionMaterial.EnableKeyword("VIVID_MESHLET_MOTION");
+                }
             }
 
             if (m_ObjectMotionVectorFallbackMaterial == null)
@@ -223,12 +275,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_MotionVectorTexture.Resize(width, height);
-            m_MotionVectorTexture.desc.ColorFormat = GraphicsFormat.R16G16_SFloat;
+            m_MotionVectorTexture.desc.ColorFormat = MotionVectorPass.MotionVectorFormat;
             m_MotionVectorTexture.desc.DepthBufferBits = DepthBits.None;
             m_MotionVectorTexture.desc.MsaaSamples = MSAASamples.None;
             m_MotionVectorTexture.desc.FilterMode = FilterMode.Point;
             m_MotionVectorTexture.desc.WrapMode = TextureWrapMode.Clamp;
-            m_MotionVectorTexture.desc.ClearBuffer = false;
+            m_MotionVectorTexture.desc.ClearBuffer = true;
             m_MotionVectorTexture.desc.ClearColor = Color.clear;
             m_MotionVectorTexture.desc.UseMipMap = false;
             m_MotionVectorTexture.desc.AutoGenerateMips = false;

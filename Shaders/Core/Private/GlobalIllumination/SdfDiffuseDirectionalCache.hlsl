@@ -89,7 +89,7 @@ bool GetDirectionalHistoryUV(uint2 tile, float3 position, out float2 uv)
         uint2 pixel;
         if (LoadProbeReceiverPixel(tile, uint2(_SdfDiffuseScreenSize.xy), pixel))
         {
-            float4 packed = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+            float4 packed = _SdfScreenMotion.Load(int3(pixel, 0));
             if (!PixelSetAsNoMotionVectors(packed) && all(isfinite(packed.xy)))
             {
                 float2 motion;

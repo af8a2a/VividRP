@@ -20,7 +20,7 @@ NRD_SAMPLERS_END
 
 NRD_INPUTS_START
     NRD_INPUT( Texture2D,float, gIn_ViewZ, t, 0 )
-    NRD_INPUT( Texture2D,float2, gIn_Mv, t, 1 )
+    NRD_INPUT( Texture2D,float4, gIn_Mv, t, 1 )
     NRD_INPUT( Texture2D,float, gIn_Penumbra, t, 2 )
     NRD_INPUT( Texture2D,SIGMA_TYPE, gIn_Shadow_Translucency, t, 3 )
     NRD_INPUT( Texture2D,SIGMA_TYPE, gIn_History, t, 4 )

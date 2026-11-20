@@ -437,12 +437,13 @@ FfxFloat32x3 SampleInputColor(FfxFloat32x2 fUV)
 #endif
 
 #if defined(FSR3UPSCALER_BIND_SRV_INPUT_MOTION_VECTORS)
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorEncoding.hlsl"
 Texture2D<FfxFloat32x4> r_input_motion_vectors : FFX_FSR3UPSCALER_DECLARE_SRV(FSR3UPSCALER_BIND_SRV_INPUT_MOTION_VECTORS);
 
 FfxFloat32x2 LoadInputMotionVector(FfxUInt32x2 iPxDilatedMotionVectorPos)
 {
     FfxFloat32x4 fEncodedMotionVector = r_input_motion_vectors[iPxDilatedMotionVectorPos];
-    FfxFloat32x2 fSrcMotionVector = fEncodedMotionVector.x > 1.0f ? FfxFloat32x2(0.0f, 0.0f) : fEncodedMotionVector.xy;
+    FfxFloat32x2 fSrcMotionVector = VividDecodeMotionUV(fEncodedMotionVector);
 
     FfxFloat32x2 fUvMotionVector = fSrcMotionVector * MotionVectorScale();
 

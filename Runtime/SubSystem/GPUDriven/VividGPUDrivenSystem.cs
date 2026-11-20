@@ -507,7 +507,9 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        public void PrepareFrame(bool reportStats = true)
+        public void PrepareFrame(bool reportStats = true) => PrepareFrame(Time.frameCount, reportStats);
+
+        private void PrepareFrame(int frameIndex, bool reportStats)
         {
             ThrowIfDisposed();
             // Scheduled culling jobs read PrimitiveScene NativeArrays directly. They
@@ -561,7 +563,7 @@ namespace VividRP.Runtime.GPUDriven
                     SceneData,
                     staticDataChanged,
                     materialDataChanged,
-                    Time.frameCount);
+                    frameIndex);
                 m_SceneDataBuilder.InvalidateChangedShadowCasters(
                     PrimitiveScene,
                     VividMeshletRendererDatabase.instance,
@@ -1155,7 +1157,7 @@ namespace VividRP.Runtime.GPUDriven
             if (!ShouldPrepareFrame(s_PreparedFrameIndex, resolvedFrameIndex, Application.isPlaying))
                 return;
 
-            gpuDrivenSystem.PrepareFrame(reportStats);
+            gpuDrivenSystem.PrepareFrame(resolvedFrameIndex, reportStats);
             s_PreparedFrameIndex = resolvedFrameIndex;
         }
 

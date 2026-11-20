@@ -153,6 +153,9 @@ namespace VividRP.Runtime.PrimitiveScene
         Terrain = 1u << 5,
         ReceiveShadows = 1u << 6,
         TwoSidedShadows = 1u << 7,
+        ShadowCacheStatic = 1u << 8,
+        ObjectMotion = 1u << 9,
+        ForceNoMotion = 1u << 10,
     }
 
     [GenerateHLSL(PackingRules.Exact)]

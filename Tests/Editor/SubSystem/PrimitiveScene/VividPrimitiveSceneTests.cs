@@ -699,6 +699,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShadowCacheInvalidation_PreservesObjectMotionMode()
+        {
+            using var scene = new VividPrimitiveScene();
+            scene.BeginFrame(0);
+            var source = CreateEntity("Moving shadow caster");
+            var handle = scene.RegisterOrUpdate(CreateDescriptor(source,
+                flags: VividPrimitiveFlags.Valid | VividPrimitiveFlags.ObjectMotion));
+            scene.InvalidateShadowCaster(source);
+            scene.BeginFrame(1);
+            var flags = scene.PrimitiveTable[handle.Index].Flags;
+            Assert.That(flags.HasFlag(VividPrimitiveFlags.ShadowCacheStatic), Is.False);
+            Assert.That(flags.HasFlag(VividPrimitiveFlags.ObjectMotion), Is.True);
+            Assert.That(flags.HasFlag(VividPrimitiveFlags.ForceNoMotion), Is.False);
+        }
+
+        [Test]
         public void DynamicShadowInvalidations_TrackMotionVisibilityResourcesAndRemoval()
         {
             using var scene = new VividPrimitiveScene();

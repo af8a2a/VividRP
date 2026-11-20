@@ -129,7 +129,7 @@ Shader "Hidden/VividRP/Tests/PerObjectBuffer"
         {
             Name "MotionVectors"
             Tags { "LightMode" = "MotionVectors" }
-            ColorMask RG
+            ColorMask RGBA
             Cull Off
             ZWrite On
 
@@ -137,7 +137,14 @@ Shader "Hidden/VividRP/Tests/PerObjectBuffer"
             #pragma multi_compile_instancing
             #pragma instancing_options renderinglayer
             #pragma vertex PerObjectTestVertex
-            #pragma fragment PerObjectTestDepthFragment
+            #pragma fragment PerObjectTestMotionFragment
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorEncoding.hlsl"
+
+            float4 PerObjectTestMotionFragment(Varyings input) : SV_Target
+            {
+                float2 testUV = PerObjectTestDepthFragment(input).xy;
+                return VividEncodeVelocity(float3(testUV * 2.0, 0.0), 1u);
+            }
             ENDHLSL
         }
     }

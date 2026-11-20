@@ -185,7 +185,7 @@ Shader "VividRP/Terrain/TerrainLit"
             Name "MotionVectors"
             Tags { "LightMode" = "MotionVectors" }
 
-            ColorMask RG
+            ColorMask RGBA
             ZWrite [_ZWrite]
             ZTest LEqual
             Cull [_Cull]

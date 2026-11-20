@@ -21,6 +21,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
         private readonly List<EntityId> m_ExpiredCameraIds = new();
 
+        private Material m_MotionDecodeMaterial;
+
         public bool IsSupported => DLSSExtension.Initialize() && DLSSExtension.IsSuperResolutionSupported;
 
         public RenderGraphTexture Record(
@@ -56,6 +58,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var outputDescriptor = CreateOutputDescriptor(sourceTexture.desc, outputImageSize);
             var outputHandle = renderGraph.CreateTexture(outputDescriptor);
 
+            m_MotionDecodeMaterial ??= MotionVectorPass.CreateMotionDecodeMaterial();
+            var motionUV = MotionVectorPass.DecodeMotionUV(renderGraph, motionTexture.innerHandle, m_MotionDecodeMaterial);
             using (var builder = renderGraph.AddUnsafePass<PassData>(
                        "DLSS Super Resolution",
                        out var passData,
@@ -68,7 +72,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.ResetHistory = forceResetHistory || temporalData == null || temporalData.IsFirstFrame;
                 passData.Source = sourceTexture.innerHandle;
                 passData.Depth = depthTexture.innerHandle;
-                passData.MotionVectors = motionTexture.innerHandle;
+                passData.MotionVectors = motionUV;
                 passData.Output = outputHandle;
                 passData.InputWidth = currentImageSize.x;
                 passData.InputHeight = currentImageSize.y;
@@ -142,6 +146,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             using (s_DisposeMarker.Auto())
             {
+                CoreUtils.Destroy(m_MotionDecodeMaterial);
+                m_MotionDecodeMaterial = null;
                 foreach (var state in m_CameraStates.Values)
                     state.Dispose();
 

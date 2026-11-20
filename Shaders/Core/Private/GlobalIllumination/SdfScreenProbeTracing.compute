@@ -26,7 +26,7 @@ static const uint ScreenMovingBit = 0x10000000u;
 
 float ScreenObjectSpeed(uint2 pixel, float3 position)
 {
-    float4 packed = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+    float4 packed = _SdfScreenMotion.Load(int3(pixel, 0));
     if (PixelSetAsNoMotionVectors(packed) || !all(isfinite(packed.xy)))
         return 0.0;
     float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
@@ -35,7 +35,8 @@ float ScreenObjectSpeed(uint2 pixel, float3 position)
     float2 motion;
     DecodeMotionVector(packed, motion);
     float2 uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw - motion + _SdfScreenJitterDelta;
-    return length(ComputeWorldSpacePosition(uv, clip.z / clip.w, _SdfScreenPreviousInverseVP) - position);
+    float depth = VividPreviousDeviceZ(packed, _SdfDiffuseDepth.Load(int3(pixel, 0)), clip.z / clip.w);
+    return length(ComputeWorldSpacePosition(uv, depth, _SdfScreenPreviousInverseVP) - position);
 }
 
 float RelativeHitMotion(float speed, float hitSpeed, float3 position)

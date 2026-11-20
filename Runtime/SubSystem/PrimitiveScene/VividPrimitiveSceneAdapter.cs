@@ -294,6 +294,10 @@ namespace VividRP.Runtime.PrimitiveScene
                 flags |= VividPrimitiveFlags.Skinned;
             if ((rendererFlags & VividMeshletRendererFlags.ReceiveShadows) != 0)
                 flags |= VividPrimitiveFlags.ReceiveShadows;
+            if (trackedData.motionVectorGenerationMode == UnityEngine.MotionVectorGenerationMode.Object)
+                flags |= VividPrimitiveFlags.ObjectMotion;
+            else if (trackedData.motionVectorGenerationMode == UnityEngine.MotionVectorGenerationMode.ForceNoMotion)
+                flags |= VividPrimitiveFlags.ForceNoMotion;
             if (trackedData.shadowCastingMode == ShadowCastingMode.TwoSided)
                 flags |= VividPrimitiveFlags.TwoSidedShadows;
             if (isTerrain)

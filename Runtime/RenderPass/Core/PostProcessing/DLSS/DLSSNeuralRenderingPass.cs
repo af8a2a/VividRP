@@ -24,11 +24,19 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_Output =
             RenderGraphTexture.CreateColorTarget("DLSSNROutput", GraphicsFormat.R16G16B16A16_SFloat);
 
+#if DLSS_PLUGIN_INTEGRATE
+        [RenderGraphResource(Name = "Decoded Motion UV", Access = AccessFlags.ReadWrite)]
+        private RenderGraphTexture m_DecodedMotion = RenderGraphTexture.CreateColorTarget("Decoded Motion UV", GraphicsFormat.R16G16_SFloat);
+        private Material m_MotionDecodeMaterial;
+#endif
         private VividCameraData m_CameraData;
         private bool m_ResetHistory;
 
         public override void Create()
         {
+#if DLSS_PLUGIN_INTEGRATE
+            m_MotionDecodeMaterial = MotionVectorPass.CreateMotionDecodeMaterial();
+#endif
         }
 
         public override bool IsActive(ContextContainer frameData)
@@ -43,6 +51,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+#if DLSS_PLUGIN_INTEGRATE
+            if (m_MotionVectors?.desc != null)
+            {
+                m_MotionVectors.desc.Copy(m_DecodedMotion.desc);
+                m_DecodedMotion.desc.Name = "Decoded Motion UV";
+                m_DecodedMotion.desc.ColorFormat = GraphicsFormat.R16G16_SFloat;
+            }
+#endif
             m_CameraData = frameData.Get<VividCameraData>();
             var antialiasingData = frameData.Get<VividAntialiasingData>();
             m_ResetHistory = antialiasingData != null && antialiasingData.resetHistory;
@@ -58,12 +74,20 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Record(UnsafePassContext context)
         {
 #if DLSS_PLUGIN_INTEGRATE
+            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            RTHandle motion = m_MotionVectors.innerHandle;
+            if (m_MotionVectors.desc.ColorFormat == MotionVectorPass.MotionVectorFormat)
+            {
+                RTHandle decoded = m_DecodedMotion.innerHandle;
+                Blitter.BlitCameraTexture(cmd, motion, decoded, m_MotionDecodeMaterial, 1);
+                motion = decoded;
+            }
             Execute(
-                CommandBufferHelpers.GetNativeCommandBuffer(context.cmd),
+                cmd,
                 m_CameraData,
                 m_Source,
                 m_Depth,
-                m_MotionVectors,
+                motion.rt,
                 m_Output,
                 m_ResetHistory);
 #endif
@@ -72,6 +96,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
 #if DLSS_PLUGIN_INTEGRATE
+            CoreUtils.Destroy(m_MotionDecodeMaterial);
+            m_MotionDecodeMaterial = null;
             DisposeCameraStates();
 #endif
             m_CameraData = null;

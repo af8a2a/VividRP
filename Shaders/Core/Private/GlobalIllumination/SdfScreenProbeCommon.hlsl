@@ -48,7 +48,7 @@ Texture2D<float4> _SdfDiffuseGBuffer1;
 Texture2D<float4> _SdfDiffusePreviousProbes;
 Texture2D<float4> _SdfDiffusePreviousGeometry;
 Texture2D<float> _SdfScreenHzb;
-Texture2D<float2> _SdfScreenMotion;
+Texture2D<float4> _SdfScreenMotion;
 Texture2D<float4> _SdfScreenPreviousRadiance;
 Texture2D<float2> _SdfScreenPreviousGeometry;
 Texture2D<float4> _SdfScreenRays;

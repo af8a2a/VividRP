@@ -199,7 +199,7 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
     if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
         return false;
 
-    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+    float4 packedMotion = _SdfScreenMotion.Load(int3(pixel, 0));
     if (PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
         return false;
     float2 motion;
@@ -212,8 +212,9 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
     int2 low = int2(floor(previousPixel));
     float2 fraction = frac(previousPixel);
     int2 screenSize = int2(_SdfDiffuseScreenSize.xy);
-    float expectedDepth = previousClip.z / previousClip.w;
+    float expectedDepth = VividPreviousDeviceZ(packedMotion, _SdfDiffuseDepth.Load(int3(pixel, 0)), previousClip.z / previousClip.w);
     float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
+    float3 expectedReceiver = ComputeWorldSpacePosition(previousUv, expectedDepth, _SdfScreenPreviousInverseVP);
     float thickness = clamp(0.008 * eyeDepth, 0.025, 0.12);
     float totalWeight = 0.0;
     [unroll]
@@ -239,7 +240,7 @@ bool ReadPixelHistory(uint2 pixel, float3 position, float3 normal, bool openPbr,
         float3 previousPosition = ComputeWorldSpacePosition(uv, depth, _SdfScreenPreviousInverseVP);
         float3 expectedPosition = ComputeWorldSpacePosition(uv, expectedDepth, _SdfScreenPreviousInverseVP);
         float depthError = distance(previousPosition, expectedPosition);
-        float planeError = abs(dot(previousPosition - position, normal));
+        float planeError = abs(dot(previousPosition - expectedReceiver, normal));
         if (nearer && depthError > thickness && planeError > thickness)
             foregroundWeight += weight;
         if (!normalMatches || depthError > thickness || planeError > thickness)
@@ -411,7 +412,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     if (previousClip.w <= 0.0 || previousClip.z <= 0.0 || previousClip.z > previousClip.w)
         return false;
 
-    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+    float4 packedMotion = _SdfScreenMotion.Load(int3(pixel, 0));
     if (PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
         return false;
 
@@ -425,9 +426,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     int2 lower = int2(floor(previousPixel));
     float2 fraction = frac(previousPixel);
     int2 size = int2(_SdfDiffuseScreenSize.xy);
-    float expectedDepth = previousClip.z / previousClip.w;
-    // Motion provides the previous XY. Use the projected depth as a
-    // conservative anchor when the motion buffer has no depth velocity.
+    float expectedDepth = VividPreviousDeviceZ(packedMotion, _SdfDiffuseDepth.Load(int3(pixel, 0)), previousClip.z / previousClip.w);
     float3 expectedReceiver = ComputeWorldSpacePosition(previousUv, expectedDepth, _SdfScreenPreviousInverseVP);
     history.objectMotionPixels = length((previousUv - ScreenUv(previousClip)) * _SdfDiffuseScreenSize.xy);
     float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
@@ -625,7 +624,8 @@ void InspectScreenProbeTemporalHistoryCS(uint3 id : SV_DispatchThreadID)
     ScreenProbeTemporalHistory history = (ScreenProbeTemporalHistory)0;
     bool valid = receiver && ReadScreenProbeTemporalHistory(pixel, position, normal, history);
     float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
-    float2 motion = _SdfScreenMotion.Load(int3(pixel, 0));
+    float4 encodedMotion = _SdfScreenMotion.Load(int3(pixel, 0));
+    float2 motion = VividDecodeMotionUV(encodedMotion);
     float2 previousPixel = float2(pixel) + (_SdfScreenJitterDelta - motion) * _SdfDiffuseScreenSize.xy;
     float eyeDepth = dot(float4(position, 1.0), _SdfProbeCameraForward);
     _SdfPixelHistoryInspection[address] = float4(valid ? 1.0 : 0.0, history.footprint,
@@ -635,8 +635,9 @@ void InspectScreenProbeTemporalHistoryCS(uint3 id : SV_DispatchThreadID)
         clamp(0.008 * eyeDepth, 0.025, 0.12), clamp(0.006 * eyeDepth, 0.02, 0.10));
     _SdfPixelHistoryInspection[address + 3u] = float4(position, eyeDepth);
     _SdfPixelHistoryInspection[address + 4u] = float4(normal, _SdfDiffuseDepth.Load(int3(pixel, 0)));
-    _SdfPixelHistoryInspection[address + 5u] = float4(previousPixel, clip.w != 0.0 ? clip.z / clip.w : 0.0,
-        PixelSetAsNoMotionVectors(float4(motion, 0.0, 0.0)) ? 1.0 : 0.0);
+    _SdfPixelHistoryInspection[address + 5u] = float4(previousPixel,
+        VividPreviousDeviceZ(encodedMotion, _SdfDiffuseDepth.Load(int3(pixel, 0)), clip.w != 0.0 ? clip.z / clip.w : 0.0),
+        PixelSetAsNoMotionVectors(encodedMotion) ? 1.0 : 0.0);
 }
 #endif
 

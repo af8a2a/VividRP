@@ -699,7 +699,7 @@ Shader "VividRP/Particles/Unlit"
             Name "MotionVectors"
             Tags { "LightMode" = "MotionVectors" }
 
-            ColorMask RG
+            ColorMask RGBA
             ZWrite On
             ZTest LEqual
             Cull [_CullMode]

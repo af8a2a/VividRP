@@ -1,27 +1,18 @@
 #ifndef VIVIDRP_MOTION_VECTORS_COMMON_INCLUDED
 #define VIVIDRP_MOTION_VECTORS_COMMON_INCLUDED
 
-#define VIVIDRP_MOTION_VECTOR_NO_MOTION_SENTINEL 2.0
+#include "MotionVectorEncoding.hlsl"
+#define VIVIDRP_MOTION_VECTOR_NO_MOTION_SENTINEL 0.0
 #define VIVIDRP_MOTION_VECTOR_MICRO_MOVEMENT_THRESHOLD (0.01 * _ScreenSize.zw)
 
 void EncodeMotionVector(float2 motionVector, out float4 outBuffer)
 {
-    outBuffer = float4(motionVector.xy, 0.0, 0.0);
-}
-
-bool PixelSetAsNoMotionVectors(float4 inBuffer)
-{
-    return inBuffer.x > 1.0;
-}
-
-void DecodeMotionVector(float4 inBuffer, out float2 motionVector)
-{
-    motionVector = PixelSetAsNoMotionVectors(inBuffer) ? 0.0 : inBuffer.xy;
+    outBuffer = VividEncodeVelocity(float3(2.0 * motionVector, 0.0), 0u);
 }
 
 float4 EncodeNoMotionVector()
 {
-    return float4(VIVIDRP_MOTION_VECTOR_NO_MOTION_SENTINEL, 0.0, 0.0, 0.0);
+    return 0.0;
 }
 
 bool ForceNoMotionVector()
@@ -71,9 +62,11 @@ float4 EncodeMotionVectorFromCsPositions(float4 positionCS, float4 previousPosit
     if (ForceNoMotionVector())
         return EncodeNoMotionVector();
 
-    float4 encodedMotionVector;
-    EncodeMotionVector(CalcNdcMotionVectorFromCsPositions(positionCS, previousPositionCS), encodedMotionVector);
-    return encodedMotionVector;
+    if (positionCS.w <= 0.0 || previousPositionCS.w <= 0.0)
+        return EncodeNoMotionVector();
+    float2 motionUV = CalcNdcMotionVectorFromCsPositions(positionCS, previousPositionCS);
+    float deltaZ = positionCS.z / positionCS.w - previousPositionCS.z / previousPositionCS.w;
+    return VividEncodeVelocity(float3(motionUV * 2.0, deltaZ), 1u);
 }
 
 float4 EncodeCameraMotionVectorFromCsPositions(float4 positionCS, float4 previousPositionCS)
@@ -81,9 +74,11 @@ float4 EncodeCameraMotionVectorFromCsPositions(float4 positionCS, float4 previou
     if (ForceNoMotionVector())
         return EncodeNoMotionVector();
 
-    float4 encodedMotionVector;
-    EncodeMotionVector(CalcCameraNdcMotionVectorFromCsPositions(positionCS, previousPositionCS), encodedMotionVector);
-    return encodedMotionVector;
+    if (positionCS.w <= 0.0 || previousPositionCS.w <= 0.0)
+        return EncodeNoMotionVector();
+    float2 motionUV = CalcCameraNdcMotionVectorFromCsPositions(positionCS, previousPositionCS);
+    float deltaZ = positionCS.z / positionCS.w - previousPositionCS.z / previousPositionCS.w;
+    return VividEncodeVelocity(float3(motionUV * 2.0, deltaZ), 0u);
 }
 
 #endif

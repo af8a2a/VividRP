@@ -23,14 +23,12 @@ namespace VividRP.Editor.Tests
 
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
-                "CameraDepth",
                 "CameraDepthStencil",
                 "MotionVectors",
             }));
-            Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepth").Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepth").IsDepthAttachment, Is.False);
             Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepthStencil").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepthStencil").IsDepthAttachment, Is.True);
+            Assert.That(textureEntries.Single(entry => entry.Name == "MotionVectors").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(renderListEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "FallbackRenderList", "RenderList" }));
         }
 
@@ -52,23 +50,17 @@ namespace VividRP.Editor.Tests
 
             pass.Prepare(frameData);
 
-            var cameraDepthTexture = GetTextureField(pass, "m_CameraDepthTexture");
             var motionVectorTexture = GetTextureField(pass, "m_MotionVectorTexture");
-
-            Assert.That(cameraDepthTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
-            Assert.That(cameraDepthTexture.desc.DepthBufferBits, Is.EqualTo(DepthBits.None));
-            Assert.That(cameraDepthTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
-            Assert.That(cameraDepthTexture.desc.ClearBuffer, Is.False);
 
             Assert.That(motionVectorTexture.desc.Width, Is.EqualTo(320));
             Assert.That(motionVectorTexture.desc.Height, Is.EqualTo(180));
-            Assert.That(motionVectorTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16_SFloat));
+            Assert.That(motionVectorTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_UNorm));
             Assert.That(motionVectorTexture.desc.Dimension, Is.EqualTo(TextureDimension.Tex2DArray));
             Assert.That(motionVectorTexture.desc.Slices, Is.EqualTo(2));
             Assert.That(motionVectorTexture.desc.UseDynamicScale, Is.True);
             Assert.That(motionVectorTexture.desc.UseDynamicScaleExplicit, Is.True);
             Assert.That(motionVectorTexture.desc.ScaleFactor, Is.EqualTo(new Vector2(0.5f, 0.5f)));
-            Assert.That(motionVectorTexture.desc.ClearBuffer, Is.False);
+            Assert.That(motionVectorTexture.desc.ClearBuffer, Is.True);
             Assert.That(motionVectorTexture.desc.ClearColor, Is.EqualTo(Color.clear));
         }
 

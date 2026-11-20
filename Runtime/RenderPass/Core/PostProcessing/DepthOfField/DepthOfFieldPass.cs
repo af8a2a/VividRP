@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
@@ -133,7 +134,7 @@ namespace VividRP.Runtime
 
             source = RenderGraphTexture.CreateInput("source", GraphicsFormat.R16G16B16A16_SFloat);
             linearDepth = RenderGraphTexture.CreateInput("LinearDepth", GraphicsFormat.R32_SFloat);
-            motionVectors = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            motionVectors = RenderGraphTexture.CreateInput("MotionVectors", MotionVectorPass.MotionVectorFormat);
             m_FullResCoC = CreateTexture("DepthOfFieldCoC", 1, 1, GraphicsFormat.R16_SFloat, FilterMode.Point, true);
             m_CoCHistoryPrevious = RenderGraphTexture.CreateInput("DepthOfFieldCoCHistory", GraphicsFormat.R16_SFloat);
             m_CoCHistoryCurrent = CreateTexture("DepthOfFieldCoCHistoryCurrent", 1, 1, GraphicsFormat.R16_SFloat, FilterMode.Point, true);

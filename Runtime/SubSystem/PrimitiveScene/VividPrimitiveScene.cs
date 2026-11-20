@@ -15,7 +15,7 @@ namespace VividRP.Runtime.PrimitiveScene
         internal const uint InvalidIndex = uint.MaxValue;
         internal const int MaxPendingStaticShadowInvalidationBounds = 1024;
         // CPU shadow draw-set classification; does not change authoring Static or GPU layout.
-        internal const VividPrimitiveFlags ShadowCacheStaticFlag = (VividPrimitiveFlags)(1u << 8);
+        internal const VividPrimitiveFlags ShadowCacheStaticFlag = VividPrimitiveFlags.ShadowCacheStatic;
         internal const uint ShadowCacheFramesStaticThreshold = 100;
         internal uint FramesStaticThreshold { get; set; } = ShadowCacheFramesStaticThreshold;
         internal uint ShadowInvalidationEpoch { get; private set; }

@@ -53,7 +53,7 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(nameof(TemporalAAPass));
 
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
-            m_MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            m_MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", MotionVectorPass.MotionVectorFormat);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_HistoryColorPrevious = RenderGraphTexture.CreateInput("TAAHistoryColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_HistoryColorCurrent = CreatePassOwnedTexture("TAAHistoryColorCurrent", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);

@@ -53,7 +53,7 @@ bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float3 rayD
     if (previousClip.w <= 0.0 || previousClip.z > previousClip.w || previousClip.z <= 0.0)
         return false;
 
-    float4 packedMotion = float4(_SdfScreenMotion.Load(int3(pixel, 0)), 0.0, 0.0);
+    float4 packedMotion = _SdfScreenMotion.Load(int3(pixel, 0));
     if (PixelSetAsNoMotionVectors(packedMotion) || !all(isfinite(packedMotion.xy)))
         return false;
     float2 motion;
@@ -73,7 +73,8 @@ bool ReadScreenRadiance(uint2 pixel, float3 position, float3 normal, float3 rayD
 
     float2 sampleUv = (float2(previousPixel) + 0.5) * _SdfDiffuseScreenSize.zw;
     float3 previousPosition = ComputeWorldSpacePosition(sampleUv, geometry.x, _SdfScreenPreviousInverseVP);
-    float3 expectedDepthPosition = ComputeWorldSpacePosition(sampleUv, previousClip.z / previousClip.w,
+    float expectedDeviceZ = VividPreviousDeviceZ(packedMotion, _SdfDiffuseDepth.Load(int3(pixel, 0)), previousClip.z / previousClip.w);
+    float3 expectedDepthPosition = ComputeWorldSpacePosition(sampleUv, expectedDeviceZ,
         _SdfScreenPreviousInverseVP);
     if (distance(previousPosition, expectedDepthPosition) > thickness)
         return false;

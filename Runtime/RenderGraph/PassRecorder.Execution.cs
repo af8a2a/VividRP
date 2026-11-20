@@ -1366,6 +1366,9 @@ namespace VividRP.Runtime
             var renderListCache = s_RecordGraphRenderListCache;
             var accelerationStructureCache = s_RecordGraphAccelerationStructureCache;
             var recordedPreImageEffectGizmos = false;
+            var screenHistory = s_FrameData.Contains<VividSdfScreenTraceData>() ? s_FrameData.Get<VividSdfScreenTraceData>() : null;
+            bool captureSceneColor = screenHistory != null && screenHistory.currentColor.IsValid()
+                && screenHistory.currentDepthExposure.IsValid() && screenHistory.preExposure.IsValid();
 
             using (RenderPassProfilingUtility.RecordRenderGraphRecordPassesMarker.Auto())
             {
@@ -1376,6 +1379,25 @@ namespace VividRP.Runtime
                     using (markers.RecordGraphPrepareRenderGraph.Auto())
                     {
                         PrepareRenderGraphPass(pass);
+                    }
+
+                    if (captureSceneColor)
+                    {
+                        var source = pass switch
+                        {
+                            StopNaNPass stopNaN => stopNaN.SceneColorInput,
+                            AntialiasingPass aa => aa.SceneColorInput,
+                            IPostProcessSourceOverridePass post => post.GetSourceTexture(),
+                            _ => null
+                        };
+                        if (source != null && source.desc.Width == screenHistory.depth.desc.Width
+                            && source.desc.Height == screenHistory.depth.desc.Height
+                            && textureCache.TryGetValue(source, out var color) && color.IsValid())
+                        {
+                            var depth = GetOrCreateTextureHandle(renderGraph, screenHistory.depth, textureCache);
+                            screenHistory.RecordSceneColor(renderGraph, color, depth);
+                            captureSceneColor = false;
+                        }
                     }
 
 #if UNITY_EDITOR

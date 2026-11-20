@@ -12,6 +12,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Access = AccessFlags.Read, InputAttachmentIndex = 0)]
         private RenderGraphTexture m_Source = new();
 
+        internal RenderGraphTexture SceneColorInput => m_Source;
+
         [RenderGraphResource(
             Name = "StopNaNOutput",
             Access = AccessFlags.Write,

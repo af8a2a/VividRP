@@ -109,6 +109,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Add published card indirect lighting to screen hits that match the same Mesh SDF surface.")]
         public BoolParameter screenHitCardLighting = new(true);
 
+        [Tooltip("Trace the full-sphere screen probes through the closest HZB and sample the previous pre-postprocessing SceneColor.")]
+        public BoolParameter lumenScreenTracing = new(true);
+
         [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
         public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
 

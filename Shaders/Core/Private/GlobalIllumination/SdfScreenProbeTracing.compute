@@ -6,6 +6,10 @@
 #pragma kernel TraceSdfReceiverCachedProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE
 #pragma kernel TraceSdfReceiverCachedSunProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 
+#pragma kernel BuildScreenProbeClosestHZB VIVID_BUILD_CLOSEST_HZB
+#pragma kernel CaptureScreenProbeSceneColor VIVID_CAPTURE_SCENE_COLOR
+#pragma kernel TraceLumenScreenRays VIVID_LUMEN_SCREEN
+#pragma kernel TraceLumenScreenRaysWithSdf VIVID_LUMEN_SCREEN VIVID_SDF_RECEIVER
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel TraceReceiverDiffuseScreenRays VIVID_SDF_RECEIVER
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
@@ -19,6 +23,42 @@
 #include "SdfScreenProbeHistory.hlsl"
 #include "SdfDiffuseReSTIR.hlsl"
 
+#include "../../Public/AutoExposure.hlsl"
+
+uint EncodeProbeRayDistance(float HitDistance, bool bHit, bool bMoving, bool bReachedRadianceCache)
+{
+    HitDistance = max(HitDistance, 0.0f);
+
+    uint EncodedRay = 0;
+
+    // Encode extra data in sign bit and in the least important bits of mantissa
+    EncodedRay = asuint(HitDistance) & 0x7FFFFFFC;
+    EncodedRay |= bHit ? (1 << 0) : 0;
+    EncodedRay |= bMoving ? (1 << 1) : 0;
+    EncodedRay |= bReachedRadianceCache ? (1 << 31) : 0;
+
+    return EncodedRay;
+}
+
+struct FProbeRayDistance
+{
+    float HitDistance;
+    bool bHit;
+    bool bMoving;
+    bool bReachedRadianceCache;
+};
+
+FProbeRayDistance DecodeProbeRayDistance(uint Encoded)
+{
+    FProbeRayDistance ProbeRayDistance;
+    ProbeRayDistance.bHit = (Encoded & (1 << 0)) != 0;
+    ProbeRayDistance.bMoving = (Encoded & (1 << 1)) != 0;
+    ProbeRayDistance.bReachedRadianceCache = (Encoded & (1 << 31)) != 0;
+    ProbeRayDistance.HitDistance = asfloat(Encoded & 0x7FFFFFFC);
+    return ProbeRayDistance;
+}
+
+uint _SdfLumenScreenTrace;
 uint _SdfScreenPreviousRadianceValid;
 uint _SdfMotionFrame;
 RWTexture2D<float> _SdfProbeMovingOutput;
@@ -219,12 +259,18 @@ bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver rec
     {
         float detailEnd = min(nearLimit, _SdfMeshDetailDistance);
         tracedDistance = detailEnd;
-        bool detailHit = VividTraceMeshSdfSceneInternal(origin, direction, 0.0f, detailEnd,
-            _SdfDiffuseLayerMask, 0.0f, false, receiver, hit, advancedReceiver, incomplete);
+        float screenStart = _SdfLumenScreenTrace != 0u && _SdfDiffuseUseScreenRays != 0u
+            ? max(0.0001f, screenDistance - 0.10f) : 0.0f;
+        hit = (VividMeshSdfHit)0;
+        incomplete = false;
+        bool detailHit = false;
+        if (screenStart < detailEnd)
+            detailHit = VividTraceMeshSdfSceneInternal(origin, direction, screenStart, detailEnd,
+                _SdfDiffuseLayerMask, 0.0f, false, receiver, hit, advancedReceiver, incomplete);
         if (detailHit || incomplete || detailEnd >= nearLimit) return detailHit;
         VividGlobalSdfHit global;
         tracedDistance = nearLimit;
-        if (!VividTraceGlobalSdf(origin, direction, detailEnd, nearLimit, global)) return false;
+        if (max(screenStart, detailEnd) >= nearLimit || !VividTraceGlobalSdf(origin, direction, max(screenStart, detailEnd), nearLimit, global)) return false;
         traceState = RayGlobalCandidate;
         hit.distance = global.distance;
         hit.normalWS = global.normalWS;
@@ -331,19 +377,26 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
     result.inverseRelativePdf = inverseRelativePdf;
     uint screenState = 0u;
     float screenDistance = FLT_MAX;
+    bool reachedRadianceCache = false;
     if (_SdfDiffuseUseScreenRays != 0u)
     {
         float4 screenHit = _SdfScreenRays.Load(int3(ProbeTraceAddress(tile, ray), 0));
-        if (screenHit.a > 0.0)
+        FProbeRayDistance screen = DecodeProbeRayDistance(asuint(screenHit.a));
+        if (_SdfLumenScreenTrace != 0u)
         {
-            float distance = screenHit.a;
+            screenDistance = screen.HitDistance;
+            reachedRadianceCache = screen.bReachedRadianceCache;
+        }
+        if (_SdfLumenScreenTrace != 0u ? screen.bHit : screenHit.a > 0.0)
+        {
+            float distance = _SdfLumenScreenTrace != 0u ? screen.HitDistance : screenHit.a;
             float3 radiance = screenHit.rgb;
             uint hitState = RayScreenHit;
             VividMeshSdfHit screenSurface = (VividMeshSdfHit)0;
             float3 screenNormal = 0.0;
             screenSurface.instanceIndex = 0xffffffffu;
             bool accepted = true;
-            if (_SdfRestirDense != 0u || _SdfScreenCardLighting != 0u || _SdfScreenMaterialLookup != 0u || _SdfDirectionalCacheEnabled != 0u)
+            if (_SdfLumenScreenTrace == 0u && (_SdfRestirDense != 0u || _SdfScreenCardLighting != 0u || _SdfScreenMaterialLookup != 0u || _SdfDirectionalCacheEnabled != 0u))
             {
                 uint address = (asuint(screenHit.a) - ScreenHitPixelBase) & ~ScreenMovingBit;
                 uint2 pixel = uint2(address % screenSize.x, address / screenSize.x);
@@ -389,7 +442,7 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
                 accum.sum += inverseRelativePdf * radiance;
                 if (_SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
                     accum.moments += ProbeSampleMoments(radiance, direction, normal);
-                if (_SdfDirectionalCacheEnabled != 0u && ((asuint(screenHit.a) - ScreenHitPixelBase) & ScreenMovingBit) != 0u)
+                if (_SdfDirectionalCacheEnabled != 0u && (_SdfLumenScreenTrace != 0u ? screen.bMoving : ((asuint(screenHit.a) - ScreenHitPixelBase) & ScreenMovingBit) != 0u))
                     accum.movingRays += inverseRelativePdf;
                 accum.screenHits++;
                 accum.valid++;
@@ -397,9 +450,12 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
                 return result;
             }
         }
-        screenState = screenHit.a != 0.0 ? RayScreenHistoryRejected : 0u;
-        if (screenHit.a < 0.0)
-            screenDistance = -screenHit.a;
+        if (_SdfLumenScreenTrace == 0u)
+        {
+            screenState = screenHit.a != 0.0 ? RayScreenHistoryRejected : 0u;
+            if (screenHit.a < 0.0)
+                screenDistance = -screenHit.a;
+        }
     }
     #if !defined(VIVID_SDF_SCREEN_ONLY)
     VividMeshSdfHit hit;
@@ -411,16 +467,28 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
     float3 worldRadiance = 0.0;
     float worldDistance = 0.0;
     float fullLimit = _SdfScreenProbeFullSphere != 0u ? max(_SdfFarTraceDistance, _SdfDiffuseMaxDistance) : _SdfDiffuseMaxDistance;
+    float3 cachePosition = _SdfLumenScreenTrace != 0u ? position : origin;
     bool traced;
     // A missing directional texel retries the same traversal out to the far limit.
     // Keep one traversal body in the shader for both ranges.
     [loop] for (uint attempt = 0u; ; ++attempt)
     {
+        if (attempt == 0u && reachedRadianceCache && useWorld)
+        {
+            if (SampleWorldCache(cachePosition, direction, worldLevel, worldRadiance, worldDistance))
+            {
+                traced = incomplete = advancedReceiver = false;
+                hit = (VividMeshSdfHit)0;
+                traceState = 0u;
+                tracedDistance = screenDistance;
+                break;
+            }
+        }
         traced = TraceSdfGatherHit(origin, direction, receiver, screenDistance, screenState,
             useWorld && attempt == 0u ? WorldNearDistance(worldLevel) : fullLimit, useWorld,
             hit, advancedReceiver, incomplete, traceState, tracedDistance);
         if (!useWorld || attempt != 0u || traced || incomplete) break;
-        if (SampleWorldCache(origin, direction, worldLevel, worldRadiance, worldDistance)) break;
+        if (SampleWorldCache(cachePosition, direction, worldLevel, worldRadiance, worldDistance)) break;
         worldDistance = 0.0;
     }
     uint rayState = screenState | traceState;
@@ -685,7 +753,7 @@ void TraceProbe(uint3 id)
 
     float3x3 basis = DiffuseProbeFrame(normal);
     float3 origin = position + normal * _SdfDiffuseRayBias;
-    uint worldLevel = GetWorldCoverage(origin);
+    uint worldLevel = GetWorldCoverage(_SdfLumenScreenTrace != 0u ? position : origin);
     #if !defined(VIVID_SDF_SCREEN_ONLY)
         VividMeshSdfReceiver receiver = (VividMeshSdfReceiver)0;
     #endif
@@ -791,5 +859,411 @@ void TraceSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
 #endif
 {
     TraceProbe(id);
+}
+#endif
+
+#if defined(VIVID_CAPTURE_SCENE_COLOR)
+Texture2D<float4> _SdfResolvedSceneColor;
+RWTexture2D<float4> _SdfSceneColorOutput;
+RWTexture2D<float2> _SdfDepthExposureOutput;
+
+[numthreads(8, 8, 1)]
+void CaptureScreenProbeSceneColor(uint3 id : SV_DispatchThreadID)
+{
+    uint2 size;
+    _SdfSceneColorOutput.GetDimensions(size.x, size.y);
+    if (any(id.xy >= size)) return;
+    _SdfSceneColorOutput[id.xy] = _SdfResolvedSceneColor.Load(int3(id.xy, 0));
+    _SdfDepthExposureOutput[id.xy] = float2(_SdfDiffuseDepth.Load(int3(id.xy, 0)), VividGetPreExposure());
+}
+#endif
+
+#if defined(VIVID_BUILD_CLOSEST_HZB) || defined(VIVID_LUMEN_SCREEN)
+// Unity stores the UE closest mips in adjacent rows of a single R16 UAV.
+// Each group emits four mips before reloading conservative FP16 depth.
+float4 _SdfClosestHzbSize; // base width, height, mip count, log2(height)
+uint2 ClosestMipSize(uint mip) { return max(uint2(_SdfClosestHzbSize.xy) >> mip, 1u); }
+uint2 ClosestMipOffset(uint mip)
+{
+    return uint2(0, 2u * ((uint)_SdfClosestHzbSize.y - ClosestMipSize(mip).y)
+        + (uint)max(0, (int)mip - (int)_SdfClosestHzbSize.w));
+}
+#endif
+
+#if defined(VIVID_BUILD_CLOSEST_HZB)
+uint _SdfHzbStartMip;
+RWTexture2D<float> _SdfClosestHzbOutput;
+groupshared float ClosestTile[64];
+
+float LoadHzbParent(uint2 pixel)
+{
+    if (_SdfHzbStartMip == 0u) return _SdfDiffuseDepth.Load(int3(pixel, 0));
+    return _SdfClosestHzbOutput[ClosestMipOffset(_SdfHzbStartMip - 1u) + pixel];
+}
+
+[numthreads(8, 8, 1)]
+void BuildScreenProbeClosestHZB(uint3 id : SV_DispatchThreadID, uint lane : SV_GroupIndex)
+{
+    uint mip = _SdfHzbStartMip;
+    uint2 parentSize = mip == 0u ? uint2(_SdfDiffuseScreenSize.xy) : ClosestMipSize(mip - 1u);
+    uint2 p = min(id.xy * 2u, (uint2)max(int2(parentSize) - 2, 0));
+    uint2 q = min(p + 1u, parentSize - 1u);
+    float z = max(max(LoadHzbParent(p), LoadHzbParent(uint2(q.x, p.y))),
+                  max(LoadHzbParent(uint2(p.x, q.y)), LoadHzbParent(q)));
+    ClosestTile[lane] = z;
+    if (all(id.xy < ClosestMipSize(mip)))
+        _SdfClosestHzbOutput[ClosestMipOffset(mip) + id.xy] = f16tof32(f32tof16(z) + 1u);
+    [unroll] for (uint i = 1u; i < 4u; ++i)
+    {
+        GroupMemoryBarrierWithGroupSync();
+        uint stride = 1u << (i - 1u);
+        if (mip + i < (uint)_SdfClosestHzbSize.z && all((id.xy & (2u * stride - 1u)) == 0u))
+        {
+            z = max(max(z, ClosestTile[lane + stride]), max(ClosestTile[lane + 8u * stride], ClosestTile[lane + 9u * stride]));
+            ClosestTile[lane] = z;
+            uint2 dst = id.xy >> i;
+            if (all(dst < ClosestMipSize(mip + i)))
+                _SdfClosestHzbOutput[ClosestMipOffset(mip + i) + dst] = f16tof32(f32tof16(z) + 1u);
+        }
+    }
+}
+#endif
+
+#if defined(VIVID_LUMEN_SCREEN)
+// Epic Games, UE 5.7.4: HZBTracing.ush, TraceHZB. Default desktop permutation.
+Texture2D<float> _SdfClosestHzb;
+float4x4 _SdfClipToPrevClip;
+float _SdfDepthThicknessScale;
+
+float2 ScreenNdcToUvScale()
+{
+#if UNITY_UV_STARTS_AT_TOP
+    return float2(0.5, -0.5);
+#else
+    return 0.5;
+#endif
+}
+
+float ScreenTraceEyeDepth(float z)
+{
+    return unity_OrthoParams.w != 0 ? lerp(_ProjectionParams.z, _ProjectionParams.y, z) : LinearEyeDepth(z, _ZBufferParams);
+}
+
+float LoadClosestHzb(float2 uv, uint mip)
+{
+    mip = min(mip, (uint)_SdfClosestHzbSize.z - 1u);
+    uint2 size = ClosestMipSize(mip);
+    return _SdfClosestHzb.Load(int3(ClosestMipOffset(mip) + min((uint2)(saturate(uv) * size), size - 1u), 0));
+}
+float2 ScreenTraceLineBoxIntersect(float3 RayOrigin, float3 RayEnd, float3 BoxMin, float3 BoxMax)
+{
+    float3 InvRayDir = 1.0f / (RayEnd - RayOrigin);
+
+    //find the ray intersection with each of the 3 planes defined by the minimum extrema.
+    float3 FirstPlaneIntersections = (BoxMin - RayOrigin) * InvRayDir;
+    //find the ray intersection with each of the 3 planes defined by the maximum extrema.
+    float3 SecondPlaneIntersections = (BoxMax - RayOrigin) * InvRayDir;
+    //get the closest of these intersections along the ray
+    float3 ClosestPlaneIntersections = min(FirstPlaneIntersections, SecondPlaneIntersections);
+    //get the furthest of these intersections along the ray
+    float3 FurthestPlaneIntersections = max(FirstPlaneIntersections, SecondPlaneIntersections);
+
+    float2 BoxIntersections;
+    //find the furthest near intersection
+    BoxIntersections.x = max(ClosestPlaneIntersections.x, max(ClosestPlaneIntersections.y, ClosestPlaneIntersections.z));
+    //find the closest far intersection
+    BoxIntersections.y = min(FurthestPlaneIntersections.x, min(FurthestPlaneIntersections.y, FurthestPlaneIntersections.z));
+    //clamp the intersections to be between RayOrigin and RayEnd on the ray
+    return saturate(BoxIntersections);
+}
+
+void TraceHZB(
+    float2 InHZBBaseTexelSize,
+    float4 InHZBUVToScreenUVScaleBias,
+    float3 RayTranslatedWorldOrigin,
+    float3 RayWorldDirection,
+    float MaxWorldTraceDistance,
+    float4 InHZBUvFactorAndInvFactor,
+    float MaxIterations,
+    float RelativeDepthThickness,
+    float NumThicknessStepsToDetermineCertainty,
+    uint MinimumTracingThreadOccupancy,
+    inout bool bHit,
+    inout bool bUncertain,
+    inout float3 OutScreenUV,
+    inout float3 OutLastVisibleScreenUV,
+    inout float OutHitTileZ)
+{
+    float3 RayStartScreenUV;
+    {
+        float4 RayStartClip = mul(_SdfDiffuseVP, float4(RayTranslatedWorldOrigin, 1.0f));
+        float3 RayStartScreenPosition = RayStartClip.xyz / max(RayStartClip.w, 0.01f);
+        RayStartScreenUV = float3((RayStartScreenPosition.xy * ScreenNdcToUvScale() + 0.5f) * InHZBUvFactorAndInvFactor.xy, RayStartScreenPosition.z);
+    }
+
+    float3 RayEndScreenUV;
+    {
+        float ViewRayDirectionZ = dot(RayWorldDirection, _SdfProbeCameraForward.xyz);
+        float SceneDepth = dot(float4(RayTranslatedWorldOrigin, 1.0f), _SdfProbeCameraForward);
+        // Clamps the ray to end at the Z == 0 plane so the end point will be valid in NDC space for clipping
+        float RayEndWorldDistance = ViewRayDirectionZ < 0.0 ? min(-0.99f * SceneDepth / ViewRayDirectionZ, MaxWorldTraceDistance) : MaxWorldTraceDistance;
+
+        float3 RayWorldEnd = RayTranslatedWorldOrigin + RayWorldDirection * RayEndWorldDistance;
+        float4 RayEndClip = mul(_SdfDiffuseVP, float4(RayWorldEnd, 1.0f));
+        float3 RayEndScreenPosition = RayEndClip.xyz / RayEndClip.w;
+        RayEndScreenUV = float3((RayEndScreenPosition.xy * ScreenNdcToUvScale() + 0.5f) * InHZBUvFactorAndInvFactor.xy, RayEndScreenPosition.z);
+
+        float2 ScreenEdgeIntersections = ScreenTraceLineBoxIntersect(RayStartScreenUV, RayEndScreenUV, float3(0, 0, 0), float3(InHZBUvFactorAndInvFactor.xy, 1));
+
+        // Recalculate end point where it leaves the screen
+        RayEndScreenUV = RayStartScreenUV + (RayEndScreenUV - RayStartScreenUV) * ScreenEdgeIntersections.y;
+    }
+
+    float BaseMipLevel = -1;
+    float MipLevel = BaseMipLevel;
+
+    float3 RayDirectionScreenUV = RayEndScreenUV - RayStartScreenUV;
+    float CurrentIntersectionTime = 0;
+    float LastAboveSurfaceTime = 0;
+
+    // Offset to pick which XY boundary planes to intersect
+    float2 FloorOffset = float2(RayDirectionScreenUV.x < 0 ? 0 : 1, RayDirectionScreenUV.y < 0 ? 0 : 1);
+
+    float3 RayScreenUV = RayStartScreenUV;
+
+    // Step out of current tile without hit test to avoid self-intersection
+    bool bStepOutOfCurrentTile = true;
+
+    if (bStepOutOfCurrentTile)
+    {
+        float MipLevelForStepOut = MipLevel;
+        float2 CurrentMipTexelSize = exp2(MipLevelForStepOut) * InHZBBaseTexelSize;
+        float2 CurrentMipResolution = 1.0f / CurrentMipTexelSize;
+
+        float2 UVOffset = .005f * CurrentMipTexelSize;
+        UVOffset = float2(RayDirectionScreenUV.x < 0 ? -UVOffset.x : UVOffset.x, RayDirectionScreenUV.y < 0 ? -UVOffset.y : UVOffset.y);
+
+        float2 XYPlane = floor(RayScreenUV.xy * CurrentMipResolution) + FloorOffset;
+        XYPlane = XYPlane * CurrentMipTexelSize + UVOffset;
+
+        float2 PlaneIntersectionTimes = (XYPlane - RayStartScreenUV.xy) / RayDirectionScreenUV.xy;
+        float IntersectionTime = min(PlaneIntersectionTimes.x, PlaneIntersectionTimes.y);
+        CurrentIntersectionTime = IntersectionTime;
+        RayScreenUV = RayStartScreenUV + CurrentIntersectionTime * RayDirectionScreenUV;
+    }
+
+    if (CurrentIntersectionTime >= 1.0f)
+    {
+        // If bStepOutOfCurrentTile caused the ray to terminate rewind to the start of the ray since screen trace will be skipped
+        RayScreenUV = RayStartScreenUV;
+    }
+
+    float NumIterations = 0;
+    bHit = false;
+    bUncertain = false;
+    OutHitTileZ = 0;
+
+    // Stackless HZB traversal
+    while (MipLevel >= BaseMipLevel
+        && NumIterations < MaxIterations
+        && CurrentIntersectionTime < 1.0f
+
+        )
+    {
+        float2 CurrentMipTexelSize = exp2(MipLevel) * InHZBBaseTexelSize;
+        float2 CurrentMipResolution = 1.0f / CurrentMipTexelSize;
+
+        float2 UVOffset = .005f * CurrentMipTexelSize;
+        UVOffset = float2(RayDirectionScreenUV.x < 0 ? -UVOffset.x : UVOffset.x, RayDirectionScreenUV.y < 0 ? -UVOffset.y : UVOffset.y);
+
+        float2 XYPlane = floor(RayScreenUV.xy * CurrentMipResolution) + FloorOffset;
+        XYPlane = XYPlane * CurrentMipTexelSize + UVOffset;
+
+        float TileZ;
+
+        if (MipLevel < 0)
+        {
+            TileZ = _SdfDiffuseDepth.SampleLevel(sampler_PointClamp, RayScreenUV.xy * InHZBUVToScreenUVScaleBias.xy + InHZBUVToScreenUVScaleBias.zw, 0).r;
+
+        }
+        else
+
+        {
+            TileZ = LoadClosestHzb(RayScreenUV.xy, (uint)MipLevel);
+
+        }
+
+        float3 BoundaryPlanes = float3(XYPlane, TileZ);
+
+        float3 PlaneIntersectionTimes = (BoundaryPlanes - RayStartScreenUV) / RayDirectionScreenUV;
+        PlaneIntersectionTimes.z = RayDirectionScreenUV.z < 0 ? PlaneIntersectionTimes.z : 1.0f;
+        float IntersectionTime = min(PlaneIntersectionTimes.x, PlaneIntersectionTimes.y);
+
+        bool bAboveSurface = RayScreenUV.z > TileZ;
+        bool bSkippedTile = bAboveSurface;
+
+        {
+            IntersectionTime = min(IntersectionTime, PlaneIntersectionTimes.z);
+            bSkippedTile &= IntersectionTime != PlaneIntersectionTimes.z;
+        }
+
+        if (bSkippedTile)
+        {
+            LastAboveSurfaceTime = IntersectionTime;
+        }
+
+        CurrentIntersectionTime = bAboveSurface ? IntersectionTime : CurrentIntersectionTime;
+        RayScreenUV = RayStartScreenUV + min(CurrentIntersectionTime, 1.0f) * RayDirectionScreenUV;
+        MipLevel += bSkippedTile ? 1 : -1;
+
+        NumIterations++;
+    }
+
+    if (MipLevel < BaseMipLevel && CurrentIntersectionTime < 1.0f)
+    {
+        float TileZ;
+
+        TileZ = _SdfDiffuseDepth.SampleLevel(sampler_PointClamp, RayScreenUV.xy * InHZBUVToScreenUVScaleBias.xy + InHZBUVToScreenUVScaleBias.zw, 0).r;
+
+        OutHitTileZ = TileZ;
+
+        float HitSceneDepth = ScreenTraceEyeDepth(TileZ);
+        float RaySceneDepth = ScreenTraceEyeDepth(RayScreenUV.z);
+
+        bHit = (RaySceneDepth - HitSceneDepth) < RelativeDepthThickness * max(HitSceneDepth, .0000001f);
+
+        if (!bHit)
+        {
+            // We went below the surface and couldn't count it as a hit, rewind to the last time we were above
+            RayScreenUV = RayStartScreenUV + LastAboveSurfaceTime * RayDirectionScreenUV;
+        }
+    }
+
+    // Linear steps to determine feature thickness along the ray, to reject hits behind very thin surfaces (grass / hair / foliage)
+    if (bHit && !bUncertain && NumThicknessStepsToDetermineCertainty > 0)
+    {
+        float ThicknessSearchMipLevel = 0.0f;
+        float MipNumTexels = exp2(ThicknessSearchMipLevel);
+        float2 HZBTileSize = MipNumTexels * InHZBBaseTexelSize;
+        float NumSteps = NumThicknessStepsToDetermineCertainty / MipNumTexels;
+        float ThicknessSearchEndTime = min(length(RayDirectionScreenUV.xy * HZBTileSize * NumSteps) / length(RayEndScreenUV.xy - RayScreenUV.xy), 1.0f);
+
+        for (float I = 0; I < NumSteps; I++)
+        {
+            float3 SampleUV = RayScreenUV + (I / NumSteps) * ThicknessSearchEndTime * (RayEndScreenUV - RayScreenUV);
+
+            if (all(SampleUV.xy > 0) && all(SampleUV.xy < InHZBUvFactorAndInvFactor.xy))
+            {
+                float SampleTileZ = LoadClosestHzb(SampleUV.xy, (uint)ThicknessSearchMipLevel);
+
+                if (SampleUV.z > SampleTileZ)
+                {
+                    bUncertain = true;
+                }
+            }
+        }
+    }
+
+    // Output in GBuffer SceneUV space for xy
+    OutScreenUV.xy = RayScreenUV.xy * InHZBUVToScreenUVScaleBias.xy + InHZBUVToScreenUVScaleBias.zw;
+    OutScreenUV.z = RayScreenUV.z;
+
+    float3 LastVisibleScreenUV = RayStartScreenUV + LastAboveSurfaceTime * RayDirectionScreenUV;
+    OutLastVisibleScreenUV.xy = LastVisibleScreenUV.xy * InHZBUVToScreenUVScaleBias.xy + InHZBUVToScreenUVScaleBias.zw;
+    OutLastVisibleScreenUV.z = LastVisibleScreenUV.z;
+}
+
+float HitVignette(float2 screenPosition)
+{
+    float2 vignette = saturate(abs(screenPosition) * 5 - 4);
+    return saturate(1.0 - dot(vignette, vignette));
+}
+
+// LumenScreenProbeTracing.usf, ScreenProbeTraceScreenTexturesCS, desktop opaque path.
+[numthreads(8, 8, 1)]
+#if defined(VIVID_SDF_RECEIVER)
+void TraceLumenScreenRaysWithSdf(uint3 id : SV_DispatchThreadID)
+#else
+void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
+#endif
+{
+    uint2 tile = id.xy / 8u;
+    uint ray = (id.x & 7u) + (id.y & 7u) * 8u;
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy);
+    uint2 grid = ProbeGridSize(size);
+    if (tile.x >= grid.x || tile.y >= ProbeAtlasHeight(grid)) return;
+    _SdfScreenRaysOutput[id.xy] = 0.0;
+    uint2 pixel;
+    float3 position, normal;
+    if (!LoadProbeReceiverPixel(tile, size, pixel) || !LoadReceiver(pixel, position, normal)) return;
+
+    uint bin;
+    float inverseRelativePdf;
+    float3 direction = SampleDiffuseProbeRay(tile, ray, ProbeSeed(tile), DiffuseProbeFrame(normal), bin, inverseRelativePdf);
+    float2 uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw;
+    float depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
+    float3 corner = ComputeWorldSpacePosition(uv + 0.5 * _SdfDiffuseScreenSize.zw, depth, _SdfDiffuseInverseVP);
+    float normalBias = abs(dot(corner - position, normal)) * 2;
+    float3 origin = position + normalBias * normal;
+    float4 startClip = mul(_SdfDiffuseVP, float4(origin, 1.0));
+    if (any(startClip.xy < -startClip.w) || any(startClip.xy > startClip.w)) return;
+
+    uint level = GetWorldCoverage(position);
+    float maxDistance = max(_SdfDiffuseMaxDistance, _SdfFarTraceDistance);
+    float traceDistance = level < WorldClipmaps ? min(maxDistance, WorldNearDistance(level)) : maxDistance;
+    float thicknessScale = 1.0;
+#if defined(VIVID_SDF_RECEIVER)
+    uint index = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    thicknessScale = index < _SdfReceiverCount && _SdfReceiverEntities[index].z != 0xffffffffu ? 1.0 : 2.0;
+#endif
+    float2 hzbFactor = _SdfDiffuseScreenSize.xy / (2.0 * _SdfClosestHzbSize.xy);
+    bool hit = false, uncertain = false;
+    float3 hitUVz = 0.0, lastVisible = 0.0;
+    float hitTileZ = 0.0;
+    TraceHZB(rcp(_SdfClosestHzbSize.xy), float4(rcp(hzbFactor), 0, 0), origin, direction,
+        traceDistance, float4(hzbFactor, rcp(hzbFactor)), 50, 0.02 * _SdfDepthThicknessScale * thicknessScale,
+        0, 0, hit, uncertain, hitUVz, lastVisible, hitTileZ);
+    hit = hit && !uncertain;
+    float3 hitPosition = ComputeWorldSpacePosition(hitUVz.xy, hitUVz.z, _SdfDiffuseInverseVP);
+    float hitDistance = min(distance(position, hitPosition) + (!hit && !uncertain ? 0.02 : 0.0), maxDistance);
+
+    bool moving = false;
+    float3 lighting = 0.0;
+    if (hit)
+    {
+        float2 ndc = (hitUVz.xy - 0.5) / ScreenNdcToUvScale();
+        float4 prevClip = mul(_SdfClipToPrevClip, float4(ndc, hitUVz.z, 1.0));
+        float3 prevNdc = prevClip.xyz / prevClip.w;
+        float4 encoded = _SdfScreenMotion.SampleLevel(sampler_PointClamp, hitUVz.xy, 0);
+        if (VividHasObjectVelocity(encoded))
+        {
+            prevNdc.xy = ndc - VividDecodeMotionUV(encoded) / ScreenNdcToUvScale();
+            prevNdc.z = hitUVz.z - VividDecodeMotionDeviceZ(encoded);
+        }
+        float2 prevUV = prevNdc.xy * ScreenNdcToUvScale() + 0.5;
+        float vignette = min(HitVignette(ndc), HitVignette(prevNdc.xy));
+        float2 noiseUV = id.xy + 0.5f + (_SdfDiffuseFrame % 8u) * (float2(47, 17) * 0.695f);
+        float noise = frac(52.9829189f * frac(dot(noiseUV, float2(0.06711056f, 0.00583715f))));
+        hit = vignette >= noise;
+        if (hit)
+        {
+            float2 history = _SdfScreenPreviousGeometry.SampleLevel(sampler_PointClamp, prevUV, 0);
+            hit = abs(history.x - prevNdc.z) < 0.005 * _SdfDepthThicknessScale * lerp(0.5f, 2.0f, noise);
+            if (hit)
+            {
+                float2 edge = 0.5 * _SdfDiffuseScreenSize.zw;
+                float3 color = _SdfScreenPreviousRadiance.SampleLevel(sampler_PointClamp, clamp(prevUV, edge, 1.0 - edge), 0).rgb;
+                float exposure = VividGetPreExposure();
+                color = -min(-color, 0.0) * (exposure / history.y);
+                // Lumen QuantizeFloatColor, followed by the default R11G11B10 trace target conversion.
+                float3 error = asfloat(asuint(color * float3(1.0/64, 1.0/64, 1.0/32)) & ~0x007fffffu);
+                lighting = UnpackFromR11G11B10f(PackToR11G11B10f(color + error * noise)) / exposure;
+                float3 prevPosition = ComputeWorldSpacePosition(prevUV, prevNdc.z, _SdfScreenPreviousInverseVP);
+                moving = RelativeHitMotion(ScreenObjectSpeed(pixel, position), distance(hitPosition, prevPosition), position) > 0.0;
+            }
+        }
+    }
+    _SdfScreenRaysOutput[id.xy] = float4(lighting, asfloat(EncodeProbeRayDistance(hitDistance, hit, moving,
+        level < WorldClipmaps && hitDistance >= traceDistance)));
 }
 #endif

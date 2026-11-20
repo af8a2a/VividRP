@@ -26,6 +26,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Read)]
         private RenderGraphTexture Color;
 
+        internal RenderGraphTexture SceneColorInput => Color;
+
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Read)]
         private RenderGraphTexture MotionVectors;
 

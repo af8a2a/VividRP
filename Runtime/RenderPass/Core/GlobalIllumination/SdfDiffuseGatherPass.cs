@@ -231,6 +231,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int BentWriteGeometryId = Shader.PropertyToID("_SdfBentWriteGeometry");
         private static readonly int HzbId = Shader.PropertyToID("_SdfScreenHzb");
         private static readonly int MotionId = Shader.PropertyToID("_SdfScreenMotion");
+        private static readonly CameraHistoryId SceneColorHistoryId = CameraHistoryId.Create("SdfResolvedSceneColor");
+        private static readonly CameraHistoryId SceneDepthExposureId = CameraHistoryId.Create("SdfSceneDepthExposure");
+        private static readonly int LumenTraceId = Shader.PropertyToID("_SdfLumenScreenTrace");
+        private static readonly int ClosestHzbId = Shader.PropertyToID("_SdfClosestHzb");
+        private static readonly int ClosestHzbOutputId = Shader.PropertyToID("_SdfClosestHzbOutput");
+        private static readonly int ClosestHzbSizeId = Shader.PropertyToID("_SdfClosestHzbSize");
+        private static readonly int HzbStartMipId = Shader.PropertyToID("_SdfHzbStartMip");
+        private static readonly int ClipToPrevClipId = Shader.PropertyToID("_SdfClipToPrevClip");
+        private static readonly int DepthThicknessScaleId = Shader.PropertyToID("_SdfDepthThicknessScale");
         private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
         private static readonly int ScreenRadianceValidId = Shader.PropertyToID("_SdfScreenPreviousRadianceValid");
         private static readonly int ScreenGeometryId = Shader.PropertyToID("_SdfScreenPreviousGeometry");
@@ -399,7 +408,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal VividSdfSurfaceCache Cache;
             internal bool OffscreenOnly;
             internal SdfDiffuseTraceMode TraceMode;
-            internal bool HasScreenRays;
+            internal bool HasScreenRays, LumenScreenTrace;
             internal bool DirectionalProbes;
             internal bool AdaptiveProbes, SpatialFilter, HitDistanceFilter;
             internal SdfScreenProbeSpatialKernel ProbeSpatialKernel;
@@ -668,6 +677,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector2 m_ScreenJitterUv, m_ScreenJitterDelta;
         private Vector4 m_LightPositionRange, m_LightColorShadow;
         private int m_TraceKernel = -1, m_CachedTraceKernel = -1, m_ResolveKernel = -1;
+        [RenderGraphResource(Name = "Screen Probe Closest HZB", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_ClosestHzb = CreateScratch("Screen Probe Closest HZB", GraphicsFormat.R16_SFloat);
+        private int m_ClosestHzbKernel = -1, m_LumenTraceKernel = -1, m_LumenReceiverKernel = -1, m_SceneColorKernel = -1;
+        private Vector4 m_ClosestHzbSize;
+        private float m_DepthThicknessScale;
+        private Matrix4x4 m_ClipToPrevClip;
+        private bool m_LumenScreenTrace;
+
         private int m_ScreenTraceKernel = -1, m_ScreenReceiverTraceKernel = -1, m_ScreenGatherKernel = -1;
         private int m_CachedSunTraceKernel = -1, m_SunUpdateKernel = -1;
         private readonly int[] m_CompactPlacementKernels = new int[5];
@@ -875,6 +893,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_SFloat, GraphicsFormatUsage.LoadStore)
                 && HasKernel(m_TraceCompute, "TraceDiffuseScreenRays") && HasKernel(m_TraceCompute, "GatherScreenDiffuseProbes"))
             {
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample)
+                    && HasKernel(m_TraceCompute, "TraceLumenScreenRaysWithSdf") && HasKernel(m_TraceCompute, "TraceLumenScreenRays")
+                    && HasKernel(m_TraceCompute, "BuildScreenProbeClosestHZB") && HasKernel(m_TraceCompute, "CaptureScreenProbeSceneColor"))
+                {
+                    m_LumenReceiverKernel = m_TraceCompute.FindKernel("TraceLumenScreenRaysWithSdf");
+                    m_ClosestHzbKernel = m_TraceCompute.FindKernel("BuildScreenProbeClosestHZB");
+                    m_LumenTraceKernel = m_TraceCompute.FindKernel("TraceLumenScreenRays");
+                    m_SceneColorKernel = m_TraceCompute.FindKernel("CaptureScreenProbeSceneColor");
+                }
                 m_ScreenTraceKernel = m_TraceCompute.FindKernel("TraceDiffuseScreenRays");
                 if (HasKernel(m_TraceCompute, "TraceReceiverDiffuseScreenRays"))
                     m_ScreenReceiverTraceKernel = m_TraceCompute.FindKernel("TraceReceiverDiffuseScreenRays");
@@ -1003,11 +1030,9 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var temporal = frameData.Get<VividTemporalData>();
-            bool screenConfigured = !m_OffscreenOnly && m_TraceMode != SdfDiffuseTraceMode.SdfOnly
-                && m_ScreenTraceKernel >= 0 && m_ScreenHzb != null && motionConnected
+            bool screenInputs = m_ScreenTraceKernel >= 0 && !m_OffscreenOnly && m_TraceMode != SdfDiffuseTraceMode.SdfOnly && motionConnected;
+            bool screenConfigured = screenInputs && m_ScreenHzb != null
                 && !ReferenceEquals(m_ScreenHzb, m_LocalHzb);
-            if (!m_UseSdf && !screenConfigured)
-                return;
             m_CorrectReceiverSelfHits = m_UseSdf && useSettings && settings.correctReceiverSelfHits.value;
             m_ScreenCardLightingRequested = m_UseSdf && screenConfigured && useSettings && cache != null
                 && settings.screenHitCardLighting.value && settings.surfaceCacheBounceOrders.value > 0;
@@ -1038,6 +1063,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 && DirectionalGatherBins * m_ProbeWidth <= SystemInfo.maxTextureSize && DirectionalTracePlanes * m_AtlasHeight <= SystemInfo.maxTextureSize;
             m_FullSphere = m_DirectionalCache && !legacyGather && settings.screenProbeFullSphere.value
                 && 8 * DirectionalTracePlanes * (m_ProbeHeight + (m_AdaptiveProbes ? (m_ProbeHeight + 1) / 2 : 0)) <= SystemInfo.maxTextureSize;
+            m_LumenScreenTrace = screenInputs && m_LumenTraceKernel >= 0 && m_FullSphere && settings.lumenScreenTracing.value;
+            screenConfigured |= m_LumenScreenTrace;
+            if (!m_UseSdf && !screenConfigured)
+                return;
+            if (m_LumenScreenTrace)
+            {
+                m_ScreenCardLightingRequested = false;
+                int width = Mathf.Max(1, Mathf.NextPowerOfTwo(m_Width) >> 1);
+                int height = Mathf.Max(1, Mathf.NextPowerOfTwo(m_Height) >> 1);
+                int heightLog = Mathf.RoundToInt(Mathf.Log(height, 2));
+                int mips = Mathf.Max(1, Mathf.RoundToInt(Mathf.Log(Mathf.Max(width, height), 2)));
+                m_ClosestHzbSize = new Vector4(width, height, mips, heightLog);
+                m_ClosestHzb.Resize(width, 2 * height - 1 + Mathf.Max(0, mips - heightLog - 1));
+                var projection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
+                m_DepthThicknessScale = camera.orthographic ? Mathf.Pow(10f,
+                    -(int)Mathf.Clamp(Mathf.Log10(Mathf.Abs(projection.inverse.m22) * 100f), 0f, 9f)) : 1f;
+                m_ClipToPrevClip = temporal.previousViewProjectionMatrix * temporal.nonJitteredViewProjectionMatrix.inverse;
+            }
+            else
+                m_ClosestHzb.Resize(1, 1);
             if (m_FullSphere && m_AdaptiveProbes)
                 m_AtlasHeight = m_ProbeHeight + (m_ProbeHeight + 1) / 2;
             m_DitherTraceDirections = m_FullSphere && settings.screenProbeDitherTraceDirections.value;
@@ -1135,7 +1180,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PreviousRestir, m_CurrentRestir, m_CurrentRestir.desc, out m_RestirHistory);
             }
 
-            if ((m_CorrectReceiverSelfHits || m_ScreenCardLightingRequested)
+            if ((m_CorrectReceiverSelfHits || m_ScreenCardLightingRequested || m_LumenScreenTrace)
                 && frameData.Contains<VividSdfReceiverFrameData>() && VividGPUDrivenSystem.HasInstance)
             {
                 var receiver = frameData.Get<VividSdfReceiverFrameData>();
@@ -1183,7 +1228,7 @@ namespace VividRP.Runtime.RenderPass.Core
             // Dense reservoirs and card lighting need the exact raster hit pixel.
             bool storeScreenPixel = screenConfigured && (m_RestirPixelIntegration
                 || (m_ScreenCardLightingRequested && m_ReceiverVisibilitySource != null && m_RadiosityInput.IsValid()));
-            m_ScreenRays.desc.ColorFormat = storeScreenPixel ? GeometryFormat : ProbeFormat;
+            m_ScreenRays.desc.ColorFormat = (m_LumenScreenTrace || storeScreenPixel) ? GeometryFormat : ProbeFormat;
             if (m_MeshDetailDistance > 0f && m_FullSphere && m_FarKernel >= 0 && m_ClipmapNear != null)
             {
                 var grid = m_State.ObjectGrid ??= new VividGlobalSdfObjectGrid();
@@ -1262,7 +1307,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.DirectionalProbes == m_DirectionalProbes
                 && ((m_State.NearOcclusion.z == 0f && m_NearOcclusion.z == 0f) || m_State.NearOcclusion.Equals(m_NearOcclusion))
                 && m_State.DirectionalCache == m_DirectionalCache && m_State.DirectionalGuide == m_DirectionalGuide
-                && m_State.FullSphere == m_FullSphere && m_State.ProbeTemporal == m_ProbeTemporal
+                && m_State.LumenScreenTrace == m_LumenScreenTrace && m_State.FullSphere == m_FullSphere && m_State.ProbeTemporal == m_ProbeTemporal
                 && m_State.DitherTraceDirections == m_DitherTraceDirections
                 && m_State.MaxRayIntensity == m_MaxRayIntensity
                 && m_State.DirectionalHierarchicalGuide == m_DirectionalHierarchicalGuide
@@ -1400,9 +1445,9 @@ namespace VividRP.Runtime.RenderPass.Core
             RecordSkyRadianceBound(context);
             var cache = m_UseSdf ? m_Scene.SurfaceCache : null;
             bool useScreenRays = m_HasScreenHistory && m_ScreenRays.innerHandle.IsValid()
-                && m_ScreenHzb.innerHandle.IsValid() && m_ScreenMotion.innerHandle.IsValid();
-            bool validScreenRadiance = useScreenRays && (!m_UseSdf || HasCurrentScreenLighting());
-            bool repairScreenRays = m_RealtimeOnly && validScreenRadiance && !m_OffscreenOnly;
+                && (m_LumenScreenTrace ? m_ClosestHzb.innerHandle.IsValid() : m_ScreenHzb.innerHandle.IsValid()) && m_ScreenMotion.innerHandle.IsValid();
+            bool validScreenRadiance = useScreenRays && (m_LumenScreenTrace || !m_UseSdf || HasCurrentScreenLighting());
+            bool repairScreenRays = !m_LumenScreenTrace && m_RealtimeOnly && validScreenRadiance && !m_OffscreenOnly;
             bool useSunCache = m_SunAtlas.IsValid() && m_SunCacheHits.innerHandle.IsValid();
             int traceKernel = !m_UseSdf ? m_ScreenGatherKernel : cache != null ? m_CachedTraceKernel : m_TraceKernel;
             if (useSunCache)
@@ -1418,6 +1463,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, ReceiverEntitiesId, m_ReceiverEntities);
                 cmd.SetComputeIntParam(m_TraceCompute, ReceiverCountId, m_ReceiverCount);
             }
+            cmd.SetComputeIntParam(m_TraceCompute, LumenTraceId, m_LumenScreenTrace ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, CorrectReceiverId, correctReceiver ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, ScreenCardLightingId, screenCardLighting ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, ScreenMaterialLookupId, hasReceiverSource ? 1 : 0);
@@ -1684,6 +1730,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.NearOcclusion = m_NearOcclusion;
             m_State.DirectionalCache = m_DirectionalCache;
             m_State.DirectionalGuide = m_DirectionalGuide;
+            m_State.LumenScreenTrace = m_LumenScreenTrace;
             m_State.FullSphere = m_FullSphere;
             m_State.ProbeTemporal = m_ProbeTemporal;
             m_State.DitherTraceDirections = m_DitherTraceDirections;
@@ -1791,6 +1838,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RestirCompute = m_SunCompute = m_RadiosityCompute = m_FarCompute = m_NearOcclusionCompute = null;
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
             m_ScreenTraceKernel = m_ScreenReceiverTraceKernel = m_ScreenGatherKernel = -1;
+            m_LumenTraceKernel = m_LumenReceiverKernel = m_ClosestHzbKernel = m_SceneColorKernel = -1;
             m_CachedSunTraceKernel = m_SunUpdateKernel = -1;
             m_RadiosityKernel = -1;
             m_RadiosityAccumulationKernel = m_RadiosityPublishKernel = -1;
@@ -2577,16 +2625,33 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenRadianceDesc.Resize(m_Width, m_Height);
             m_ScreenGeometryDesc.Resize(m_Width, m_Height);
             var screen = frameData.GetOrCreate<VividSdfScreenTraceData>();
-            screen.radiance = history.GetOrCreateTexture(ScreenRadianceHistoryId, 2,
+            var radiance = history.GetOrCreateTexture(m_LumenScreenTrace ? SceneColorHistoryId : ScreenRadianceHistoryId, 2,
                 CameraHistoryRenderGraphBridge.CreateDescriptor(m_ScreenRadianceDesc.desc));
-            screen.geometry = history.GetOrCreateTexture(ScreenGeometryHistoryId, 2,
+            var geometry = history.GetOrCreateTexture(m_LumenScreenTrace ? SceneDepthExposureId : ScreenGeometryHistoryId, 2,
                 CameraHistoryRenderGraphBridge.CreateDescriptor(m_ScreenGeometryDesc.desc));
+            if (m_LumenScreenTrace)
+            {
+                screen.sceneColor = radiance;
+                screen.sceneDepthExposure = geometry;
+                screen.preExposure = PassRecorder.ImportBufferHandle(m_PreExposure);
+                screen.depth = m_Depth;
+                screen.shader = m_TraceCompute;
+                screen.kernel = m_SceneColorKernel;
+                screen.currentColor = CameraHistoryRenderGraphBridge.Import(radiance, 0);
+                screen.currentDepthExposure = CameraHistoryRenderGraphBridge.Import(geometry, 0);
+            }
+            else
+            {
+                screen.radiance = radiance;
+                screen.geometry = geometry;
+            }
             if (temporal.isFirstFrame || temporal.resetPostProcessingHistory || m_State.Width != m_Width
-                || m_State.Height != m_Height || !screen.radiance.IsValid() || !screen.geometry.IsValid())
+                || m_State.Height != m_Height || m_State.LumenScreenTrace != m_LumenScreenTrace
+                || !radiance.IsValid() || !geometry.IsValid())
                 return;
 
-            m_PreviousScreenRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this, screen.radiance, 1, AccessFlags.Read);
-            m_PreviousScreenGeometry = CameraHistoryRenderGraphBridge.ImportForPass(this, screen.geometry, 1, AccessFlags.Read);
+            m_PreviousScreenRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this, radiance, 1, AccessFlags.Read);
+            m_PreviousScreenGeometry = CameraHistoryRenderGraphBridge.ImportForPass(this, geometry, 1, AccessFlags.Read);
             m_HasScreenHistory = m_PreviousScreenRadiance.IsValid() && m_PreviousScreenGeometry.IsValid();
         }
 
@@ -2839,7 +2904,24 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, ScreenTraceSampler);
             bool materialLookup = m_UseSdf && m_ScreenReceiverTraceKernel >= 0
                 && m_ReceiverVisibility.IsValid() && m_ReceiverEntities != null && m_ReceiverCount > 0;
-            int kernel = materialLookup ? m_ScreenReceiverTraceKernel : m_ScreenTraceKernel;
+            int kernel = m_LumenScreenTrace ? (materialLookup ? m_LumenReceiverKernel : m_LumenTraceKernel) : materialLookup ? m_ScreenReceiverTraceKernel : m_ScreenTraceKernel;
+            if (m_LumenScreenTrace)
+            {
+                cmd.SetComputeVectorParam(m_TraceCompute, ClosestHzbSizeId, m_ClosestHzbSize);
+                cmd.SetComputeTextureParam(m_TraceCompute, m_ClosestHzbKernel, DepthId, m_Depth.innerHandle);
+                cmd.SetComputeTextureParam(m_TraceCompute, m_ClosestHzbKernel, ClosestHzbOutputId, m_ClosestHzb.innerHandle);
+                for (int mip = 0; mip < (int)m_ClosestHzbSize.z; mip += 4)
+                {
+                    cmd.SetComputeIntParam(m_TraceCompute, HzbStartMipId, mip);
+                    int width = Mathf.Max(1, (int)m_ClosestHzbSize.x >> mip);
+                    int height = Mathf.Max(1, (int)m_ClosestHzbSize.y >> mip);
+                    cmd.DispatchCompute(m_TraceCompute, m_ClosestHzbKernel, CoreUtils.DivRoundUp(width, 8), CoreUtils.DivRoundUp(height, 8), 1);
+                }
+                cmd.SetComputeTextureParam(m_TraceCompute, kernel, ClosestHzbId, m_ClosestHzb.innerHandle);
+                cmd.SetComputeBufferParam(m_TraceCompute, kernel, VividAutoExposureSystem.PreExposureBufferId, m_PreExposure);
+                cmd.SetComputeMatrixParam(m_TraceCompute, ClipToPrevClipId, m_ClipToPrevClip);
+                cmd.SetComputeFloatParam(m_TraceCompute, DepthThicknessScaleId, m_DepthThicknessScale);
+            }
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, FarRadianceId, m_FarAtlas.IsValid() ? m_FarAtlas : black);
             BindReceiver(cmd, m_TraceCompute, kernel);
             if (materialLookup)
@@ -2856,13 +2938,13 @@ namespace VividRP.Runtime.RenderPass.Core
             // Keep the screen hit distance so Hybrid can shade it through the current SDF path.
             cmd.SetComputeIntParam(m_TraceCompute, ScreenRadianceValidId, validScreenRadiance ? 1 : 0);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, ScreenRaysOutputId, m_ScreenRays.innerHandle);
-            cmd.DispatchCompute(m_TraceCompute, kernel, groupsX, groupsY, 1);
+            cmd.DispatchCompute(m_TraceCompute, kernel, m_LumenScreenTrace ? m_ProbeWidth : groupsX, m_LumenScreenTrace ? m_AtlasHeight : groupsY, 1);
         }
 
         private void BindScreenTraceHistory(ComputeCommandBuffer cmd, ComputeShader shader, int kernel,
             bool available, TextureHandle black)
         {
-            cmd.SetComputeTextureParam(shader, kernel, HzbId, available ? m_ScreenHzb.innerHandle : black);
+            cmd.SetComputeTextureParam(shader, kernel, HzbId, available && !m_LumenScreenTrace ? m_ScreenHzb.innerHandle : black);
             cmd.SetComputeTextureParam(shader, kernel, MotionId, available ? m_ScreenMotion.innerHandle : black);
             cmd.SetComputeTextureParam(shader, kernel, ScreenRadianceId, available ? m_PreviousScreenRadiance : black);
             cmd.SetComputeTextureParam(shader, kernel, ScreenGeometryId, available ? m_PreviousScreenGeometry : black);

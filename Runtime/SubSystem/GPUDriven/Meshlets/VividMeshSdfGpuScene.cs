@@ -100,12 +100,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private struct InstanceSource : IEquatable<InstanceSource>
         {
             public Matrix4x4 LocalToWorld, WorldToLocal;
+            public Bounds SparseBounds;
             public ulong EntityId;
             public uint FieldIndex, LayerMask;
 
             public readonly bool Equals(InstanceSource other) =>
                 EntityId == other.EntityId && FieldIndex == other.FieldIndex && LayerMask == other.LayerMask
-                && LocalToWorld.Equals(other.LocalToWorld) && WorldToLocal.Equals(other.WorldToLocal);
+                && LocalToWorld.Equals(other.LocalToWorld) && WorldToLocal.Equals(other.WorldToLocal)
+                && SparseBounds.Equals(other.SparseBounds);
         }
 
         private struct RadiosityCardIdentity : IEquatable<RadiosityCardIdentity>
@@ -211,6 +213,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         internal VividMeshSdfGpuScene() { }
 
+        internal readonly VividSparseMeshSdfAtlas SparseAtlas;
+        internal VividMeshSdfGpuScene(VividSparseMeshSdfAtlas sparseAtlas) => SparseAtlas = sparseAtlas;
+
         internal VividMeshSdfGpuScene(Shader diffuseShader)
         {
             m_DiffuseShader = diffuseShader;
@@ -242,8 +247,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             bool fieldsChanged = NodeCount == 0 || !SameSources(m_Fields, m_NextFields);
-            bool instancesChanged = fieldsChanged || !SameSources(m_Instances, m_NextInstances);
-            bool transformOnly = instancesChanged && !fieldsChanged && HasSameInstanceOrder();
+            bool sparseChanged = SparseAtlas?.End() == true;
+            bool instancesChanged = fieldsChanged || sparseChanged || !SameSources(m_Instances, m_NextInstances);
+            bool transformOnly = instancesChanged && !fieldsChanged && !sparseChanged && HasSameInstanceOrder();
             if (transformOnly)
             {
                 for (int i = 0; i < m_Instances.Count; i++)
@@ -451,6 +457,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             m_FieldIndices.Clear();
             m_NextFields.Clear();
+            SparseAtlas?.Begin();
             m_NextInstances.Clear();
             m_NextDiffuseSurfaces?.Clear();
             m_NextSurfaceLightingInstances?.Clear();
@@ -498,8 +505,25 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     });
                 }
 
+                Bounds sparseBounds = default;
+                if (SparseAtlas != null)
+                {
+                    var sparse = renderer.SparseDistanceField;
+                    var bakeScale = renderer.SparseFieldBakeScale;
+                    Vector3 center = sparse ? renderer.sourceMesh.bounds.center : default;
+                    SparseAtlas.Add(sparse, bakeScale, center, data.objectToWorldMatrix);
+                    if (sparse)
+                    {
+                        Vector3 undoBake = new(0.01f / bakeScale.x, 0.01f / bakeScale.y, 0.01f / bakeScale.z);
+                        var offset = sparse.FieldBoundsCm.center - sparse.GeometryBoundsCm.center;
+                        var size = sparse.FieldBoundsCm.size;
+                        sparseBounds = new Bounds(center + Vector3.Scale(new Vector3(offset.y, offset.z, offset.x), undoBake),
+                            Vector3.Scale(new Vector3(size.y, size.z, size.x), undoBake));
+                    }
+                }
                 m_NextInstances.Add(new InstanceSource
                 {
+                    SparseBounds = sparseBounds,
                     LocalToWorld = data.objectToWorldMatrix,
                     WorldToLocal = data.worldToObjectMatrix,
                     FieldIndex = fieldIndex,
@@ -642,6 +666,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 Vector3 origin = field.OriginAndVoxelSize;
                 var extent = new Vector3(field.Width - 1, field.Height - 1, field.Depth - 1) * field.OriginAndVoxelSize.w;
                 var localBounds = new Bounds(origin + extent * 0.5f, extent);
+                if (source.SparseBounds.size != Vector3.zero)
+                    localBounds.Encapsulate(source.SparseBounds);
                 var bounds = VividMeshletRendererDatabase.TransformBounds(localBounds, source.LocalToWorld);
                 var leaf = new Leaf { Bounds = bounds, InstanceIndex = (uint)i, LayerMask = source.LayerMask };
                 if (rebuildBvh)
@@ -812,6 +838,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         public void Dispose()
         {
+            SparseAtlas?.Dispose();
             m_Voxels?.Dispose();
             m_FieldBuffer?.Dispose();
             m_InstanceBuffer?.Dispose();

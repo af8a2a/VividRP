@@ -1,0 +1,10 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1",
+    "FriendlyName": "Vivid Cornell Asset Export",
+    "EnabledByDefault": true,
+    "Modules": [
+        { "Name": "VividCornellExport", "Type": "UncookedOnly", "LoadingPhase": "PostConfigInit" }
+    ]
+}

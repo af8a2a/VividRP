@@ -27,6 +27,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         [SerializeField] private Texture2DArray m_AlbedoDepth;
         [SerializeField] private Texture2DArray m_NormalCoverage;
+        [SerializeField, Tooltip("Resident material pages imported for this reference scene.")]
+        private VividCardMaterialPages m_CardMaterialPages;
+        internal VividCardMaterialPages CardMaterialPages => m_CardMaterialPages;
         [SerializeField] private Entry[] m_Entries;
         [SerializeField, HideInInspector] private LocalCard[] m_LocalCards;
         [SerializeField, HideInInspector] private int m_OriginalNormalVersion;

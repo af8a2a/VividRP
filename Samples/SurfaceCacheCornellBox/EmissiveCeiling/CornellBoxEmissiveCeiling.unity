@@ -346,6 +346,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: d12fc641da54c8c4fac13cf64084b2d6, type: 3}
+  m_SparseFieldBakeScale: {x: 4.4, y: 3, z: 0.2}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -414,6 +416,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: c7938eca4f70e8645a38fb5284c2875a, type: 3}
+  m_SparseFieldBakeScale: {x: 0.2, y: 3, z: 4}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 348b5c5d21aba5f40ae288a1a48c8ae6, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -482,6 +486,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: 7663311935914884db8b901bb5eca803, type: 3}
+  m_SparseFieldBakeScale: {x: 1.05, y: 1.9, z: 1.05}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -550,6 +556,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: a86dca9f56968554baae14e94bd3431f, type: 3}
+  m_SparseFieldBakeScale: {x: 4.4, y: 0.2, z: 4.2}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -618,6 +626,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: 486c32e3e7b57ff4db5b7bf6c74ae474, type: 3}
+  m_SparseFieldBakeScale: {x: 4.4, y: 0.2, z: 4.2}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -685,6 +695,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: 7f20b8255abc9f0469d5e4aed8ad7a69, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: c3161aa045c77154fa05ada23497a64e, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: f88958cba4a3bde46a890b58b08e2989, type: 3}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 80dc63d891862dd4c86ba6f11f7bbd79, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -745,6 +757,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: 2c412686f4d6bf44bbf0fe4432a9fa43, type: 3}
+  m_SparseFieldBakeScale: {x: 0.2, y: 3, z: 4}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 1a7ec614d8b53f04a9224c13096be040, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -865,6 +879,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: -6471235696909962349, guid: 8beb13d5eee76ee43a84e4febf68ebf0, type: 3}
+  m_SparseFieldBakeScale: {x: 1.05, y: 1.1, z: 1.05}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1

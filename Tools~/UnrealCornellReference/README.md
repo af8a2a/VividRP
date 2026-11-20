@@ -8,6 +8,14 @@
 
 ## 与 Unity 对应的输入
 
+### 将 UE 烘焙输入导回 Cornell
+
+将本目录的 `VividCornellExport` 复制到独立 UE 5.7.4 参考工程的 `Plugins`，为该工程编译 UnrealEditor 模块。导出器读取当前静态网格的渲染数据和 Lumen Scene 驻留页。Unity 包中的 `.vsdf`、`.vcardpages` 可以直接导入。
+
+- 在 UE 控制台执行 `Vivid.ExportDistanceField /Game/VividReference/Meshes/SM_Back.SM_Back D:/Export/SM_Back.vsdf`。输出目录须已存在。对其余网格使用对应的完整对象路径。每个文件包含网格与距离场的局部边界、双面标志、三个独立 mip 的索引与砖块。
+- 按本目录的离屏 Cornell 启动方式，给 UnrealEditor 添加 `-VividMaterialPages=D:/Export/Cornell.vcardpages`。使用静态参考地图、相同相机和 Epic 软件 Lumen，并至少运行到第 639 帧 GPU 读回完成。该文件包含当时的卡片、Mesh Cards、页表、驻留页描述以及压缩材质块。材质导出使用 D3D12 的 BC 整数 UAV 视图。
+- Cornell 场景的八个 MeshletRenderer 分别引用对应网格距离场，bake scale 为生成 UE 几何时使用的缩放。专用 Surface Cache 资产引用该场景的材质页快照。
+
 `unity_fixture.json` 是从 Unity 当前 `CornellBoxEmissiveCeiling.unity` 通过 Editor API 只读导出的输入。保留原始 sRGB 颜色以及转换后的线性反射率。
 
 - 坐标与单位：Unity `(x, y, z)` 米映射到 Unreal `(z, x, y) × 100` 厘米；Unity 绕 Y 的角度对应 Unreal yaw。

@@ -45,7 +45,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_BaseVoxelSize = VividGlobalSdfClipmap.DefaultVoxelSize;
 
         private readonly CameraRelativeSystem<VividGlobalSdfCameraState> m_Cameras = new();
-        private readonly VividMeshSdfGpuScene m_Scene = new();
+        private readonly VividMeshSdfGpuScene m_Scene = new(new VividSparseMeshSdfAtlas());
         private readonly RenderGraphTexture[] m_Outputs = new RenderGraphTexture[VividGlobalSdfClipmap.LevelCount];
         private readonly int[] m_RegionCounts = new int[VividGlobalSdfClipmap.LevelCount];
         private readonly VividGlobalSdfClipmap.Region[] m_Regions =
@@ -59,6 +59,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_Shader;
         private GraphicsFormat m_Format;
         private int m_Kernel = -1;
+        private int m_SparseKernel = -1;
+        private TextureHandle m_SparseBricks;
         private int m_ClearKernel = -1;
         private int m_ThinKernel = -1;
 
@@ -77,6 +79,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && SystemInfo.IsFormatSupported(m_Format, usage))
             {
                 m_Kernel = m_Shader.FindKernel(KernelName);
+                m_SparseKernel = m_Shader.FindKernel("ComposeGlobalSdfSparse");
                 m_ClearKernel = m_Shader.FindKernel(ClearKernelName);
                 m_ThinKernel = m_Shader.FindKernel(ThinKernelName);
             }
@@ -86,6 +89,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            m_SparseBricks = default;
             m_Frame = frameData.GetOrCreate<VividGlobalSdfFrameData>();
             var camera = frameData.Get<VividCameraData>().camera;
             if (m_Kernel < 0 || camera == null || camera.cullingMask == 0 || DebugPassCameraUtility.ShouldSkipExecution(camera))
@@ -94,6 +98,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Scene.Update(VividMeshletRendererDatabase.instance);
             if (m_Scene.NodeCount == 0)
                 return;
+            if (m_Scene.SparseAtlas.Active)
+                m_SparseBricks = PassRecorder.ImportTextureForPass(this, m_Scene.SparseAtlas.BricksHandle);
 
             m_Cameras.PurgeDestroyedCameras();
             var state = m_Cameras.GetOrCreateBase(camera);
@@ -172,6 +178,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     return;
 
             var cmd = context.cmd;
+            int composeKernel = m_Scene.SparseAtlas.Active ? m_SparseKernel : m_Kernel;
             bool bound = false;
             for (int level = 0; level < m_Outputs.Length; level++)
             {
@@ -183,9 +190,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     // Do not reuse partially updated history if the frame fails before committing.
                     m_Frame.State.Valid = false;
-                    m_Scene.Bind(cmd, m_Shader, m_Kernel);
+                    m_Scene.Bind(cmd, m_Shader, composeKernel);
+                    if (m_Scene.SparseAtlas.Active)
+                    {
+                        m_Scene.SparseAtlas.Bind(cmd, m_Shader, composeKernel);
+                        cmd.SetComputeTextureParam(m_Shader, composeKernel, VividSparseMeshSdfAtlas.BricksId, m_SparseBricks);
+                    }
                     m_Scene.Bind(cmd, m_Shader, m_ThinKernel);
-                    cmd.SetComputeBufferParam(m_Shader, m_Kernel, PagesId, m_Pages.innerHandle);
+                    cmd.SetComputeBufferParam(m_Shader, composeKernel, PagesId, m_Pages.innerHandle);
                     cmd.SetComputeBufferParam(m_Shader, m_ThinKernel, ThinBricksId, m_ThinBricks.innerHandle);
                     cmd.SetComputeIntParam(m_Shader, LayerMaskId, m_Frame.LayerMask);
                     bound = true;
@@ -196,8 +208,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (count != 0)
                 {
                     ClearNewPages(cmd, level);
-                    cmd.SetComputeTextureParam(m_Shader, m_Kernel, OutputId, m_Outputs[level].innerHandle);
-                    DispatchRegions(cmd, m_Kernel, m_Regions, start, count);
+                    cmd.SetComputeTextureParam(m_Shader, composeKernel, OutputId, m_Outputs[level].innerHandle);
+                    DispatchRegions(cmd, composeKernel, m_Regions, start, count);
                 }
                 if (thinCount != 0)
                     DispatchRegions(cmd, m_ThinKernel, m_ThinRegions, start, thinCount);

@@ -1,9 +1,14 @@
 #pragma kernel ComposeGlobalSdf
+#pragma kernel ComposeGlobalSdfSparse VIVID_SPARSE_MESH_DISTANCE_FIELDS
 #pragma kernel ClearGlobalSdfPages
 #pragma kernel ComposeGlobalSdfThinBricks
 #pragma kernel TraceGlobalSdfDebug
 
 #include "../../Public/GPUDriven/GlobalSdf.hlsl"
+#if defined(VIVID_SPARSE_MESH_DISTANCE_FIELDS)
+#include "../../Public/GPUDriven/SparseMeshDistanceField.hlsl"
+#define ComposeGlobalSdf ComposeGlobalSdfSparse
+#endif
 
 RWTexture3D<float> _GlobalSdfWrite;
 RWStructuredBuffer<uint> _GlobalSdfThinBrickWrites;
@@ -67,9 +72,22 @@ void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
         [loop]
         for (uint i = 0u; i < node.leafCount; i++)
         {
-            VividMeshSdfInstance instance = _MeshSdfInstances[_MeshSdfLeafInstances[node.firstLeaf + i]];
+            uint instanceIndex = _MeshSdfLeafInstances[node.firstLeaf + i];
+            VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
             if ((instance.layerMask & _GlobalSdfLayerMask) == 0u)
                 continue;
+#if defined(VIVID_SPARSE_MESH_DISTANCE_FIELDS)
+            uint objectOffset = instanceIndex * 4u;
+            float4 localToVolume = _SparseSdfObjects[objectOffset];
+            if (localToVolume.w >= 0.0)
+            {
+                float4 p = float4(position, 1.0);
+                float3 localPosition = float3(dot(instance.worldToLocal0, p), dot(instance.worldToLocal1, p),
+                    dot(instance.worldToLocal2, p));
+                surface = min(surface, SparseDistanceToNearestSurfaceForObject(objectOffset, localToVolume, localPosition, surface));
+                continue;
+            }
+#endif
             VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
             if (VividMeshSdfIsSubvoxelShell(field, instance, _GlobalSdfVoxelSize))
                 continue;

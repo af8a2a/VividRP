@@ -51,6 +51,15 @@ namespace VividRP.Runtime.GPUDriven
         [SerializeField]
         private VividMeshSdfAsset m_MeshSdf;
 
+        [SerializeField, Tooltip("Optional baked sparse distance field for Global SDF composition.")]
+        private VividSparseMeshDistanceField m_SparseDistanceField;
+
+        [SerializeField, Tooltip("Scale already applied to the vertices of the imported distance field, in Unity axis order.")]
+        private Vector3 m_SparseFieldBakeScale = Vector3.one;
+
+        internal VividSparseMeshDistanceField SparseDistanceField => m_SourceWasSkinned ? null : m_SparseDistanceField;
+        internal Vector3 SparseFieldBakeScale => m_SparseFieldBakeScale;
+
         [SerializeField]
         private GPUDrivenMaterialProxy[] m_MaterialProxies = Array.Empty<GPUDrivenMaterialProxy>();
 

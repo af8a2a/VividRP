@@ -53,6 +53,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.Meshlets.VividSdfSurfaceCache
   m_AlbedoDepth: {fileID: 6958624360204244137}
   m_NormalCoverage: {fileID: -7924903085619062310}
+  m_CardMaterialPages: {fileID: -7359786189939899131, guid: 1f96ec0ed2e086d4c994d9184254b214, type: 3}
   m_Entries:
   - Mesh: {fileID: 4300000, guid: 1e11f4ac56ba00c458bef406d7d06adc, type: 2}
     Material: {fileID: 2100000, guid: d73ce15a14ac0ef4cb931e348e012638, type: 2}

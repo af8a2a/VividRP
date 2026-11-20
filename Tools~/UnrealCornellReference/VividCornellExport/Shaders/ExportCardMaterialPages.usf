@@ -1,0 +1,38 @@
+#include "/Engine/Public/Platform.ush"
+
+// The UE D3D12 Surface Cache exposes its BC blocks as R32G32B32A32_UINT UAVs.
+RWTexture2D<uint4> AlbedoBlocks;
+RWTexture2D<uint4> NormalBlocks;
+RWTexture2D<uint4> EmissiveBlocks;
+Texture2D<float> PageDepth;
+Texture2D<float> PageOpacity;
+StructuredBuffer<uint2> BlockCoords;
+RWStructuredBuffer<uint4> Records;
+uint NumBlocks;
+[numthreads(64,1,1)]
+void Export(uint id : SV_DispatchThreadID)
+{
+    if (id >= NumBlocks) return;
+    uint2 xy = BlockCoords[id];
+    uint first = id * 6;
+    Records[first] = AlbedoBlocks[xy];
+    Records[first + 1] = NormalBlocks[xy];
+    Records[first + 2] = EmissiveBlocks[xy];
+    uint depth[8], opacity[4];
+    [unroll] for (uint y = 0; y < 4; ++y)
+    {
+        uint4 d, o;
+        [unroll] for (uint x = 0; x < 4; ++x)
+        {
+            int3 texel = int3(xy * 4 + uint2(x,y), 0);
+            d[x] = uint(round(PageDepth.Load(texel) * 65535.0));
+            o[x] = uint(round(PageOpacity.Load(texel) * 255.0));
+        }
+        depth[2*y] = d.x | (d.y << 16);
+        depth[2*y+1] = d.z | (d.w << 16);
+        opacity[y] = o.x | (o.y << 8) | (o.z << 16) | (o.w << 24);
+    }
+    Records[first + 3] = uint4(depth[0],depth[1],depth[2],depth[3]);
+    Records[first + 4] = uint4(depth[4],depth[5],depth[6],depth[7]);
+    Records[first + 5] = uint4(opacity[0],opacity[1],opacity[2],opacity[3]);
+}

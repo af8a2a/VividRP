@@ -7,8 +7,10 @@
 #pragma kernel AllocateWorldProbes VIVID_SDF_WORLD
 #pragma kernel BuildWorldTickets VIVID_SDF_WORLD
 #pragma kernel SelectWorldProbeUpdates VIVID_SDF_WORLD
+#pragma kernel BuildWorldProbeDispatchArgs VIVID_SDF_WORLD
 #pragma kernel UpdateWorldProbes VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
 #pragma kernel UpdateWorldProbesWithSky VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_SDF_WORLD_SKY
+#pragma kernel FilterWorldProbeRadiance VIVID_SDF_WORLD
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
@@ -41,6 +43,8 @@ void UpdateSdfFarRadiance(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
 
 #if defined(VIVID_SDF_WORLD)
 RWTexture2D<uint> _SdfWorldWork;
+RWStructuredBuffer<uint> _SdfWorldDispatchArgs;
+RWTexture2D<float4> _SdfWorldRawRadiance;
 
 // Demand uses one uint per logical cell. The following rows hold the free
 // list, frame counters, trace tickets and each physical slot's priority.
@@ -48,7 +52,29 @@ uint2 DemandAddress(uint index) { return uint2(index & 1023u, index >> 10u); }
 uint2 FreeAddress(uint index) { return uint2(index & 1023u, 432u + (index >> 10u)); }
 uint2 PriorityAddress(uint slot) { return uint2(slot & 1023u, 437u + (slot >> 10u)); }
 uint2 Counter(uint index) { return uint2(index, 436u); }
-uint2 Ticket(uint index) { return Counter(64u + index); }
+uint2 Ticket(uint index) { return uint2(index & 1023u, 441u + (index >> 10u)); }
+
+static const uint PriorityHistogramSize = 16u;
+static const uint ProbeTraceCostDownsampled = 1u;
+static const uint ProbeTraceCostNormal = 4u;
+
+uint GetProbeTraceCostBudget()
+{
+    return WorldBudget * ProbeTraceCostNormal;
+}
+
+// LumenRadianceCacheUpdate.ush, with the default supersample distance disabled.
+uint GetProbeTraceCost(float3 ProbeWorldPosition)
+{
+    float3 DistanceVector = _SdfFarWindow.xyz - ProbeWorldPosition;
+    float CameraDistance = length(DistanceVector);
+    if (_SdfFarWindow.w != 0.0)
+        CameraDistance *= CameraDistance / dot(DistanceVector, _SdfProbeCameraForward.xyz);
+    float DistanceFromCameraSq = CameraDistance * CameraDistance;
+    if (DistanceFromCameraSq >= 40.0f * 40.0f)
+        return ProbeTraceCostDownsampled;
+    return ProbeTraceCostNormal;
+}
 
 [numthreads(8,8,1)]
 void ClearWorldProbeDemand(uint3 id : SV_DispatchThreadID)
@@ -56,7 +82,7 @@ void ClearWorldProbeDemand(uint3 id : SV_DispatchThreadID)
     uint index = id.x + 1024u * id.y;
     _SdfWorldWork[id.xy] = 0u;
     _SdfFarOutput[WorldIndirection(index)] = 0.0f;
-    if (index < 64u + WorldBudget) _SdfWorldWork[Counter(index)] = 0u;
+    if (index < 64u) _SdfWorldWork[Counter(index)] = 0u;
 }
 
 [numthreads(8,8,1)]
@@ -92,7 +118,12 @@ void ReuseWorldProbes(uint slot : SV_DispatchThreadID)
             bool used = _SdfWorldWork[DemandAddress(index)] != 0u;
             if (used || _SdfDiffuseFrame + 1u - uint(age.y) < 8u)
             {
-                if (used) _SdfWorldWork[DemandAddress(index)] = slot + 2u;
+                _SdfWorldWork[DemandAddress(index)] = slot + 2u;
+                if (used)
+                {
+                    age.y = float(_SdfDiffuseFrame + 1u);
+                    _SdfFarOutput[WorldAgeAddress(slot)] = age;
+                }
                 if (age.x > 0.0f) _SdfFarOutput[WorldIndirection(index)] = float(slot + 1u);
                 return;
             }
@@ -113,39 +144,58 @@ void AllocateWorldProbes(uint3 id : SV_DispatchThreadID)
     uint level = index / (48u * 48u * 48u);
     uint slot = marker - 2u;
     uint lastTraced = 0u;
+    uint lastUsed = _SdfDiffuseFrame + 1u;
+    int3 local = int3(index % 48u, (index / 48u) % 48u, (index / 2304u) % 48u);
+    int3 cell = WorldOrigin(level) + local;
     if (marker == 1u)
     {
         uint freeIndex;
         InterlockedAdd(_SdfWorldWork[Counter(1)], 1u, freeIndex);
         if (freeIndex >= _SdfWorldWork[Counter(0)]) return;
         slot = _SdfWorldWork[FreeAddress(freeIndex)];
-        int3 local = int3(index % 48u, (index / 48u) % 48u, (index / 2304u) % 48u);
-        _SdfFarOutput[WorldKeyAddress(slot)] = float4(WorldOrigin(level) + local, level + 1u);
+        _SdfFarOutput[WorldKeyAddress(slot)] = float4(cell, level + 1u);
+        _SdfFarOutput[WorldAgeAddress(slot)] = float4(0u, lastUsed, 0, 0);
     }
-    else lastTraced = uint(_SdfFarOutput[WorldAgeAddress(slot)].x);
-    uint frame = _SdfDiffuseFrame + 1u;
-    _SdfFarOutput[WorldAgeAddress(slot)] = float4(lastTraced, frame, 0, 0);
+    else
+    {
+        uint2 age = uint2(_SdfFarOutput[WorldAgeAddress(slot)].xy);
+        lastTraced = age.x;
+        lastUsed = age.y;
+    }
     // GetPriorityBucketIndex, LumenRadianceCacheUpdate.usf.
     uint bucket = 0u;
     if (lastTraced != 0u)
     {
-        uint framesBetweenTracedAndUsed = frame > lastTraced ? frame - lastTraced : 1u;
+        uint framesBetweenTracedAndUsed = lastUsed > lastTraced ? lastUsed - lastTraced : 1u;
         float importance = framesBetweenTracedAndUsed / (level + 1.0f);
         bucket = 15.0f - clamp(log2(importance), 0.0f, 14.0f);
     }
     _SdfWorldWork[PriorityAddress(slot)] = bucket + 1u;
-    InterlockedAdd(_SdfWorldWork[Counter(2u + bucket)], 1u);
+    uint cost = GetProbeTraceCost(float3(cell) * WorldCellSize(level));
+    InterlockedAdd(_SdfWorldWork[Counter(2u + bucket)], cost);
+    if (bucket == 0u)
+        InterlockedAdd(_SdfWorldWork[Counter(20u)], ProbeTraceCostDownsampled);
 }
 
 [numthreads(1,1,1)]
 void SelectWorldProbeUpdates(uint3 id : SV_DispatchThreadID)
 {
-    uint sum = 0u;
-    for (uint bucket = 0u; bucket < 16u; ++bucket)
+    uint NumTracesBudget = GetProbeTraceCostBudget();
+    uint TraceSum = 0u;
+    uint PriorityBucketIndex = 0u;
+    uint NumTracesFromPriorityBucket = NumTracesBudget;
+    for (; PriorityBucketIndex < PriorityHistogramSize; ++PriorityBucketIndex)
     {
-        _SdfWorldWork[Counter(18u + bucket)] = sum;
-        sum += _SdfWorldWork[Counter(2u + bucket)];
+        uint TilesPerBucket = _SdfWorldWork[Counter(2u + PriorityBucketIndex)];
+        if (TraceSum + TilesPerBucket >= NumTracesBudget)
+        {
+            NumTracesFromPriorityBucket = NumTracesBudget - TraceSum;
+            break;
+        }
+        TraceSum += TilesPerBucket;
     }
+    _SdfWorldWork[Counter(18u)] = PriorityBucketIndex;
+    _SdfWorldWork[Counter(19u)] = NumTracesFromPriorityBucket;
 }
 
 [numthreads(64,1,1)]
@@ -153,10 +203,39 @@ void BuildWorldTickets(uint slot : SV_DispatchThreadID)
 {
     uint priority = _SdfWorldWork[PriorityAddress(slot)];
     if (priority == 0u) return;
-    uint ticket;
-    InterlockedAdd(_SdfWorldWork[Counter(17u + priority)], 1u, ticket);
-    if (ticket < WorldBudget)
-        _SdfWorldWork[Ticket(ticket)] = (slot + 1u) | (priority == 1u ? 0u : 0x10000u);
+    uint PriorityBucketIndex = priority - 1u;
+    uint MaxUpdateBucketIndex = _SdfWorldWork[Counter(18u)];
+    if (PriorityBucketIndex > MaxUpdateBucketIndex) return;
+
+    float4 key = _SdfFarOutput[WorldKeyAddress(slot)];
+    uint ProbeTraceCost = GetProbeTraceCost(key.xyz * WorldCellSize(uint(key.w) - 1u));
+    bool bForceDownsampleProbe = false;
+    if (PriorityBucketIndex == MaxUpdateBucketIndex && MaxUpdateBucketIndex > 0u)
+    {
+        uint ProbeTraceAllocatedFromMaxUpdateBucket;
+        InterlockedAdd(_SdfWorldWork[Counter(21u)], ProbeTraceCost, ProbeTraceAllocatedFromMaxUpdateBucket);
+        if (ProbeTraceAllocatedFromMaxUpdateBucket + ProbeTraceCost > _SdfWorldWork[Counter(19u)])
+            return;
+    }
+    else if (PriorityBucketIndex == 0u)
+    {
+        uint PrevMinNewProbeTraceCost;
+        InterlockedAdd(_SdfWorldWork[Counter(20u)], ProbeTraceCost - ProbeTraceCostDownsampled, PrevMinNewProbeTraceCost);
+        if (PrevMinNewProbeTraceCost + ProbeTraceCost - ProbeTraceCostDownsampled > GetProbeTraceCostBudget())
+            bForceDownsampleProbe = true;
+    }
+
+    uint TraceIndex;
+    InterlockedAdd(_SdfWorldWork[Counter(22u)], 1u, TraceIndex);
+    _SdfWorldWork[Ticket(TraceIndex)] = slot | (bForceDownsampleProbe || ProbeTraceCost == ProbeTraceCostDownsampled ? 0x10000u : 0u);
+}
+
+[numthreads(1,1,1)]
+void BuildWorldProbeDispatchArgs(uint3 id : SV_DispatchThreadID)
+{
+    _SdfWorldDispatchArgs[0] = 4u;
+    _SdfWorldDispatchArgs[1] = 4u;
+    _SdfWorldDispatchArgs[2] = _SdfWorldWork[Counter(22u)];
 }
 
 #if defined(VIVID_SDF_FAR_UPDATE)
@@ -168,33 +247,104 @@ void UpdateWorldProbes(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
 #endif
 {
     uint ticket = _SdfWorldWork[Ticket(group.z)];
-    if (ticket == 0u) return;
-    uint slot = (ticket & 0xffffu) - 1u;
+    uint slot = ticket & 0xffffu;
     float4 key = _SdfFarOutput[WorldKeyAddress(slot)];
     int3 cell = int3(key.xyz);
     uint level = uint(key.w) - 1u;
     uint index = WorldCellIndex(cell - WorldOrigin(level), level);
-    uint seed = HashProbe(index ^ HashProbe(_SdfDiffuseFrame));
-    float2 jitter = (float2(seed & 65535u, seed >> 16u) + 0.5) / 65536.0;
+    uint TraceResolution = (ticket & 0x10000u) != 0u ? WorldResolution / 2u : WorldResolution;
     uint2 xy = group.xy * 8u + lane.xy;
-    uint2 address = WorldTexelAddress(slot, xy);
-    float3 dir = ProbeSphereDirection((xy + jitter) / WorldResolution);
+    if (any(xy >= TraceResolution)) return;
+    float3 dir = ProbeSphereDirection((xy + 0.5f) / float(TraceResolution));
     uint instance;
     float4 fresh = TraceFarProbe(float3(cell) * WorldCellSize(level), dir, WorldProbeTMin(level), instance);
-    if ((ticket & 0x10000u) != 0u)
-    {
-        float4 previous = _SdfFarOutput[address];
-        if (fresh.w > 0.0 && previous.w > 0.0 && abs(fresh.w - previous.w) < 0.1 * fresh.w)
-            fresh.rgb = lerp(previous.rgb, fresh.rgb, 0.25);
-    }
-    _SdfFarOutput[address] = fresh;
+    uint UpsampleFactor = WorldResolution / TraceResolution;
+    for (uint Y = 0; Y < UpsampleFactor; Y++)
+        for (uint X = 0; X < UpsampleFactor; X++)
+            _SdfWorldRawRadiance[WorldTexelAddress(slot, xy * UpsampleFactor + uint2(X, Y))] = fresh;
     if (all(xy == 0u))
     {
         _SdfFarOutput[WorldIndirection(index)] = float(slot + 1u);
-        _SdfFarOutput[WorldAgeAddress(slot)] = float4(_SdfDiffuseFrame + 1u, _SdfDiffuseFrame + 1u, 0, 0);
+        float4 age = _SdfFarOutput[WorldAgeAddress(slot)];
+        age.x = float(_SdfDiffuseFrame + 1u);
+        _SdfFarOutput[WorldAgeAddress(slot)] = age;
     }
 }
 #endif
+
+// LumenRadianceCache.usf::FilterProbeRadianceWithGatherCS (LOCAL_SCATTER_FILTER=0).
+// Retained neighbors are read from the unfiltered atlas, including those not traced this frame.
+float WorldProbeHitAngle(float inX)
+{
+    float x = abs(inX);
+    float res = -0.156583f * x + (0.5f * PI);
+    res *= sqrt(1.0f - x);
+    return inX >= 0.0f ? res : PI - res;
+}
+
+uint2 WorldDepthCoord(float3 direction)
+{
+    return min(uint2(ProbeSphereUV(direction) * WorldResolution), WorldResolution - 1u);
+}
+
+[numthreads(8,8,1)]
+void FilterWorldProbeRadiance(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+{
+    uint slot = _SdfWorldWork[Ticket(group.z)] & 0xffffu;
+    float4 key = _SdfFarOutput[WorldKeyAddress(slot)];
+    uint level = uint(key.w) - 1u;
+    int3 ProbeCoord = int3(key.xyz) - WorldOrigin(level);
+    float3 ProbeWorldCenter = key.xyz * WorldCellSize(level);
+    uint2 ProbeTexelCoord = group.xy * 8u + lane.xy;
+    uint2 address = WorldTexelAddress(slot, ProbeTexelCoord);
+    float4 current = _SdfWorldRawRadiance[address];
+    float3 Lighting = current.rgb;
+    float HitDistance = current.w;
+    float TotalWeight = 1.0f;
+    float3 WorldConeDirection = ProbeSphereDirection((ProbeTexelCoord + 0.5f) / float(WorldResolution));
+    const int3 Offsets[6] = { int3(-1,0,0), int3(1,0,0), int3(0,-1,0), int3(0,1,0), int3(0,0,-1), int3(0,0,1) };
+    for (uint OffsetIndex = 0; OffsetIndex < 6u; OffsetIndex++)
+    {
+        int3 NeighborCoord = ProbeCoord + Offsets[OffsetIndex];
+        if (all(NeighborCoord >= 0) && all(NeighborCoord < int(WorldGrid)))
+        {
+            uint NeighborProbeIndex = uint(_SdfFarOutput[WorldIndirection(WorldCellIndex(NeighborCoord, level))].x) - 1u;
+            if (NeighborProbeIndex < WorldCapacity)
+            {
+                float4 NeighborRadiance = _SdfWorldRawRadiance[WorldTexelAddress(NeighborProbeIndex, ProbeTexelCoord)];
+                float NeighborRadianceDepth = NeighborRadiance.w;
+                float3 NeighborWorldPosition = float3(WorldOrigin(level) + NeighborCoord) * WorldCellSize(level);
+                float OcclusionWeight = 1.0f;
+                float OcclusionTestOffset = 2.0f * WorldProbeTMin(level);
+                float3 NeighborOcclusionTestPosition = NeighborWorldPosition + OcclusionTestOffset * WorldConeDirection;
+                float3 ToNeighborOcclusionPosition = NeighborOcclusionTestPosition - ProbeWorldCenter;
+                float ProbeDepthForNeighborOcclusionPosition = _SdfWorldRawRadiance[
+                    WorldTexelAddress(slot, WorldDepthCoord(ToNeighborOcclusionPosition))].w;
+                if (ProbeDepthForNeighborOcclusionPosition * ProbeDepthForNeighborOcclusionPosition < dot(ToNeighborOcclusionPosition, ToNeighborOcclusionPosition))
+                    OcclusionWeight = 0.0f;
+
+                float3 OcclusionTestPosition = ProbeWorldCenter + OcclusionTestOffset * WorldConeDirection;
+                float3 ToOcclusionPosition = OcclusionTestPosition - NeighborWorldPosition;
+                float NeighborProbeDepthForOcclusionPosition = _SdfWorldRawRadiance[
+                    WorldTexelAddress(NeighborProbeIndex, WorldDepthCoord(ToOcclusionPosition))].w;
+                if (NeighborProbeDepthForOcclusionPosition * NeighborProbeDepthForOcclusionPosition < dot(ToOcclusionPosition, ToOcclusionPosition))
+                    OcclusionWeight = 0.0f;
+
+                if (HitDistance >= 0.0f)
+                    NeighborRadianceDepth = min(NeighborRadianceDepth, HitDistance);
+                float3 NeighborHitPosition = NeighborWorldPosition + WorldConeDirection * NeighborRadianceDepth;
+                float3 ToNeighborHit = NeighborHitPosition - ProbeWorldCenter;
+                float NeighborAngle = WorldProbeHitAngle(dot(ToNeighborHit, WorldConeDirection) / length(ToNeighborHit));
+                const float SpatialFilterMaxRadianceHitAngle = 0.2f;
+                float AngleWeight = 1.0f - saturate(NeighborAngle / SpatialFilterMaxRadianceHitAngle);
+                float Weight = AngleWeight * OcclusionWeight;
+                Lighting += NeighborRadiance.rgb * Weight;
+                TotalWeight += Weight;
+            }
+        }
+    }
+    _SdfFarOutput[address] = float4(Lighting / TotalWeight, HitDistance);
+}
 #endif
 
 #if defined(VIVID_GLOBAL_OBJECT_PRODUCER)

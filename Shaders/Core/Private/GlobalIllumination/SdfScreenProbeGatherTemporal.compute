@@ -391,6 +391,27 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
 #else
 Texture2D<float> _SdfPreviousFastUpdate;
 RWTexture2D<float> _SdfFastUpdateOutput;
+
+// LumenScreenProbeGatherTemporal.usf, scalar loads from Vivid's geometry-valid taps.
+float PackFastUpdateModeAmountAndNumFramesAccumulated(float FastUpdateModeAmount, float NumFramesAccumulated)
+{
+    float EncodedFastUpdateModeAmount = ceil(FastUpdateModeAmount * 15.0f);
+    float LocalMaxFramesAccumulated = min(_SdfPixelHistoryMaxAge, 15.0f);
+    float EncodedNumFramesAccumulated = round(saturate(NumFramesAccumulated / LocalMaxFramesAccumulated) * 15.0f);
+    return (EncodedFastUpdateModeAmount * 16.0f + EncodedNumFramesAccumulated) / 255.0f;
+}
+
+void UnpackFastUpdateModeAmountAndNumFramesAccumulated(float Packed,
+    out float OutFastUpdateModeAmount, out float OutNumFramesAccumulated)
+{
+    Packed = round(Packed * 255.0f);
+    float EncodedFastUpdateModeAmount = floor(Packed / 16.0f);
+    float EncodedNumFramesAccumulated = Packed - EncodedFastUpdateModeAmount * 16.0f;
+    OutFastUpdateModeAmount = EncodedFastUpdateModeAmount / 15.0f;
+    OutNumFramesAccumulated = EncodedNumFramesAccumulated == 15.0f ? _SdfPixelHistoryMaxAge
+        : EncodedNumFramesAccumulated / 15.0f * min(_SdfPixelHistoryMaxAge, 15.0f);
+}
+
 struct ScreenProbeTemporalHistory
 {
     float3 coveredLighting;
@@ -496,8 +517,11 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
         }
 #endif
         history.coveredLighting += weight * DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y);
-        history.age += covered * ageAndCoverage.x;
-        history.fastUpdate += weight * _SdfPreviousFastUpdate.Load(int3(tap, 0));
+        float fastUpdate, numFramesAccumulated;
+        UnpackFastUpdateModeAmountAndNumFramesAccumulated(_SdfPreviousFastUpdate.Load(int3(tap, 0)),
+            fastUpdate, numFramesAccumulated);
+        history.age += weight * (numFramesAccumulated + 1.0f);
+        history.fastUpdate += weight * fastUpdate;
         history.footprint += weight;
         coveredWeight += covered;
     }
@@ -506,7 +530,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
 
     history.coveredLighting /= geometryWeight;
     history.coverage = coveredWeight / geometryWeight;
-    history.age /= max(coveredWeight, 1e-5);
+    history.age = min(history.age / history.footprint, _SdfPixelHistoryMaxAge);
     history.fastUpdate /= history.footprint;
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
     float momentWeight = history.momentCoverage;
@@ -550,6 +574,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     uint historyStatus = ScreenProbeNoHistory;
     ScreenProbeTemporalHistory history;
     float currentFastUpdate = 0.0;
+    float numFramesAccumulated = 0.0;
     if (age > 0.0 && _SdfDiffuseHasHistory != 0u && ReadScreenProbeTemporalHistory(id.xy, position, normal, history))
     {
         float coverageAgreement = min(result.a, history.coverage) / max(result.a, history.coverage);
@@ -557,11 +582,17 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         {
             float3 historyLighting = history.coveredLighting / history.coverage;
             float moving = _SdfResolvedMoving.Load(int3(id.xy, 0));
-            currentFastUpdate = clamp((saturate(10.0 * moving) - 0.2) / 0.8, 0.0, 0.9);
+            currentFastUpdate = saturate(moving * 10.0f);
+            currentFastUpdate = saturate(min((currentFastUpdate - .2f) / .8f, .9f));
             // Only this frame's lighting motion is carried into the next frame.
             float fastUpdate = max(currentFastUpdate, min(history.fastUpdate, 0.9));
-            fastUpdate = max(fastUpdate, SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels));
-            float3 rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
+            bool fullSphere = _SdfScreenProbeFullSphere != 0u;
+            float3 rectified = historyLighting;
+            if (!fullSphere)
+            {
+                fastUpdate = max(fastUpdate, SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels));
+                rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
+            }
             // Trace coverage is a stochastic lighting estimate. It must not
             // select the current sample's averaging weight on stable geometry.
             float ageConfidence = (_SdfGatherHistoryDiagnostics & 4194304u) != 0u
@@ -582,12 +613,14 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
                     (1.0 - weight) * (history.logVariance + weight * delta * delta), min(momentAge, _SdfPixelHistoryMaxAge));
             }
 #endif
-            float priorFrames = ScreenProbePriorFrameCount(history.age, ageConfidence, fastUpdate);
-            age = min(1.0 + priorFrames, _SdfPixelHistoryMaxAge);
+            // The UE desktop default uses validity-weighted age, with no
+            // fast-update neighborhood clamp. Geometry/coverage rejection above still applies.
+            numFramesAccumulated = ScreenProbePriorFrameCount(history.age, fullSphere ? 1.0 : ageConfidence, fastUpdate);
+            age = min(1.0 + numFramesAccumulated, _SdfPixelHistoryMaxAge);
             historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
                 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
 
-            float currentWeight = rcp(1.0 + priorFrames);
+            float currentWeight = 1.0f / (1.0f + numFramesAccumulated);
             float3 covered = lerp(rectified * history.coverage, result.rgb * result.a, currentWeight);
             result.a = lerp(history.coverage, result.a, currentWeight);
             result.rgb = min(covered / max(result.a, 1e-5), 65000.0);
@@ -595,7 +628,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     }
 
     _SdfDiffusePixelGeometryOutput[id.xy] = geometry;
-    _SdfFastUpdateOutput[id.xy] = currentFastUpdate;
+    _SdfFastUpdateOutput[id.xy] = PackFastUpdateModeAmountAndNumFramesAccumulated(currentFastUpdate, numFramesAccumulated);
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
     _SdfScreenProbeMomentsOutput[id.xy] = SdfRoundToNearestHalf(float4(moments, age > 0.0 ? result.a : 0.0));
 #endif

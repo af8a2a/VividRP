@@ -94,7 +94,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId RestirHistoryId = CameraHistoryId.Create("SdfDiffuseRestirHistory");
         private static readonly CameraHistoryId PixelHistoryId = CameraHistoryId.Create("SdfDiffusePixelHistoryWithCoverage");
         private static readonly CameraHistoryId CoveredPixelHistoryId = CameraHistoryId.Create("SdfScreenProbeCoveredPixelHistory");
-        private static readonly CameraHistoryId FastUpdateHistoryId = CameraHistoryId.Create("SdfScreenProbeFastUpdate");
+        private static readonly CameraHistoryId FastUpdateHistoryId = CameraHistoryId.Create("SdfScreenProbeFastUpdateAndFrames");
         private static readonly int PreviousFastUpdateId = Shader.PropertyToID("_SdfPreviousFastUpdate");
         private static readonly int ScatterNoiseId = Shader.PropertyToID("_SdfScatterNoise");
         private static readonly int HasScatterNoiseId = Shader.PropertyToID("_SdfHasScatterNoise");
@@ -184,13 +184,28 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RadiosityInputId = Shader.PropertyToID("_SdfRadiosityInput");
         private static readonly int RadiosityOutputId = Shader.PropertyToID("_SdfRadiosityOutput");
         private static readonly CameraHistoryId FarHistoryId = CameraHistoryId.Create("SdfFarRadiance");
+        private static readonly CameraHistoryId WorldRawRadianceHistoryId = CameraHistoryId.Create("SdfWorldRawRadiance");
         private static readonly int WorldWorkId = Shader.PropertyToID("_SdfWorldWork");
+        private static readonly int WorldDispatchArgsId = Shader.PropertyToID("_SdfWorldDispatchArgs");
+        private static readonly int WorldRawRadianceId = Shader.PropertyToID("_SdfWorldRawRadiance");
         [RenderGraphResource(Name = "World Probe Update Work", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_WorldWork = CreateScratch("World Probe Update Work", GraphicsFormat.R32_UInt);
+        [RenderGraphResource(Name = "World Probe Dispatch Arguments", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_WorldDispatchArgs = new()
+        {
+            desc = new RenderGraphBufferDesc
+            {
+                Name = "World Probe Dispatch Arguments",
+                Count = 3,
+                Stride = sizeof(uint),
+                Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
+            },
+        };
         private const int WorldAtlasHeight = 2052 + 4 * 48 * 48 * 48 / 2048;
-        private const int WorldProbeBudget = 100;
         private int m_WorldReuseKernel, m_WorldAllocateKernel, m_WorldTicketsKernel;
+        private int m_WorldArgsKernel, m_WorldFilterKernel;
         private Vector4 m_FarWindowParameter;
         private int m_WorldClearKernel, m_WorldMarkKernel, m_WorldSelectKernel, m_WorldUpdateKernel, m_WorldSkyKernel;
         private static readonly CameraHistoryId FarHitIdsHistoryId = CameraHistoryId.Create("SdfFarRadianceHitIds");
@@ -553,8 +568,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_BentDuringIntegration;
         private readonly RenderGraphTexture m_PreviousScreenProbeMoments = RenderGraphTexture.CreateInput("Previous Screen Probe Moments", ProbeFormat);
         private readonly RenderGraphTexture m_CurrentScreenProbeMoments = CreateOutput("Screen Probe Moments", ProbeFormat);
-        private readonly RenderGraphTexture m_PreviousFastUpdate = RenderGraphTexture.CreateInput("Previous Screen Probe Fast Update", GraphicsFormat.R16_SFloat);
-        private readonly RenderGraphTexture m_CurrentFastUpdate = CreateOutput("Screen Probe Fast Update", GraphicsFormat.R16_SFloat);
+        private readonly RenderGraphTexture m_PreviousFastUpdate = RenderGraphTexture.CreateInput("Previous Screen Probe Fast Update and Frames", GraphicsFormat.R8_UNorm);
+        private readonly RenderGraphTexture m_CurrentFastUpdate = CreateOutput("Screen Probe Fast Update and Frames", GraphicsFormat.R8_UNorm);
         private CameraHistoryTexture m_FastUpdateHistory;
         [RenderGraphResource(Name = "Raw Resolved Diffuse GI", Access = AccessFlags.ReadWrite)]
         [TransientResource]
@@ -598,6 +613,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_SunHistoryDesc = CreateOutput("Surface Cache Sun Visibility", SunVisibilityFormat);
         private readonly RenderGraphTexture m_RadiosityDesc = CreateOutput("Surface Cache Radiosity", ProbeFormat);
         private readonly RenderGraphTexture m_FarDesc = CreateOutput("World Diffuse Far Radiance", GeometryFormat);
+        private readonly RenderGraphTexture m_WorldRawDesc = CreateOutput("World Probe Raw Radiance and Depth", GeometryFormat);
+        private CameraHistoryTexture m_WorldRawHistory;
+        private TextureHandle m_WorldRawRadiance;
         [RenderGraphResource(Name = "Screen Ray Samples", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_ScreenRays = CreateOutput("Diffuse GI Screen Rays", ProbeFormat);
         private VividMeshSdfGpuScene m_Scene;
@@ -812,6 +830,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_WorldAllocateKernel = m_FarCompute.FindKernel("AllocateWorldProbes");
                 m_WorldTicketsKernel = m_FarCompute.FindKernel("BuildWorldTickets");
                 m_WorldSelectKernel = m_FarCompute.FindKernel("SelectWorldProbeUpdates");
+                m_WorldArgsKernel = m_FarCompute.FindKernel("BuildWorldProbeDispatchArgs");
+                m_WorldFilterKernel = m_FarCompute.FindKernel("FilterWorldProbeRadiance");
                 m_WorldUpdateKernel = m_FarCompute.FindKernel("UpdateWorldProbes");
                 m_WorldSkyKernel = m_FarCompute.FindKernel("UpdateWorldProbesWithSky");
             }
@@ -977,6 +997,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RadiosityFastRelight = false;
             m_RadiositySweeps = 1;
             m_FarHistory = null;
+            m_WorldRawHistory = null;
+            m_WorldRawRadiance = default;
             m_FarHitIdsHistory = null;
             m_FarAtlas = default;
             m_FarHitIds = default;
@@ -1255,7 +1277,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && float.IsFinite(settings.farTraceDistance.value)
                 && (m_FullSphere ? settings.farTraceDistance.value > 2f * Mathf.Sqrt(3f) * (50f / 48f)
                     : settings.farTraceDistance.value > m_TraceDistance + FarCellSize);
-            m_WorldWork.Resize(farConfigured && m_FullSphere ? 1024 : 1, farConfigured && m_FullSphere ? 441 : 1);
+            m_WorldWork.Resize(farConfigured && m_FullSphere ? 1024 : 1, farConfigured && m_FullSphere ? 445 : 1);
             if (m_UseSdf)
             {
                 m_SkyTexture = PassRecorder.ImportTextureForPass(this, SkyManager.GetSkySourceCubemapHandle());
@@ -2467,9 +2489,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarCardVersion = cache.CardVersion;
             var center = Vector3Int.FloorToInt(camera.transform.position / FarCellSize);
             m_FarWindow = center - new Vector3Int(FarGridSize / 2, FarGridSize / 2, FarGridSize / 2);
-            m_FarWindowParameter = m_FullSphere ? (Vector4)camera.transform.position : new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f);
+            var cameraPosition = camera.transform.position;
+            m_FarWindowParameter = m_FullSphere
+                ? new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, camera.orthographic ? 1f : 0f)
+                : new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f);
+            // Keep world probes through rigid motion. The scheduler refreshes their
+            // samples against current geometry while reusing the clipmap residency.
+            bool sceneChanged = m_FullSphere ? m_State.SceneNonMotionVersion != m_Scene.NonMotionVersion
+                : m_State.SceneRevision != m_Scene.Revision;
             m_FarClear = !m_FarHistory.IsValid(0) || (!m_FullSphere && !m_FarHitIdsHistory.IsValid(0)) || m_State.FarDistance != m_FarDistance
-                || m_State.SceneRevision != m_Scene.Revision || !ReferenceEquals(m_State.Cache, cache)
+                || sceneChanged || !ReferenceEquals(m_State.Cache, cache)
                 || m_State.FarCardVersion != m_FarCardVersion || m_State.GatherRadiosityOrder != PublishedRadiosityOrder
                 || m_State.LayerMask != m_LayerMask || m_State.LightLayerMask != m_LightLayerMask
                 || m_State.MaxDistance != m_TraceDistance || m_State.RayBias != m_Bias
@@ -2477,6 +2506,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !MatchesPreviousDirectionalLighting() || m_RadiosityRestarting && !m_State.RadiosityRestarting;
             if (m_FullSphere)
             {
+                m_WorldRawDesc.Resize(2048, 2048);
+                m_WorldRawHistory = history.GetOrCreateTexture(WorldRawRadianceHistoryId, 1,
+                    CameraHistoryRenderGraphBridge.CreateDescriptor(m_WorldRawDesc.desc));
+                m_FarClear |= !m_WorldRawHistory.IsValid(0);
+                m_WorldRawRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this, m_WorldRawHistory, 0, AccessFlags.ReadWrite);
                 m_FarAtlas = CameraHistoryRenderGraphBridge.ImportForPass(this, m_FarHistory, 0, AccessFlags.ReadWrite);
                 return;
             }
@@ -2508,7 +2542,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void RecordFarCache(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black, TextureHandle placement)
         {
-            bool ready = m_FarAtlas.IsValid() && (m_FullSphere || m_FarHitIds.IsValid());
+            bool ready = m_FarAtlas.IsValid() && (m_FullSphere
+                ? m_WorldRawRadiance.IsValid() && m_WorldDispatchArgs.innerHandle.IsValid()
+                : m_FarHitIds.IsValid());
             cmd.SetComputeFloatParam(m_TraceCompute, FarDistanceId, ready ? m_FarDistance : 0f);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, FarRadianceId, ready ? m_FarAtlas : black);
             if (ready && !m_FullSphere)
@@ -2563,11 +2599,22 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldSelectKernel, WorldWorkId, work);
                     cmd.DispatchCompute(m_FarCompute, m_WorldSelectKernel, 1, 1, 1);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldTicketsKernel, WorldWorkId, work);
+                    cmd.SetComputeTextureParam(m_FarCompute, m_WorldTicketsKernel, FarOutputId, m_FarAtlas);
                     cmd.DispatchCompute(m_FarCompute, m_WorldTicketsKernel, 64, 1, 1);
+                    var dispatchArgs = m_WorldDispatchArgs.innerHandle;
+                    cmd.SetComputeTextureParam(m_FarCompute, m_WorldArgsKernel, WorldWorkId, work);
+                    cmd.SetComputeBufferParam(m_FarCompute, m_WorldArgsKernel, WorldDispatchArgsId, dispatchArgs);
+                    cmd.DispatchCompute(m_FarCompute, m_WorldArgsKernel, 1, 1, 1);
                     cmd.SetComputeTextureParam(m_FarCompute, kernel, WorldWorkId, work);
+                    cmd.SetComputeTextureParam(m_FarCompute, kernel, WorldRawRadianceId, m_WorldRawRadiance);
                     if (worldSky)
                         BindOccludedSky(cmd, m_FarCompute, kernel);
-                    cmd.DispatchCompute(m_FarCompute, kernel, 4, 4, WorldProbeBudget);
+                    cmd.DispatchCompute(m_FarCompute, kernel, dispatchArgs, 0);
+                    cmd.SetComputeTextureParam(m_FarCompute, m_WorldFilterKernel, WorldWorkId, work);
+                    cmd.SetComputeTextureParam(m_FarCompute, m_WorldFilterKernel, WorldRawRadianceId, m_WorldRawRadiance);
+                    cmd.SetComputeTextureParam(m_FarCompute, m_WorldFilterKernel, FarOutputId, m_FarAtlas);
+                    cmd.DispatchCompute(m_FarCompute, m_WorldFilterKernel, dispatchArgs, 0);
+                    m_WorldRawHistory.MarkWritten();
                     m_FarHistory.MarkWritten();
                     return;
                 }

@@ -321,6 +321,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int AdaptiveProbesId = Shader.PropertyToID("_SdfDiffuseAdaptiveProbes");
         private static readonly int ProbeResolveRepairModeId = Shader.PropertyToID("_SdfProbeResolveRepairMode");
         private static readonly int IntegrationJitterId = Shader.PropertyToID("_SdfScreenProbeIntegrationJitter");
+        private static readonly int StochasticInterpolationId = Shader.PropertyToID("_SdfScreenProbeStochasticInterpolation");
+        private static readonly int InterpolationScalarNoiseId = Shader.PropertyToID("_SdfInterpolationScalarNoise");
+        private static readonly int InterpolationVectorNoiseId = Shader.PropertyToID("_SdfInterpolationVectorNoise");
+        private static readonly int InterpolationFlipYId = Shader.PropertyToID("_SdfInterpolationFlipY");
         private static readonly int SpatialFilterId = Shader.PropertyToID("_SdfDiffuseSpatialFilter");
         private static readonly int ProbeSpatialKernelId = Shader.PropertyToID("_SdfProbeSpatialKernel");
         private static readonly int ProbeHistoryBlendId = Shader.PropertyToID("_SdfProbeHistoryBlend");
@@ -443,7 +447,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool RestirPixelIntegration;
             internal bool RestirOpenPbrDiffuse;
             internal ulong RestirCardVersion;
-            internal bool PixelTemporal;
+            internal bool PixelTemporal, StochasticInterpolation;
             internal int PixelHistoryMaxAge, ProbeAnchorMaxAge;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
@@ -652,6 +656,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_DirectionalHierarchicalGuide, m_FullSphere, m_ProbeTemporal, m_DitherTraceDirections;
         private float m_MaxRayIntensity;
         private TextureHandle m_ScatterNoise;
+        private TextureHandle m_InterpolationScalarNoise, m_InterpolationVectorNoise;
+        private bool m_StochasticInterpolation, m_InterpolationFlipY;
         private GraphicsBuffer m_PreExposure;
         private int m_SphereGuideKernel = -1;
         private CameraHistoryTexture m_RestirHistory;
@@ -996,6 +1002,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LumenBentNormal.Resize(1, 1);
             m_BentBlueNoise = default;
             m_BentScalarNoise = default;
+            m_StochasticInterpolation = false;
+            m_InterpolationScalarNoise = m_InterpolationVectorNoise = default;
             m_BentComposite = false;
             m_BentDuringIntegration = false;
             m_ScreenProbeMomentsHistory = null;
@@ -1157,6 +1165,17 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_FullSphere && m_AdaptiveProbes)
                 m_AtlasHeight = m_ProbeHeight + (m_ProbeHeight + 1) / 2;
             m_DitherTraceDirections = m_FullSphere && settings.screenProbeDitherTraceDirections.value;
+            if (m_FullSphere && settings.screenProbeStochasticInterpolation.value && BlueNoise.Instance != null)
+            {
+                m_InterpolationScalarNoise = BlueNoise.Instance.ScalarAtlas;
+                m_InterpolationVectorNoise = BlueNoise.Instance.VectorAtlas;
+                m_StochasticInterpolation = m_InterpolationScalarNoise.IsValid() && m_InterpolationVectorNoise.IsValid();
+                if (m_StochasticInterpolation)
+                {
+                    PassRecorder.RegisterImportedTextureForPass(this, m_InterpolationScalarNoise);
+                    PassRecorder.RegisterImportedTextureForPass(this, m_InterpolationVectorNoise);
+                }
+            }
             m_ScatterNoise = m_DitherTraceDirections && BlueNoise.Instance != null ? BlueNoise.Instance.VectorAtlas : default;
             if (m_ScatterNoise.IsValid())
                 PassRecorder.RegisterImportedTextureForPass(this, m_ScatterNoise);
@@ -1285,6 +1304,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             var view = cameraData.GetViewMatrix();
             m_ProbeCameraForward = -view.GetRow(2);
+            if (m_StochasticInterpolation)
+                m_InterpolationFlipY = (cameraData.GetGPUProjectionMatrix(renderIntoTexture: true).m11 > 0f)
+                    != SystemInfo.graphicsUVStartsAtTop;
             if (m_BentDuringIntegration || m_BentComposite)
             {
                 m_BentWorldToView = view;
@@ -1793,6 +1815,7 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
                 if (pixelTemporal)
                     RecordPixelTemporal(cmd, hasHistory && m_State.PixelHistoryMaxAge == m_PixelHistoryMaxAge
+                        && m_State.StochasticInterpolation == m_StochasticInterpolation
                         && (m_State.NearOcclusion.w == 2f) == m_BentDuringIntegration
                         && (!m_BentDuringIntegration || m_State.NearOcclusion.y == m_NearOcclusion.y)
                         && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal, compositeBent, frame);
@@ -1859,6 +1882,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.RestirOpenPbrDiffuse = m_RestirOpenPbrDiffuse;
             m_State.RestirCardVersion = m_RestirCardVersion;
             m_State.PixelTemporal = pixelTemporal;
+            m_State.StochasticInterpolation = m_StochasticInterpolation;
             m_State.PixelHistoryMaxAge = m_PixelHistoryMaxAge;
             m_State.ProbeAnchorMaxAge = m_ProbeAnchorMaxAge;
             m_State.CorrectReceiverSelfHits = correctReceiver;
@@ -2888,11 +2912,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, LumenBentNormalId, m_LumenBentNormal.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, ProbeMovingId, m_ProbeMoving.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, ResolvedMovingOutputId, m_ResolvedMoving.innerHandle);
-                bool jitter = pixelTemporal;
+                bool jitter = pixelTemporal || m_StochasticInterpolation;
 #if UNITY_EDITOR
                 jitter &= EditorTraceCapture == null || (EditorGatherHistoryDiagnostics & 2) == 0;
 #endif
                 cmd.SetComputeIntParam(m_GatherCompute, IntegrationJitterId, jitter ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherCompute, StochasticInterpolationId, m_StochasticInterpolation ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherCompute, InterpolationFlipYId, m_InterpolationFlipY ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, InterpolationScalarNoiseId,
+                    m_StochasticInterpolation ? m_InterpolationScalarNoise : black);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, InterpolationVectorNoiseId,
+                    m_StochasticInterpolation ? m_InterpolationVectorNoise : black);
             }
             BindReceiver(cmd, m_GatherCompute, kernel);
             BindScreenTraceHistory(cmd, m_GatherCompute, kernel, repairScreenRays, black);

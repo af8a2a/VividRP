@@ -160,6 +160,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Stochastically scatter each traced direction to neighboring octahedral texels before filtering.")]
         public BoolParameter screenProbeDitherTraceDirections = new(true);
 
+        [Tooltip("Use Lumen full-tile blue-noise jitter and pick one weighted probe per pixel for SH3 integration.")]
+        public BoolParameter screenProbeStochasticInterpolation = new(false);
+
         [Tooltip("Blend the previous probe radiance before spatial filtering. The lighting sampling guide retains its own filtered history.")]
         public BoolParameter screenProbeTemporalFilter = new(false);
 

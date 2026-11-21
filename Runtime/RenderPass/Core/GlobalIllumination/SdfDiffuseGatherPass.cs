@@ -107,6 +107,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HasScatterNoiseId = Shader.PropertyToID("_SdfHasScatterNoise");
         private static readonly int DitherTraceDirectionsId = Shader.PropertyToID("_SdfDitherTraceDirections");
         private static readonly int FastUpdateOutputId = Shader.PropertyToID("_SdfFastUpdateOutput");
+        private static readonly int TemporalScalarNoiseId = Shader.PropertyToID("_SdfTemporalScalarNoise");
+        private static readonly int TemporalScalarNoiseEnabledId = Shader.PropertyToID("_SdfTemporalScalarNoiseEnabled");
+        private static readonly int ProbePreviousCameraForwardId = Shader.PropertyToID("_SdfProbePreviousCameraForward");
+        private static readonly int HistorySubPixelGridSizeAndInvSizeId = Shader.PropertyToID("_SdfHistorySubPixelGridSizeAndInvSize");
+        private static readonly int HistoryGatherUvMinMaxId = Shader.PropertyToID("_SdfHistoryGatherUvMinMax");
+        private static readonly int HistoryCoordShiftXId = Shader.PropertyToID("_SdfHistoryCoordShiftX");
+        private static readonly int HistoryCoordShiftYId = Shader.PropertyToID("_SdfHistoryCoordShiftY");
+        private static readonly int HistoryTemporalParamsId = Shader.PropertyToID("_SdfHistoryTemporalParams");
+        private static readonly int FastUpdateNeighborhoodClampId = Shader.PropertyToID("_SdfFastUpdateNeighborhoodClamp");
         private static readonly CameraHistoryId ScreenProbeMomentsHistoryId = CameraHistoryId.Create("SdfScreenProbePixelMoments");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
         private static readonly CameraHistoryId BentNormalHistoryId = CameraHistoryId.Create("SdfShortRangeBentNormal");
@@ -453,7 +462,9 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool RestirOpenPbrDiffuse;
             internal ulong RestirCardVersion;
             internal bool PixelTemporal, StochasticInterpolation;
+            internal bool FastUpdateNeighborhoodClamp;
             internal int PixelHistoryMaxAge, ProbeAnchorMaxAge;
+            internal Vector4 ProbeCameraForward;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
             internal bool FullSphere, ProbeTemporal, DitherTraceDirections;
@@ -664,7 +675,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_ProbeDirectionNoise, m_ScatterNoise;
         private TextureHandle m_SpatialFilterScalarNoise, m_SpatialFilterVectorNoise;
         private TextureHandle m_InterpolationScalarNoise, m_InterpolationVectorNoise;
+        private TextureHandle m_TemporalScalarNoise;
         private bool m_StochasticInterpolation, m_InterpolationFlipY;
+        private bool m_FastUpdateNeighborhoodClamp;
         private GraphicsBuffer m_PreExposure;
         private int m_SphereGuideKernel = -1;
         private CameraHistoryTexture m_RestirHistory;
@@ -1012,7 +1025,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BentBlueNoise = default;
             m_BentScalarNoise = default;
             m_StochasticInterpolation = false;
+            m_FastUpdateNeighborhoodClamp = true;
             m_InterpolationScalarNoise = m_InterpolationVectorNoise = default;
+            m_TemporalScalarNoise = default;
             m_ProbeDirectionNoise = m_ScatterNoise = default;
             m_SpatialFilterScalarNoise = m_SpatialFilterVectorNoise = default;
             m_BentComposite = false;
@@ -1203,6 +1218,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScatterNoise = m_DitherTraceDirections && BlueNoise.Instance != null ? BlueNoise.Instance.VectorAtlas : default;
             if (m_ScatterNoise.IsValid())
                 PassRecorder.RegisterImportedTextureForPass(this, m_ScatterNoise);
+            m_FastUpdateNeighborhoodClamp = !useSettings || settings.screenProbeFastUpdateNeighborhoodClamp.value;
+            m_TemporalScalarNoise = m_DirectionalCache && pixelTemporal && BlueNoise.Instance != null
+                ? BlueNoise.Instance.ScalarAtlas : default;
+            if (m_TemporalScalarNoise.IsValid())
+                PassRecorder.RegisterImportedTextureForPass(this, m_TemporalScalarNoise);
             int gatherColumns = m_FullSphere ? 8 : DirectionalGatherBins;
             int directionHeight = m_AtlasHeight * (m_FullSphere ? 8 : 1);
             m_ProbeTemporal = m_DirectionalCache && settings.screenProbeTemporalFilter.value;
@@ -1844,7 +1864,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         && m_State.StochasticInterpolation == m_StochasticInterpolation
                         && (m_State.NearOcclusion.w == 2f) == m_BentDuringIntegration
                         && (!m_BentDuringIntegration || m_State.NearOcclusion.y == m_NearOcclusion.y)
-                        && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal, compositeBent, frame);
+                        && m_PixelHistory.IsValid() && m_PixelGeometryHistory.IsValid(), restirVarianceTemporal, compositeBent, frame, black);
 #if UNITY_EDITOR
                 if (m_DirectionalCache && pixelTemporal)
                     EditorGatherStageCapture?.Invoke(context, 1, m_Output.innerHandle.ResolveTexture());
@@ -1884,6 +1904,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalGuideHistory?.MarkWritten();
             m_ProposalHistory?.MarkWritten();
             m_State.ViewProjection = m_ViewProjection;
+            m_State.ProbeCameraForward = m_ProbeCameraForward;
+            m_State.FastUpdateNeighborhoodClamp = m_FastUpdateNeighborhoodClamp;
             m_State.ProbeFrame = frame;
             m_State.Cache = m_Scene.SurfaceCache;
             m_State.OffscreenOnly = m_OffscreenOnly;
@@ -3066,8 +3088,53 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
+        internal static void GetHistoryScreenCoordCodec(
+            int width,
+            int height,
+            out Vector4 subPixelGridSizeAndInvSize,
+            out Vector2Int decodeShift,
+            out Vector4 gatherUvMinMax)
+        {
+            static int FloorLog2Positive(int value)
+            {
+                int shift = 0;
+                while ((value >>= 1) > 0)
+                    shift++;
+                return shift;
+            }
+
+            if (width <= 0 || height <= 0)
+            {
+                subPixelGridSizeAndInvSize = Vector4.zero;
+                decodeShift = Vector2Int.zero;
+                gatherUvMinMax = Vector4.zero;
+                return;
+            }
+
+            int rawSubPixelX = Mathf.Max(1, ushort.MaxValue / width);
+            int rawSubPixelY = Mathf.Max(1, ushort.MaxValue / height);
+            int shiftX = FloorLog2Positive(rawSubPixelX);
+            int shiftY = FloorLog2Positive(rawSubPixelY);
+            int subPixelX = 1 << shiftX;
+            int subPixelY = 1 << shiftY;
+            float invSubPixelX = 1f / subPixelX;
+            float invSubPixelY = 1f / subPixelY;
+            subPixelGridSizeAndInvSize = new Vector4(subPixelX, subPixelY, invSubPixelX, invSubPixelY);
+            decodeShift = new Vector2Int(shiftX, shiftY);
+
+            float invWidth = 1f / width;
+            float invHeight = 1f / height;
+            float guardX = 0.5f + Mathf.Max(invSubPixelX, 1f / 512f);
+            float guardY = 0.5f + Mathf.Max(invSubPixelY, 1f / 512f);
+            gatherUvMinMax = new Vector4(
+                Mathf.Min(guardX * invWidth, 0.5f),
+                Mathf.Min(guardY * invHeight, 0.5f),
+                Mathf.Max(1f - guardX * invWidth, 0.5f),
+                Mathf.Max(1f - guardY * invHeight, 0.5f));
+        }
+
         private void RecordPixelTemporal(ComputeCommandBuffer cmd, bool hasHistory, bool restirVarianceTemporal,
-            bool compositeBent, int frame)
+            bool compositeBent, int frame, TextureHandle black)
         {
             using var scope = new ProfilingScope(cmd, m_RestirGather ? RestirPixelTemporalSampler : PixelTemporalSampler);
             int kernel = m_PixelTemporalKernel;
@@ -3081,6 +3148,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 hasHistory &= m_FastUpdateHistory.IsValid();
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousFastUpdateId, m_PreviousFastUpdate.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, FastUpdateOutputId, m_CurrentFastUpdate.innerHandle);
+
+                GetHistoryScreenCoordCodec(
+                    m_Width,
+                    m_Height,
+                    out var subPixelGridSizeAndInvSize,
+                    out var decodeShift,
+                    out var gatherUvMinMax);
+                bool hasScalarNoise = m_TemporalScalarNoise.IsValid();
+                Vector4 previousCameraForward = m_State.ProbeCameraForward.sqrMagnitude > 0.5f
+                    ? m_State.ProbeCameraForward : m_ProbeCameraForward;
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, FrameId, frame);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, TemporalScalarNoiseEnabledId, hasScalarNoise ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, TemporalScalarNoiseId, hasScalarNoise ? m_TemporalScalarNoise : black);
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, ProbePreviousCameraForwardId, previousCameraForward);
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistorySubPixelGridSizeAndInvSizeId, subPixelGridSizeAndInvSize);
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryGatherUvMinMaxId, gatherUvMinMax);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, HistoryCoordShiftXId, decodeShift.x);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, HistoryCoordShiftYId, decodeShift.y);
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryTemporalParamsId, new Vector4(0.01f, 0.70710678f, 10f, 0.9f));
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, FastUpdateNeighborhoodClampId, m_FastUpdateNeighborhoodClamp ? 1 : 0);
             }
             else if (restirVarianceTemporal)
                 kernel = m_RestirVarianceTemporalKernel;

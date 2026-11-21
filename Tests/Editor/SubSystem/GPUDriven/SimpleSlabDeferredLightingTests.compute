@@ -1,11 +1,17 @@
 #pragma kernel PrepareInputs
 #pragma kernel ReferenceLighting
 #pragma kernel EvaluateAreaViewHemisphere
+#pragma kernel SampleStandaloneEffects VIVID_REALTIME_DIFFUSE_GI
 #pragma use_dxc
 #pragma target 5.0
 
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+#include "../../../../Shaders/Core/Public/Input.hlsl"
+#include "../../../../Shaders/Core/Public/VividDeferredLighting.hlsl"
+#else
 // Include the new path FIRST: this must compile without the legacy header.
 #include "../../../../Shaders/Core/Public/VividSimpleSlabDeferredLighting.hlsl"
+#endif
 
 RWTexture2D<float4> _TestGBuffer0;
 RWTexture2D<float4> _TestGBuffer1;
@@ -25,6 +31,17 @@ uint _TestSSREnabled;
 uint _TestDualMode;
 uint _TestOverrideClass;
 float _TestLayerWeight;
+
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+[numthreads(1, 1, 1)]
+void SampleStandaloneEffects(uint3 id : SV_DispatchThreadID)
+{
+    VividSurfaceSummaryData summary = (VividSurfaceSummaryData)0;
+    summary.deferredExportHeader = VIVID_DEFERRED_EXPORT_FLAG_RECEIVE_SSR;
+    float4 reflection = LoadScreenSpaceReflection(id.xy, summary);
+    _Expected[0] = float4(SampleGTAO(id.xy), reflection.rg, reflection.a);
+}
+#endif
 
 // Both light shapes face the surface. Only the viewing hemisphere changes.
 // The first two views must light both lobes; the remaining three must be zero.

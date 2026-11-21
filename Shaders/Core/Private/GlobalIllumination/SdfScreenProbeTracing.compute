@@ -8,12 +8,13 @@
 
 #pragma kernel ResetCompactTracesCS VIVID_COMPACT_PROBE_TRACE
 #pragma kernel SetupIndirectArgsCS VIVID_COMPACT_PROBE_TRACE
-#pragma kernel CompactScreenProbeTracesCS VIVID_COMPACT_PROBE_TRACE
-#pragma kernel CompactScreenProbeTracesWithReceiverCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_RECEIVER
-#pragma kernel TraceMeshSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
-#pragma kernel TraceMeshSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER
-#pragma kernel TraceMeshSdfSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
-#pragma kernel TraceMeshSdfReceiverSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_SDF_CACHED_SUN
+#pragma kernel BuildMeshSdfCardGridCS VIVID_BUILD_MESH_SDF_CARD_GRID
+#pragma kernel CompactScreenProbeTracesCS VIVID_COMPACT_PROBE_TRACE VIVID_MESH_SDF_CARD_GRID
+#pragma kernel CompactScreenProbeTracesWithReceiverCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_RECEIVER VIVID_MESH_SDF_CARD_GRID
+#pragma kernel TraceMeshSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_MESH_SDF_CARD_GRID
+#pragma kernel TraceMeshSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_MESH_SDF_CARD_GRID
+#pragma kernel TraceMeshSdfSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN VIVID_MESH_SDF_CARD_GRID
+#pragma kernel TraceMeshSdfReceiverSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_SDF_CACHED_SUN VIVID_MESH_SDF_CARD_GRID
 #pragma kernel TraceGlobalSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
 #pragma kernel ResolveGlobalSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
 #pragma kernel ResolveGlobalSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER
@@ -38,6 +39,80 @@
 #include "SdfDiffuseReSTIR.hlsl"
 
 #include "../../Public/AutoExposure.hlsl"
+
+#if defined(VIVID_BUILD_MESH_SDF_CARD_GRID)
+RWStructuredBuffer<uint> _MeshSdfCardGridWrite;
+float4x4 _MeshSdfCardGridInverseProjection;
+float4x4 _MeshSdfCardGridInverseView;
+
+[numthreads(4, 4, 2)]
+void BuildMeshSdfCardGridCS(uint3 cell : SV_DispatchThreadID)
+{
+    if (any(cell >= MeshSdfCardGridSize))
+        return;
+
+    uint offset = MeshSdfCardGridOffset(cell);
+    float4 parameters = _MeshSdfCardGridParameters;
+    if (!(parameters.y > 0.0))
+    {
+        _MeshSdfCardGridWrite[offset] = MeshSdfCardGridUnavailable;
+        return;
+    }
+
+    float3 boundsMin = FLT_MAX;
+    float3 boundsMax = -FLT_MAX;
+    float4 clipDepthAxis = mul(_MeshSdfCardGridInverseProjection, float4(0.0, 0.0, 1.0, 0.0));
+    [unroll]
+    for (uint corner = 0u; corner < 8u; ++corner)
+    {
+        uint3 boundary = cell + uint3(corner & 1u, (corner >> 1u) & 1u, corner >> 2u);
+        float3 fraction = float3(boundary) / float3(MeshSdfCardGridSize);
+        float depth = exp2(parameters.x + fraction.z * parameters.y);
+        float4 clipBase = mul(_MeshSdfCardGridInverseProjection, float4(2.0 * fraction.xy - 1.0, 0.0, 1.0));
+        // Intersect the unprojected clip line with view-space z = -depth in homogeneous coordinates.
+        float clipW = clipDepthAxis.z + depth * clipDepthAxis.w;
+        float4 cornerVS = clipW * clipBase - (clipBase.z + depth * clipBase.w) * clipDepthAxis;
+        float3 positionWS = mul(_MeshSdfCardGridInverseView, float4(cornerVS.xyz / cornerVS.w, 1.0)).xyz;
+        if (!(clipW * cornerVS.w > 0.0) || !all(isfinite(positionWS)))
+        {
+            _MeshSdfCardGridWrite[offset] = MeshSdfCardGridUnavailable;
+            return;
+        }
+        boundsMin = min(boundsMin, positionWS);
+        boundsMax = max(boundsMax, positionWS);
+    }
+
+    // Include all geometry within reach of a biased detail ray, even outside the camera frustum.
+    float3 padding = parameters.z + 0.001 + 1e-6 * max(abs(boundsMin), abs(boundsMax));
+    boundsMin -= padding;
+    boundsMax += padding;
+    uint count = 0u;
+    uint nodeIndex = 0u;
+    [loop]
+    while (nodeIndex < _MeshSdfNodeCount)
+    {
+        VividMeshSdfNode node = _MeshSdfNodes[nodeIndex];
+        if ((node.layerMask & _SdfDiffuseLayerMask) == 0u
+            || any(node.boundsMax < boundsMin) || any(node.boundsMin > boundsMax))
+        {
+            nodeIndex = node.escapeIndex;
+            continue;
+        }
+        if (node.leafCount != 0u)
+        {
+            if (count == MeshSdfCardGridCapacity)
+            {
+                _MeshSdfCardGridWrite[offset] = MeshSdfCardGridUnavailable;
+                return;
+            }
+            _MeshSdfCardGridWrite[offset + 1u + count] = nodeIndex;
+            ++count;
+        }
+        ++nodeIndex;
+    }
+    _MeshSdfCardGridWrite[offset] = count;
+}
+#endif
 
 uint EncodeProbeRayDistance(float HitDistance, bool bHit, bool bMoving, bool bReachedRadianceCache)
 {
@@ -271,13 +346,13 @@ float ProbeSdfStart(float screenDistance)
 }
 
 bool TraceProbeMeshDetail(float3 origin, float3 direction, VividMeshSdfReceiver receiver,
-    float screenStart, float detailEnd, out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete)
+    float screenStart, float detailEnd, uint2 gridRange, out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete)
 {
     hit = (VividMeshSdfHit)0;
     advancedReceiver = incomplete = false;
     if (!(screenStart < detailEnd)) return false;
-    return VividTraceMeshSdfSceneInternal(origin, direction, screenStart, detailEnd,
-        _SdfDiffuseLayerMask, 0.0f, false, receiver, hit, advancedReceiver, incomplete);
+    return VividTraceMeshSdfSceneNodes(origin, direction, screenStart, detailEnd,
+        _SdfDiffuseLayerMask, 0.0f, false, receiver, gridRange, hit, advancedReceiver, incomplete);
 }
 
 bool TraceProbeGlobal(float3 origin, float3 direction, float start, float end, inout VividMeshSdfHit hit)
@@ -306,7 +381,7 @@ bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver rec
         float detailEnd = min(nearLimit, _SdfMeshDetailDistance);
         tracedDistance = detailEnd;
         float screenStart = ProbeSdfStart(screenDistance);
-        bool detailHit = TraceProbeMeshDetail(origin, direction, receiver, screenStart, detailEnd,
+        bool detailHit = TraceProbeMeshDetail(origin, direction, receiver, screenStart, detailEnd, 0u,
             hit, advancedReceiver, incomplete);
         if (detailHit || incomplete || detailEnd >= nearLimit) return detailHit;
         tracedDistance = nearLimit;
@@ -941,7 +1016,7 @@ struct CompactProbe
     uint worldLevel;
     uint2 pixel;
     float receiverSpeed;
-    uint padding;
+    uint meshCardGridList;
 };
 
 struct CompactContribution
@@ -1066,6 +1141,9 @@ void CompactScreenProbeTracesCS(uint2 tile : SV_GroupID, uint ray : SV_GroupInde
             probe.valid = 1u;
             probe.worldLevel = GetWorldCoverage(probe.position);
             probe.receiverSpeed = ProbeReceiverSpeed(probe.pixel, probe.position);
+#if defined(VIVID_MESH_SDF_CARD_GRID)
+            probe.meshCardGridList = VividMeshSdfCardGridList(probe.position);
+#endif
         }
         _SdfCompactProbes[probeIndex] = probe;
         SharedCompactProbe = probe;
@@ -1164,9 +1242,13 @@ void TraceMeshSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex
 
     float limit = useWorld ? WorldNearDistance(probe.worldLevel) : max(_SdfFarTraceDistance, _SdfDiffuseMaxDistance);
     float detailEnd = min(limit, _SdfMeshDetailDistance);
+    uint2 gridRange = 0u;
+#if defined(VIVID_MESH_SDF_CARD_GRID)
+    gridRange = VividMeshSdfCardGridRange(probe.meshCardGridList);
+#endif
     bool advancedReceiver, incomplete;
     bool traced = TraceProbeMeshDetail(origin, result.direction, receiver, ProbeSdfStart(screen.HitDistance),
-        detailEnd, hit, advancedReceiver, incomplete);
+        detailEnd, gridRange, hit, advancedReceiver, incomplete);
     if (!traced && !incomplete && (detailEnd < limit || useWorld))
     {
         uint slot = AllocateCompactRay(retry ? CompactRetryGlobalQueue : CompactGlobalQueue);

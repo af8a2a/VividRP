@@ -18,6 +18,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal sealed class VividSdfDiffuseFrameData : ContextItem
     {
+        internal RenderGraphTexture DeclaredOutput;
         internal RenderGraphTexture Output;
         internal CameraHistoryTexture BentNormalHistory;
         internal TextureHandle BentNormalOutput;
@@ -28,6 +29,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Reset()
         {
+            DeclaredOutput = null;
             Output = null;
             BentNormalHistory = null;
             BentNormalOutput = default;
@@ -247,6 +249,19 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CompactArgsId = Shader.PropertyToID("_SdfCompactArgs");
         private static readonly int CompactQueueIndexId = Shader.PropertyToID("_SdfCompactQueueIndex");
         private static readonly int CompactRetryId = Shader.PropertyToID("_SdfCompactRetry");
+        private static readonly int MeshCardGridId = Shader.PropertyToID("_MeshSdfCardGrid");
+        private static readonly int MeshCardGridWriteId = Shader.PropertyToID("_MeshSdfCardGridWrite");
+        private static readonly int MeshCardGridViewId = Shader.PropertyToID("_MeshSdfCardGridView");
+        private static readonly int MeshCardGridProjectionId = Shader.PropertyToID("_MeshSdfCardGridProjection");
+        private static readonly int MeshCardGridInverseViewId = Shader.PropertyToID("_MeshSdfCardGridInverseView");
+        private static readonly int MeshCardGridInverseProjectionId = Shader.PropertyToID("_MeshSdfCardGridInverseProjection");
+        private static readonly int MeshCardGridParametersId = Shader.PropertyToID("_MeshSdfCardGridParameters");
+        private static readonly ProfilingSampler MeshCardGridSampler = new("Build Mesh SDF CardGrid");
+        // Must match MeshSdfCardGridSize and MeshSdfCardGridCapacity in MeshSdfTrace.hlsl.
+        private const int MeshCardGridX = 16, MeshCardGridY = 12, MeshCardGridZ = 16, MeshCardGridStride = 65;
+        [RenderGraphResource(Name = "Mesh SDF CardGrid", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_MeshCardGrid = RenderGraphBuffer.CreateStructured("Mesh SDF CardGrid", sizeof(uint));
         private static readonly ProfilingSampler CompactScreenSampler = new("Compact Screen Probe Traces");
         private static readonly ProfilingSampler CompactMeshSampler = new("Trace Compacted Mesh SDF");
         private static readonly ProfilingSampler CompactGlobalSampler = new("Trace Compacted Global SDF");
@@ -293,6 +308,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly int[] m_CompactResolveGlobalKernels = new int[2];
         private readonly int[] m_CompactFinalizeKernels = new int[2];
         private int m_CompactResetKernel = -1, m_CompactArgsKernel = -1;
+        private int m_MeshCardGridKernel = -1;
         private int m_CompactGlobalKernel = -1;
         private bool m_CompactTraceSupported, m_CompactTracePrepared, m_CompactTraceMayRetryMesh;
 
@@ -1105,6 +1121,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_CompactResetKernel = FindOptionalKernel("ResetCompactTracesCS");
             m_CompactArgsKernel = FindOptionalKernel("SetupIndirectArgsCS");
+            m_MeshCardGridKernel = FindOptionalKernel("BuildMeshSdfCardGridCS");
             m_CompactScreenKernels[0] = FindOptionalKernel("CompactScreenProbeTracesCS");
             m_CompactScreenKernels[1] = FindOptionalKernel("CompactScreenProbeTracesWithReceiverCS");
             m_CompactMeshKernels[0] = FindOptionalKernel("TraceMeshSdfCompactedCS");
@@ -1117,7 +1134,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CompactFinalizeKernels[0] = FindOptionalKernel("FinalizeProbeGatherCS");
             m_CompactFinalizeKernels[1] = FindOptionalKernel("FinalizeProbeGatherWithSunCS");
 
-            return m_CompactResetKernel >= 0 && m_CompactArgsKernel >= 0
+            return m_CompactResetKernel >= 0 && m_CompactArgsKernel >= 0 && m_MeshCardGridKernel >= 0
                 && System.Array.IndexOf(m_CompactScreenKernels, -1) < 0
                 && System.Array.IndexOf(m_CompactMeshKernels, -1) < 0
                 && m_CompactGlobalKernel >= 0 && System.Array.IndexOf(m_CompactResolveGlobalKernels, -1) < 0
@@ -1131,6 +1148,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            frameData.GetOrCreate<VividSdfDiffuseFrameData>().DeclaredOutput = m_Output;
             var cameraData = frameData.Get<VividCameraData>();
             var camera = cameraData.camera;
             m_State = null;
@@ -1756,6 +1774,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CompactProbes.desc.Count = probeCount;
             m_CompactContributions.desc.Count = rayCount;
             m_CompactMeshRays.desc.Count = rayCount;
+            m_MeshCardGrid.desc.Count = m_CompactTracePrepared ? MeshCardGridX * MeshCardGridY * MeshCardGridZ * MeshCardGridStride : 1;
             m_CompactGlobalRays.desc.Count = rayCount;
             m_CompactGlobalResults.desc.Count = rayCount;
             m_CompactRetryRays.desc.Count = m_CompactTraceMayRetryMesh ? rayCount : 1;
@@ -1790,7 +1809,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool compactTrace = m_CompactTracePrepared && useGlobalClipmap
                 && m_CompactProbes.IsValid() && m_CompactContributions.IsValid() && m_CompactCounts.IsValid()
                 && m_CompactMeshRays.IsValid() && m_CompactGlobalRays.IsValid() && m_CompactRetryRays.IsValid()
-                && m_CompactGlobalResults.IsValid()
+                && m_CompactGlobalResults.IsValid() && m_MeshCardGrid.IsValid()
                 && m_CompactMeshArgs.IsValid() && m_CompactGlobalArgs.IsValid()
                 && (!m_CompactTraceMayRetryMesh || (m_CompactRetryMeshArgs.IsValid() && m_CompactRetryGlobalArgs.IsValid()));
             int receiverVariant = hasReceiverSource ? 1 : 0;
@@ -1888,7 +1907,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, PreviousGeometryId, useProbeHistory ? m_PreviousGeometry.innerHandle : black);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ProbeMovingOutputId, m_ProbeMoving.innerHandle);
-            cmd.SetComputeIntParam(m_TraceCompute, MotionFrameId, context.Get<VividCameraData>().frameIndex);
+            var cameraData = context.Get<VividCameraData>();
+            cmd.SetComputeIntParam(m_TraceCompute, MotionFrameId, cameraData.frameIndex);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, HitLightingId, m_HitLighting.innerHandle);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, TraceSourcesId, m_TraceSources.innerHandle);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, RayDiagnosticsId, m_RayDiagnostics.innerHandle);
@@ -1979,8 +1999,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 using (new ProfilingScope(cmd, GatherSampler))
                 {
                     if (compactTrace)
+                    {
+                        RecordMeshSdfCardGrid(cmd, traceKernel, cameraData);
                         RecordCompactProbeTraces(cmd, cache, black, placement, useScreenRays, receiverVariant, sunVariant,
                             traceKernel, groupsX, groupsY);
+                    }
                     else
                         cmd.DispatchCompute(m_TraceCompute, traceKernel, groupsX, groupsY, 1);
                 }
@@ -2675,6 +2698,26 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, ProbeId, m_DirectionalRayTexture.innerHandle);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, RayDiagnosticsId, m_RayDiagnostics.innerHandle);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, HitSamplesId, m_HitSamples.innerHandle);
+        }
+
+        private void RecordMeshSdfCardGrid(ComputeCommandBuffer cmd, int traceKernel, VividCameraData cameraData)
+        {
+            using var scope = new ProfilingScope(cmd, MeshCardGridSampler);
+            var shader = m_TraceCompute;
+            var view = cameraData.GetViewMatrix();
+            var projection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
+            float logNear = Mathf.Log(Mathf.Max(0.001f, cameraData.camera.nearClipPlane), 2f);
+            float logDepthRange = Mathf.Log(cameraData.camera.farClipPlane, 2f) - logNear;
+            cmd.SetComputeVectorParam(shader, MeshCardGridParametersId,
+                new Vector4(logNear, logDepthRange, m_MeshDetailDistance + m_Bias, 0f));
+            cmd.SetComputeMatrixParam(shader, MeshCardGridViewId, view);
+            cmd.SetComputeMatrixParam(shader, MeshCardGridProjectionId, projection);
+            cmd.SetComputeMatrixParam(shader, MeshCardGridInverseViewId, view.inverse);
+            cmd.SetComputeMatrixParam(shader, MeshCardGridInverseProjectionId, projection.inverse);
+            m_Scene.BindBvhNodes(cmd, shader, m_MeshCardGridKernel);
+            cmd.SetComputeBufferParam(shader, m_MeshCardGridKernel, MeshCardGridWriteId, m_MeshCardGrid.innerHandle);
+            cmd.DispatchCompute(shader, m_MeshCardGridKernel, MeshCardGridX / 4, MeshCardGridY / 4, MeshCardGridZ / 2);
+            cmd.SetComputeBufferParam(shader, traceKernel, MeshCardGridId, m_MeshCardGrid.innerHandle);
         }
 
         private void RecordCompactProbeTraces(ComputeCommandBuffer cmd, VividSdfSurfaceCache cache, TextureHandle black,

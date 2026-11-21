@@ -66,6 +66,53 @@ StructuredBuffer<VividMeshSdfNode> _MeshSdfNodes;
 StructuredBuffer<uint> _MeshSdfLeafInstances;
 uint _MeshSdfNodeCount;
 
+#if defined(VIVID_MESH_SDF_CARD_GRID) || defined(VIVID_BUILD_MESH_SDF_CARD_GRID)
+// Keep the dimensions and entry stride in sync with SdfDiffuseGatherPass.
+static const uint3 MeshSdfCardGridSize = uint3(16u, 12u, 16u);
+static const uint MeshSdfCardGridCapacity = 64u;
+static const uint MeshSdfCardGridUnavailable = 0xffffffffu;
+float4 _MeshSdfCardGridParameters; // log2 near depth, log2 depth range, expanded trace reach, unused
+
+uint MeshSdfCardGridOffset(uint3 cell)
+{
+    return (cell.x + MeshSdfCardGridSize.x * (cell.y + MeshSdfCardGridSize.y * cell.z))
+        * (1u + MeshSdfCardGridCapacity);
+}
+#endif
+
+#if defined(VIVID_MESH_SDF_CARD_GRID)
+StructuredBuffer<uint> _MeshSdfCardGrid;
+float4x4 _MeshSdfCardGridView;
+float4x4 _MeshSdfCardGridProjection;
+
+uint VividMeshSdfCardGridList(float3 positionWS)
+{
+    float4 positionVS = mul(_MeshSdfCardGridView, float4(positionWS, 1.0));
+    float4 clip = mul(_MeshSdfCardGridProjection, positionVS);
+    float depth = -positionVS.z;
+    if (!(clip.w > 0.0 && depth > 0.0 && _MeshSdfCardGridParameters.y > 0.0))
+        return 0u;
+
+    float2 uv = clip.xy / clip.w * 0.5 + 0.5;
+    float slice = (log2(depth) - _MeshSdfCardGridParameters.x) / _MeshSdfCardGridParameters.y;
+    float3 position = float3(uv, slice);
+    if (!all(position >= 0.0) || !all(position <= 1.0))
+        return 0u;
+
+    uint3 cell = min(uint3(position * MeshSdfCardGridSize), MeshSdfCardGridSize - 1u);
+    return MeshSdfCardGridOffset(cell) + 1u;
+}
+
+uint2 VividMeshSdfCardGridRange(uint list)
+{
+    if (list == 0u)
+        return 0u;
+
+    uint count = _MeshSdfCardGrid[list - 1u];
+    return count == MeshSdfCardGridUnavailable ? uint2(0u, 0u) : uint2(list, list + count);
+}
+#endif
+
 // The page directory lives at the start of _MeshSdfVoxels. Entries are atlas slots or relative word offsets.
 static const uint VividMeshSdfBrickCells = 12u;
 static const uint VividMeshSdfDense = 0xffffffffu;
@@ -379,9 +426,9 @@ bool VividMeshSdfTryAdvanceReceiver(VividMeshSdfField field, VividMeshSdfInstanc
 }
 #endif
 
-bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    uint layerMask, float shellVoxelSize, bool anyHit, VividMeshSdfReceiver receiver, out VividMeshSdfHit hit,
-    out bool advancedReceiver, out bool incomplete)
+bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, float shellVoxelSize, bool anyHit, VividMeshSdfReceiver receiver, uint2 gridRange,
+    out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete)
 {
     advancedReceiver = false;
     incomplete = false;
@@ -392,18 +439,36 @@ bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float m
     VividMeshSdfField hitField = (VividMeshSdfField)0;
     float3 hitPosition = 0.0;
 
-    // Nodes are in preorder. A miss skips the entire subtree without a per-ray stack.
     uint nodeIndex = 0u;
-    [loop]
-    while (nodeIndex < _MeshSdfNodeCount)
+    uint nodeEnd = _MeshSdfNodeCount;
+#if defined(VIVID_MESH_SDF_CARD_GRID)
+    bool useGrid = gridRange.x != 0u;
+    if (useGrid)
     {
-        VividMeshSdfNode node = _MeshSdfNodes[nodeIndex];
+        nodeIndex = gridRange.x;
+        nodeEnd = gridRange.y;
+    }
+#endif
+    // The grid stores leaves in the same preorder as the scene BVH.
+    [loop]
+    while (nodeIndex < nodeEnd)
+    {
+        uint sceneNodeIndex = nodeIndex;
+#if defined(VIVID_MESH_SDF_CARD_GRID)
+        if (useGrid)
+            sceneNodeIndex = _MeshSdfCardGrid[nodeIndex];
+#endif
+        VividMeshSdfNode node = _MeshSdfNodes[sceneNodeIndex];
         float entry = minDistance;
         float exit = hit.distance;
         if ((node.layerMask & layerMask) == 0u
             || !VividMeshSdfClipRay(originWS, directionWS, node.boundsMin, node.boundsMax, entry, exit))
         {
+#if defined(VIVID_MESH_SDF_CARD_GRID)
+            nodeIndex = useGrid ? nodeIndex + 1u : node.escapeIndex;
+#else
             nodeIndex = node.escapeIndex;
+#endif
             continue;
         }
         nodeIndex++;
@@ -462,6 +527,14 @@ bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float m
     hit.entityId = hitInstance.entityId;
     hit.signMode = hitField.signMode;
     return true;
+}
+
+bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    uint layerMask, float shellVoxelSize, bool anyHit, VividMeshSdfReceiver receiver, out VividMeshSdfHit hit,
+    out bool advancedReceiver, out bool incomplete)
+{
+    return VividTraceMeshSdfSceneNodes(originWS, directionWS, minDistance, maxDistance, layerMask, shellVoxelSize,
+        anyHit, receiver, 0u, hit, advancedReceiver, incomplete);
 }
 
 bool VividTraceMeshSdfSceneInternal(float3 originWS, float3 directionWS, float minDistance, float maxDistance,

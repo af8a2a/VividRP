@@ -37,6 +37,15 @@ uint _RealtimeDiffuseGIOnly;
 uint _RealtimeOpenPbrDiffuse;
 #endif
 
+bool VividHasRealtimeDiffuseGI()
+{
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+    return _RealtimeDiffuseGIEnabled != 0u;
+#else
+    return false;
+#endif
+}
+
 float VividBentSpecularVisibility(uint2 pixelCoord, float3 normal, float3 view, float roughness)
 {
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
@@ -74,7 +83,7 @@ float VividBentSpecularVisibility(uint2 pixelCoord, float3 normal, float3 view, 
 float4 LoadVividRealtimeDiffuseGI(uint2 pixelCoord, float3 diffuseAlbedo)
 {
     #if defined(VIVID_REALTIME_DIFFUSE_GI)
-        if (_RealtimeDiffuseGIEnabled != 0u)
+        if (VividHasRealtimeDiffuseGI())
         {
             float4 gi = _RealtimeDiffuseGI.Load(int3(pixelCoord, 0));
             if (_RealtimeBentNormalEnabled == 2u)
@@ -134,6 +143,9 @@ float SampleDirectionalShadow(uint2 pixelCoord)
 
 float SampleGTAO(uint2 pixelCoord)
 {
+    if (VividHasRealtimeDiffuseGI())
+        return 1.0;
+
     return LOAD_TEXTURE2D(_GTAOTexture,pixelCoord).x;
 }
 
@@ -141,7 +153,7 @@ float4 LoadScreenSpaceReflection(
     uint2 pixelCoord,
     VividSurfaceSummaryData summary)
 {
-    if (_ScreenSpaceReflectionEnabled == 0)
+    if (_ScreenSpaceReflectionEnabled == 0u || VividHasRealtimeDiffuseGI())
         return float4(0.0, 0.0, 0.0, 0.0);
 
     if (!VividHasDeferredExportFlag(

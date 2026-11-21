@@ -80,6 +80,53 @@ namespace VividRP.Editor.Tests
             fixture.Run(directLights, ssrWeight, lutReady, mixedTile);
         }
 
+        [Test]
+        public void StandaloneAoAndSsr_OnlyContributeWithoutRealtimeGI()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.SupportsTextureFormat(TextureFormat.RGBAFloat))
+                Assert.Ignore("Compute and RGBAFloat textures required.");
+
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(VividPackagePathUtility.GetPreferredAssetPath(
+                "Tests/Editor/SubSystem/GPUDriven/SimpleSlabDeferredLightingTests.compute"));
+            int kernel = shader.FindKernel("SampleStandaloneEffects");
+            var gtao = new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true);
+            var ssr = new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true);
+            try
+            {
+                gtao.SetPixel(0, 0, new Color(0.25f, 0, 0, 1));
+                gtao.Apply();
+                ssr.SetPixel(0, 0, new Color(0.5f, 0.25f, 0.125f, 0.75f));
+                ssr.Apply();
+                using var preExposure = new ComputeBuffer(1, 16);
+                using var output = new ComputeBuffer(1, 16);
+                using var cmd = new CommandBuffer();
+                var pixels = new Vector4[1];
+                preExposure.SetData(new[] { new Vector4(2, 0, 0, 0) });
+                Assert.That(Sample(true), Is.EqualTo(new Vector4(1, 0, 0, 0)));
+                Assert.That(Sample(false), Is.EqualTo(new Vector4(0.25f, 1, 0.5f, 0.75f)));
+
+                Vector4 Sample(bool realtimeGI)
+                {
+                    cmd.Clear();
+                    cmd.SetComputeTextureParam(shader, kernel, "_GTAOTexture", gtao);
+                    cmd.SetComputeTextureParam(shader, kernel, "_ScreenSpaceReflectionTexture", ssr);
+                    cmd.SetComputeBufferParam(shader, kernel, "_VividAutoExposurePreExposureBuffer", preExposure);
+                    cmd.SetComputeBufferParam(shader, kernel, "_Expected", output);
+                    cmd.SetComputeIntParam(shader, "_RealtimeDiffuseGIEnabled", realtimeGI ? 1 : 0);
+                    cmd.SetComputeIntParam(shader, "_ScreenSpaceReflectionEnabled", 1);
+                    cmd.DispatchCompute(shader, kernel, 1, 1, 1);
+                    Graphics.ExecuteCommandBuffer(cmd);
+                    output.GetData(pixels);
+                    return pixels[0];
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(gtao);
+                Object.DestroyImmediate(ssr);
+            }
+        }
+
         // 1: mip-colored sky, 2: partial probes + sky, 3: overlapping probes
         // consume all weight, 4: invalid first probe, 5: different N/R face fades.
         [TestCase(1, 0.0f, true)]

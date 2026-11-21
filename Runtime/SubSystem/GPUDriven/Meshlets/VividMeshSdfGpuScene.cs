@@ -251,8 +251,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             cmd.SetComputeVectorParam(shader, BrickAtlasSizeId, m_BrickAtlasSize);
             cmd.SetComputeBufferParam(shader, kernel, FieldsId, m_FieldBuffer);
             cmd.SetComputeBufferParam(shader, kernel, InstancesId, m_InstanceBuffer);
-            cmd.SetComputeBufferParam(shader, kernel, NodesId, m_NodeBuffer);
             cmd.SetComputeBufferParam(shader, kernel, LeafInstancesId, m_LeafInstanceBuffer);
+            BindBvhNodes(cmd, shader, kernel);
+        }
+
+        internal void BindBvhNodes(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
+        {
+            cmd.SetComputeBufferParam(shader, kernel, NodesId, m_NodeBuffer);
             cmd.SetComputeIntParam(shader, NodeCountId, NodeCount);
         }
 

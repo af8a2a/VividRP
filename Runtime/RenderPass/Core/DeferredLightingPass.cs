@@ -643,8 +643,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
         {
             var rgDefaultResource = context.renderGraphContext.defaultResources;
-            bool hasRealtimeGI = m_UseRealtimeDiffuseGI && !ReferenceEquals(m_RealtimeDiffuseGI, m_LocalRealtimeDiffuseGI)
-                && m_RealtimeDiffuseGI?.innerHandle.IsValid() == true;
+            context.TryGet<VividSdfDiffuseFrameData>(out var diffuse);
+            bool hasRealtimeGI = HasRealtimeDiffuseGI(diffuse);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, RealtimeDiffuseGIId,
                 hasRealtimeGI ? m_RealtimeDiffuseGI.innerHandle : rgDefaultResource.blackTexture);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIEnabledId, hasRealtimeGI ? 1 : 0);
@@ -653,8 +653,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool openPbrDiffuse = false;
             bool bentNormal = false;
             bool compositeBent = false;
-            if (hasRealtimeGI && context.TryGet<VividSdfDiffuseFrameData>(out var diffuse)
-                && ReferenceEquals(diffuse.Output, m_RealtimeDiffuseGI))
+            if (hasRealtimeGI && ReferenceEquals(diffuse?.Output, m_RealtimeDiffuseGI))
             {
                 bentNormal = m_BentNormal.IsValid() && diffuse.BentNormalOutput == m_BentNormal;
                 compositeBent = bentNormal && diffuse.CompositeBentNormal;
@@ -676,6 +675,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 slabLutReady ? m_SlabLutTexture.innerHandle : rgDefaultResource.blackTexture);
             cmd.SetComputeIntParam(m_DeferredLitCompute, VividSlabLut.ReadyId, slabLutReady ? 1 : 0);
             BindSkyTextureParameters(cmd, kernel);
+        }
+
+        internal bool HasRealtimeDiffuseGI(VividSdfDiffuseFrameData diffuse)
+        {
+            // An allocated graph texture can exist even when SDF Gather skipped
+            // producing it. Other graph inputs retain the normal texture contract.
+            return m_UseRealtimeDiffuseGI && !ReferenceEquals(m_RealtimeDiffuseGI, m_LocalRealtimeDiffuseGI)
+                && m_RealtimeDiffuseGI?.innerHandle.IsValid() == true
+                && (!ReferenceEquals(diffuse?.DeclaredOutput, m_RealtimeDiffuseGI)
+                    || ReferenceEquals(diffuse.Output, m_RealtimeDiffuseGI));
         }
 
         private void BindSkyTextureParameters(ComputeCommandBuffer cmd, int kernel)

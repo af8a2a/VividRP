@@ -570,19 +570,22 @@ ProbeRaySample ResolveProbeRay(uint2 tile, uint ray, uint seed, float3 position,
     }
     else if (cacheCoverage < 1.0)
     {
-        float cachedVisibility = -1.0;
-        #if defined(VIVID_SDF_CACHED_SUN)
-            if (!farSegment)
-            {
-                cachedVisibility = LoadCachedSunVisibility(surface, cardTexel, surfaceError, hit, lightingNormal);
-                accum.cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
-            }
-        #endif
         #if defined(VIVID_SDF_SURFACE_CACHE)
-            float3 exactLighting = TraceSdfSurfaceRadiance(hitPosition, lightingNormal, originalNormal,
-                direction, hit, surface, cardTexel, cachedVisibility);
+            float3 exactLighting;
+            if (!TryLoadCardFinalLighting(surface, cardTexel, exactLighting))
+            {
+                float cachedVisibility = -1.0;
+                #if defined(VIVID_SDF_CACHED_SUN)
+                    if (!farSegment)
+                    {
+                        cachedVisibility = LoadCachedSunVisibility(surface, cardTexel, surfaceError, hit, lightingNormal);
+                        accum.cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
+                    }
+                #endif
+                exactLighting = EvaluateUncachedSdfSurfaceRadiance(hitPosition, lightingNormal, hit, surface, cardTexel, cachedVisibility);
+            }
         #else
-            float3 exactLighting = TraceHitLighting(hitPosition, lightingNormal, hit, surface, cachedVisibility);
+            float3 exactLighting = TraceHitLighting(hitPosition, lightingNormal, hit, surface, -1.0f);
         #endif
         radiance = lerp(exactLighting, cacheLighting, cacheCoverage);
     }

@@ -1,4 +1,6 @@
 #pragma kernel UpdateSdfSurfaceSunVisibility VIVID_SDF_SURFACE_CACHE VIVID_SDF_SUN_UPDATE
+#pragma kernel UpdateSdfCardDirectLighting VIVID_SDF_SURFACE_CACHE
+#pragma kernel CombineSdfCardFinalLighting VIVID_SDF_SURFACE_CACHE
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
@@ -55,5 +57,92 @@ void UpdateSdfSurfaceSunVisibility(uint3 id : SV_DispatchThreadID)
         return;
     uint card = _SdfSunFirstCard + id.z;
     _SdfSunVisibilityOutput[VividSdfSunAtlasPixel(card, id.xy)] = EvaluateCardSunVisibility(card, id.xy);
+}
+#endif
+
+#if defined(VIVID_SDF_SURFACE_CACHE)
+Texture2D<float4> _SdfCardDirectLighting;
+RWTexture2D<float4> _SdfCardLightingOutput;
+uint _SdfCardLightingFirstCard;
+uint _SdfCardLightingHasDirect;
+
+void LoadCardLightingWork(uint card, out uint instance, out uint slot)
+{
+    uint work = _SdfRadiosityWork[0] + 2u * card;
+    instance = _SdfRadiosityWork[work];
+    slot = _SdfRadiosityWork[work + 1u];
+}
+
+float3 FiniteCardLighting(float3 lighting)
+{
+    return float3(isfinite(lighting.x) ? clamp(lighting.x, 0.0f, 65000.0f) : 0.0f,
+        isfinite(lighting.y) ? clamp(lighting.y, 0.0f, 65000.0f) : 0.0f,
+        isfinite(lighting.z) ? clamp(lighting.z, 0.0f, 65000.0f) : 0.0f);
+}
+
+[numthreads(8, 8, 1)]
+void UpdateSdfCardDirectLighting(uint3 id : SV_DispatchThreadID)
+{
+    uint2 size = uint2(_SdfFinalLightingLayout.xy);
+    if (any(id.xy >= size)) return;
+    uint card = _SdfCardLightingFirstCard + id.z;
+    uint instanceIndex, slot;
+    LoadCardLightingWork(card, instanceIndex, slot);
+    DiffuseSurface surface = _SdfDiffuseSurfaces[instanceIndex];
+    uint slice, axis;
+    float3 lower, extent;
+    VividGetSdfCardProjection(surface, slot, slice, axis, lower, extent);
+    float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(id.xy, slice, 0));
+    float3 direct = 0.0;
+    if (packedNormal.a > 0.0f)
+    {
+        VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+        float3 r0 = instance.worldToLocal0.xyz;
+        float3 r1 = instance.worldToLocal1.xyz;
+        float3 r2 = instance.worldToLocal2.xyz;
+        float4 albedoDepth = _SdfSurfaceAlbedoDepth.Load(int4(id.xy, slice, 0));
+        float2 uv = (float2(id.xy) + 0.5f) / float2(size);
+        float depth = albedoDepth.w;
+        float3 relative = axis == 0u ? float3(depth, uv) : axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
+        float3 delta = lower + relative * extent
+            - float3(instance.worldToLocal0.w, instance.worldToLocal1.w, instance.worldToLocal2.w);
+        float3 c0 = cross(r1, r2);
+        float3 position = (c0 * delta.x + cross(r2, r0) * delta.y + cross(r0, r1) * delta.z) / dot(r0, c0);
+        float3 normalLS = packedNormal.xyz * 2.0f - 1.0f;
+        float3 normal = SafeNormalize(r0 * normalLS.x + r1 * normalLS.y + r2 * normalLS.z);
+        VividMeshSdfHit hit = (VividMeshSdfHit)0;
+        hit.normalWS = normal;
+        hit.instanceIndex = instanceIndex;
+        surface.albedoAndValid.rgb = albedoDepth.rgb;
+        if (all(isfinite(position)))
+            direct = TraceHitDirectLighting(position, normal, hit, surface, -1.0f);
+    }
+    _SdfCardLightingOutput[FinalLightingCardOrigin(card) + id.xy] = float4(FiniteCardLighting(direct), 0.0f);
+}
+
+[numthreads(8, 8, 1)]
+void CombineSdfCardFinalLighting(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= uint2(_SdfFinalLightingLayout.xy))) return;
+    uint card = _SdfCardLightingFirstCard + id.z;
+    uint instanceIndex, slot;
+    LoadCardLightingWork(card, instanceIndex, slot);
+    DiffuseSurface surface = _SdfDiffuseSurfaces[instanceIndex];
+    uint slice, axis;
+    float3 lower, extent;
+    VividGetSdfCardProjection(surface, slot, slice, axis, lower, extent);
+    uint2 atlasPixel = FinalLightingCardOrigin(card) + id.xy;
+    float3 lighting = 0.0f;
+    if (_SdfSurfaceNormalCoverage.Load(int4(id.xy, slice, 0)).a > 0.0f)
+    {
+        float3 direct = _SdfCardLightingHasDirect != 0u ? _SdfCardDirectLighting.Load(int3(atlasPixel, 0)).rgb : 0.0f;
+        VividMeshSdfHit hit = (VividMeshSdfHit)0;
+        hit.instanceIndex = instanceIndex;
+        surface.albedoAndValid.rgb = _SdfSurfaceAlbedoDepth.Load(int4(id.xy, slice, 0)).rgb;
+        // Direct is outgoing Lambertian radiance. LoadCardIndirect converts the
+        // stored E / PI to outgoing radiance with one albedo multiply.
+        lighting = (max(surface.emission.rgb, 0.0f) + direct) + LoadCardIndirect(surface, hit, uint3(id.xy, slot));
+    }
+    _SdfCardLightingOutput[atlasPixel] = float4(FiniteCardLighting(lighting), 0.0f);
 }
 #endif

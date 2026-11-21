@@ -218,12 +218,14 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
     TexelBilinearWeights.w=(1-FracUV.x)*(1-FracUV.y);
     // Point-sampler Gather on the native texture array uses the same four lanes as UE.
     float4 TexelDepths;
+    float4 packedNormals[4];
     uint2 low=uint2(floor(CoordInPage-0.5f+SubTexelPrecisionBias));
+    [unroll]
     for(uint k=0;k<4;k++){
         int4 texel=int4(min(low + uint2(k == 1u || k == 2u, k < 2u),uint2(width-1u,height-1u)),slice,0);
         float raw=_SdfSurfaceAlbedoDepth.Load(texel).w;
-        bool valid=_SdfSurfaceNormalCoverage.Load(texel).w>0;
-        TexelDepths[k]=EncodeSurfaceCacheDepth((face&1u)?1.0f-raw:raw,valid);
+        packedNormals[k]=_SdfSurfaceNormalCoverage.Load(texel);
+        TexelDepths[k]=EncodeSurfaceCacheDepth((face&1u)?1.0f-raw:raw,packedNormals[k].w>0);
     }
     const bool bHeightfield = false;
     float NormalWeight=normalWeight, SurfaceCacheBias=bias;
@@ -262,6 +264,50 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
     }
     VividMeshSdfInstance inst = _MeshSdfInstances[index];
     float3 a = inst.worldToLocal0.xyz, b = inst.worldToLocal1.xyz, c = inst.worldToLocal2.xyz;
+    DiffuseSurface surface = _SdfDiffuseSurfaces[index];
+    uint finalCard;
+    [branch]
+    if (TryGetFinalLightingCard(surface, slot, finalCard))
+    {
+        // A material side that is culled still contributes to CardSampleWeight.
+        // Keep its radiance black while preserving opaque coverage.
+        float4 lightWeights = TexelWeights;
+        if (surface.emission.w != 0.0f)
+        {
+            [unroll] for (uint tap = 0u; tap < 4u; ++tap)
+            {
+                if (lightWeights[tap] <= 0.0f) continue;
+                float3 normalLS = packedNormals[tap].xyz * 2.0f - 1.0f;
+                float3 normal = SafeNormalize(a * normalLS.x + b * normalLS.y + c * normalLS.z);
+                float3 originalNormal = packedNormals[tap].w < 0.75f ? -normal : normal;
+                if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
+                    lightWeights[tap] = 0.0f;
+            }
+        }
+
+        uint2 atlasOrigin = FinalLightingCardOrigin(finalCard);
+        if (all(lightWeights == TexelBilinearWeights))
+        {
+            uint atlasWidth, atlasHeight;
+            _SdfFinalLightingAtlas.GetDimensions(atlasWidth, atlasHeight);
+            float2 texel = clamp(float2(low) + FracUV + 0.5f, 0.5f, float2(width, height) - 0.5f);
+            float2 atlasUV = (float2(atlasOrigin) + texel) / float2(atlasWidth, atlasHeight);
+            accum.sum += CardSampleWeight * _SdfFinalLightingAtlas.SampleLevel(sampler_LinearClamp, atlasUV, 0.0f).rgb;
+        }
+        else
+        {
+            // Depth and material masks produce nonseparable weights at card edges.
+            [unroll] for (uint tap = 0u; tap < 4u; ++tap)
+            {
+                float weight = NormalWeight * lightWeights[tap];
+                if (weight <= 0.0f) continue;
+                uint2 pixel = min(low + uint2(tap == 1u || tap == 2u, tap < 2u), uint2(width - 1u, height - 1u));
+                accum.sum += weight * _SdfFinalLightingAtlas.Load(int3(atlasOrigin + pixel, 0)).rgb;
+            }
+        }
+        return;
+    }
+
     float3 cx = cross(b,c), cy = cross(c,a), cz = cross(a,b);
     VividMeshSdfHit hit = (VividMeshSdfHit)0;
     hit.instanceIndex = index;
@@ -271,7 +317,7 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
         if (weight <= 0.0f) continue;
         uint2 xy = min(low + uint2(tap == 1u || tap == 2u, tap < 2u), uint2(width-1u,height-1u));
         float4 albedoDepth = _SdfSurfaceAlbedoDepth.Load(int4(xy,slice,0));
-        float4 normalCoverage = _SdfSurfaceNormalCoverage.Load(int4(xy,slice,0));
+        float4 normalCoverage = packedNormals[tap];
         float3 normalLS = normalCoverage.xyz * 2.0f - 1.0f;
         hit.normalWS = SafeNormalize(a * normalLS.x + b * normalLS.y + c * normalLS.z);
         float3 originalNormal = normalCoverage.w < 0.75f ? -hit.normalWS : hit.normalWS;
@@ -281,10 +327,9 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
         local[axis] += albedoDepth.w * sizeLS[axis];
         float3 delta = local - float3(inst.worldToLocal0.w,inst.worldToLocal1.w,inst.worldToLocal2.w);
         float3 position = (cx*delta.x + cy*delta.y + cz*delta.z) / dot(a,cx);
-        DiffuseSurface surface = _SdfDiffuseSurfaces[index];
         surface.albedoAndValid.rgb = albedoDepth.rgb;
-        accum.sum += weight * TraceSdfSurfaceRadiance(position, hit.normalWS, originalNormal, rayDirection,
-            hit, surface, uint3(xy,slot), -1.0f);
+        if (VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
+            accum.sum += weight * EvaluateUncachedSdfSurfaceRadiance(position, hit.normalWS, hit, surface, uint3(xy,slot), -1.0f);
     }
 }
 
@@ -392,7 +437,7 @@ float4 TraceFarProbe(float3 origin, float3 direction, float start, out uint inst
     float error;
     if (surface.albedoAndValid.a == 0.0 || !VividTrySampleSdfSurface(hit, position, surface, normal, originalNormal, texel, error))
         return 0.0;
-    float3 radiance = TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel, -1.0);
+    float3 radiance = TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel);
     instance = hit.instanceIndex + 1u;
     return float4(clamp(radiance, 0.0, 65000.0), hit.distance);
 }

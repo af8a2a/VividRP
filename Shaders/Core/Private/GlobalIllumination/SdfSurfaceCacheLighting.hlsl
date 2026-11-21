@@ -109,16 +109,14 @@ float LoadCachedSunVisibility(DiffuseSurface surface, uint3 cardTexel, float sur
 }
 #endif
 
-// Direct terms only. Cached surface callers validate the material side through
-// TraceSdfSurfaceRadiance before adding either these terms or indirect lighting.
-float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, DiffuseSurface surface,
+// Outgoing direct diffuse radiance for a card texel or an uncached hit.
+float3 TraceHitDirectLighting(float3 position, float3 normal, VividMeshSdfHit hit, DiffuseSurface surface,
     float cachedVisibility)
 {
-    float3 radiance = max(surface.emission.rgb, 0.0);
     float range = _SdfDiffuseLightPositionRange.w;
     VividMeshSdfInstance instance = _MeshSdfInstances[hit.instanceIndex];
     if (range == 0.0 || (instance.layerMask & _SdfDiffuseLightLayerMask) == 0u)
-        return radiance;
+        return 0.0;
 
     bool directional = range < 0.0;
     float3 direction = _SdfDiffuseLightPositionRange.xyz;
@@ -128,7 +126,7 @@ float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, Dif
         float3 toLight = direction - position;
         float distanceSquared = dot(toLight, toLight);
         if (distanceSquared <= 1e-6 || distanceSquared >= range * range)
-            return radiance;
+            return 0.0;
         direction = toLight * rsqrt(distanceSquared);
         float relativeDistance = distanceSquared / (range * range);
         float window = saturate(1.0 - relativeDistance * relativeDistance);
@@ -136,9 +134,9 @@ float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, Dif
     }
     float nDotL = dot(normal, direction);
     if (nDotL <= 0.0)
-        return radiance;
+        return 0.0;
     if (dot(hit.normalWS, direction) <= 0.0)
-        return radiance;
+        return 0.0;
 
     float shadow = 1.0;
     float strength = _SdfDiffuseLightColorShadow.w;
@@ -165,8 +163,13 @@ float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, Dif
 
     // Incident directional illuminance is unexposed. Lambertian outgoing radiance
     // is albedo * E / PI; the gather's cosine PDF cancels its receiver BRDF / PI.
-    return radiance + saturate(surface.albedoAndValid.rgb) * max(_SdfDiffuseLightColorShadow.rgb, 0.0)
+    return saturate(surface.albedoAndValid.rgb) * max(_SdfDiffuseLightColorShadow.rgb, 0.0)
         * (INV_PI * nDotL * attenuation * shadow);
+}
+
+float3 TraceHitLighting(float3 position, float3 normal, VividMeshSdfHit hit, DiffuseSurface surface, float cachedVisibility)
+{
+    return max(surface.emission.rgb, 0.0) + TraceHitDirectLighting(position, normal, hit, surface, cachedVisibility);
 }
 
 #if defined(VIVID_SDF_SURFACE_CACHE)
@@ -177,6 +180,40 @@ static const uint RadiosityRays = 16u;
 StructuredBuffer<uint> _SdfRadiosityWork;
 Texture2D<float4> _SdfRadiosityInput;
 uint _SdfRadiosityLayout; // Number of published cards, or zero until a sweep is complete.
+
+Texture2D<float4> _SdfFinalLightingAtlas;
+float4 _SdfFinalLightingLayout; // Baked card width, height and atlas columns.
+uint _SdfFinalLightingCardCount;
+
+uint2 FinalLightingCardOrigin(uint card)
+{
+    uint columns = (uint)_SdfFinalLightingLayout.z;
+    return uint2(card % columns, card / columns) * uint2(_SdfFinalLightingLayout.xy);
+}
+
+bool TryGetFinalLightingCard(DiffuseSurface surface, uint slot, out uint card)
+{
+    card = 0u;
+    uint instance = (uint)surface.cardExtent.w;
+    [branch]
+    if (_SdfFinalLightingCardCount == 0u || instance == 0u)
+        return false;
+    uint first = _SdfRadiosityWork[instance];
+    if (first >= _SdfFinalLightingCardCount || slot >= _SdfFinalLightingCardCount - first)
+        return false;
+    card = first + slot;
+    return true;
+}
+
+bool TryLoadCardFinalLighting(DiffuseSurface surface, uint3 cardTexel, out float3 lighting)
+{
+    lighting = 0.0;
+    uint card;
+    if (!TryGetFinalLightingCard(surface, cardTexel.z, card))
+        return false;
+    lighting = _SdfFinalLightingAtlas.Load(int3(FinalLightingCardOrigin(card) + cardTexel.xy, 0)).rgb;
+    return true;
+}
 
 uint2 RadiosityAtlasPixel(uint card, uint2 pixel)
 {
@@ -246,15 +283,24 @@ float3 LoadCardIndirect(DiffuseSurface surface, VividMeshSdfHit hit, uint3 cardT
     return radiance;
 }
 
+float3 EvaluateUncachedSdfSurfaceRadiance(float3 position, float3 normal, VividMeshSdfHit hit,
+    DiffuseSurface surface, uint3 cardTexel, float cachedVisibility)
+{
+    return TraceHitLighting(position, normal, hit, surface, cachedVisibility)
+        + LoadCardIndirect(surface, hit, cardTexel);
+}
+
 float3 TraceSdfSurfaceRadiance(float3 position, float3 normal, float3 originalNormal, float3 rayDirection,
-    VividMeshSdfHit hit, DiffuseSurface surface, uint3 cardTexel, float cachedVisibility)
+    VividMeshSdfHit hit, DiffuseSurface surface, uint3 cardTexel)
 {
     // The SDF shell remains an occluder on either side. A culled material side
     // contributes covered black, never a miss or a continuation through the shell.
     if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
         return 0.0;
-    return TraceHitLighting(position, normal, hit, surface, cachedVisibility)
-        + LoadCardIndirect(surface, hit, cardTexel);
+    float3 lighting;
+    if (TryLoadCardFinalLighting(surface, cardTexel, lighting))
+        return lighting;
+    return EvaluateUncachedSdfSurfaceRadiance(position, normal, hit, surface, cardTexel, -1.0);
 }
 
 #if defined(VIVID_SDF_RADIOSITY_UPDATE)
@@ -280,7 +326,7 @@ float3 TraceCardRadiance(float3 origin, float3 direction, VividMeshSdfReceiver r
     float error;
     if (!VividTrySampleSdfSurface(hit, position, surface, normal, originalNormal, texel, error))
         return 0.0;
-    return TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel, -1.0);
+    return TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel);
 }
 
 #endif

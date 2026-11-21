@@ -218,8 +218,14 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Maximum age of stable full-resolution diffuse GI history. Motion, coverage loss and shading changes shorten the window.")]
         public ClampedIntParameter pixelHistoryMaxAge = new(16, 8, 32);
 
-        [Tooltip("Clamp fast-updating Screen Probe pixel history to the 3×3 current resolved lighting neighborhood when traces hit moving geometry.")]
-        public BoolParameter screenProbeFastUpdateNeighborhoodClamp = new(true);
+        [Tooltip("Clamp fast-updating Screen Probe pixel history to the 3x3 current resolved lighting neighborhood when traces hit moving geometry. Disabled by default to match UE Lumen.")]
+        public BoolParameter screenProbeFastUpdateNeighborhoodClamp = new(false);
+
+        [Tooltip("Reject Screen Probe pixel temporal history when the reprojected normal differs by more than 45 degrees. Disabled by default to match UE Lumen and avoid normal-map flicker during camera motion.")]
+        public BoolParameter screenProbeTemporalRejectBasedOnNormal = new(false);
+
+        [Tooltip("Use world-space plane distance instead of linear scene depth with grazing-angle expansion for Screen Probe pixel temporal disocclusion. Disabled by default to match UE Lumen.")]
+        public BoolParameter screenProbeTemporalPlaneDisocclusion = new(false);
 
         [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
         public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);

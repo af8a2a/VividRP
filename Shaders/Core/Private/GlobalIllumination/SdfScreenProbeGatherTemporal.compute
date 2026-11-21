@@ -507,15 +507,20 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
 #else
 Texture2D<float> _SdfPreviousFastUpdate;
 RWTexture2D<float> _SdfFastUpdateOutput;
+Texture2D<float> _SdfDiffusePreviousPixelDepth;
+RWTexture2D<float> _SdfDiffusePixelDepthOutput;
+uint _SdfPreviousPixelDepthValid;
 Texture2D<float> _SdfTemporalScalarNoise;
 uint _SdfTemporalScalarNoiseEnabled;
 float4 _SdfProbePreviousCameraForward;
+float4 _SdfProbeCameraPosition;
 float4 _SdfHistorySubPixelGridSizeAndInvSize;
 float4 _SdfHistoryGatherUvMinMax;
 uint _SdfHistoryCoordShiftX;
 uint _SdfHistoryCoordShiftY;
 float4 _SdfHistoryTemporalParams; // x: DistanceThreshold, y: NormalCosThreshold, z: InvFractionMoving, w: MaxFastUpdateAmount
 uint _SdfFastUpdateNeighborhoodClamp;
+uint _SdfTemporalReprojectionFlags; // bit 0: PLANE_DISOCCLUSION_WEIGHTS, bit 1: HISTORY_REJECT_BASED_ON_NORMAL
 
 static const int2 kScreenProbeOffsets3x3[8] =
 {
@@ -681,7 +686,18 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     float distanceThreshold = _SdfHistoryTemporalParams.x > 0.0f ? _SdfHistoryTemporalParams.x : 0.01f;
     float normalCosThreshold = _SdfHistoryTemporalParams.y > 0.0f ? _SdfHistoryTemporalParams.y : 0.70710678f;
     float randomScalar = LoadScreenProbeTemporalScalarNoise(pixel);
-    float lumenDisocclusionThreshold = reprojectedSceneDepth * (distanceThreshold * lerp(0.5f, 1.5f, randomScalar));
+    bool usePlaneDisocclusion = (_SdfTemporalReprojectionFlags & 1u) != 0u;
+    bool rejectBasedOnNormal = (_SdfTemporalReprojectionFlags & 2u) != 0u;
+    float lumenDisocclusionThreshold = distanceThreshold * lerp(0.5f, 1.5f, randomScalar);
+    if (!usePlaneDisocclusion)
+    {
+        // StochasticLightingTileClassification.usf: EXPAND_HISTORY_DISTANCE_THRESHOLD_FOR_JITTER
+        float3 viewDir = _SdfProbeCameraPosition.w > 0.5f
+            ? SafeNormalize(_SdfProbeCameraPosition.xyz - position)
+            : -_SdfProbeCameraForward.xyz;
+        lumenDisocclusionThreshold /= clamp(saturate(dot(viewDir, normal)), 0.1f, 1.0f);
+    }
+    lumenDisocclusionThreshold *= reprojectedSceneDepth;
     float depthTolerance = clamp(0.008 * eyeDepth, 0.025, 0.12);
     float planeTolerance = clamp(0.006 * eyeDepth, 0.02, 0.10);
     float geometryWeight = 0.0;
@@ -698,7 +714,9 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
             continue;
 
         uint packed = _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0));
-        float depth = f16tof32(packed & 65535u);
+        float depth = _SdfPreviousPixelDepthValid != 0u
+            ? _SdfDiffusePreviousPixelDepth.Load(int3(tap, 0))
+            : f16tof32(packed & 65535u);
         if (depth <= 0.0)
             continue;
 
@@ -707,11 +725,21 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
         float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
         if (fullSphere)
         {
-            // StochasticLightingTileClassification.usf: PLANE_DISOCCLUSION_WEIGHTS + HISTORY_REJECT_BASED_ON_NORMAL
-            // and SetHistorySampleValidity(LumenHistoryWeights > 0.01).
-            float planeDistance = abs(dot(float4(samplePosition, -1.0f), prevScenePlane));
-            float depthWeight = planeDistance >= lumenDisocclusionThreshold ? 0.0f : 1.0f;
-            float normalWeight = dot(UnpackProbeNormal(float(packed >> 16u)), normal) < normalCosThreshold ? 0.0f : 1.0f;
+            // StochasticLightingTileClassification.usf:
+            // Default PLANE_DISOCCLUSION_WEIGHTS == 0 (linear depth + grazing expansion) and
+            // HISTORY_REJECT_BASED_ON_NORMAL == 0, with SetHistorySampleValidity(LumenHistoryWeights > 0.01).
+            float distanceToHistory;
+            if (usePlaneDisocclusion)
+            {
+                distanceToHistory = abs(dot(float4(samplePosition, -1.0f), prevScenePlane));
+            }
+            else
+            {
+                float historySampleSceneDepth = max(dot(float4(samplePosition, 1.0f), prevForward), 1e-4f);
+                distanceToHistory = abs(historySampleSceneDepth - reprojectedSceneDepth);
+            }
+            float depthWeight = distanceToHistory >= lumenDisocclusionThreshold ? 0.0f : 1.0f;
+            float normalWeight = !rejectBasedOnNormal || dot(UnpackProbeNormal(float(packed >> 16u)), normal) >= normalCosThreshold ? 1.0f : 0.0f;
             float validLighting = sample.a > 0.0f ? 1.0f : 0.0f;
             if (weight * depthWeight * normalWeight * validLighting <= 0.01f)
                 continue;
@@ -942,6 +970,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     _SdfBentOutput[id.xy] = PackSharedShortRangeAO(OutShortRangeAO);
 #endif
     _SdfDiffusePixelGeometryOutput[id.xy] = geometry;
+    _SdfDiffusePixelDepthOutput[id.xy] = depth;
     _SdfFastUpdateOutput[id.xy] = PackFastUpdateModeAmountAndNumFramesAccumulated(currentFastUpdate, numFramesAccumulated);
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
     _SdfScreenProbeMomentsOutput[id.xy] = SdfRoundToNearestHalf(float4(moments, age > 0.0 ? result.a : 0.0));

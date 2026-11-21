@@ -151,7 +151,8 @@ static const uint ScreenMovingBit = 0x10000000u;
 float ScreenObjectSpeed(uint2 pixel, float3 position)
 {
     float4 packed = _SdfScreenMotion.Load(int3(pixel, 0));
-    if (PixelSetAsNoMotionVectors(packed) || !all(isfinite(packed.xy)))
+    if (PixelSetAsNoMotionVectors(packed) || !all(isfinite(packed.xy))
+        || (!VividHasLegacyMotionUV(packed) && !VividHasObjectVelocity(packed)))
         return 0.0;
     float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     if (clip.w <= 0.0)
@@ -1730,15 +1731,19 @@ void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
     if (hit)
     {
         float2 ndc = (hitUVz.xy - 0.5) / ScreenNdcToUvScale();
-        float4 prevClip = mul(_SdfClipToPrevClip, float4(ndc, hitUVz.z, 1.0));
-        float3 prevNdc = prevClip.xyz / prevClip.w;
+        // Reproject the jittered world hit point directly through the previous frame's jittered VP so
+        // prevUV / prevNdc.z match _SdfScreenPreviousGeometry and _SdfScreenPreviousRadiance without jitter mismatch.
+        float4 prevClip = mul(_SdfDiffusePreviousVP, float4(hitPosition, 1.0));
+        float3 prevNdc = prevClip.w > 0.0 ? prevClip.xyz / prevClip.w : float3(2.0, 2.0, 0.0);
         float4 encoded = _SdfScreenMotion.SampleLevel(sampler_PointClamp, hitUVz.xy, 0);
-        if (VividHasObjectVelocity(encoded))
+        bool hitHasObjectVelocity = VividHasObjectVelocity(encoded);
+        float2 prevUV = prevNdc.xy * ScreenNdcToUvScale() + 0.5;
+        if (hitHasObjectVelocity)
         {
-            prevNdc.xy = ndc - VividDecodeMotionUV(encoded) / ScreenNdcToUvScale();
+            prevUV = hitUVz.xy - VividDecodeMotionUV(encoded) + _SdfScreenJitterDelta;
+            prevNdc.xy = (prevUV - 0.5) / ScreenNdcToUvScale();
             prevNdc.z = hitUVz.z - VividDecodeMotionDeviceZ(encoded);
         }
-        float2 prevUV = prevNdc.xy * ScreenNdcToUvScale() + 0.5;
         float vignette = min(HitVignette(ndc), HitVignette(prevNdc.xy));
         float2 noiseUV = id.xy + 0.5f + (_SdfDiffuseFrame % 8u) * (float2(47, 17) * 0.695f);
         float noise = frac(52.9829189f * frac(dot(noiseUV, float2(0.06711056f, 0.00583715f))));
@@ -1756,8 +1761,10 @@ void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
                 // Lumen QuantizeFloatColor, followed by the default R11G11B10 trace target conversion.
                 float3 error = asfloat(asuint(color * float3(1.0/64, 1.0/64, 1.0/32)) & ~0x007fffffu);
                 lighting = UnpackFromR11G11B10f(PackToR11G11B10f(color + error * noise)) / exposure;
-                float3 prevPosition = ComputeWorldSpacePosition(prevUV, prevNdc.z, _SdfScreenPreviousInverseVP);
-                moving = RelativeHitMotion(ScreenObjectSpeed(pixel, position), distance(hitPosition, prevPosition), position) > 0.0;
+                float hitSpeed = hitHasObjectVelocity
+                    ? distance(hitPosition, ComputeWorldSpacePosition(prevUV, prevNdc.z, _SdfScreenPreviousInverseVP))
+                    : 0.0;
+                moving = RelativeHitMotion(ScreenObjectSpeed(pixel, position), hitSpeed, position) > 0.0;
             }
         }
     }

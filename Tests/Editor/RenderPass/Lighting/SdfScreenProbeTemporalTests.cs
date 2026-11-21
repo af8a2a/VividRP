@@ -43,6 +43,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DefaultSettings_MatchUeLumenTemporalDefaults()
+        {
+            var settings = ScriptableObject.CreateInstance<SdfDiffuseGISettings>();
+            try
+            {
+                Assert.That(settings.screenProbeFastUpdateNeighborhoodClamp.value, Is.False);
+                Assert.That(settings.screenProbeTemporalRejectBasedOnNormal.value, Is.False);
+                Assert.That(settings.screenProbeTemporalPlaneDisocclusion.value, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
         public void GrazingPlaneReprojection_RetainsFullHistoryWhereRayDepthVariesSteeply()
         {
             RequireComputeAndReversedZ();
@@ -57,7 +73,8 @@ namespace VividRP.Editor.Tests
                 (u, v) => fixture.IntersectPlaneWorldZ(u, v, planeAnchor, grazingNormal),
                 (_, _) => grazingNormal,
                 (_, _) => new Color(0.8f, 0.6f, 0.4f, 1f),
-                frames: 12);
+                frames: 12,
+                reprojectionFlags: 1);
 
             var jitterDeltaUv = new Vector2(0.25f / 16f, -0.45f / 16f);
             fixture.SetCurrentFrame(
@@ -67,10 +84,108 @@ namespace VividRP.Editor.Tests
                 moving: 0.004f,
                 currentJitterUv: -jitterDeltaUv);
 
-            var output = fixture.Step(hasHistory: true, jitterDeltaUv: jitterDeltaUv, clampEnabled: true);
+            var output = fixture.Step(hasHistory: true, jitterDeltaUv: jitterDeltaUv, clampEnabled: true, reprojectionFlags: 1);
             int center = 8 * 16 + 8;
             Assert.That(output.NumFrames[center], Is.EqualTo(10f).Within(0.01f));
             Assert.That(output.OutputRgba[center * 4], Is.EqualTo(Mathf.Lerp(0.8f, 0.2f, 1f / 11f)).Within(0.006f));
+        }
+
+        [Test]
+        public void GrazingAngleDepthExpansion_RetainsHistoryUnderUeDefaultLinearDepth()
+        {
+            RequireComputeAndReversedZ();
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+
+            // Grazing surface (V.N ~ 0.15 => ~6.7x UE threshold expansion: 0.01 / 0.15 = 6.7%).
+            // 1-px neighbor differs by 3% depth (> 1% unexpanded, < 6.7% expanded).
+            var grazingNormal = new Vector3(0f, -1f, -0.15f).normalized;
+            fixture.WarmupSteadyHistory(
+                (_, uvY) => 8.0f + (uvY - 0.5f) * 4.0f,
+                (_, _) => grazingNormal,
+                (_, _) => new Color(0.8f, 0.6f, 0.4f, 1f),
+                frames: 12);
+
+            var jitterDeltaUv = new Vector2(0.25f / 16f, -0.45f / 16f);
+            fixture.SetCurrentFrame(
+                (_, uvY) => 8.0f + (uvY - 0.5f) * 4.0f,
+                (_, _) => grazingNormal,
+                (_, _) => new Color(0.2f, 0.2f, 0.2f, 1f),
+                moving: 0.004f,
+                currentJitterUv: -jitterDeltaUv);
+
+            var output = fixture.Step(hasHistory: true, jitterDeltaUv: jitterDeltaUv, clampEnabled: false, reprojectionFlags: 0);
+            int center = 8 * 16 + 8;
+            Assert.That(output.NumFrames[center], Is.EqualTo(10f).Within(0.01f));
+            Assert.That(output.OutputRgba[center * 4], Is.EqualTo(Mathf.Lerp(0.8f, 0.2f, 1f / 11f)).Within(0.006f));
+        }
+
+        [Test]
+        public void NormalMappedSurfaceMotion_RetainsHistoryByDefaultAndRejectsWhenNormalRejectEnabled()
+        {
+            RequireComputeAndReversedZ();
+            int center = 8 * 16 + 8;
+            var normalA = new Vector3(0.6f, 0f, -0.8f).normalized;
+            var normalB = new Vector3(-0.6f, 0f, -0.8f).normalized; // dot(A, B) = 0.28 < 0.7071
+
+            using var defaultFixture = new TemporalFixture(16, 16, useMoments: false);
+            defaultFixture.WarmupSteadyHistory(
+                (_, _) => 6.0f,
+                (_, _) => normalA,
+                (_, _) => new Color(0.85f, 0.85f, 0.85f, 1f),
+                frames: 12);
+            defaultFixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => normalB,
+                (_, _) => new Color(0.25f, 0.25f, 0.25f, 1f),
+                moving: 0.004f);
+            var defaultOut = defaultFixture.Step(hasHistory: true, jitterDeltaUv: new Vector2(0.35f / 16f, 0f),
+                clampEnabled: false, reprojectionFlags: 0);
+            Assert.That(defaultOut.NumFrames[center], Is.EqualTo(10f).Within(0.01f),
+                "UE default (RejectBasedOnNormal = 0) must retain history across normal-map variation at matching depth.");
+            Assert.That(defaultOut.OutputRgba[center * 4], Is.EqualTo(Mathf.Lerp(0.85f, 0.25f, 1f / 11f)).Within(0.006f));
+
+            using var normalRejectFixture = new TemporalFixture(16, 16, useMoments: false);
+            normalRejectFixture.WarmupSteadyHistory(
+                (_, _) => 6.0f,
+                (_, _) => normalA,
+                (_, _) => new Color(0.85f, 0.85f, 0.85f, 1f),
+                frames: 12,
+                reprojectionFlags: 2);
+            normalRejectFixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => normalB,
+                (_, _) => new Color(0.25f, 0.25f, 0.25f, 1f),
+                moving: 0.004f);
+            var rejectOut = normalRejectFixture.Step(hasHistory: true, jitterDeltaUv: new Vector2(0.35f / 16f, 0f),
+                clampEnabled: false, reprojectionFlags: 2);
+            Assert.That(rejectOut.NumFrames[center], Is.LessThan(0.5f),
+                "Opt-in RejectBasedOnNormal flag must reject history when normal angle exceeds 45 degrees.");
+        }
+
+        [Test]
+        public void SmallNearClipFp32DepthHistory_RetainsFullHistoryAtSceneViewNearPlane()
+        {
+            RequireComputeAndReversedZ();
+            using var fixture = new TemporalFixture(16, 16, useMoments: false, nearClip: 0.025f, farClip: 5000f);
+
+            var wallNormal = new Vector3(0f, 0f, -1f);
+            fixture.WarmupSteadyHistory(
+                (_, _) => 25.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.9f, 0.7f, 0.5f, 1f),
+                frames: 12);
+
+            fixture.SetCurrentFrame(
+                (_, _) => 25.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.2f, 0.2f, 0.2f, 1f),
+                moving: 0.004f);
+
+            var output = fixture.Step(hasHistory: true, jitterDeltaUv: new Vector2(0.4f / 16f, -0.3f / 16f),
+                clampEnabled: false, reprojectionFlags: 0);
+            int center = 8 * 16 + 8;
+            Assert.That(output.NumFrames[center], Is.EqualTo(10f).Within(0.01f));
+            Assert.That(output.OutputRgba[center * 4], Is.EqualTo(Mathf.Lerp(0.9f, 0.2f, 1f / 11f)).Within(0.006f));
         }
 
         [Test]
@@ -167,7 +282,7 @@ namespace VividRP.Editor.Tests
             private readonly Matrix4x4 proj, view, vp, invVp;
 
             private readonly Texture2D depthTex, gbuffer0, gbuffer1, motionTex, resolvedTex, movingTex, scalarNoise;
-            private RenderTexture prevFast, outFast, prevLighting, outLighting, prevGeom, outGeom, prevMoments, outMoments;
+            private RenderTexture prevFast, outFast, prevLighting, outLighting, prevGeom, outGeom, prevDepth, outDepth, prevMoments, outMoments;
             private readonly RenderTexture outResolved;
 
             internal struct Result
@@ -178,7 +293,7 @@ namespace VividRP.Editor.Tests
                 public float[] NumFrames;
             }
 
-            internal TemporalFixture(int width, int height, bool useMoments)
+            internal TemporalFixture(int width, int height, bool useMoments, float nearClip = 0.1f, float farClip = 100f)
             {
                 this.width = width;
                 this.height = height;
@@ -195,7 +310,7 @@ namespace VividRP.Editor.Tests
 
                 view = Matrix4x4.identity;
                 view.m22 = -1f;
-                proj = Matrix4x4.Perspective(45f, 1f, 0.1f, 100f);
+                proj = Matrix4x4.Perspective(45f, 1f, nearClip, farClip);
                 var gpuProj = GL.GetGPUProjectionMatrix(proj, true);
                 vp = gpuProj * view;
                 invVp = vp.inverse;
@@ -216,6 +331,8 @@ namespace VividRP.Editor.Tests
                 outLighting = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
                 prevGeom = CreateRT(GraphicsFormat.R32_UInt);
                 outGeom = CreateRT(GraphicsFormat.R32_UInt);
+                prevDepth = CreateRT(GraphicsFormat.R32_SFloat);
+                outDepth = CreateRT(GraphicsFormat.R32_SFloat);
                 prevMoments = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
                 outMoments = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
                 outResolved = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
@@ -283,11 +400,13 @@ namespace VividRP.Editor.Tests
                 Func<float, float, float> worldDepthAtUv,
                 Func<int, int, Vector3> normalAtPixel,
                 Func<int, int, Color> resolvedAtPixel,
-                int frames)
+                int frames,
+                int reprojectionFlags = 0)
             {
                 SetCurrentFrame(worldDepthAtUv, normalAtPixel, resolvedAtPixel, moving: 0.004f);
                 for (int f = 0; f < frames; f++)
-                    Step(hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: true, readResult: false);
+                    Step(hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                        readResult: false, reprojectionFlags: reprojectionFlags);
             }
 
             internal void SetCurrentFrame(
@@ -344,7 +463,8 @@ namespace VividRP.Editor.Tests
                 movingTex.SetPixelData(cMov, 0); movingTex.Apply(false, false);
             }
 
-            internal Result Step(bool hasHistory, Vector2 jitterDeltaUv, bool clampEnabled, bool readResult = true)
+            internal Result Step(bool hasHistory, Vector2 jitterDeltaUv, bool clampEnabled,
+                bool readResult = true, int reprojectionFlags = 0)
             {
                 SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(
                     width, height, out var subPixel, out var shift, out var gatherMinMax);
@@ -362,6 +482,7 @@ namespace VividRP.Editor.Tests
                 shader.SetMatrix("_SdfScreenPreviousInverseVP", invVp);
                 shader.SetVector("_SdfProbeCameraForward", new Vector4(0f, 0f, 1f, 0f));
                 shader.SetVector("_SdfProbePreviousCameraForward", new Vector4(0f, 0f, 1f, 0f));
+                shader.SetVector("_SdfProbeCameraPosition", new Vector4(0f, 0f, 0f, 1f));
                 shader.SetVector("_SdfHistoryLightScale", Vector4.one);
                 shader.SetVector("_SdfScreenJitterDelta", new Vector4(jitterDeltaUv.x, jitterDeltaUv.y, 0f, 0f));
                 shader.SetFloat("_SdfPixelHistoryMaxAge", 10f);
@@ -376,6 +497,8 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_SdfHistoryCoordShiftY", shift.y);
                 shader.SetVector("_SdfHistoryTemporalParams", new Vector4(0.01f, 0.70710678f, 10f, 0.9f));
                 shader.SetInt("_SdfFastUpdateNeighborhoodClamp", clampEnabled ? 1 : 0);
+                shader.SetInt("_SdfTemporalReprojectionFlags", reprojectionFlags);
+                shader.SetInt("_SdfPreviousPixelDepthValid", hasHistory ? 1 : 0);
 
                 shader.SetTexture(kernel, "_SdfDiffuseDepth", depthTex);
                 shader.SetTexture(kernel, "_SdfDiffuseGBuffer0", gbuffer0);
@@ -385,11 +508,13 @@ namespace VividRP.Editor.Tests
                 shader.SetTexture(kernel, "_SdfResolvedMoving", movingTex);
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelLighting", prevLighting);
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelGeometry", prevGeom);
+                shader.SetTexture(kernel, "_SdfDiffusePreviousPixelDepth", prevDepth);
                 shader.SetTexture(kernel, "_SdfPreviousFastUpdate", prevFast);
                 shader.SetTexture(kernel, "_SdfTemporalScalarNoise", scalarNoise);
                 shader.SetTexture(kernel, "_SdfFastUpdateOutput", outFast);
                 shader.SetTexture(kernel, "_SdfDiffusePixelLightingOutput", outLighting);
                 shader.SetTexture(kernel, "_SdfDiffusePixelGeometryOutput", outGeom);
+                shader.SetTexture(kernel, "_SdfDiffusePixelDepthOutput", outDepth);
                 shader.SetTexture(kernel, "_SdfDiffuseOutput", outResolved);
                 if (useMoments)
                 {
@@ -441,6 +566,7 @@ namespace VividRP.Editor.Tests
                 (prevFast, outFast) = (outFast, prevFast);
                 (prevLighting, outLighting) = (outLighting, prevLighting);
                 (prevGeom, outGeom) = (outGeom, prevGeom);
+                (prevDepth, outDepth) = (outDepth, prevDepth);
                 (prevMoments, outMoments) = (outMoments, prevMoments);
                 return res;
             }

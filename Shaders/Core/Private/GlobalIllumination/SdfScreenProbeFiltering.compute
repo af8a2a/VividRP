@@ -4,6 +4,7 @@
 #pragma kernel ScreenProbeCompositeTracesWithScatterCS
 #pragma kernel ScreenProbeTemporallyAccumulateTraceRadianceCS
 #pragma kernel ScreenProbeFilterGatherTracesCS
+#pragma kernel ScreenProbeFilterGatherLegacyTracesCS
 #pragma kernel ScreenProbePrepareAnchorCS VIVID_SDF_ANCHOR_PIXEL_HISTORY
 #pragma kernel ScreenProbePrepareAnchorNoPixelHistoryCS
 #pragma kernel ScreenProbeFilterAnchorCS
@@ -273,8 +274,12 @@ groupshared float4 SharedTraceRadiance[64];
 groupshared float4 SharedTraceMetadata[64];
 groupshared float4 SharedTracePlane[64];
 Texture2D<float2> _SdfScatterNoise;
+Texture2D<float> _SdfSpatialFilterScalarNoise;
+Texture2D<float2> _SdfSpatialFilterVectorNoise;
+Texture2D<float> _SdfProbeMoving;
 uint _SdfHasScatterNoise;
 uint _SdfDitherTraceDirections;
+uint _SdfSpatialFilterPassIndex;
 
 uint DitherSphereBin(uint2 tile, uint ray)
 {
@@ -650,7 +655,7 @@ void ScreenProbeTemporallyAccumulateTraceRadianceCS(uint3 group : SV_GroupID, ui
 
 
 [numthreads(64, 1, 1)]
-void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
+void ScreenProbeFilterGatherLegacyTracesCS(uint3 group : SV_GroupID, uint bin : SV_GroupIndex)
 {
     if (bin >= DirectionalGatherBinCount)
         return;
@@ -725,6 +730,183 @@ void ScreenProbeFilterGatherTracesCS(uint3 group : SV_GroupID, uint bin : SV_Gro
         lighting.rgb = sum / total;
     }
     _SdfDirectionalFilteredOutput[address] = lighting;
+}
+
+// Adapters for the full-sphere LumenScreenProbeFiltering.usf permutation.
+float GetSpatialFilterProbeDepth(float4 Geometry)
+{
+    return Geometry.w >= 0.0f ? dot(float4(Geometry.xyz, 1.0), _SdfProbeCameraForward) : -1.0f;
+}
+
+float GetSpatialFilterHitDistance(uint2 Address, uint2 MetadataOffset)
+{
+    // Map Vivid's signed metre storage onto the reference PF_R8 hit distance.
+    // Zero is undrawn, and a resolved sky trace uses its configured range.
+    float SignedDistance = _SdfDirectionalComposite.Load(int3(Address + MetadataOffset, 0)).x;
+    const float ProbeMaxHitDistance = 65504.0f;
+    float DistanceInCentimeters = (SignedDistance < 0.0f ? _SdfDiffuseSkyTraceDistance : SignedDistance) * 100.0f;
+    float Encoded = SignedDistance == 0.0f ? 0.0f
+        : sqrt(DistanceInCentimeters / ProbeMaxHitDistance) * 254.0f / 255.0f + 1.0f / 255.0f;
+    Encoded = round(saturate(Encoded) * 255.0f) / 255.0f;
+    float Linear = Encoded * Encoded * ProbeMaxHitDistance;
+    return ((Linear - 1.0f / 255.0f) * 255.0f / 254.0f) * 0.01f;
+}
+
+uint3 SpatialFilterBlueNoiseCoord(uint2 Coordinate, uint FrameIndex)
+{
+    uint3 WrappedCoordinate = uint3(Coordinate, FrameIndex) & uint3(127u, 127u, 63u);
+    return uint3(WrappedCoordinate.x, 8191u - (WrappedCoordinate.z * 128u + WrappedCoordinate.y), 0u);
+}
+
+float acosFast(float inX)
+{
+    float x = abs(inX);
+    float res = -0.156583f * x + (0.5 * PI);
+    res *= sqrt(1.0f - x);
+    return (inX >= 0) ? res : PI - res;
+}
+
+float GetFilterPositionWeight(float ProbeDepth, float SceneDepth)
+{
+    const float SpatialFilterPositionWeightScale = 1000.0f;
+    float DepthDifference = abs(ProbeDepth - SceneDepth);
+    float RelativeDepthDifference = DepthDifference / SceneDepth;
+    return ProbeDepth >= 0 ? exp2(-SpatialFilterPositionWeightScale * (RelativeDepthDifference * RelativeDepthDifference)) : 0;
+}
+
+void GatherNeighborRadiance(
+    int2 NeighborScreenTileCoord,
+    uint ProbeTexelIndex,
+    float3 WorldPosition,
+    float3 WorldConeDirection,
+    float SceneDepth,
+    float HitDistance,
+    float ScreenProbeTracesMoving,
+    uint2 ScreenProbeViewSize,
+    uint2 MetadataOffset,
+    inout float3 TotalRadiance,
+    inout float TotalWeight)
+{
+    if (all(NeighborScreenTileCoord >= 0) && all(NeighborScreenTileCoord < int2(ScreenProbeViewSize)))
+    {
+        uint2 NeighborScreenProbeAtlasCoord = uint2(NeighborScreenTileCoord);
+        float4 NeighborGeometry = _SdfDiffuseGeometry[NeighborScreenProbeAtlasCoord];
+        float NeighborSceneDepth = GetSpatialFilterProbeDepth(NeighborGeometry);
+        float PositionWeight = GetFilterPositionWeight(NeighborSceneDepth, SceneDepth);
+
+        // FILTER_SEARCH_ADAPTIVE_PROBES is disabled in the reference shader.
+        if (PositionWeight > 0.0f)
+        {
+            uint2 NeighborTraceCoord = DirectionalGatherAddress(NeighborScreenProbeAtlasCoord, ProbeTexelIndex);
+            float NeighborRadianceDepth = GetSpatialFilterHitDistance(NeighborTraceCoord, MetadataOffset);
+
+            if (NeighborRadianceDepth >= 0)
+            {
+                float AngleWeight = 1.0f;
+
+                // Increase spatial filtering when temporal filter will be reduced.
+                if (ScreenProbeTracesMoving <= .01f)
+                {
+                    if (HitDistance >= 0.0f)
+                    {
+                        NeighborRadianceDepth = min(NeighborRadianceDepth, HitDistance);
+                    }
+                    float3 NeighborWorldPosition = NeighborGeometry.xyz;
+                    float3 NeighborHitPosition = NeighborWorldPosition + WorldConeDirection * NeighborRadianceDepth;
+                    float3 ToNeighborHit = NeighborHitPosition - WorldPosition;
+                    float NeighborAngle = acosFast(dot(ToNeighborHit, WorldConeDirection) / length(ToNeighborHit));
+                    const float SpatialFilterMaxRadianceHitAngle = 10.0f * PI / 180.0f;
+                    AngleWeight = 1.0f - saturate(NeighborAngle / SpatialFilterMaxRadianceHitAngle);
+                }
+
+                float Weight = PositionWeight * AngleWeight;
+                TotalRadiance += _SdfDirectionalSpatialInput.Load(int3(NeighborTraceCoord, 0)).xyz * Weight;
+                TotalWeight += Weight;
+            }
+        }
+    }
+}
+
+[numthreads(8, 8, 1)]
+void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 ScreenProbeAtlasCoord = DispatchThreadId.xy / 8u;
+    uint2 ScreenProbeViewSize = DirectionalGrid();
+    uint2 ProbeTexelCoord = DispatchThreadId.xy - ScreenProbeAtlasCoord * 8u;
+    uint ProbeTexelIndex = ProbeTexelCoord.x + ProbeTexelCoord.y * 8u;
+    uint2 Address = DispatchThreadId.xy;
+    uint2 MetadataOffset = DirectionalMetadataOffset(ScreenProbeViewSize);
+    uint2 ScreenTileCoord = ScreenProbeAtlasCoord;
+    bool bValidProbe = true;
+    if (ScreenProbeAtlasCoord.y >= ScreenProbeViewSize.y)
+    {
+        uint2 ScreenProbeScreenPosition;
+        bValidProbe = CompactReceiver(ScreenProbeAtlasCoord, ScreenProbeViewSize,
+            ScreenTileCoord, ScreenProbeScreenPosition);
+    }
+
+    float4 Geometry = _SdfDiffuseGeometry[ScreenProbeAtlasCoord];
+    float SceneDepth = GetSpatialFilterProbeDepth(Geometry);
+    if (bValidProbe && SceneDepth > 0.0f)
+    {
+        uint StateFrameIndexMod8 = _SdfDiffuseFrame & 7u;
+        float E = _SdfSpatialFilterScalarNoise.Load(
+            SpatialFilterBlueNoiseCoord(Address, StateFrameIndexMod8 + _SdfSpatialFilterPassIndex + 11u));
+        float ScreenProbeTracesMoving = round(saturate(_SdfProbeMoving[ScreenProbeAtlasCoord]) * 255.0f) / 255.0f;
+        float3 WorldPosition = Geometry.xyz;
+        float2 ProbeTexelCenter = _SdfSpatialFilterVectorNoise.Load(SpatialFilterBlueNoiseCoord(ScreenTileCoord, StateFrameIndexMod8));
+        float2 ProbeUV = (ProbeTexelCoord + ProbeTexelCenter) / 8.0f;
+        float3 WorldConeDirection = ProbeSphereDirection(ProbeUV);
+        float HitDistance = GetSpatialFilterHitDistance(Address, MetadataOffset);
+
+        float3 TotalRadiance = 0.0f;
+        float TotalWeight = 0.0f;
+
+        if (HitDistance >= 0.0f)
+        {
+            TotalRadiance = _SdfDirectionalSpatialInput.Load(int3(Address, 0)).xyz;
+            TotalWeight = 1.0f;
+        }
+
+        const int2 Offsets[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+        [loop]
+        for (uint OffsetIndex = 0; OffsetIndex < 4; OffsetIndex++)
+        {
+            GatherNeighborRadiance(int2(ScreenTileCoord) + Offsets[OffsetIndex], ProbeTexelIndex, WorldPosition,
+                WorldConeDirection, SceneDepth, HitDistance, ScreenProbeTracesMoving, ScreenProbeViewSize,
+                MetadataOffset, TotalRadiance, TotalWeight);
+        }
+
+        // Increase spatial filtering when temporal filter will be reduced.
+        if (ScreenProbeTracesMoving > .01f)
+        {
+            const int2 MovingOffsets[8] =
+            {
+                int2(-2, 0), int2(2, 0), int2(0, -2), int2(0, 2),
+                int2(-1, 1), int2(1, 1), int2(-1, -1), int2(1, -1)
+            };
+            [loop]
+            for (uint OffsetIndex = 0; OffsetIndex < 8; OffsetIndex++)
+            {
+                GatherNeighborRadiance(int2(ScreenTileCoord) + MovingOffsets[OffsetIndex], ProbeTexelIndex, WorldPosition,
+                    WorldConeDirection, SceneDepth, HitDistance, ScreenProbeTracesMoving, ScreenProbeViewSize,
+                    MetadataOffset, TotalRadiance, TotalWeight);
+            }
+        }
+
+        if (TotalWeight > 0.0f)
+        {
+            TotalRadiance /= TotalWeight;
+        }
+
+        // Lumen's QuantizeFloatColor, with the mantissa width of Vivid's RGBA16F atlas.
+        float3 Error = asfloat(asuint(TotalRadiance * (1.0f / 1024.0f)) & ~0x007FFFFFu);
+        _SdfDirectionalFilteredOutput[Address] = float4(min(TotalRadiance + Error * E, 65504.0f), 1.0f);
+    }
+    else
+    {
+        _SdfDirectionalFilteredOutput[Address] = 0.0f;
+    }
 }
 
 

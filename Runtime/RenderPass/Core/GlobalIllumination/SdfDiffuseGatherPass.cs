@@ -64,6 +64,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int DirectionalAnchorDiagnosticPlanes = 22;
         private static readonly int ProbeMovingOutputId = Shader.PropertyToID("_SdfProbeMovingOutput");
         private static readonly int ProbeMovingId = Shader.PropertyToID("_SdfProbeMoving");
+        private static readonly int SpatialFilterScalarNoiseId = Shader.PropertyToID("_SdfSpatialFilterScalarNoise");
+        private static readonly int SpatialFilterVectorNoiseId = Shader.PropertyToID("_SdfSpatialFilterVectorNoise");
+        private static readonly int SpatialFilterPassIndexId = Shader.PropertyToID("_SdfSpatialFilterPassIndex");
         private static readonly int ResolvedMovingOutputId = Shader.PropertyToID("_SdfResolvedMovingOutput");
         private static readonly int ResolvedMovingId = Shader.PropertyToID("_SdfResolvedMoving");
         private static readonly int MotionFrameId = Shader.PropertyToID("_SdfMotionFrame");
@@ -647,6 +650,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_FrozenGuideActive, m_ProposalHistoryValid;
         private int m_DirectionalGuideKernel = -1, m_DirectionalCompositeKernel = -1, m_DirectionalTemporalKernel = -1;
         private int m_DirectionalFilterKernel = -1, m_DirectionalIntegrateKernel = -1, m_DirectionalResolveKernel = -1;
+        private int m_LumenDirectionalFilterKernel = -1;
         private int m_PrepareAnchorKernel = -1;
         private int m_PrepareAnchorNoPixelKernel = -1;
         private int m_AnchorPreFilterKernel = -1;
@@ -656,6 +660,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_DirectionalHierarchicalGuide, m_FullSphere, m_ProbeTemporal, m_DitherTraceDirections;
         private float m_MaxRayIntensity;
         private TextureHandle m_ScatterNoise;
+        private TextureHandle m_SpatialFilterScalarNoise, m_SpatialFilterVectorNoise;
         private TextureHandle m_InterpolationScalarNoise, m_InterpolationVectorNoise;
         private bool m_StochasticInterpolation, m_InterpolationFlipY;
         private GraphicsBuffer m_PreExposure;
@@ -925,16 +930,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DirectionalGuideKernel = m_ImportanceSamplingCompute.FindKernel("PrepareSdfDirectionalGuide");
             if (HasKernel(m_FilterCompute, "ScreenProbeCompositeTracesWithScatterCS")
                 && HasKernel(m_FilterCompute, "ScreenProbeTemporallyAccumulateTraceRadianceCS")
-                && HasKernel(m_FilterCompute, "ScreenProbeFilterGatherTracesCS")
+                && HasKernel(m_FilterCompute, "ScreenProbeFilterGatherLegacyTracesCS")
                 && HasKernel(m_FilterCompute, "ScreenProbeConvertToIrradianceCS")
                 && HasKernel(m_GatherCompute, "ScreenProbeIntegrateCS"))
             {
                 m_DirectionalCompositeKernel = m_FilterCompute.FindKernel("ScreenProbeCompositeTracesWithScatterCS");
                 m_DirectionalTemporalKernel = m_FilterCompute.FindKernel("ScreenProbeTemporallyAccumulateTraceRadianceCS");
-                m_DirectionalFilterKernel = m_FilterCompute.FindKernel("ScreenProbeFilterGatherTracesCS");
+                m_DirectionalFilterKernel = m_FilterCompute.FindKernel("ScreenProbeFilterGatherLegacyTracesCS");
                 m_DirectionalIntegrateKernel = m_FilterCompute.FindKernel("ScreenProbeConvertToIrradianceCS");
                 m_DirectionalResolveKernel = m_GatherCompute.FindKernel("ScreenProbeIntegrateCS");
             }
+            if (HasKernel(m_FilterCompute, "ScreenProbeFilterGatherTracesCS"))
+                m_LumenDirectionalFilterKernel = m_FilterCompute.FindKernel("ScreenProbeFilterGatherTracesCS");
             if (HasKernel(m_FilterCompute, "ScreenProbePrepareAnchorCS"))
                 m_PrepareAnchorKernel = m_FilterCompute.FindKernel("ScreenProbePrepareAnchorCS");
             if (HasKernel(m_FilterCompute, "ScreenProbePrepareAnchorNoPixelHistoryCS"))
@@ -1004,6 +1011,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BentScalarNoise = default;
             m_StochasticInterpolation = false;
             m_InterpolationScalarNoise = m_InterpolationVectorNoise = default;
+            m_SpatialFilterScalarNoise = m_SpatialFilterVectorNoise = default;
             m_BentComposite = false;
             m_BentDuringIntegration = false;
             m_ScreenProbeMomentsHistory = null;
@@ -1164,6 +1172,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ClosestHzb.Resize(1, 1);
             if (m_FullSphere && m_AdaptiveProbes)
                 m_AtlasHeight = m_ProbeHeight + (m_ProbeHeight + 1) / 2;
+            if (m_FullSphere && m_SpatialFilter && m_LumenDirectionalFilterKernel >= 0 && BlueNoise.Instance != null)
+            {
+                m_SpatialFilterScalarNoise = BlueNoise.Instance.ScalarAtlas;
+                m_SpatialFilterVectorNoise = BlueNoise.Instance.VectorAtlas;
+                PassRecorder.RegisterImportedTextureForPass(this, m_SpatialFilterScalarNoise);
+                PassRecorder.RegisterImportedTextureForPass(this, m_SpatialFilterVectorNoise);
+            }
             m_DitherTraceDirections = m_FullSphere && settings.screenProbeDitherTraceDirections.value;
             if (m_FullSphere && settings.screenProbeStochasticInterpolation.value && BlueNoise.Instance != null)
             {
@@ -1989,6 +2004,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PlacementKernel = m_FilterKernel = m_HitFilterKernel = -1;
             m_SphereGuideKernel = m_DirectionalGuideKernel = m_DirectionalCompositeKernel = m_DirectionalTemporalKernel = -1;
             m_DirectionalFilterKernel = m_DirectionalIntegrateKernel = m_DirectionalResolveKernel = -1;
+            m_LumenDirectionalFilterKernel = -1;
             m_PrepareAnchorKernel = -1;
             m_PrepareAnchorNoPixelKernel = -1;
             m_AnchorPreFilterKernel = -1;
@@ -3311,16 +3327,26 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             using (new ProfilingScope(cmd, DirectionalFilterSampler))
             {
-                kernel = m_DirectionalFilterKernel;
+                bool lumenFilter = m_SpatialFilterScalarNoise.IsValid() && m_SpatialFilterVectorNoise.IsValid();
+                kernel = lumenFilter ? m_LumenDirectionalFilterKernel : m_DirectionalFilterKernel;
                 cmd.SetComputeTextureParam(shader, kernel, PlacementId, m_AdaptiveProbes ? m_AdaptivePlacement.innerHandle : black);
                 cmd.SetComputeTextureParam(shader, kernel, GeometryId, geometry);
                 cmd.SetComputeTextureParam(shader, kernel, DirectionalCompositeId, composite);
+                if (lumenFilter)
+                {
+                    cmd.SetComputeTextureParam(shader, kernel, ProbeMovingId, m_ProbeMoving.innerHandle);
+                    cmd.SetComputeTextureParam(shader, kernel, SpatialFilterScalarNoiseId, m_SpatialFilterScalarNoise);
+                    cmd.SetComputeTextureParam(shader, kernel, SpatialFilterVectorNoiseId, m_SpatialFilterVectorNoise);
+                    cmd.SetComputeFloatParam(shader, SkyTraceDistanceId, m_SkyTraceDistance);
+                }
                 // Use this frame's hit distances with the two-frame radiance estimate.
                 TextureHandle spatialInput = temporal;
                 int spatialPasses = m_SpatialFilter ? 3 : 1;
                 for (int pass = 0; pass < spatialPasses; ++pass)
                 {
                     TextureHandle spatialOutput = pass == 1 ? m_DirectionalSpatialScratch.innerHandle : filtered;
+                    if (lumenFilter)
+                        cmd.SetComputeIntParam(shader, SpatialFilterPassIndexId, pass);
                     cmd.SetComputeTextureParam(shader, kernel, DirectionalSpatialInputId, spatialInput);
                     cmd.SetComputeTextureParam(shader, kernel, DirectionalFilteredOutputId, spatialOutput);
                     cmd.DispatchCompute(shader, kernel, m_ProbeWidth, m_AtlasHeight, 1);

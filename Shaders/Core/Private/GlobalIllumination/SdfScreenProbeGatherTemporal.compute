@@ -505,11 +505,18 @@ void TemporalSdfDiffuseGI(uint3 id : SV_DispatchThreadID)
         _SdfDiffuseOutput[id.xy] = result;
 }
 #else
+#include "../../Public/AutoExposure.hlsl"
+
 Texture2D<float> _SdfPreviousFastUpdate;
 RWTexture2D<float> _SdfFastUpdateOutput;
 Texture2D<float> _SdfDiffusePreviousPixelDepth;
 RWTexture2D<float> _SdfDiffusePixelDepthOutput;
 uint _SdfPreviousPixelDepthValid;
+Texture2D<float> _SdfPreviousPreExposure;
+RWTexture2D<float> _SdfCurrentPreExposureOutput;
+uint _SdfPreExposureHistoryEnabled;
+uint _SdfPreviousPreExposureValid;
+uint _SdfDisocclusionSpatialFilter;
 Texture2D<float> _SdfTemporalScalarNoise;
 uint _SdfTemporalScalarNoiseEnabled;
 float4 _SdfProbePreviousCameraForward;
@@ -565,7 +572,8 @@ float3 ClampScreenProbeHistory(
     uint2 MinScreenCoord,
     uint2 MaxScreenCoord,
     float3 NewLighting,
-    float3 HistoryLighting)
+    float3 HistoryLighting,
+    float PreExposure)
 {
     float3 NeighborMin = NewLighting;
     float3 NeighborMax = NewLighting;
@@ -578,13 +586,63 @@ float3 ClampScreenProbeHistory(
         const float4 Lighting = _SdfDiffuseCurrentResolved.Load(int3(NeighborScreenCoord, 0));
         if (Lighting.w > 0.0f)
         {
-            NeighborMin = min(NeighborMin, Lighting.xyz);
-            NeighborMax = max(NeighborMax, Lighting.xyz);
+            const float3 NeighborLighting = Lighting.xyz * PreExposure;
+            NeighborMin = min(NeighborMin, NeighborLighting);
+            NeighborMax = max(NeighborMax, NeighborLighting);
         }
     }
 
     HistoryLighting = clamp(HistoryLighting, NeighborMin, NeighborMax);
     return HistoryLighting;
+}
+
+// Lightweight geometry-aware 3x3 bilateral filter executed only for freshly disoccluded
+// pixels (numFramesAccumulated < 2) to suppress single-frame stochastic probe jitter.
+float4 FilterDisoccludedScreenProbeLighting(uint2 pixel, float3 position, float3 normal, float4 current)
+{
+    int2 size = int2(_SdfDiffuseScreenSize.xy);
+    float eyeDepth = max(dot(float4(position, 1.0f), _SdfProbeCameraForward), 1e-4f);
+    float3 viewDir = _SdfProbeCameraPosition.w > 0.5f
+        ? SafeNormalize(_SdfProbeCameraPosition.xyz - position)
+        : -_SdfProbeCameraForward.xyz;
+    float grazingScale = clamp(saturate(dot(viewDir, normal)), 0.15f, 1.0f);
+    float depthFalloff = 2500.0f * grazingScale * grazingScale;
+
+    float3 coveredSum = current.rgb * current.a;
+    float coverageSum = current.a;
+    float weightSum = 1.0f;
+
+    [unroll]
+    for (uint i = 0u; i < 8u; ++i)
+    {
+        int2 offset = kScreenProbeOffsets3x3[i];
+        int2 tap = int2(pixel) + offset;
+        if (any(tap < 0) || any(tap >= size))
+            continue;
+        float4 tapLighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
+        if (tapLighting.a <= 0.0f)
+            continue;
+        float3 tapPosition, tapNormal;
+        if (!LoadReceiver(uint2(tap), tapPosition, tapNormal))
+            continue;
+
+        float tapEyeDepth = max(dot(float4(tapPosition, 1.0f), _SdfProbeCameraForward), 1e-4f);
+        float relativeDepth = abs(tapEyeDepth - eyeDepth) / eyeDepth;
+        float depthWeight = exp2(-depthFalloff * relativeDepth * relativeDepth);
+        float normalWeight = saturate((dot(normal, tapNormal) - 0.85f) / 0.15f);
+        float spatialWeight = (offset.x != 0 && offset.y != 0) ? 0.5f : 0.75f;
+        float weight = spatialWeight * depthWeight * normalWeight;
+        if (weight <= 1e-4f)
+            continue;
+
+        coveredSum += tapLighting.rgb * tapLighting.a * weight;
+        coverageSum += tapLighting.a * weight;
+        weightSum += weight;
+    }
+
+    float filteredCoverage = coverageSum / max(weightSum, 1e-5f);
+    float3 filteredRgb = coveredSum / max(coverageSum, 1e-5f);
+    return float4(filteredRgb, filteredCoverage);
 }
 
 // LumenScreenProbeGatherTemporal.usf, scalar loads from Vivid's geometry-valid taps.
@@ -624,7 +682,8 @@ struct ScreenProbeTemporalHistory
 #endif
 };
 
-bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal, out ScreenProbeTemporalHistory history)
+bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
+    float historyExposureScale, float invCurrentPreExposure, out ScreenProbeTemporalHistory history)
 {
     history = (ScreenProbeTemporalHistory)0;
     float4 previousClip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
@@ -762,7 +821,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
         float3 unscaledRgb = sample.rgb;
 #endif
-        sample.rgb *= _SdfHistoryLightScale.rgb;
+        sample.rgb *= historyExposureScale * _SdfHistoryLightScale.rgb;
 
         float2 ageAndCoverage = UnpackScreenProbePixelHistory(sample.a);
         float covered = weight * ageAndCoverage.y;
@@ -772,8 +831,11 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
             float4 moments = _SdfScreenProbePreviousMoments.Load(int3(tap, 0));
             if (moments.w > 0.0 && moments.z >= 1.0)
             {
-                float3 oldLighting = DecodeScreenProbeCoveredHistory(unscaledRgb, ageAndCoverage.y) / max(ageAndCoverage.y, 1e-5);
-                float3 newLighting = DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y) / max(ageAndCoverage.y, 1e-5);
+                float invPrevPreExposure = historyExposureScale * invCurrentPreExposure;
+                float3 oldLighting = DecodeScreenProbeCoveredHistory(unscaledRgb, ageAndCoverage.y)
+                    * (invPrevPreExposure / max(ageAndCoverage.y, 1e-5));
+                float3 newLighting = DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y)
+                    * (invCurrentPreExposure / max(ageAndCoverage.y, 1e-5));
                 float oldY = RestirLuminance(oldLighting), newY = RestirLuminance(newLighting);
                 float mean = moments.x + log2((1.0 + newY) / (1.0 + oldY));
                 // A covered black history still needs a unit Jacobian under unchanged lighting.
@@ -861,6 +923,15 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     if (any(id.xy >= uint2(_SdfDiffuseScreenSize.xy)))
         return;
 
+    float currentPreExposure = _SdfPreExposureHistoryEnabled != 0u ? VividGetPreExposure() : 1.0f;
+    float prevPreExposure = (_SdfPreExposureHistoryEnabled != 0u && _SdfPreviousPreExposureValid != 0u)
+        ? max(_SdfPreviousPreExposure.Load(int3(0, 0, 0)), 1e-4f)
+        : currentPreExposure;
+    float historyExposureScale = currentPreExposure / prevPreExposure;
+    float invCurrentPreExposure = rcp(currentPreExposure);
+    if (_SdfPreExposureHistoryEnabled != 0u && all(id.xy == 0u))
+        _SdfCurrentPreExposureOutput[uint2(0u, 0u)] = currentPreExposure;
+
     float4 result = _SdfDiffuseCurrentResolved.Load(int3(id.xy, 0));
     float depth = _SdfDiffuseDepth.Load(int3(id.xy, 0));
     float3 position, normal;
@@ -873,10 +944,6 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     float invFractionMoving = _SdfHistoryTemporalParams.z > 0.0f ? _SdfHistoryTemporalParams.z : 10.0f;
     float maxFastUpdateAmount = _SdfHistoryTemporalParams.w > 0.0f ? _SdfHistoryTemporalParams.w : 0.9f;
     float age = hasLighting ? 1.0 : 0.0;
-#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
-    float currentLog = ScreenProbeLogLuminance(result.rgb);
-    float3 moments = float3(currentLog, 0.0, age);
-#endif
     uint historyStatus = ScreenProbeNoHistory;
     ScreenProbeTemporalHistory history;
     float currentFastUpdate = 0.0;
@@ -893,78 +960,108 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 #endif
     bool bLightingIsValid = hasLighting && (!fullSphere || moving > 0.0) && bValidReconstruction;
     bool readHistory = receiver && (fullSphere || hasLighting);
-    if (readHistory && _SdfDiffuseHasHistory != 0u && ReadScreenProbeTemporalHistory(id.xy, position, normal, history))
+    bool historyRead = readHistory && _SdfDiffuseHasHistory != 0u
+        && ReadScreenProbeTemporalHistory(id.xy, position, normal, historyExposureScale, invCurrentPreExposure, history);
+    bool historyAccepted = false;
+    float fastUpdate = 0.0;
+    float ageConfidence = 1.0;
+    float coverageAgreement = 1.0;
+    if (historyRead)
     {
-        float coverageAgreement = min(result.a, history.coverage) / max(max(result.a, history.coverage), 1e-5);
+        coverageAgreement = min(result.a, history.coverage) / max(max(result.a, history.coverage), 1e-5);
         // LumenScreenProbeGatherTemporal.usf accumulates any valid reprojected history (bAnyHistoryValid).
         if (fullSphere || (hasLighting && coverageAgreement >= 0.35))
         {
-            float3 historyLighting = history.coveredLighting / max(history.coverage, 1e-5);
+            historyAccepted = true;
             currentFastUpdate = saturate(moving * invFractionMoving);
             currentFastUpdate = saturate(min((currentFastUpdate - .2f) / .8f, maxFastUpdateAmount));
             // Only this frame's lighting motion is carried into the next frame.
-            float fastUpdate = max(currentFastUpdate, min(history.fastUpdate, maxFastUpdateAmount));
-            float3 rectified = historyLighting;
-            if (fullSphere)
-            {
-                if (_SdfFastUpdateNeighborhoodClamp != 0u && fastUpdate > 0.0f)
-                {
-                    rectified = ClampScreenProbeHistory(
-                        id.xy,
-                        uint2(0u, 0u),
-                        uint2(_SdfDiffuseScreenSize.xy) - 1u,
-                        result.rgb,
-                        historyLighting);
-                }
-            }
-            else
-            {
+            fastUpdate = max(currentFastUpdate, min(history.fastUpdate, maxFastUpdateAmount));
+            if (!fullSphere)
                 fastUpdate = max(fastUpdate, SdfPixelHistoryFastUpdate(history.foreground, history.objectMotionPixels));
-                rectified = RectifyPixelHistory(id.xy, position, normal, result, historyLighting, fastUpdate);
-            }
             // Trace coverage is a stochastic lighting estimate. It must not
             // select the current sample's averaging weight on stable geometry.
-            float ageConfidence = (_SdfGatherHistoryDiagnostics & 4194304u) != 0u
+            ageConfidence = (_SdfGatherHistoryDiagnostics & 4194304u) != 0u
                 ? coverageAgreement : saturate(history.footprint);
             if ((_SdfGatherHistoryDiagnostics & 8u) != 0u)
                 ageConfidence = 1.0;
-#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
-            if (fullSphere ? history.momentCoverage > 0.0f : history.momentCoverage >= 0.35f)
-            {
-                float momentPriorFrames = ScreenProbePriorFrameCount(history.momentAge,
-                    (fullSphere ? 1.0f : ageConfidence) * saturate(history.momentCoverage), fastUpdate);
-                float weight = ScreenProbeCurrentSampleWeight(bLightingIsValid, momentPriorFrames);
-                float mean = history.logMean + ScreenProbeLogLuminance(rectified) - ScreenProbeLogLuminance(historyLighting);
-                float delta = currentLog - mean;
-                // Central variance avoids cancellation in half-precision history.
-                // Keep observation variance conservative: sparse probes are correlated.
-                moments = float3(lerp(mean, currentLog, weight),
-                    (1.0 - weight) * (history.logVariance + weight * delta * delta), min(1.0 + momentPriorFrames, _SdfPixelHistoryMaxAge));
-            }
-#endif
             numFramesAccumulated = ScreenProbePriorFrameCount(history.age, fullSphere ? 1.0 : ageConfidence, fastUpdate);
-            age = min(1.0 + numFramesAccumulated, _SdfPixelHistoryMaxAge);
-            historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
-                ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
-
-            float currentWeight = ScreenProbeCurrentSampleWeight(bLightingIsValid, numFramesAccumulated);
-            float3 covered = lerp(rectified * history.coverage, result.rgb * result.a, currentWeight);
-            result.a = lerp(history.coverage, result.a, currentWeight);
-            result.rgb = min(covered / max(result.a, 1e-5), 65000.0);
         }
-#if defined(VIVID_SDF_SCREEN_PROBE_AO)
-        if (_SdfBentHistoryValid != 0u)
+    }
+
+    if (_SdfDisocclusionSpatialFilter != 0u && fullSphere && hasLighting && numFramesAccumulated < 2.0f)
+    {
+        float4 filtered = FilterDisoccludedScreenProbeLighting(id.xy, position, normal, result);
+        float spatialBlend = saturate(1.0f - 0.5f * numFramesAccumulated);
+        result = lerp(result, filtered, spatialBlend);
+    }
+
+#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
+    float currentLog = ScreenProbeLogLuminance(result.rgb);
+    float3 moments = float3(currentLog, 0.0, age);
+#endif
+    float3 currentPreExposed = result.rgb * currentPreExposure;
+    float3 blendedPreExposed = min(currentPreExposed, 65000.0);
+
+    if (historyAccepted)
+    {
+        float3 historyLighting = history.coveredLighting / max(history.coverage, 1e-5);
+        float3 rectified = historyLighting;
+        if (fullSphere)
         {
-            float FastUpdateModeAmount = saturate(_SdfResolvedMoving.Load(int3(id.xy, 0)) * invFractionMoving);
-            FastUpdateModeAmount = saturate(min((FastUpdateModeAmount - .2f) / .8f, maxFastUpdateAmount));
-            FastUpdateModeAmount = max(FastUpdateModeAmount, min(history.fastUpdate, maxFastUpdateAmount));
-            float NewNumFramesAccumulated = min(history.age, (1.0f - FastUpdateModeAmount) * _SdfPixelHistoryMaxAge);
-            half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, OutShortRangeAO, history.shortRangeAO);
-            float Alpha = ScreenProbeCurrentSampleWeight(bLightingIsValid, NewNumFramesAccumulated);
-            OutShortRangeAO = lerp(HistoryShortRangeAO, OutShortRangeAO, half(Alpha));
+            if (_SdfFastUpdateNeighborhoodClamp != 0u && fastUpdate > 0.0f)
+            {
+                rectified = ClampScreenProbeHistory(
+                    id.xy,
+                    uint2(0u, 0u),
+                    uint2(_SdfDiffuseScreenSize.xy) - 1u,
+                    currentPreExposed,
+                    historyLighting,
+                    currentPreExposure);
+            }
+        }
+        else
+        {
+            rectified = RectifyPixelHistory(id.xy, position, normal, result,
+                historyLighting * invCurrentPreExposure, fastUpdate) * currentPreExposure;
+        }
+#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
+        if (fullSphere ? history.momentCoverage > 0.0f : history.momentCoverage >= 0.35f)
+        {
+            float momentPriorFrames = ScreenProbePriorFrameCount(history.momentAge,
+                (fullSphere ? 1.0f : ageConfidence) * saturate(history.momentCoverage), fastUpdate);
+            float weight = ScreenProbeCurrentSampleWeight(bLightingIsValid, momentPriorFrames);
+            float mean = history.logMean + ScreenProbeLogLuminance(rectified * invCurrentPreExposure)
+                - ScreenProbeLogLuminance(historyLighting * invCurrentPreExposure);
+            float delta = currentLog - mean;
+            // Central variance avoids cancellation in half-precision history.
+            // Keep observation variance conservative: sparse probes are correlated.
+            moments = float3(lerp(mean, currentLog, weight),
+                (1.0 - weight) * (history.logVariance + weight * delta * delta), min(1.0 + momentPriorFrames, _SdfPixelHistoryMaxAge));
         }
 #endif
+        age = min(1.0 + numFramesAccumulated, _SdfPixelHistoryMaxAge);
+        historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
+            ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
+
+        float currentWeight = ScreenProbeCurrentSampleWeight(bLightingIsValid, numFramesAccumulated);
+        float3 coveredPreExposed = lerp(rectified * history.coverage, currentPreExposed * result.a, currentWeight);
+        result.a = lerp(history.coverage, result.a, currentWeight);
+        blendedPreExposed = min(coveredPreExposed / max(result.a, 1e-5), 65000.0);
     }
+
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+    if (historyRead && _SdfBentHistoryValid != 0u)
+    {
+        float FastUpdateModeAmount = saturate(_SdfResolvedMoving.Load(int3(id.xy, 0)) * invFractionMoving);
+        FastUpdateModeAmount = saturate(min((FastUpdateModeAmount - .2f) / .8f, maxFastUpdateAmount));
+        FastUpdateModeAmount = max(FastUpdateModeAmount, min(history.fastUpdate, maxFastUpdateAmount));
+        float NewNumFramesAccumulated = min(history.age, (1.0f - FastUpdateModeAmount) * _SdfPixelHistoryMaxAge);
+        half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, OutShortRangeAO, history.shortRangeAO);
+        float Alpha = ScreenProbeCurrentSampleWeight(bLightingIsValid, NewNumFramesAccumulated);
+        OutShortRangeAO = lerp(HistoryShortRangeAO, OutShortRangeAO, half(Alpha));
+    }
+#endif
 
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     _SdfBentOutput[id.xy] = PackSharedShortRangeAO(OutShortRangeAO);
@@ -976,10 +1073,10 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     _SdfScreenProbeMomentsOutput[id.xy] = SdfRoundToNearestHalf(float4(moments, age > 0.0 ? result.a : 0.0));
 #endif
     float historyAlpha = PackScreenProbePixelHistory(age, result.a, historyStatus);
-    float3 historyRgb = EncodeScreenProbeCoveredHistory(result.rgb, result.a);
-    result = RoundSdfHistory(result);
+    float3 historyRgb = EncodeScreenProbeCoveredHistory(blendedPreExposed, result.a);
+    float4 outputResult = RoundSdfHistory(float4(min(blendedPreExposed * invCurrentPreExposure, 65000.0), result.a));
     _SdfDiffusePixelLightingOutput[id.xy] = float4(historyRgb, historyAlpha);
-    _SdfDiffuseOutput[id.xy] = result;
+    _SdfDiffuseOutput[id.xy] = outputResult;
 }
 
 // Explicit Editor diagnostic dispatch only. Reuse the production history reader
@@ -998,7 +1095,7 @@ void InspectScreenProbeTemporalHistoryCS(uint3 id : SV_DispatchThreadID)
     float3 position, normal;
     bool receiver = LoadReceiver(pixel, position, normal);
     ScreenProbeTemporalHistory history = (ScreenProbeTemporalHistory)0;
-    bool valid = receiver && ReadScreenProbeTemporalHistory(pixel, position, normal, history);
+    bool valid = receiver && ReadScreenProbeTemporalHistory(pixel, position, normal, 1.0f, 1.0f, history);
     float4 clip = mul(_SdfDiffusePreviousVP, float4(position, 1.0));
     float4 encodedMotion = _SdfScreenMotion.Load(int3(pixel, 0));
     float2 motion = VividDecodeMotionUV(encodedMotion);

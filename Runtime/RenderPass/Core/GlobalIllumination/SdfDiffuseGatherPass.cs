@@ -125,9 +125,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PreviousPixelDepthId = Shader.PropertyToID("_SdfDiffusePreviousPixelDepth");
         private static readonly int PixelDepthOutputId = Shader.PropertyToID("_SdfDiffusePixelDepthOutput");
         private static readonly int PreviousPixelDepthValidId = Shader.PropertyToID("_SdfPreviousPixelDepthValid");
+        private static readonly int PreviousPreExposureId = Shader.PropertyToID("_SdfPreviousPreExposure");
+        private static readonly int CurrentPreExposureOutputId = Shader.PropertyToID("_SdfCurrentPreExposureOutput");
+        private static readonly int PreExposureHistoryEnabledId = Shader.PropertyToID("_SdfPreExposureHistoryEnabled");
+        private static readonly int PreviousPreExposureValidId = Shader.PropertyToID("_SdfPreviousPreExposureValid");
+        private static readonly int DisocclusionSpatialFilterId = Shader.PropertyToID("_SdfDisocclusionSpatialFilter");
         private static readonly CameraHistoryId ScreenProbeMomentsHistoryId = CameraHistoryId.Create("SdfScreenProbePixelMoments");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
         private static readonly CameraHistoryId PixelDepthHistoryId = CameraHistoryId.Create("SdfDiffusePixelDepthHistory");
+        private static readonly CameraHistoryId PixelPreExposureHistoryId = CameraHistoryId.Create("SdfScreenProbePreExposure");
         private static readonly CameraHistoryId BentNormalHistoryId = CameraHistoryId.Create("SdfShortRangeBentNormal");
         private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenLambertRadianceHistory");
@@ -745,6 +751,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_CurrentPixelGeometry = CreateOutput("SDF Diffuse Pixel Geometry History", PixelGeometryFormat);
         private readonly RenderGraphTexture m_PreviousPixelDepth = RenderGraphTexture.CreateInput("Previous SDF Diffuse Pixel Depth", GraphicsFormat.R32_SFloat);
         private readonly RenderGraphTexture m_CurrentPixelDepth = CreateOutput("SDF Diffuse Pixel Depth History", GraphicsFormat.R32_SFloat);
+        private readonly RenderGraphTexture m_PreviousPreExposure = RenderGraphTexture.CreateInput("Previous Screen Probe PreExposure", GraphicsFormat.R32_SFloat);
+        private readonly RenderGraphTexture m_CurrentPreExposure = CreateOutput("Screen Probe PreExposure History", GraphicsFormat.R32_SFloat);
         [RenderGraphResource(Name = "Short Range Bent Normal Samples", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_BentSamples = CreateScratch("Short Range Bent Normal Samples", ProbeFormat);
@@ -871,13 +879,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_InterpolationScalarNoise, m_InterpolationVectorNoise;
         private TextureHandle m_TemporalScalarNoise;
         private bool m_StochasticInterpolation, m_InterpolationFlipY;
-        private bool m_FastUpdateNeighborhoodClamp, m_TemporalRejectBasedOnNormal, m_TemporalPlaneDisocclusion;
+        private bool m_FastUpdateNeighborhoodClamp, m_TemporalRejectBasedOnNormal, m_TemporalPlaneDisocclusion, m_DisocclusionSpatialFilter;
         private Vector4 m_ProbeCameraPosition;
         private GraphicsBuffer m_PreExposure;
         private int m_SphereGuideKernel = -1;
         private CameraHistoryTexture m_RestirHistory;
         private CameraHistoryTexture m_RestirVarianceHistory;
-        private CameraHistoryTexture m_PixelHistory, m_PixelGeometryHistory, m_PixelDepthHistory;
+        private CameraHistoryTexture m_PixelHistory, m_PixelGeometryHistory, m_PixelDepthHistory, m_PreExposureHistory;
         private CameraHistoryTexture m_RadiosityReadHistory, m_RadiosityWriteHistory;
         private TextureHandle m_RadiosityInput, m_RadiosityOutput;
         private int m_RadiosityKernel = -1;
@@ -1249,7 +1257,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrozenGuideActive = m_ProposalHistoryValid = false;
             m_DirectionalHistoryValid = m_DirectionalGuideHistoryValid = false;
             m_RestirHistory = m_RestirVarianceHistory = null;
-            m_PixelHistory = m_PixelGeometryHistory = m_PixelDepthHistory = null;
+            m_PixelHistory = m_PixelGeometryHistory = m_PixelDepthHistory = m_PreExposureHistory = null;
             m_BentNormalHistory = null;
             m_BentNormalHistoryValid = false;
             m_BentSamples.Resize(1, 1);
@@ -1261,6 +1269,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FastUpdateNeighborhoodClamp = false;
             m_TemporalRejectBasedOnNormal = false;
             m_TemporalPlaneDisocclusion = false;
+            m_DisocclusionSpatialFilter = false;
             m_ProbeCameraPosition = default;
             m_InterpolationScalarNoise = m_InterpolationVectorNoise = default;
             m_TemporalScalarNoise = default;
@@ -1467,6 +1476,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FastUpdateNeighborhoodClamp = useSettings && settings.screenProbeFastUpdateNeighborhoodClamp.value;
             m_TemporalRejectBasedOnNormal = useSettings && settings.screenProbeTemporalRejectBasedOnNormal.value;
             m_TemporalPlaneDisocclusion = useSettings && settings.screenProbeTemporalPlaneDisocclusion.value;
+            m_DisocclusionSpatialFilter = !useSettings || settings.screenProbeDisocclusionSpatialFilter.value;
             m_TemporalScalarNoise = m_DirectionalCache && pixelTemporal && BlueNoise.Instance != null
                 ? BlueNoise.Instance.ScalarAtlas : default;
             if (m_TemporalScalarNoise.IsValid())
@@ -3787,6 +3797,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CurrentPixelDepth.Resize(m_Width, m_Height);
                 CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelDepthHistoryId,
                     m_PreviousPixelDepth, m_CurrentPixelDepth, m_CurrentPixelDepth.desc, out m_PixelDepthHistory, AccessFlags.Write);
+                m_CurrentPreExposure.Resize(1, 1);
+                CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, PixelPreExposureHistoryId,
+                    m_PreviousPreExposure, m_CurrentPreExposure, m_CurrentPreExposure.desc, out m_PreExposureHistory, AccessFlags.Write);
             }
             if (m_DirectionalCache && m_AtrousIterations > 0 && m_ScreenProbeTemporalKernel >= 0 && m_ScreenProbeMomentsKernel >= 0)
             {
@@ -3861,6 +3874,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? (screenProbeMoments ? m_ScreenProbeMomentsAoKernel : m_ScreenProbeAoKernel)
                     : (screenProbeMoments ? m_ScreenProbeMomentsKernel : m_ScreenProbeTemporalKernel);
                 hasHistory &= m_FastUpdateHistory.IsValid();
+                bool preExposureEnabled = m_PreExposure != null && m_PreExposureHistory != null
+                    && m_CurrentPreExposure.innerHandle.IsValid();
+                if (preExposureEnabled)
+                    hasHistory &= m_PreExposureHistory.IsValid();
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousFastUpdateId, m_PreviousFastUpdate.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, FastUpdateOutputId, m_CurrentFastUpdate.innerHandle);
 
@@ -3892,6 +3909,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousPixelDepthId,
                     pixelDepthValid ? m_PreviousPixelDepth.innerHandle : black);
                 cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PixelDepthOutputId, m_CurrentPixelDepth.innerHandle);
+                bool prevPreExposureValid = preExposureEnabled && hasHistory && m_PreviousPreExposure.innerHandle.IsValid();
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, PreExposureHistoryEnabledId, preExposureEnabled ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, PreviousPreExposureValidId, prevPreExposureValid ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousPreExposureId,
+                    prevPreExposureValid ? m_PreviousPreExposure.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, CurrentPreExposureOutputId,
+                    preExposureEnabled ? m_CurrentPreExposure.innerHandle : m_CurrentPixelDepth.innerHandle);
+                if (m_PreExposure != null)
+                    cmd.SetComputeBufferParam(m_GatherTemporalCompute, kernel, VividAutoExposureSystem.PreExposureBufferId, m_PreExposure);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, DisocclusionSpatialFilterId, m_DisocclusionSpatialFilter ? 1 : 0);
             }
             else if (restirVarianceTemporal)
                 kernel = m_RestirVarianceTemporalKernel;
@@ -3944,6 +3971,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FastUpdateHistory?.MarkWritten();
             m_PixelGeometryHistory.MarkWritten();
             m_PixelDepthHistory?.MarkWritten();
+            m_PreExposureHistory?.MarkWritten();
             if (compositeBent)
                 m_BentNormalHistory.MarkWritten();
             if (screenProbeMoments)

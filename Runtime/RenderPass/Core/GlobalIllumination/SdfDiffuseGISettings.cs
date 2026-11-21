@@ -227,6 +227,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Use world-space plane distance instead of linear scene depth with grazing-angle expansion for Screen Probe pixel temporal disocclusion. Disabled by default to match UE Lumen.")]
         public BoolParameter screenProbeTemporalPlaneDisocclusion = new(false);
 
+        [Tooltip("Apply a lightweight geometry-aware 3x3 bilateral spatial filter on newly disoccluded Screen Probe pixels (history age < 2) to suppress single-frame stochastic probe noise during camera motion.")]
+        public BoolParameter screenProbeDisocclusionSpatialFilter = new(true);
+
         [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
         public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);
 

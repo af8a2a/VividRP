@@ -51,6 +51,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.screenProbeFastUpdateNeighborhoodClamp.value, Is.False);
                 Assert.That(settings.screenProbeTemporalRejectBasedOnNormal.value, Is.False);
                 Assert.That(settings.screenProbeTemporalPlaneDisocclusion.value, Is.False);
+                Assert.That(settings.screenProbeDisocclusionSpatialFilter.value, Is.True);
             }
             finally
             {
@@ -263,6 +264,94 @@ namespace VividRP.Editor.Tests
             Assert.That(movingClamped.OutputRgba[center * 4], Is.LessThanOrEqualTo(0.355f));
         }
 
+        [Test]
+        public void DisocclusionSpatialFilter_SmoothsFreshPixelsWithoutBleedingAcrossEdgesOrAffectingSteadyHistory()
+        {
+            RequireComputeAndReversedZ();
+            var wallNormal = new Vector3(0f, 0f, -1f);
+            var sideNormal = new Vector3(1f, 0f, 0f);
+
+            // 1. Fresh disocclusion (hasHistory = false): checkerboard noise on coplanar wall at x >= 8
+            //    adjacent to a bright perpendicular foreground occluder at x < 8.
+            using var disoccludedFixture = new TemporalFixture(16, 16, useMoments: false);
+            disoccludedFixture.SetCurrentFrame(
+                (u, _) => u * 16f < 8f ? 3.0f : 8.0f,
+                (x, _) => x < 8 ? sideNormal : wallNormal,
+                (x, y) => x < 8
+                    ? new Color(10.0f, 10.0f, 10.0f, 1f)
+                    : (((x + y) & 1) == 0 ? new Color(1.0f, 1.0f, 1.0f, 1f) : new Color(0.2f, 0.2f, 0.2f, 1f)),
+                moving: 0.004f);
+
+            var filtered = disoccludedFixture.Step(
+                hasHistory: false, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                disocclusionSpatialFilter: true);
+
+            // Interior coplanar pixel (12, 8) has center 1.0 surrounded by 4 axial 0.2 and 4 diagonal 1.0:
+            // weighted avg = (1.0*1 + 4*0.75*0.2 + 4*0.5*1.0) / 6.0 = 3.6 / 6.0 = 0.6.
+            int interior = 8 * 16 + 12;
+            Assert.That(filtered.OutputRgba[interior * 4], Is.EqualTo(0.6f).Within(0.02f),
+                "Disocclusion 3x3 bilateral filter must smooth single-frame stochastic noise on coplanar pixels.");
+
+            // Edge pixel (8, 8) borders foreground occluder at x = 7 (value 10.0, depth 3.0 vs 8.0, perpendicular normal).
+            int edgePixel = 8 * 16 + 8;
+            Assert.That(filtered.OutputRgba[edgePixel * 4], Is.LessThan(0.85f),
+                "Disocclusion filter must reject foreground depth/normal discontinuities without bleeding bright values.");
+
+            // 2. Steady history (age == 10 >= 2): filter must NOT run at all.
+            using var steadyFixture = new TemporalFixture(16, 16, useMoments: false);
+            steadyFixture.WarmupSteadyHistory(
+                (_, _) => 8.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.5f, 0.5f, 0.5f, 1f),
+                frames: 12);
+            steadyFixture.SetCurrentFrame(
+                (_, _) => 8.0f,
+                (_, _) => wallNormal,
+                (x, y) => x == 8 && y == 8 ? new Color(1.0f, 1.0f, 1.0f, 1f) : new Color(0.0f, 0.0f, 0.0f, 1f),
+                moving: 0.004f);
+            var steadyFiltered = steadyFixture.Step(
+                hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                disocclusionSpatialFilter: true);
+            int center = 8 * 16 + 8;
+            float expectedSteady = Mathf.Lerp(0.5f, 1.0f, 1f / 11f);
+            Assert.That(steadyFiltered.OutputRgba[center * 4], Is.EqualTo(expectedSteady).Within(0.006f),
+                "Steady pixels (numFramesAccumulated >= 2) must skip the disocclusion spatial filter completely.");
+        }
+
+        [Test]
+        public void PreExposedHistory_PreservesHighLuxRadianceAcrossExposureChange()
+        {
+            RequireComputeAndReversedZ();
+            using var fixture = new TemporalFixture(16, 16, useMoments: true);
+            var wallNormal = new Vector3(0f, 0f, -1f);
+
+            // Simulate a 100,000 Lux sunlit indirect bounce (~25,000 unexposed linear radiance):
+            // Warmup at prevPreExposure = 0.0004 (PreExposed value = 10.0, clean FP16 precision).
+            fixture.SetCurrentFrame(
+                (_, _) => 8.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(25000f, 20000f, 15000f, 1f),
+                moving: 0.004f);
+            for (int f = 0; f < 12; f++)
+            {
+                fixture.Step(
+                    hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                    readResult: false, preExposure: 0.0004f);
+            }
+
+            // Now jump PreExposure 8x (0.0004 -> 0.0032, 3 EV shift) while physical radiance stays constant.
+            var output = fixture.Step(
+                hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                readResult: true, preExposure: 0.0032f);
+
+            int center = 8 * 16 + 8;
+            Assert.That(output.NumFrames[center], Is.EqualTo(10f).Within(0.01f));
+            Assert.That(output.OutputRgba[center * 4 + 0], Is.EqualTo(25000f).Within(64f),
+                "PreExposed history rescaled by currentPreExposure/prevPreExposure must remain invariant to an 8x EV jump.");
+            Assert.That(output.OutputRgba[center * 4 + 1], Is.EqualTo(20000f).Within(64f));
+            Assert.That(output.OutputRgba[center * 4 + 2], Is.EqualTo(15000f).Within(64f));
+        }
+
         private static void RequireComputeAndReversedZ()
         {
             Assume.That(
@@ -283,6 +372,9 @@ namespace VividRP.Editor.Tests
 
             private readonly Texture2D depthTex, gbuffer0, gbuffer1, motionTex, resolvedTex, movingTex, scalarNoise;
             private RenderTexture prevFast, outFast, prevLighting, outLighting, prevGeom, outGeom, prevDepth, outDepth, prevMoments, outMoments;
+            private RenderTexture prevPreExposure, outPreExposure;
+            private readonly ComputeBuffer preExposureBuffer;
+            private readonly Vector4[] preExposureScratch = new Vector4[1];
             private readonly RenderTexture outResolved;
 
             internal struct Result
@@ -335,6 +427,11 @@ namespace VividRP.Editor.Tests
                 outDepth = CreateRT(GraphicsFormat.R32_SFloat);
                 prevMoments = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
                 outMoments = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
+                prevPreExposure = CreateRT(GraphicsFormat.R32_SFloat, 1, 1);
+                outPreExposure = CreateRT(GraphicsFormat.R32_SFloat, 1, 1);
+                preExposureBuffer = new ComputeBuffer(1, sizeof(float) * 4);
+                preExposureScratch[0] = new Vector4(1f, 1f, 0f, 0f);
+                preExposureBuffer.SetData(preExposureScratch);
                 outResolved = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
             }
 
@@ -349,9 +446,9 @@ namespace VividRP.Editor.Tests
                 return tex;
             }
 
-            private RenderTexture CreateRT(GraphicsFormat format)
+            private RenderTexture CreateRT(GraphicsFormat format, int w = -1, int h = -1)
             {
-                var rt = new RenderTexture(new RenderTextureDescriptor(width, height)
+                var rt = new RenderTexture(new RenderTextureDescriptor(w > 0 ? w : width, h > 0 ? h : height)
                 {
                     graphicsFormat = format,
                     depthStencilFormat = GraphicsFormat.None,
@@ -464,7 +561,8 @@ namespace VividRP.Editor.Tests
             }
 
             internal Result Step(bool hasHistory, Vector2 jitterDeltaUv, bool clampEnabled,
-                bool readResult = true, int reprojectionFlags = 0)
+                bool readResult = true, int reprojectionFlags = 0, bool disocclusionSpatialFilter = false,
+                float preExposure = 0f)
             {
                 SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(
                     width, height, out var subPixel, out var shift, out var gatherMinMax);
@@ -474,6 +572,13 @@ namespace VividRP.Editor.Tests
                 currJitterMat.m13 = -2f * jitterDeltaUv.y;
                 var currVp = GL.GetGPUProjectionMatrix(currJitterMat * proj, true) * view;
                 var currInvVp = currVp.inverse;
+
+                bool usePreExposure = preExposure > 0f;
+                if (usePreExposure)
+                {
+                    preExposureScratch[0] = new Vector4(preExposure, 1f / preExposure, 0f, 0f);
+                    preExposureBuffer.SetData(preExposureScratch);
+                }
 
                 shader.SetVector("_SdfDiffuseScreenSize", new Vector4(width, height, 1f / width, 1f / height));
                 shader.SetMatrix("_SdfDiffuseInverseVP", currInvVp);
@@ -499,7 +604,11 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_SdfFastUpdateNeighborhoodClamp", clampEnabled ? 1 : 0);
                 shader.SetInt("_SdfTemporalReprojectionFlags", reprojectionFlags);
                 shader.SetInt("_SdfPreviousPixelDepthValid", hasHistory ? 1 : 0);
+                shader.SetInt("_SdfPreExposureHistoryEnabled", usePreExposure ? 1 : 0);
+                shader.SetInt("_SdfPreviousPreExposureValid", usePreExposure && hasHistory ? 1 : 0);
+                shader.SetInt("_SdfDisocclusionSpatialFilter", disocclusionSpatialFilter ? 1 : 0);
 
+                shader.SetBuffer(kernel, "_VividAutoExposurePreExposureBuffer", preExposureBuffer);
                 shader.SetTexture(kernel, "_SdfDiffuseDepth", depthTex);
                 shader.SetTexture(kernel, "_SdfDiffuseGBuffer0", gbuffer0);
                 shader.SetTexture(kernel, "_SdfDiffuseGBuffer1", gbuffer1);
@@ -509,12 +618,14 @@ namespace VividRP.Editor.Tests
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelLighting", prevLighting);
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelGeometry", prevGeom);
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelDepth", prevDepth);
+                shader.SetTexture(kernel, "_SdfPreviousPreExposure", prevPreExposure);
                 shader.SetTexture(kernel, "_SdfPreviousFastUpdate", prevFast);
                 shader.SetTexture(kernel, "_SdfTemporalScalarNoise", scalarNoise);
                 shader.SetTexture(kernel, "_SdfFastUpdateOutput", outFast);
                 shader.SetTexture(kernel, "_SdfDiffusePixelLightingOutput", outLighting);
                 shader.SetTexture(kernel, "_SdfDiffusePixelGeometryOutput", outGeom);
                 shader.SetTexture(kernel, "_SdfDiffusePixelDepthOutput", outDepth);
+                shader.SetTexture(kernel, "_SdfCurrentPreExposureOutput", outPreExposure);
                 shader.SetTexture(kernel, "_SdfDiffuseOutput", outResolved);
                 if (useMoments)
                 {
@@ -567,12 +678,14 @@ namespace VividRP.Editor.Tests
                 (prevLighting, outLighting) = (outLighting, prevLighting);
                 (prevGeom, outGeom) = (outGeom, prevGeom);
                 (prevDepth, outDepth) = (outDepth, prevDepth);
+                (prevPreExposure, outPreExposure) = (outPreExposure, prevPreExposure);
                 (prevMoments, outMoments) = (outMoments, prevMoments);
                 return res;
             }
 
             public void Dispose()
             {
+                preExposureBuffer?.Dispose();
                 foreach (Object obj in owned)
                 {
                     if (obj is RenderTexture rt) rt.Release();

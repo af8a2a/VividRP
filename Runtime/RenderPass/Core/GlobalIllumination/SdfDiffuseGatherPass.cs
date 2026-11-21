@@ -613,6 +613,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool FarPending;
             internal float FarDistance;
             internal ulong FarCardVersion;
+            internal uint FarSceneVersion;
 
             internal VividGlobalSdfObjectGrid ObjectGrid;
             public override void Dispose()
@@ -2272,6 +2273,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.RadiosityFastRelight = m_RadiosityFastRelight && m_RadiosityRestarting;
             m_State.FarDistance = m_FarDistance;
             m_State.FarCardVersion = m_FarCardVersion;
+            m_State.FarSceneVersion = FarSceneVersion;
             m_State.FarPending = m_FarPending;
             m_State.FarWindow = m_FarWindow;
             m_State.LightPositionRange = m_LightPositionRange;
@@ -3270,6 +3272,8 @@ namespace VividRP.Runtime.RenderPass.Core
             return (cell.x & mask) + FarGridSize * ((cell.z & mask) + FarGridSize * (cell.y & mask));
         }
 
+        private uint FarSceneVersion => m_FullSphere ? m_Scene.NonMotionTransportVersion : m_Scene.Revision;
+
         private void PrepareFarCache(Camera camera, VividSdfSurfaceCache cache, float distance)
         {
             var history = camera.GetVividCameraHistory();
@@ -3290,22 +3294,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarWindowParameter = m_FullSphere
                 ? new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, camera.orthographic ? 1f : 0f)
                 : new Vector4(m_FarWindow.x, m_FarWindow.y, m_FarWindow.z, 0f);
-            // Keep world probes through rigid motion. The scheduler refreshes their
-            // samples against current geometry while reusing the clipmap residency.
-            bool sceneChanged = m_FullSphere ? m_State.SceneNonMotionVersion != m_Scene.NonMotionVersion
-                : m_State.SceneRevision != m_Scene.Revision;
-            m_FarClear = !m_FarHistory.IsValid(0) || (!m_FullSphere && !m_FarHitIdsHistory.IsValid(0)) || m_State.FarDistance != m_FarDistance
-                || sceneChanged || !ReferenceEquals(m_State.Cache, cache)
-                || m_State.FarCardVersion != m_FarCardVersion || m_State.GatherRadiosityOrder != PublishedRadiosityOrder
-                || m_State.LayerMask != m_LayerMask || m_State.LightLayerMask != m_LightLayerMask
-                || m_State.MaxDistance != m_TraceDistance || m_State.RayBias != m_Bias
-                || (m_FullSphere && !MatchesEnvironmentLighting(m_State.SkyContentHash, m_State.SkyTextureParams, m_State.SkyTextureTint))
-                || !MatchesPreviousDirectionalLighting() || m_RadiosityRestarting && !m_State.RadiosityRestarting;
-            // The legacy volume only fills missing probes. Refresh samples that saw cold cards.
-            m_FarClear |= !m_FullSphere && m_FinalLightingNewCards > 0
-                && m_FinalLightingUpdateFirst + m_FinalLightingNewCards == (int)m_FinalLightingLayout.w;
+            m_FarClear = !m_FarHistory.IsValid(0) || m_State.FarDistance != m_FarDistance
+                || m_State.FarSceneVersion != FarSceneVersion || !ReferenceEquals(m_State.Cache, cache)
+                || m_State.FarCardVersion != m_FarCardVersion || m_State.LayerMask != m_LayerMask
+                || m_State.MaxDistance != m_TraceDistance || m_State.RayBias != m_Bias;
             if (m_FullSphere)
             {
+                // Keep residency and probe ages through lighting updates and rigid motion.
+                // The world scheduler refreshes them using current sky and card lighting.
                 m_WorldRawDesc.Resize(2048, 2048);
                 m_WorldRawHistory = history.GetOrCreateTexture(WorldRawRadianceHistoryId, 1,
                     CameraHistoryRenderGraphBridge.CreateDescriptor(m_WorldRawDesc.desc));
@@ -3314,6 +3310,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_FarAtlas = CameraHistoryRenderGraphBridge.ImportForPass(this, m_FarHistory, 0, AccessFlags.ReadWrite);
                 return;
             }
+
+            // The legacy fixed grid fills missing probes and has no continuous refresh.
+            bool finishedCardLighting = m_FinalLightingNewCards > 0
+                && m_FinalLightingUpdateFirst + m_FinalLightingNewCards == (int)m_FinalLightingLayout.w;
+            m_FarClear |= !m_FarHitIdsHistory.IsValid(0) || m_State.GatherRadiosityOrder != PublishedRadiosityOrder
+                || !MatchesPreviousDirectionalLighting() || m_RadiosityRestarting && !m_State.RadiosityRestarting
+                || finishedCardLighting;
             var keys = m_State.FarKeys ??= new Vector3Int[FarProbeCount];
             if (m_FarClear)
                 System.Array.Fill(keys, new Vector3Int(int.MinValue, int.MinValue, int.MinValue));

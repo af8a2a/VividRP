@@ -202,6 +202,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal uint RadiosityDiscontinuityVersion { get; private set; }
         internal uint TransportVersion { get; private set; }
         internal uint NonMotionVersion { get; private set; }
+        internal uint NonMotionTransportVersion { get; private set; }
         internal uint EmissionVersion { get; private set; }
         private Vector4 m_EmissionMaximum, m_PreviousEmissionMaximum;
         private bool m_LinearEmissionChange;
@@ -293,6 +294,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             bool surfacesChanged = m_NextDiffuseSurfaces != null
                 && (m_DiffuseSurfaceBuffer == null || !SameSources(m_DiffuseSurfaces, m_NextDiffuseSurfaces));
             bool transportChanged = instancesChanged;
+            bool nonMotionTransportChanged = instancesChanged && !transformOnly;
             if (surfacesChanged)
             {
                 bool sameTransport = m_DiffuseSurfaces.Count == m_NextDiffuseSurfaces.Count;
@@ -315,6 +317,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     linearEmission &= TryMergeEmissionScale(old.Emission, next.Emission, ref emissionScale, ref emissionChannels);
                 }
                 transportChanged |= !sameTransport;
+                nonMotionTransportChanged |= !sameTransport;
                 if (emissionChanged)
                 {
                     EmissionVersion++;
@@ -350,6 +353,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     NonMotionVersion++;
                 if (transportChanged)
                     TransportVersion++;
+                if (nonMotionTransportChanged)
+                    NonMotionTransportVersion++;
                 if (!smallTransform || surfacesChanged)
                     RadiosityDiscontinuityVersion++;
             }
@@ -980,6 +985,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             RadiosityDiscontinuityVersion++;
             TransportVersion++;
             NonMotionVersion++;
+            NonMotionTransportVersion++;
             EmissionVersion++;
             RadiosityCardCount = 0;
             m_SurfaceLightingInstanceBuffer = null;

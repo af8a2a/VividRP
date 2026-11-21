@@ -172,7 +172,7 @@ MonoBehaviour:
   m_ExposureTarget: {fileID: 0}
   m_StopNaNs: 0
   m_Dithering: 0
-  m_Antialiasing: 0
+  m_Antialiasing: 6
   m_EnableTAA: 0
   m_LegacyAntialiasingMigrated: 1
   m_TAAJitterSpread: 1
@@ -193,10 +193,10 @@ MonoBehaviour:
   m_FSR3Quality: 2
   m_FSR3EnableSharpening: 1
   m_FSR3Sharpness: 0.2
-  m_TSRQuality: 1
+  m_TSRQuality: 0
   m_TSREnableSharpening: 1
   m_TSRSharpness: 0.867
-  m_TSRHistorySampleCount: 31
+  m_TSRHistorySampleCount: 16
 --- !u!20 &186297868
 Camera:
   m_ObjectHideFlags: 0

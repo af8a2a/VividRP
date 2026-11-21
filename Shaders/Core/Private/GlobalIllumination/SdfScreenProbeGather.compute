@@ -965,6 +965,13 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
         }
         moving /= interpolationWeight;
     }
+    if (_SdfScreenProbeFullSphere != 0u)
+    {
+        // Lumen's LightIsMoving uses zero to mark an invalid integration.
+        // A covered fallback may still supply RGB without making the sample valid.
+        moving = totalWeight >= MinProbeInterpolationWeight && coveredWeight > 0.0
+            ? max(moving, 0.004f) : 0.0f;
+    }
     if (coveredWeight <= 0.0 && _SdfProbeResolveRepairMode == 0u)
         return 0.0;
 

@@ -667,13 +667,19 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     return true;
 }
 
-// Stored age includes the last observation. At saturation all N prior frames
-// still contribute alongside the current observation with weight 1 / (1 + N).
 Texture2D<float> _SdfResolvedMoving;
 
 float ScreenProbePriorFrameCount(float storedAge, float confidence, float fastUpdate)
 {
     return min(storedAge * confidence, (1.0 - fastUpdate) * _SdfPixelHistoryMaxAge);
+}
+
+float ScreenProbeCurrentSampleWeight(bool bLightingIsValid, float NewNumFramesAccumulated)
+{
+    float Alpha = 1.0f / (1.0f + NewNumFramesAccumulated);
+    if (!bLightingIsValid && NewNumFramesAccumulated >= 1.0f)
+        Alpha = 1.0f / (1.0f + 4.0f * NewNumFramesAccumulated);
+    return Alpha;
 }
 
 [numthreads(8, 8, 1)]
@@ -696,7 +702,10 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     bool receiver = LoadReceiver(id.xy, position, normal);
     // Depth from an unresolved or unlit foreground still occludes history.
     uint geometry = f32tof16(depth) | (receiver ? uint(PackProbeNormal(normal)) << 16u : 0u);
-    float age = receiver && result.a > 0.0 ? 1.0 : 0.0;
+    bool hasLighting = receiver && result.a > 0.0;
+    bool fullSphere = _SdfScreenProbeFullSphere != 0u;
+    float moving = receiver ? _SdfResolvedMoving.Load(int3(id.xy, 0)) : 0.0;
+    float age = hasLighting ? 1.0 : 0.0;
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
     float currentLog = ScreenProbeLogLuminance(result.rgb);
     float3 moments = float3(currentLog, 0.0, age);
@@ -705,31 +714,30 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     ScreenProbeTemporalHistory history;
     float currentFastUpdate = 0.0;
     float numFramesAccumulated = 0.0;
+    bool bValidReconstruction = true;
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     half4 OutShortRangeAO = half4(0.0, 1.0, 0.0, 1.0);
     int2 SampleCoord = 0;
-    bool bValidReconstruction = false;
     if (receiver)
     {
         SampleCoord = ReconstructShortRangeAO(id.xy, position, normal, bValidReconstruction);
         OutShortRangeAO = UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(SampleCoord, 0)));
     }
-    bool readHistory = age > 0.0 || (receiver && _SdfBentHistoryValid != 0u);
-#else
-    bool readHistory = age > 0.0;
 #endif
+    bool bLightingIsValid = hasLighting && (!fullSphere || moving > 0.0) && bValidReconstruction;
+    bool readHistory = receiver && (fullSphere || hasLighting);
     if (readHistory && _SdfDiffuseHasHistory != 0u && ReadScreenProbeTemporalHistory(id.xy, position, normal, history))
     {
         float coverageAgreement = min(result.a, history.coverage) / max(result.a, history.coverage);
-        if (age > 0.0 && coverageAgreement >= 0.35)
+        // Coverage can disagree when the current integration failed. The history
+        // reader has already validated the reprojected receiver and its lighting.
+        if ((fullSphere && !bLightingIsValid) || (hasLighting && coverageAgreement >= 0.35))
         {
             float3 historyLighting = history.coveredLighting / history.coverage;
-            float moving = _SdfResolvedMoving.Load(int3(id.xy, 0));
             currentFastUpdate = saturate(moving * 10.0f);
             currentFastUpdate = saturate(min((currentFastUpdate - .2f) / .8f, .9f));
             // Only this frame's lighting motion is carried into the next frame.
             float fastUpdate = max(currentFastUpdate, min(history.fastUpdate, 0.9));
-            bool fullSphere = _SdfScreenProbeFullSphere != 0u;
             float3 rectified = historyLighting;
             if (!fullSphere)
             {
@@ -745,15 +753,15 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
             if (history.momentCoverage >= 0.35)
             {
-                float momentAge = 1.0 + ScreenProbePriorFrameCount(history.momentAge,
+                float momentPriorFrames = ScreenProbePriorFrameCount(history.momentAge,
                     ageConfidence * saturate(history.momentCoverage), fastUpdate);
-                float weight = rcp(momentAge);
+                float weight = ScreenProbeCurrentSampleWeight(bLightingIsValid, momentPriorFrames);
                 float mean = history.logMean + ScreenProbeLogLuminance(rectified) - ScreenProbeLogLuminance(historyLighting);
                 float delta = currentLog - mean;
                 // Central variance avoids cancellation in half-precision history.
                 // Keep observation variance conservative: sparse probes are correlated.
                 moments = float3(lerp(mean, currentLog, weight),
-                    (1.0 - weight) * (history.logVariance + weight * delta * delta), min(momentAge, _SdfPixelHistoryMaxAge));
+                    (1.0 - weight) * (history.logVariance + weight * delta * delta), min(1.0 + momentPriorFrames, _SdfPixelHistoryMaxAge));
             }
 #endif
             // The UE desktop default uses validity-weighted age, with no
@@ -763,7 +771,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
             historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
                 ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
 
-            float currentWeight = 1.0f / (1.0f + numFramesAccumulated);
+            float currentWeight = ScreenProbeCurrentSampleWeight(bLightingIsValid, numFramesAccumulated);
             float3 covered = lerp(rectified * history.coverage, result.rgb * result.a, currentWeight);
             result.a = lerp(history.coverage, result.a, currentWeight);
             result.rgb = min(covered / max(result.a, 1e-5), 65000.0);
@@ -776,9 +784,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
             FastUpdateModeAmount = max(FastUpdateModeAmount, min(history.fastUpdate, .9f));
             float NewNumFramesAccumulated = min(history.age, (1.0f - FastUpdateModeAmount) * _SdfPixelHistoryMaxAge);
             half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, OutShortRangeAO, history.shortRangeAO);
-            float Alpha = 1.0f / (1.0f + NewNumFramesAccumulated);
-            if ((!bValidReconstruction || age <= 0.0) && NewNumFramesAccumulated >= 1.0f)
-                Alpha = 1.0f / (1.0f + 4.0f * NewNumFramesAccumulated);
+            float Alpha = ScreenProbeCurrentSampleWeight(bLightingIsValid, NewNumFramesAccumulated);
             OutShortRangeAO = lerp(HistoryShortRangeAO, OutShortRangeAO, half(Alpha));
         }
 #endif

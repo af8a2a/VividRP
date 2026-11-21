@@ -452,9 +452,12 @@ MonoBehaviour:
   screenProbeDitherTraceDirections:
     m_OverrideState: 1
     m_Value: 1
+  screenProbeStochasticInterpolation:
+    m_OverrideState: 0
+    m_Value: 0
   screenProbeTemporalFilter:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 1
   screenProbeMaxRayIntensity:
     m_OverrideState: 1
     m_Value: 10

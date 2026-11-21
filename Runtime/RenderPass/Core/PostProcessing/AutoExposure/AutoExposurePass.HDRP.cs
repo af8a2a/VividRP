@@ -60,7 +60,7 @@ namespace VividRP.Runtime.RenderPass
 
             cmd.SetBufferData(m_AutoExposureHistogramBuffer, s_EmptyHdrpHistogramData);
 
-            BindHDRPHistogramGenerationParameters(cmd);
+            BindHDRPMeteringParameters(cmd, m_AutoExposureWidth, m_AutoExposureHeight);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramGenKernel, HdrpSourceTextureId,
                 source.innerHandle);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramGenKernel, HdrpPreviousExposureTextureId,
@@ -76,7 +76,7 @@ namespace VividRP.Runtime.RenderPass
                 CoreUtils.DivRoundUp(Mathf.Max(1, m_AutoExposureHeight / 2), HdrpHistogramThreadGroupSizeY),
                 1);
 
-            BindHDRPHistogramReductionParameters(cmd, evaluateMode);
+            BindHDRPReductionParameters(cmd, evaluateMode);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramReduceKernel,
                 HdrpPreviousExposureTextureId, previousExposureTexture);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramReduceKernel, HdrpExposureCurveTextureId, curveTexture);
@@ -91,91 +91,70 @@ namespace VividRP.Runtime.RenderPass
 
         private bool ExecuteHDRPAutoExposure(CommandBuffer cmd)
         {
-            // if (cmd == null
-            //     || m_AutoExposureCompute == null
-            //     || m_ExposureData?.currentExposureBuffer == null
-            //     || m_ExposureData.previousExposureTexture == null
-            //     || m_ExposureData.currentExposureTexture == null
-            //     || source?.innerHandle.IsValid() != true)
-            // {
-            //     return false;
-            // }
-            //
-            // EnsureHdrpScratchTextures();
-            // if (m_HDRPPrePassTexture == null || m_HDRPReductionTexture == null)
-            //     return false;
-            //
-            // var meterMask = m_AutoExposureSettings.hdrpWeightTextureMask != null
-            //     ? m_AutoExposureSettings.hdrpWeightTextureMask
-            //     : Texture2D.whiteTexture;
-            // var curveTexture = ResolveHDRPExposureCurveTexture();
-            // var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.hdrpExposureMode)
-            //     ? 2u
-            //     : 1u;
-            // var previousExposureTexture = m_ExposureData.previousExposureTexture;
-            // var currentExposureTexture = m_ExposureData.currentExposureTexture;
-            //
-            // if (!m_ExposureData.hasValidHistory)
-            // {
-            //     BindHDRPAutoExposureParameters(cmd, m_HdrpResetKernel, 0u);
-            //     cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpResetKernel, HdrpOutputTextureId,
-            //         previousExposureTexture);
-            //     cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpResetKernel, 1, 1, 1);
-            // }
-            //
-            // BindHDRPAutoExposureParameters(cmd, m_HdrpPrePassKernel, 0u);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpSourceTextureId,
-            //     source.innerHandle);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpPreviousExposureTextureId,
-            //     previousExposureTexture);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureWeightMaskId, meterMask);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureCurveTextureId,
-            //     curveTexture);
-            // cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpPrePassKernel, AutoExposureCurrentBufferId,
-            //     m_ExposureData.currentExposureBuffer);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpOutputTextureId,
-            //     m_HDRPPrePassTexture);
-            // cmd.DispatchCompute(
-            //     m_AutoExposureCompute,
-            //     m_HdrpPrePassKernel,
-            //     HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
-            //     HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
-            //     1);
-            //
-            // BindHDRPAutoExposureParameters(cmd, m_HdrpReductionKernel, 0u);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId,
-            //     m_HDRPPrePassTexture);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId,
-            //     previousExposureTexture);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId,
-            //     meterMask);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId,
-            //     curveTexture);
-            // cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId,
-            //     m_ExposureData.currentExposureBuffer);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId,
-            //     m_HDRPReductionTexture);
-            // cmd.DispatchCompute(
-            //     m_AutoExposureCompute,
-            //     m_HdrpReductionKernel,
-            //     HdrpAutoExposureReductionSize,
-            //     HdrpAutoExposureReductionSize,
-            //     1);
-            //
-            // BindHDRPAutoExposureParameters(cmd, m_HdrpReductionKernel, evaluateMode);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId,
-            //     m_HDRPReductionTexture);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId,
-            //     previousExposureTexture);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId,
-            //     meterMask);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId,
-            //     curveTexture);
-            // cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId,
-            //     m_ExposureData.currentExposureBuffer);
-            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId,
-            //     currentExposureTexture);
-            // cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpReductionKernel, 1, 1, 1);
+            if (cmd == null
+                || m_AutoExposureCompute == null
+                || m_ExposureData?.currentExposureBuffer == null
+                || m_ExposureData.previousExposureTexture == null
+                || m_ExposureData.currentExposureTexture == null
+                || source?.innerHandle.IsValid() != true)
+            {
+                return false;
+            }
+
+            EnsureHdrpScratchTextures();
+
+            var meterMask = m_AutoExposureSettings.hdrpWeightTextureMask != null
+                ? m_AutoExposureSettings.hdrpWeightTextureMask
+                : Texture2D.whiteTexture;
+            var previousExposureTexture = m_ExposureData.previousExposureTexture;
+
+            if (!m_ExposureData.hasValidHistory)
+            {
+                cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpResetKernel,
+                    HdrpOutputTextureId, previousExposureTexture);
+                cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpResetKernel, 1, 1, 1);
+            }
+
+            BindHDRPMeteringParameters(cmd, HdrpAutoExposurePrePassSize, HdrpAutoExposurePrePassSize);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel,
+                HdrpSourceTextureId, source.innerHandle);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel,
+                HdrpPreviousExposureTextureId, previousExposureTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel,
+                HdrpExposureWeightMaskId, meterMask);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel,
+                HdrpOutputTextureId, m_HDRPPrePassTexture);
+            cmd.DispatchCompute(
+                m_AutoExposureCompute,
+                m_HdrpPrePassKernel,
+                HdrpAutoExposurePrePassSize / HdrpPrePassThreadGroupSize,
+                HdrpAutoExposurePrePassSize / HdrpPrePassThreadGroupSize,
+                1);
+
+            // Evaluation mode zero reduces the metering texture without writing exposure history.
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                HdrpPreviousExposureTextureId, previousExposureTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                HdrpExposureCurveTextureId, ResolveHDRPExposureCurveTexture());
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                HdrpReductionInputTextureId, m_HDRPPrePassTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                HdrpOutputTextureId, m_HDRPReductionTexture);
+            cmd.DispatchCompute(
+                m_AutoExposureCompute,
+                m_HdrpReductionKernel,
+                HdrpAutoExposureReductionSize,
+                HdrpAutoExposureReductionSize,
+                1);
+
+            BindHDRPReductionParameters(cmd, UsesHDRPCurveRemapping() ? 2u : 1u);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                HdrpReductionInputTextureId, m_HDRPReductionTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel,
+                HdrpOutputTextureId, m_ExposureData.currentExposureTexture);
+            cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpReductionKernel, 1, 1, 1);
             return true;
         }
 
@@ -205,88 +184,7 @@ namespace VividRP.Runtime.RenderPass
         }
 
 
-        private void BindHDRPAutoExposureParameters(CommandBuffer cmd, int kernel, uint evaluateMode)
-        {
-            if (cmd == null || kernel < 0 || m_AutoExposureCompute == null)
-                return;
-
-            ResolveHDRPAutoExposureContext(
-                out var compensationStops,
-                out var minExposureEV100,
-                out var maxExposureEV100,
-                out var curveMinEV100,
-                out var curveMaxEV100,
-                out var histogramScaleBias,
-                out var meteringMode,
-                out var adaptationMode);
-            AutoExposureSettingsResolver.ResolveHDRPProceduralMeteringParameters(
-                m_AutoExposureSettings,
-                m_Camera,
-                m_AutoExposureWidth,
-                m_AutoExposureHeight,
-                out var proceduralMaskParams,
-                out var proceduralMaskParams2);
-
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpExposureParamsId,
-                new Vector4(
-                    compensationStops,
-                    minExposureEV100,
-                    maxExposureEV100,
-                    0f));
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpExposureParams2Id,
-                new Vector4(
-                    curveMinEV100,
-                    curveMaxEV100,
-                    ColorUtils.lensImperfectionExposureScale,
-                    m_AutoExposureSettings.targetMidGray));
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpHistogramRangeParamsId,
-                new Vector4(
-                    histogramScaleBias.x,
-                    histogramScaleBias.y,
-                    m_AutoExposureSettings.exposureLowPercent,
-                    m_AutoExposureSettings.exposureHighPercent));
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                AutoExposureScreenSizeId,
-                new Vector4(
-                    m_AutoExposureWidth,
-                    m_AutoExposureHeight,
-                    1f / Mathf.Max(1, m_AutoExposureWidth),
-                    1f / Mathf.Max(1, m_AutoExposureHeight)));
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpProceduralMaskParamsId,
-                proceduralMaskParams);
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpProceduralMaskParams2Id,
-                proceduralMaskParams2);
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpHistogramExposureParamsId,
-                new Vector4(
-                    m_AutoExposureSettings.exposureCompensationCurveMinEV100,
-                    m_AutoExposureSettings.exposureCompensationCurveInvRange,
-                    m_AutoExposureSettings.exposureCompensationCurveEnabled ? 1f : 0f,
-                    m_AutoExposureSettings.targetMidGray));
-            cmd.SetComputeVectorParam(
-                m_AutoExposureCompute,
-                HdrpAdaptationParamsId,
-                new Vector4(
-                    m_AutoExposureSettings.exposureSpeedDown,
-                    m_AutoExposureSettings.exposureSpeedUp,
-                    0f,
-                    0f));
-            SetHDRPVariants(cmd, meteringMode, adaptationMode, (int)evaluateMode);
-        }
-
-        private void BindHDRPHistogramGenerationParameters(CommandBuffer cmd)
+        private void BindHDRPMeteringParameters(CommandBuffer cmd, int width, int height)
         {
             if (cmd == null || m_AutoExposureCompute == null)
                 return;
@@ -303,8 +201,8 @@ namespace VividRP.Runtime.RenderPass
             AutoExposureSettingsResolver.ResolveHDRPProceduralMeteringParameters(
                 m_AutoExposureSettings,
                 m_Camera,
-                m_AutoExposureWidth,
-                m_AutoExposureHeight,
+                width,
+                height,
                 out var proceduralMaskParams,
                 out var proceduralMaskParams2);
 
@@ -328,10 +226,10 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureCompute,
                 AutoExposureScreenSizeId,
                 new Vector4(
-                    m_AutoExposureWidth,
-                    m_AutoExposureHeight,
-                    1f / Mathf.Max(1, m_AutoExposureWidth),
-                    1f / Mathf.Max(1, m_AutoExposureHeight)));
+                    width,
+                    height,
+                    1f / Mathf.Max(1, width),
+                    1f / Mathf.Max(1, height)));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpProceduralMaskParamsId,
@@ -343,7 +241,7 @@ namespace VividRP.Runtime.RenderPass
             SetHDRPVariants(cmd, meteringMode, adaptationMode, 0);
         }
 
-        private void BindHDRPHistogramReductionParameters(CommandBuffer cmd, uint evaluateMode)
+        private void BindHDRPReductionParameters(CommandBuffer cmd, uint evaluateMode)
         {
             if (cmd == null || m_AutoExposureCompute == null)
                 return;

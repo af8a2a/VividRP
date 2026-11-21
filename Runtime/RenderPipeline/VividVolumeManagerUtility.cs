@@ -50,7 +50,8 @@ namespace VividRP.Runtime
                     return mainCameraData.volumeLayerMask;
                 }
 
-                return s_DefaultVolumeLayerMask;
+                // Without a main camera, use the layers visible to the Scene View.
+                return mainCamera != null ? s_DefaultVolumeLayerMask : (LayerMask)camera.cullingMask;
             }
 
             if (camera.cameraType == CameraType.Preview)

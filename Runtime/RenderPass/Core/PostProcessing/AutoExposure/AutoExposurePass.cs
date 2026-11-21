@@ -15,6 +15,7 @@ namespace VividRP.Runtime.RenderPass
         private const int HdrpAutoExposureHistogramBucketCount = 128;
         private const int HdrpAutoExposurePrePassSize = 1024;
         private const int HdrpAutoExposureReductionSize = 32;
+        private const int HdrpPrePassThreadGroupSize = 8;
         private const int HdrpHistogramThreadGroupSizeX = 16;
         private const int HdrpHistogramThreadGroupSizeY = 8;
         private const string BuildHistogramKernelName = "BuildHistogram";

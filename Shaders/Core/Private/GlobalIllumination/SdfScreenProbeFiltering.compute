@@ -751,6 +751,17 @@ float GetSpatialFilterHitDistance(uint2 Address, uint2 MetadataOffset)
     return ((Linear - 1.0f / 255.0f) * 255.0f / 254.0f) * 0.01f;
 }
 
+float GetSpatialFilterSkyVisibility(uint2 Address, uint2 MetadataOffset)
+{
+    float SignedDistance = _SdfDirectionalComposite.Load(int3(Address + MetadataOffset, 0)).x;
+    if (SignedDistance < 0.0f)
+        return 1.0f;
+    // World Radiance Cache sky misses store hitDistance = _SdfFarTraceDistance (trilinearly interpolated at sky edges).
+    if (_SdfFarTraceDistance > 0.0f && SignedDistance >= 0.90f * _SdfFarTraceDistance)
+        return saturate((SignedDistance - 0.90f * _SdfFarTraceDistance) / max(0.08f * _SdfFarTraceDistance, 1e-4f));
+    return 0.0f;
+}
+
 uint3 SpatialFilterBlueNoiseCoord(uint2 Coordinate, uint FrameIndex)
 {
     uint3 WrappedCoordinate = uint3(Coordinate, FrameIndex) & uint3(127u, 127u, 63u);
@@ -784,6 +795,7 @@ void GatherNeighborRadiance(
     uint2 ScreenProbeViewSize,
     uint2 MetadataOffset,
     inout float3 TotalRadiance,
+    inout float TotalSkyVisibility,
     inout float TotalWeight)
 {
     if (all(NeighborScreenTileCoord >= 0) && all(NeighborScreenTileCoord < int2(ScreenProbeViewSize)))
@@ -819,7 +831,12 @@ void GatherNeighborRadiance(
                 }
 
                 float Weight = PositionWeight * AngleWeight;
-                TotalRadiance += _SdfDirectionalSpatialInput.Load(int3(NeighborTraceCoord, 0)).xyz * Weight;
+                float4 NeighborSample = _SdfDirectionalSpatialInput.Load(int3(NeighborTraceCoord, 0));
+                float NeighborSkyVis = _SdfSpatialFilterPassIndex == 0u
+                    ? GetSpatialFilterSkyVisibility(NeighborTraceCoord, MetadataOffset)
+                    : saturate(NeighborSample.a - 1.0f);
+                TotalRadiance += NeighborSample.xyz * Weight;
+                TotalSkyVisibility += NeighborSkyVis * Weight;
                 TotalWeight += Weight;
             }
         }
@@ -859,11 +876,16 @@ void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadI
         float HitDistance = GetSpatialFilterHitDistance(Address, MetadataOffset);
 
         float3 TotalRadiance = 0.0f;
+        float TotalSkyVisibility = 0.0f;
         float TotalWeight = 0.0f;
 
         if (HitDistance >= 0.0f)
         {
-            TotalRadiance = _SdfDirectionalSpatialInput.Load(int3(Address, 0)).xyz;
+            float4 CenterSample = _SdfDirectionalSpatialInput.Load(int3(Address, 0));
+            TotalRadiance = CenterSample.xyz;
+            TotalSkyVisibility = _SdfSpatialFilterPassIndex == 0u
+                ? GetSpatialFilterSkyVisibility(Address, MetadataOffset)
+                : saturate(CenterSample.a - 1.0f);
             TotalWeight = 1.0f;
         }
 
@@ -873,7 +895,7 @@ void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadI
         {
             GatherNeighborRadiance(int2(ScreenTileCoord) + Offsets[OffsetIndex], ProbeTexelIndex, WorldPosition,
                 WorldConeDirection, SceneDepth, HitDistance, ScreenProbeTracesMoving, ScreenProbeViewSize,
-                MetadataOffset, TotalRadiance, TotalWeight);
+                MetadataOffset, TotalRadiance, TotalSkyVisibility, TotalWeight);
         }
 
         // Increase spatial filtering when temporal filter will be reduced.
@@ -889,18 +911,20 @@ void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadI
             {
                 GatherNeighborRadiance(int2(ScreenTileCoord) + MovingOffsets[OffsetIndex], ProbeTexelIndex, WorldPosition,
                     WorldConeDirection, SceneDepth, HitDistance, ScreenProbeTracesMoving, ScreenProbeViewSize,
-                    MetadataOffset, TotalRadiance, TotalWeight);
+                    MetadataOffset, TotalRadiance, TotalSkyVisibility, TotalWeight);
             }
         }
 
         if (TotalWeight > 0.0f)
         {
             TotalRadiance /= TotalWeight;
+            TotalSkyVisibility /= TotalWeight;
         }
 
         // Lumen's QuantizeFloatColor, with the mantissa width of Vivid's RGBA16F atlas.
+        // Pack filtered directional sky visibility in alpha as [1, 2] (0 marks invalid probes).
         float3 Error = asfloat(asuint(TotalRadiance * (1.0f / 1024.0f)) & ~0x007FFFFFu);
-        _SdfDirectionalFilteredOutput[Address] = float4(min(TotalRadiance + Error * E, 65504.0f), 1.0f);
+        _SdfDirectionalFilteredOutput[Address] = float4(min(TotalRadiance + Error * E, 65504.0f), 1.0f + saturate(TotalSkyVisibility));
     }
     else
     {
@@ -1313,8 +1337,11 @@ void ScreenProbeConvertToIrradianceCS(uint3 id : SV_DispatchThreadID)
             }
             float4 filtered = _SdfDirectionalFiltered.Load(int3(address, 0));
             // Each equal-cosine-mass cell contains the weighted radiance estimate,
-            // including zero contributions. Alpha only validates the receiver.
-            float weight = cellMass * max(filtered.a, 0.0);
+            // including zero contributions. FullSphere packs filtered sky visibility in [1, 2].
+            float validAlpha = _SdfScreenProbeFullSphere != 0u
+                ? (filtered.a > 0.0f ? 1.0f : 0.0f)
+                : max(filtered.a, 0.0f);
+            float weight = cellMass * validAlpha;
             float3 sample = filtered.rgb * weight;
             float cosine = saturate(dot(normal, direction));
             ProjectSdfProbeIrradiance(sh, sample * (_SdfScreenProbeFullSphere != 0u ? 4.0 : rcp(max(cosine, 0.25))), direction);

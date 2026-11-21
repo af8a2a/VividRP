@@ -52,11 +52,27 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.screenProbeTemporalRejectBasedOnNormal.value, Is.False);
                 Assert.That(settings.screenProbeTemporalPlaneDisocclusion.value, Is.False);
                 Assert.That(settings.screenProbeDisocclusionSpatialFilter.value, Is.True);
+                Assert.That(settings.screenProbeRoughSpecular.value, Is.True);
             }
             finally
             {
                 Object.DestroyImmediate(settings);
             }
+        }
+
+        [Test]
+        public void FullSphereGather_RetainsTemporalHistoryAcrossLightingAndSkyChanges()
+        {
+            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+                fullSphere: true, preserveRelitHistory: false, matchesLighting: false), Is.True,
+                "UE Lumen FullSphere Screen Probe Gather must keep pixel temporal and directional guide history through dynamic light/sky changes.");
+            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+                fullSphere: false, preserveRelitHistory: false, matchesLighting: false), Is.False,
+                "Legacy non-FullSphere gather must retain its explicit lighting invalidation when not rescaling.");
+            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+                fullSphere: false, preserveRelitHistory: true, matchesLighting: false), Is.True);
+            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+                fullSphere: false, preserveRelitHistory: false, matchesLighting: true), Is.True);
         }
 
         [Test]
@@ -352,6 +368,49 @@ namespace VividRP.Editor.Tests
             Assert.That(output.OutputRgba[center * 4 + 2], Is.EqualTo(15000f).Within(64f));
         }
 
+        [Test]
+        public void RoughSpecularTemporal_AccumulatesPreExposedRadianceAndSkyVisibilityAcrossExposureChange()
+        {
+            RequireComputeAndReversedZ();
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            var wallNormal = new Vector3(0f, 0f, -1f);
+
+            // Warmup steady indoor colonnade: warm golden rough specular radiance (2000, 1500, 1000)
+            // with occluded sky visibility (0.0) at PreExposure = 0.001 (stored PreExposed = 2.0, 1.5, 1.0).
+            fixture.SetCurrentFrame(
+                (_, _) => 8.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(2000f, 1500f, 1000f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(2000f, 1500f, 1000f, 0.0f));
+            for (int f = 0; f < 12; f++)
+            {
+                fixture.Step(
+                    hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                    readResult: false, preExposure: 0.001f, roughSpecularEnabled: true);
+            }
+
+            // Jump PreExposure 4x (0.001 -> 0.004) while rough specular stays constant and skyVis steps to 0.55.
+            fixture.SetCurrentFrame(
+                (_, _) => 8.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(2000f, 1500f, 1000f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(2000f, 1500f, 1000f, 0.55f));
+            var output = fixture.Step(
+                hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                readResult: true, preExposure: 0.004f, roughSpecularEnabled: true);
+
+            int center = 8 * 16 + 8;
+            // Stored in PreExposed space at 0.004 => (8.0, 6.0, 4.0) and skyVis = lerp(0.0, 0.55, 1/11) = 0.05.
+            Assert.That(output.RoughSpecularRgba[center * 4 + 0], Is.EqualTo(8.0f).Within(0.05f),
+                "Rough specular temporal history must rescale cleanly across PreExposure changes.");
+            Assert.That(output.RoughSpecularRgba[center * 4 + 1], Is.EqualTo(6.0f).Within(0.05f));
+            Assert.That(output.RoughSpecularRgba[center * 4 + 2], Is.EqualTo(4.0f).Within(0.05f));
+            Assert.That(output.RoughSpecularRgba[center * 4 + 3], Is.EqualTo(0.05f).Within(0.006f),
+                "Directional sky visibility must accumulate with the same temporal sample weight as radiance.");
+        }
+
         private static void RequireComputeAndReversedZ()
         {
             Assume.That(
@@ -370,8 +429,9 @@ namespace VividRP.Editor.Tests
             private readonly int kernel;
             private readonly Matrix4x4 proj, view, vp, invVp;
 
-            private readonly Texture2D depthTex, gbuffer0, gbuffer1, motionTex, resolvedTex, movingTex, scalarNoise;
+            private readonly Texture2D depthTex, gbuffer0, gbuffer1, motionTex, resolvedTex, roughSpecTex, movingTex, scalarNoise;
             private RenderTexture prevFast, outFast, prevLighting, outLighting, prevGeom, outGeom, prevDepth, outDepth, prevMoments, outMoments;
+            private RenderTexture prevRoughSpec, outRoughSpec;
             private RenderTexture prevPreExposure, outPreExposure;
             private readonly ComputeBuffer preExposureBuffer;
             private readonly Vector4[] preExposureScratch = new Vector4[1];
@@ -380,6 +440,7 @@ namespace VividRP.Editor.Tests
             internal struct Result
             {
                 public float[] OutputRgba;
+                public float[] RoughSpecularRgba;
                 public float[] MomentsRgba;
                 public float[] FastUpdate;
                 public float[] NumFrames;
@@ -412,6 +473,7 @@ namespace VividRP.Editor.Tests
                 gbuffer1 = CreateTex2D(GraphicsFormat.R8G8B8A8_UNorm);
                 motionTex = CreateTex2D(GraphicsFormat.R32G32B32A32_SFloat);
                 resolvedTex = CreateTex2D(GraphicsFormat.R32G32B32A32_SFloat);
+                roughSpecTex = CreateTex2D(GraphicsFormat.R32G32B32A32_SFloat);
                 movingTex = CreateTex2D(GraphicsFormat.R32_SFloat);
                 scalarNoise = CreateTex2D(GraphicsFormat.R32_SFloat, 1, 1);
                 scalarNoise.SetPixelData(new[] { 0.5f }, 0);
@@ -427,6 +489,8 @@ namespace VividRP.Editor.Tests
                 outDepth = CreateRT(GraphicsFormat.R32_SFloat);
                 prevMoments = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
                 outMoments = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
+                prevRoughSpec = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
+                outRoughSpec = CreateRT(GraphicsFormat.R16G16B16A16_SFloat);
                 prevPreExposure = CreateRT(GraphicsFormat.R32_SFloat, 1, 1);
                 outPreExposure = CreateRT(GraphicsFormat.R32_SFloat, 1, 1);
                 preExposureBuffer = new ComputeBuffer(1, sizeof(float) * 4);
@@ -511,13 +575,15 @@ namespace VividRP.Editor.Tests
                 Func<int, int, Vector3> normalAtPixel,
                 Func<int, int, Color> resolvedAtPixel,
                 float moving,
-                Vector2 currentJitterUv = default)
+                Vector2 currentJitterUv = default,
+                Func<int, int, Color> roughSpecularAtPixel = null)
             {
                 var depths = new float[width * height];
                 var gb0 = new byte[width * height * 4];
                 var gb1 = new byte[width * height * 4];
                 var motions = new float[width * height * 4];
                 var cRes = new float[width * height * 4];
+                var cSpec = new float[width * height * 4];
                 var cMov = new float[width * height];
 
                 for (int y = 0; y < height; y++)
@@ -548,6 +614,11 @@ namespace VividRP.Editor.Tests
                         cRes[i * 4 + 1] = c.g;
                         cRes[i * 4 + 2] = c.b;
                         cRes[i * 4 + 3] = c.a;
+                        Color s = roughSpecularAtPixel != null ? roughSpecularAtPixel(x, y) : Color.clear;
+                        cSpec[i * 4 + 0] = s.r;
+                        cSpec[i * 4 + 1] = s.g;
+                        cSpec[i * 4 + 2] = s.b;
+                        cSpec[i * 4 + 3] = s.a;
                         cMov[i] = moving;
                     }
                 }
@@ -557,12 +628,13 @@ namespace VividRP.Editor.Tests
                 gbuffer1.SetPixelData(gb1, 0); gbuffer1.Apply(false, false);
                 motionTex.SetPixelData(motions, 0); motionTex.Apply(false, false);
                 resolvedTex.SetPixelData(cRes, 0); resolvedTex.Apply(false, false);
+                roughSpecTex.SetPixelData(cSpec, 0); roughSpecTex.Apply(false, false);
                 movingTex.SetPixelData(cMov, 0); movingTex.Apply(false, false);
             }
 
             internal Result Step(bool hasHistory, Vector2 jitterDeltaUv, bool clampEnabled,
                 bool readResult = true, int reprojectionFlags = 0, bool disocclusionSpatialFilter = false,
-                float preExposure = 0f)
+                float preExposure = 0f, bool roughSpecularEnabled = false)
             {
                 SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(
                     width, height, out var subPixel, out var shift, out var gatherMinMax);
@@ -606,6 +678,8 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_SdfPreviousPixelDepthValid", hasHistory ? 1 : 0);
                 shader.SetInt("_SdfPreExposureHistoryEnabled", usePreExposure ? 1 : 0);
                 shader.SetInt("_SdfPreviousPreExposureValid", usePreExposure && hasHistory ? 1 : 0);
+                shader.SetInt("_SdfRoughSpecularEnabled", roughSpecularEnabled ? 1 : 0);
+                shader.SetInt("_SdfPreviousRoughSpecularValid", roughSpecularEnabled && hasHistory ? 1 : 0);
                 shader.SetInt("_SdfDisocclusionSpatialFilter", disocclusionSpatialFilter ? 1 : 0);
 
                 shader.SetBuffer(kernel, "_VividAutoExposurePreExposureBuffer", preExposureBuffer);
@@ -614,6 +688,9 @@ namespace VividRP.Editor.Tests
                 shader.SetTexture(kernel, "_SdfDiffuseGBuffer1", gbuffer1);
                 shader.SetTexture(kernel, "_SdfScreenMotion", motionTex);
                 shader.SetTexture(kernel, "_SdfDiffuseCurrentResolved", resolvedTex);
+                shader.SetTexture(kernel, "_SdfCurrentRoughSpecular", roughSpecTex);
+                shader.SetTexture(kernel, "_SdfPreviousRoughSpecular", prevRoughSpec);
+                shader.SetTexture(kernel, "_SdfRoughSpecularHistoryOutput", outRoughSpec);
                 shader.SetTexture(kernel, "_SdfResolvedMoving", movingTex);
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelLighting", prevLighting);
                 shader.SetTexture(kernel, "_SdfDiffusePreviousPixelGeometry", prevGeom);
@@ -654,6 +731,15 @@ namespace VividRP.Editor.Tests
                         momentsData = reqMom.GetData<float>().ToArray();
                     }
 
+                    float[] roughSpecData = null;
+                    if (roughSpecularEnabled)
+                    {
+                        var reqSpec = AsyncGPUReadback.Request(outRoughSpec, 0, GraphicsFormat.R32G32B32A32_SFloat);
+                        reqSpec.WaitForCompletion();
+                        Assert.That(reqSpec.hasError, Is.False);
+                        roughSpecData = reqSpec.GetData<float>().ToArray();
+                    }
+
                     byte[] rawFast = reqFast.GetData<byte>().ToArray();
                     var fastVals = new float[rawFast.Length];
                     var numFramesVals = new float[rawFast.Length];
@@ -668,6 +754,7 @@ namespace VividRP.Editor.Tests
                     res = new Result
                     {
                         OutputRgba = reqOut.GetData<float>().ToArray(),
+                        RoughSpecularRgba = roughSpecData,
                         MomentsRgba = momentsData,
                         FastUpdate = fastVals,
                         NumFrames = numFramesVals
@@ -679,6 +766,7 @@ namespace VividRP.Editor.Tests
                 (prevGeom, outGeom) = (outGeom, prevGeom);
                 (prevDepth, outDepth) = (outDepth, prevDepth);
                 (prevPreExposure, outPreExposure) = (outPreExposure, prevPreExposure);
+                (prevRoughSpec, outRoughSpec) = (outRoughSpec, prevRoughSpec);
                 (prevMoments, outMoments) = (outMoments, prevMoments);
                 return res;
             }

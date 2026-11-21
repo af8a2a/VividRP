@@ -35,7 +35,7 @@ struct Varyings
     float4 positionCS : SV_POSITION;
     float4 positionCSNoJitter : TEXCOORD0;
     float4 previousPositionCSNoJitter : TEXCOORD1;
-    float2 uv : TEXCOORD2;
+    float3 uv : TEXCOORD2;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -56,14 +56,17 @@ Varyings Vert(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-    output.positionCSNoJitter = mul(_NonJitteredViewProjMatrix, mul(UNITY_MATRIX_M, input.positionOS));
-    output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+    float4 worldPosMotion = mul(UNITY_MATRIX_M, input.positionOS);
+    output.positionCSNoJitter = mul(_NonJitteredViewProjMatrix, worldPosMotion);
+    output.uv.xy = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
 
     float4 previousPositionOS = unity_MotionVectorsParams.x == 1.0
         ? float4(input.positionOld, 1.0)
         : input.positionOS;
 
-    output.previousPositionCSNoJitter = mul(_PrevViewProjMatrix, mul(UNITY_PREV_MATRIX_M, previousPositionOS));
+    float4 previousWorldPosMotion = mul(UNITY_PREV_MATRIX_M, previousPositionOS);
+    output.previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWorldPosMotion);
+    output.uv.z = any(abs(worldPosMotion.xyz - previousWorldPosMotion.xyz) > 1e-5) ? 1.0 : 0.0;
     return output;
 }
 
@@ -73,9 +76,11 @@ float4 Frag(Varyings input) : SV_Target
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     if (_AlphaClip > 0.5)
-        clip(SampleMotionVectorAlpha(input.uv) - _Cutoff);
+        clip(SampleMotionVectorAlpha(input.uv.xy) - _Cutoff);
 
-    return EncodeMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter);
+    return input.uv.z > 0.0
+        ? EncodeMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter)
+        : EncodeCameraMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter);
 }
 
 #endif

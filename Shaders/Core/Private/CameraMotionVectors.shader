@@ -103,8 +103,11 @@ Shader "Hidden/VividRP/CameraMotionVectors"
                             {
                                 float4 local = mul(_VividPrimitiveTransformData[primitive.TransformIndex].WorldToObjectMatrix, float4(positionWS, 1));
                                 float4 previousWS = mul(_VividPrimitivePreviousTransformData[primitive.TransformIndex].PreviousObjectToWorldMatrix, local);
-                                previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWS);
-                                objectVelocity = 1u;
+                                if (any(abs(previousWS.xyz - positionWS) > 1e-5))
+                                {
+                                    previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWS);
+                                    objectVelocity = 1u;
+                                }
                             }
                         }
                     }

@@ -37,6 +37,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int BentNormalId = Shader.PropertyToID("_RealtimeBentNormal");
         private static readonly int PackedBentNormalId = Shader.PropertyToID("_RealtimePackedBentNormal");
         private static readonly int BentNormalEnabledId = Shader.PropertyToID("_RealtimeBentNormalEnabled");
+        private static readonly int RealtimeRoughSpecularId = Shader.PropertyToID("_RealtimeRoughSpecular");
+        private static readonly int RealtimeRoughSpecularEnabledId = Shader.PropertyToID("_RealtimeRoughSpecularEnabled");
         private static readonly int RealtimeDiffuseGIOnlyId = Shader.PropertyToID("_RealtimeDiffuseGIOnly");
         private static readonly int RealtimeOpenPbrDiffuseId = Shader.PropertyToID("_RealtimeOpenPbrDiffuse");
         private static readonly int RealtimeDiffuseSkyHandledId = Shader.PropertyToID("_RealtimeDiffuseSkyHandled");
@@ -196,6 +198,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly int[] m_SdfScreenSourceKernels = new int[DeferredVariantCount];
         private VividSdfScreenTraceData m_SdfScreenSource;
         private TextureHandle m_BentNormal;
+        private TextureHandle m_RoughSpecular;
         private TextureHandle m_SdfScreenSourceRadiance;
         private TextureHandle m_SdfScreenSourceGeometry;
         private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1 };
@@ -383,8 +386,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
-            m_BentNormal = frameData.Contains<VividSdfDiffuseFrameData>()
-                ? CameraHistoryRenderGraphBridge.ImportForPass(this, frameData.Get<VividSdfDiffuseFrameData>().BentNormalHistory, 0, AccessFlags.Read)
+            var sdfDiffuse = frameData.Contains<VividSdfDiffuseFrameData>() ? frameData.Get<VividSdfDiffuseFrameData>() : null;
+            m_BentNormal = sdfDiffuse != null
+                ? CameraHistoryRenderGraphBridge.ImportForPass(this, sdfDiffuse.BentNormalHistory, 0, AccessFlags.Read)
+                : default;
+            m_RoughSpecular = sdfDiffuse != null
+                ? CameraHistoryRenderGraphBridge.ImportForPass(this, sdfDiffuse.RoughSpecularHistory, 0, AccessFlags.Read)
                 : default;
             m_SdfScreenSource = m_ClearSdfScreenSourceKernel >= 0 && frameData.Contains<VividSdfScreenTraceData>()
                 ? frameData.Get<VividSdfScreenTraceData>() : null;
@@ -653,10 +660,14 @@ namespace VividRP.Runtime.RenderPass.Core
             bool openPbrDiffuse = false;
             bool bentNormal = false;
             bool compositeBent = false;
+            bool roughSpecular = false;
+            bool roughSpecularPreExposed = false;
             if (hasRealtimeGI && ReferenceEquals(diffuse?.Output, m_RealtimeDiffuseGI))
             {
                 bentNormal = m_BentNormal.IsValid() && diffuse.BentNormalOutput == m_BentNormal;
                 compositeBent = bentNormal && diffuse.CompositeBentNormal;
+                roughSpecular = m_RoughSpecular.IsValid() && diffuse.RoughSpecularOutput == m_RoughSpecular;
+                roughSpecularPreExposed = roughSpecular && diffuse.RoughSpecularPreExposed;
                 skyHandled = diffuse.SkyHandled;
                 realtimeOnly = diffuse.RealtimeOnly;
                 openPbrDiffuse = diffuse.OpenPbrSource?.MatchesOpenPbrReceiver(
@@ -667,6 +678,10 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, PackedBentNormalId,
                 compositeBent ? m_BentNormal : rgDefaultResource.blackTexture);
             cmd.SetComputeIntParam(m_DeferredLitCompute, BentNormalEnabledId, compositeBent ? 2 : bentNormal ? 1 : 0);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, RealtimeRoughSpecularId,
+                roughSpecular ? m_RoughSpecular : rgDefaultResource.blackTexture);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeRoughSpecularEnabledId,
+                roughSpecular ? (roughSpecularPreExposed ? 2 : 1) : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseSkyHandledId, skyHandled ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeDiffuseGIOnlyId, realtimeOnly ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, RealtimeOpenPbrDiffuseId, openPbrDiffuse ? 1 : 0);

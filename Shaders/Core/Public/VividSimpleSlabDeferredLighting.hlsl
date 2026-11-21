@@ -62,9 +62,16 @@ VividSimpleSlabPreLightData VividPrepareSimpleSlabDeferredLighting(
 }
 
 float3 VividSampleSimpleSlabEnvironment(VividLightingLoopContext lightLoop,
-    float3 positionWS, float3 normalWS, float3 directionWS, float perceptualRoughness)
+    float3 positionWS, float3 normalWS, float3 directionWS, float perceptualRoughness,
+    float4 realtimeRoughSpecular = 0.0f, float realtimeGiCoverage = 0.0f, bool useRealtimeRoughSpecular = false)
 {
     float3 radiance = VividSampleSkyIBL(directionWS, perceptualRoughness);
+    if (useRealtimeRoughSpecular && realtimeGiCoverage > 0.0f)
+    {
+        float sharpSkyWeight = (1.0f - smoothstep(0.10f, 0.40f, perceptualRoughness)) * saturate(realtimeRoughSpecular.a);
+        float3 occludedEnvironment = lerp(realtimeRoughSpecular.rgb, radiance, sharpSkyWeight);
+        radiance = lerp(radiance, occludedEnvironment, saturate(realtimeGiCoverage));
+    }
     float3 weightedProbeRadiance;
     float probeWeight;
     if (VividLightingLoop::TryEvaluateReflectionProbes(lightLoop, positionWS,
@@ -80,7 +87,8 @@ float3 VividSampleSimpleSlabEnvironment(VividLightingLoopContext lightLoop,
 VividSimpleSlabIndirectLighting VividEvaluateSimpleSlabIndirectLighting(
     VividSurfaceSummaryData summary, VividSimpleSlabData slab,
     VividSimpleSlabPreLightData preLight, VividLightingLoopContext lightLoop,
-    float3 positionWS, float3 viewDirectionWS, float4 realtimeDiffuseGI)
+    float3 positionWS, float3 viewDirectionWS, float4 realtimeDiffuseGI,
+    float4 realtimeRoughSpecular = 0.0f, bool hasRealtimeRoughSpecular = false)
 {
     float3 diffuseIrradiance;
     if (realtimeDiffuseGI.a >= 1.0f)
@@ -98,7 +106,7 @@ VividSimpleSlabIndirectLighting VividEvaluateSimpleSlabIndirectLighting(
 
     float3 singleScatterRadiance = VividSampleSimpleSlabEnvironment(
         lightLoop, positionWS, slab.normalWS, preLight.reflectionDirectionWS,
-        slab.perceptualRoughness);
+        slab.perceptualRoughness, realtimeRoughSpecular, realtimeDiffuseGI.a, hasRealtimeRoughSpecular);
     float3 multipleScatterRadiance = 0.0f;
     UNITY_BRANCH
     if (any(preLight.energy.multipleScatterSpecularAlbedo > 0.0f))
@@ -107,7 +115,8 @@ VividSimpleSlabIndirectLighting VividEvaluateSimpleSlabIndirectLighting(
         // prefilter around N, independently of the GGX reflection direction.
         // This is NOT an exact convolution of the directional loss L(l).
         multipleScatterRadiance = VividSampleSimpleSlabEnvironment(
-            lightLoop, positionWS, slab.normalWS, slab.normalWS, 1.0f);
+            lightLoop, positionWS, slab.normalWS, slab.normalWS, 1.0f,
+            realtimeRoughSpecular, realtimeDiffuseGI.a, hasRealtimeRoughSpecular);
     }
 
     float ao = saturate(summary.ambientOcclusion);

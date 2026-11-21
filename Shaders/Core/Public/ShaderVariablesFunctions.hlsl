@@ -72,7 +72,7 @@ bool IsPerspectiveProjection()
     // This is a generic solution.
     // However, using 'unity_OrthoParams' is better for cache locality.
     // TODO: set 'unity_OrthoParams' during the shadow pass.
-    return UNITY_MATRIX_P[3][3] == 0;
+    return abs(UNITY_MATRIX_P[3][3]) < 1e-5;
 #endif
 }
 

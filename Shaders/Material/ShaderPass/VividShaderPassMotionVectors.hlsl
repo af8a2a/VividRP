@@ -20,7 +20,9 @@ float4 Frag(VividPackedVaryingsMesh packedInput) : SV_Target
 
     FragInputs input = UnpackVividVaryingsMeshToFragInputs(packedInput);
     VividApplyAlphaClip(input);
-    return EncodeMotionVectorFromCsPositions(packedInput.positionCSNoJitter, packedInput.previousPositionCSNoJitter);
+    return packedInput.objectMotion > 0.0
+        ? EncodeMotionVectorFromCsPositions(packedInput.positionCSNoJitter, packedInput.previousPositionCSNoJitter)
+        : EncodeCameraMotionVectorFromCsPositions(packedInput.positionCSNoJitter, packedInput.previousPositionCSNoJitter);
 }
 
 #endif

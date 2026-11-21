@@ -24,6 +24,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal CameraHistoryTexture BentNormalHistory;
         internal TextureHandle BentNormalOutput;
         internal bool CompositeBentNormal;
+        internal CameraHistoryTexture RoughSpecularHistory;
+        internal TextureHandle RoughSpecularOutput;
+        internal bool RoughSpecularPreExposed;
         internal bool SkyHandled;
         internal bool RealtimeOnly;
         internal SdfDiffuseGatherPass OpenPbrSource;
@@ -35,6 +38,9 @@ namespace VividRP.Runtime.RenderPass.Core
             BentNormalHistory = null;
             BentNormalOutput = default;
             CompositeBentNormal = false;
+            RoughSpecularHistory = null;
+            RoughSpecularOutput = default;
+            RoughSpecularPreExposed = false;
             SkyHandled = false;
             RealtimeOnly = false;
             OpenPbrSource = null;
@@ -130,10 +136,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PreExposureHistoryEnabledId = Shader.PropertyToID("_SdfPreExposureHistoryEnabled");
         private static readonly int PreviousPreExposureValidId = Shader.PropertyToID("_SdfPreviousPreExposureValid");
         private static readonly int DisocclusionSpatialFilterId = Shader.PropertyToID("_SdfDisocclusionSpatialFilter");
+        private static readonly int WriteRoughSpecularId = Shader.PropertyToID("_SdfWriteRoughSpecular");
+        private static readonly int RoughSpecularOutputId = Shader.PropertyToID("_SdfRoughSpecularOutput");
+        private static readonly int CurrentRoughSpecularId = Shader.PropertyToID("_SdfCurrentRoughSpecular");
+        private static readonly int PreviousRoughSpecularId = Shader.PropertyToID("_SdfPreviousRoughSpecular");
+        private static readonly int RoughSpecularHistoryOutputId = Shader.PropertyToID("_SdfRoughSpecularHistoryOutput");
+        private static readonly int RoughSpecularEnabledId = Shader.PropertyToID("_SdfRoughSpecularEnabled");
+        private static readonly int PreviousRoughSpecularValidId = Shader.PropertyToID("_SdfPreviousRoughSpecularValid");
         private static readonly CameraHistoryId ScreenProbeMomentsHistoryId = CameraHistoryId.Create("SdfScreenProbePixelMoments");
         private static readonly CameraHistoryId PixelGeometryHistoryId = CameraHistoryId.Create("SdfDiffusePixelGeometryHistory");
         private static readonly CameraHistoryId PixelDepthHistoryId = CameraHistoryId.Create("SdfDiffusePixelDepthHistory");
         private static readonly CameraHistoryId PixelPreExposureHistoryId = CameraHistoryId.Create("SdfScreenProbePreExposure");
+        private static readonly CameraHistoryId RoughSpecularHistoryId = CameraHistoryId.Create("SdfScreenProbeRoughSpecular");
         private static readonly CameraHistoryId BentNormalHistoryId = CameraHistoryId.Create("SdfShortRangeBentNormal");
         private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenLambertRadianceHistory");
@@ -581,7 +595,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal Vector4 ProbeCameraForward;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
-            internal bool FullSphere, ProbeTemporal, DitherTraceDirections;
+            internal bool FullSphere, ProbeTemporal, DitherTraceDirections, RoughSpecular;
             internal float MaxRayIntensity;
             internal bool DirectionalCache, DirectionalGuide, DirectionalHierarchicalGuide, SpatialAnchor, AnchorPreFilter;
             internal float MeshDetailDistance;
@@ -785,6 +799,13 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Raw Resolved Diffuse GI", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_RawResolved = CreateScratch("SDF Diffuse Raw Resolved", ProbeFormat);
+        [RenderGraphResource(Name = "Raw Rough Specular GI", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_RawRoughSpecular = CreateScratch("SDF Diffuse Raw Rough Specular", ProbeFormat);
+        private readonly RenderGraphTexture m_PreviousRoughSpecular = RenderGraphTexture.CreateInput("Previous Screen Probe Rough Specular", ProbeFormat);
+        private readonly RenderGraphTexture m_CurrentRoughSpecular = CreateOutput("Screen Probe Rough Specular History", ProbeFormat);
+        private CameraHistoryTexture m_RoughSpecularHistory;
+        private bool m_RoughSpecular;
         [RenderGraphResource(Name = "Diffuse GI Atrous Lighting", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_AtrousLighting = CreateScratch("Diffuse GI Atrous Lighting", ProbeFormat);
@@ -1282,6 +1303,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalHistoryValid = m_DirectionalGuideHistoryValid = false;
             m_RestirHistory = m_RestirVarianceHistory = null;
             m_PixelHistory = m_PixelGeometryHistory = m_PixelDepthHistory = m_PreExposureHistory = null;
+            m_RoughSpecularHistory = null;
+            m_RoughSpecular = false;
+            m_RawRoughSpecular.Resize(1, 1);
             m_BentNormalHistory = null;
             m_BentNormalHistoryValid = false;
             m_BentSamples.Resize(1, 1);
@@ -1598,6 +1622,11 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
             bool rawResolved = pixelTemporal || m_RestirPixelIntegration || m_AtrousIterations >= 3;
             m_RawResolved.Resize(rawResolved ? m_Width : 1, rawResolved ? m_Height : 1);
+            m_RoughSpecular = m_DirectionalCache && m_FullSphere && m_SpatialFilter && m_LumenDirectionalFilterKernel >= 0
+                && m_SpatialFilterScalarNoise.IsValid() && m_SpatialFilterVectorNoise.IsValid()
+                && (!useSettings || settings.screenProbeRoughSpecular.value);
+            bool rawRoughSpecular = m_RoughSpecular && pixelTemporal && m_ScreenProbeTemporalKernel >= 0;
+            m_RawRoughSpecular.Resize(rawRoughSpecular ? m_Width : 1, rawRoughSpecular ? m_Height : 1);
             m_AtrousLighting.Resize(m_AtrousIterations > 0 ? m_Width : 1, m_AtrousIterations > 0 ? m_Height : 1);
             m_AtrousVarianceA.Resize(m_AtrousIterations > 0 ? m_Width : 1, m_AtrousIterations > 0 ? m_Height : 1);
             m_AtrousVarianceB.Resize(m_AtrousIterations >= 3 ? m_Width : 1, m_AtrousIterations >= 3 ? m_Height : 1);
@@ -1727,6 +1756,13 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             if (pixelTemporal)
                 PreparePixelHistory(camera);
+            if (m_RoughSpecular)
+            {
+                m_CurrentRoughSpecular.Resize(m_Width, m_Height);
+                CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, RoughSpecularHistoryId,
+                    m_PreviousRoughSpecular, m_CurrentRoughSpecular, m_CurrentRoughSpecular.desc, out m_RoughSpecularHistory, AccessFlags.Write);
+                frameData.GetOrCreate<VividSdfDiffuseFrameData>().RoughSpecularHistory = m_RoughSpecularHistory;
+            }
             if (bentNormal)
             {
                 if (!m_BentComposite)
@@ -1797,13 +1833,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_State.RadiosityCardVersion == m_RadiosityCardVersion
                 && m_State.FarDistance == m_FarDistance && m_State.FarCardVersion == m_FarCardVersion
                 && m_State.Width == m_Width && m_State.Height == m_Height
-                && m_State.LayerMask == m_LayerMask && m_State.LightLayerMask == m_LightLayerMask
+                && m_State.LayerMask == m_LayerMask && (m_FullSphere || m_State.LightLayerMask == m_LightLayerMask)
                 && m_State.MaxDistance == m_TraceDistance && m_State.RayBias == m_Bias
                 && m_State.MeshDetailDistance == m_MeshDetailDistance
                 && m_State.SkyTraceDistance == m_SkyTraceDistance
-                && (MatchesEnvironmentLighting(m_State.SkyContentHash, m_State.SkyTextureParams, m_State.SkyTextureTint)
-                    || PreserveRelitHistory)
-                && (MatchesPreviousDirectionalLighting() || PreserveRelitHistory)
+                && AllowsContinuousLightingHistory(m_FullSphere, PreserveRelitHistory,
+                    MatchesEnvironmentLighting(m_State.SkyContentHash, m_State.SkyTextureParams, m_State.SkyTextureTint))
+                && AllowsContinuousLightingHistory(m_FullSphere, PreserveRelitHistory, MatchesPreviousDirectionalLighting())
                 && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
         }
 
@@ -2227,6 +2263,10 @@ namespace VividRP.Runtime.RenderPass.Core
             diffuse.BentNormalOutput = m_BentNormalHistory != null && m_PixelGeometryHistory != null
                 && (!m_BentComposite || compositeBent) ? m_CurrentBentNormal.innerHandle : default;
             diffuse.CompositeBentNormal = compositeBent;
+            diffuse.RoughSpecularOutput = m_RoughSpecular && m_RoughSpecularHistory != null
+                && m_CurrentRoughSpecular.innerHandle.IsValid() ? m_CurrentRoughSpecular.innerHandle : default;
+            diffuse.RoughSpecularPreExposed = m_RoughSpecular && pixelTemporal && m_ScreenProbeTemporalKernel >= 0
+                && m_PreExposure != null && m_PreExposureHistory != null && m_CurrentPreExposure.innerHandle.IsValid();
             diffuse.SkyHandled = m_SkyTextureParams.w > 0.5f;
             diffuse.RealtimeOnly = m_RealtimeOnly;
             diffuse.OpenPbrSource = m_RestirOpenPbrDiffuse ? this : null;
@@ -2262,6 +2302,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.FullSphere = m_FullSphere;
             m_State.ProbeTemporal = m_ProbeTemporal;
             m_State.DitherTraceDirections = m_DitherTraceDirections;
+            m_State.RoughSpecular = m_RoughSpecular;
             m_State.MaxRayIntensity = m_MaxRayIntensity;
             m_State.DirectionalHierarchicalGuide = m_DirectionalHierarchicalGuide;
             m_State.AdaptiveProbes = m_AdaptiveProbes;
@@ -3724,11 +3765,17 @@ namespace VividRP.Runtime.RenderPass.Core
             using var scope = new ProfilingScope(cmd, m_RestirGather ? RestirResolveSampler : ResolveSampler);
             int kernel = m_DirectionalCache ? m_DirectionalResolveKernel
                 : m_RestirOpenPbrDiffuse ? m_OpenPbrResolveKernel : m_ResolveKernel;
+            bool writeRawRoughSpec = m_RoughSpecular && pixelTemporal && m_ScreenProbeTemporalKernel >= 0;
             if (m_DirectionalCache)
             {
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, LumenBentNormalId, m_LumenBentNormal.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, ProbeMovingId, m_ProbeMoving.innerHandle);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, ResolvedMovingOutputId, m_ResolvedMoving.innerHandle);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, DirectionalFilteredId, m_CurrentDirectionalFiltered.innerHandle);
+                cmd.SetComputeVectorParam(m_GatherCompute, ProbeCameraPositionId, m_ProbeCameraPosition);
+                cmd.SetComputeIntParam(m_GatherCompute, WriteRoughSpecularId, m_RoughSpecular ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, RoughSpecularOutputId,
+                    m_RoughSpecular && !writeRawRoughSpec ? m_CurrentRoughSpecular.innerHandle : m_RawRoughSpecular.innerHandle);
                 bool jitter = pixelTemporal || m_StochasticInterpolation;
 #if UNITY_EDITOR
                 jitter &= EditorTraceCapture == null || (EditorGatherHistoryDiagnostics & 2) == 0;
@@ -3763,6 +3810,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, OutputId,
                 pixelTemporal || m_RestirPixelIntegration ? m_RawResolved.innerHandle : m_Output.innerHandle);
             cmd.DispatchCompute(m_GatherCompute, kernel, CoreUtils.DivRoundUp(m_Width, GroupSize), CoreUtils.DivRoundUp(m_Height, GroupSize), 1);
+            if (m_RoughSpecular && !writeRawRoughSpec)
+                m_RoughSpecularHistory?.MarkWritten();
         }
 
         private void RecordRestirDenoise(ComputeCommandBuffer cmd, bool pixelTemporal, bool restirVarianceTemporal)
@@ -3914,6 +3963,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int kernel = m_PixelTemporalKernel;
             bool screenProbeMoments = m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0 && m_ScreenProbeMomentsKernel >= 0
                 && m_ScreenProbeMomentsHistory != null && m_CurrentScreenProbeMoments.innerHandle.IsValid();
+            bool roughSpecTemporal = false;
             if (m_DirectionalCache && m_ScreenProbeTemporalKernel >= 0)
             {
                 kernel = compositeBent
@@ -3964,6 +4014,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     preExposureEnabled ? m_CurrentPreExposure.innerHandle : m_CurrentPixelDepth.innerHandle);
                 if (m_PreExposure != null)
                     cmd.SetComputeBufferParam(m_GatherTemporalCompute, kernel, VividAutoExposureSystem.PreExposureBufferId, m_PreExposure);
+                roughSpecTemporal = m_RoughSpecular && m_RoughSpecularHistory != null
+                    && m_CurrentRoughSpecular.innerHandle.IsValid() && m_RawRoughSpecular.innerHandle.IsValid();
+                bool prevRoughSpecValid = roughSpecTemporal && hasHistory && m_State.RoughSpecular
+                    && m_RoughSpecularHistory.IsValid() && m_PreviousRoughSpecular.innerHandle.IsValid();
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, RoughSpecularEnabledId, roughSpecTemporal ? 1 : 0);
+                cmd.SetComputeIntParam(m_GatherTemporalCompute, PreviousRoughSpecularValidId, prevRoughSpecValid ? 1 : 0);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, CurrentRoughSpecularId,
+                    roughSpecTemporal ? m_RawRoughSpecular.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, PreviousRoughSpecularId,
+                    prevRoughSpecValid ? m_PreviousRoughSpecular.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherTemporalCompute, kernel, RoughSpecularHistoryOutputId,
+                    roughSpecTemporal ? m_CurrentRoughSpecular.innerHandle : m_RawRoughSpecular.innerHandle);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, DisocclusionSpatialFilterId, m_DisocclusionSpatialFilter ? 1 : 0);
             }
             else if (restirVarianceTemporal)
@@ -4018,6 +4080,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelGeometryHistory.MarkWritten();
             m_PixelDepthHistory?.MarkWritten();
             m_PreExposureHistory?.MarkWritten();
+            if (roughSpecTemporal)
+                m_RoughSpecularHistory.MarkWritten();
             if (compositeBent)
                 m_BentNormalHistory.MarkWritten();
             if (screenProbeMoments)
@@ -4108,6 +4172,9 @@ namespace VividRP.Runtime.RenderPass.Core
             return (a - b).sqrMagnitude <= tolerance * tolerance * scaleSquared
                 && Mathf.Abs(previous.w - current.w) <= tolerance;
         }
+
+        internal static bool AllowsContinuousLightingHistory(bool fullSphere, bool preserveRelitHistory, bool matchesLighting) =>
+            fullSphere || preserveRelitHistory || matchesLighting;
 
         private bool MatchesPreviousDirectionalLighting() => m_State.LightLayerMask == m_LightLayerMask
             && LightingWithinTolerance(m_State.LightPositionRange, m_State.LightColorShadow,
@@ -4242,6 +4309,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(shader, kernel, SpatialFilterVectorNoiseId, m_SpatialFilterVectorNoise);
                     cmd.SetComputeFloatParam(shader, SkyTraceDistanceId,
                         Mathf.Max(m_SkyTraceDistance, Mathf.Max(m_TraceDistance, m_FarDistance)));
+                    cmd.SetComputeFloatParam(shader, FarDistanceId, m_FarDistance);
                 }
                 // Use this frame's hit distances with the two-frame radiance estimate.
                 TextureHandle spatialInput = temporal;

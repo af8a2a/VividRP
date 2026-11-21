@@ -238,6 +238,56 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetSkyHash_RemainsStableAcrossLocalCameraMotionAndUpdatesAcrossLargeAltitudeChanges()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            var cameraGameObject = new GameObject("PhysicallyBasedSkyHashStabilityCamera");
+            var camera = cameraGameObject.AddComponent<Camera>();
+            var cameraData = new VividCameraData
+            {
+                camera = camera
+            };
+            var renderer = new PhysicallyBasedSkyRenderer();
+
+            try
+            {
+                var settings = profile.Add<SkySettingsVolume>(false);
+                settings.renderingSpace.Override(RenderingSpace.World);
+                var volume = profile.Add<PhysicallyBasedSkyVolume>(false);
+                volume.planetRadius.Override(SkySettingsVolume.DefaultEarthRadius);
+
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                camera.transform.position = new Vector3(-0.37f, -4.68f, 7.95f);
+                VolumeManager.instance.Initialize(profile);
+                VolumeManager.instance.Update(camera.transform, ~0);
+
+                var context = new SkyRendererContext(cameraData, new VividLightData());
+                var hashAtOrigin = renderer.GetSkyHash(context);
+
+                camera.transform.position = new Vector3(12.5f, 18.0f, -24.0f);
+                var hashAfterLocalWalk = renderer.GetSkyHash(context);
+                Assert.That(hashAfterLocalWalk, Is.EqualTo(hashAtOrigin),
+                    "Local world-space camera motion must not churn PhysicallyBasedSky skyHash/skyContentHash or invalidate GI history.");
+
+                camera.transform.position = new Vector3(0.0f, 1500.0f, 0.0f);
+                var hashAtHighAltitude = renderer.GetSkyHash(context);
+                Assert.That(hashAtHighAltitude, Is.Not.EqualTo(hashAtOrigin),
+                    "Significant altitude changes must still update skyHash so the runtime sky cubemap rebakes.");
+            }
+            finally
+            {
+                renderer.Dispose();
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                Object.DestroyImmediate(profile);
+                Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
         public void ResolveCameraPosition_UsesManualPlanetCenter_WhenConfigured()
         {
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();

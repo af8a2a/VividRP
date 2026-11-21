@@ -31,7 +31,9 @@ uint _VividOpenPBRLutsReady;
 Texture2D<float4> _RealtimeDiffuseGI;
 Texture2D<float4> _RealtimeBentNormal;
 Texture2D<uint> _RealtimePackedBentNormal;
+Texture2D<float4> _RealtimeRoughSpecular;
 uint _RealtimeBentNormalEnabled;
+uint _RealtimeRoughSpecularEnabled;
 uint _RealtimeDiffuseGIEnabled;
 uint _RealtimeDiffuseGIOnly;
 uint _RealtimeOpenPbrDiffuse;
@@ -44,6 +46,29 @@ bool VividHasRealtimeDiffuseGI()
 #else
     return false;
 #endif
+}
+
+bool VividHasRealtimeRoughSpecular()
+{
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+    return _RealtimeRoughSpecularEnabled != 0u;
+#else
+    return false;
+#endif
+}
+
+float4 LoadVividRealtimeRoughSpecular(uint2 pixelCoord)
+{
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+    if (_RealtimeRoughSpecularEnabled != 0u)
+    {
+        float4 spec = _RealtimeRoughSpecular.Load(int3(pixelCoord, 0));
+        if (_RealtimeRoughSpecularEnabled == 2u)
+            spec.rgb *= VividGetOneOverPreExposure();
+        return float4(max(spec.rgb, 0.0f), saturate(spec.a));
+    }
+#endif
+    return 0.0f;
 }
 
 float VividBentSpecularVisibility(uint2 pixelCoord, float3 normal, float3 view, float roughness)
@@ -210,7 +235,8 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     #endif
     result = VividEvaluateOpenPBROpaqueIndirect(inputs, albedo, lightLoop,
         positionWS, viewDirectionWS, saturate(summary.ambientOcclusion),
-        LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo), realtimeOpenPbrDiffuse);
+        LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo), realtimeOpenPbrDiffuse,
+        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular());
     [loop]
     for (uint i = 0u; i < _DirectionalLightCount; ++i)
     {
@@ -257,12 +283,14 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
     VividSurfaceSummaryData summary, uint2 pixelCoord, float3 positionWS)
 {
     VividSimpleSlabData slab = BuildVividSimpleSlabData(summary);
-    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
     VividSimpleSlabPreLightData preLight =
         VividPrepareSimpleSlabDeferredLighting(slab, viewDirectionWS);
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
     VividSimpleSlabIndirectLighting indirectLighting = VividEvaluateSimpleSlabIndirectLighting(
-        summary, slab, preLight, lightLoop, positionWS, viewDirectionWS, LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo));
+        summary, slab, preLight, lightLoop, positionWS, viewDirectionWS,
+        LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo),
+        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular());
     VividSimpleSlabDirectLighting directLighting = VividCreateEmptySimpleSlabDirectLighting();
 
     [loop]
@@ -401,7 +429,7 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     VividSurfaceSummaryData topSummary = BuildVividDualSlabTopSummary(baseSummary, topLayer);
     VividSimpleSlabData baseSimpleSlab = BuildVividSimpleSlabData(baseSummary);
     VividSimpleSlabData topSimpleSlab = BuildVividSimpleSlabData(topSummary);
-    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
     VividSimpleSlabPreLightData basePreLightData =
         VividPrepareSimpleSlabDeferredLighting(baseSimpleSlab, viewDirectionWS);
     VividSimpleSlabPreLightData topPreLightData =
@@ -418,12 +446,16 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     float3 baseEnvironmentWeight = isVerticalLayer
         ? lerp(1.0.xxx, environmentTransmittance, layerWeight)
         : (1.0 - layerWeight).xxx;
+    float4 realtimeRoughSpecular = LoadVividRealtimeRoughSpecular(pixelCoord);
+    bool hasRealtimeRoughSpecular = VividHasRealtimeRoughSpecular();
     VividSimpleSlabIndirectLighting baseIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
         baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS,
-        LoadVividRealtimeDiffuseGI(pixelCoord, baseSummary.diffuseAlbedo));
+        LoadVividRealtimeDiffuseGI(pixelCoord, baseSummary.diffuseAlbedo),
+        realtimeRoughSpecular, hasRealtimeRoughSpecular);
     VividSimpleSlabIndirectLighting topIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
         topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS,
-        LoadVividRealtimeDiffuseGI(pixelCoord, topSummary.diffuseAlbedo));
+        LoadVividRealtimeDiffuseGI(pixelCoord, topSummary.diffuseAlbedo),
+        realtimeRoughSpecular, hasRealtimeRoughSpecular);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
@@ -623,7 +655,7 @@ float3 VividEvaluateDeferredSurfacePixel(
         : max(lightLoopOutput.diffuseLighting - lightLoopOutput.indirectDiffuseLighting, 0.0);
     float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
     float specularVisibility = VividBentSpecularVisibility(pixelCoord, summary.normalWS,
-        SafeNormalize(GetWorldSpaceViewDir(positionWS)), summary.perceptualRoughness);
+        SafeNormalize(GetWorldSpaceCameraViewDir(positionWS)), summary.perceptualRoughness);
     float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting
         - (1.0 - specularVisibility) * lightLoopOutput.indirectSpecularLighting, 0.0));
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, summary);

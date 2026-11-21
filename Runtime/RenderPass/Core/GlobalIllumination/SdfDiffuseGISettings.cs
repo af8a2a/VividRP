@@ -230,6 +230,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Apply a lightweight geometry-aware 3x3 bilateral spatial filter on newly disoccluded Screen Probe pixels (history age < 2) to suppress single-frame stochastic probe noise during camera motion.")]
         public BoolParameter screenProbeDisocclusionSpatialFilter = new(true);
 
+        [Tooltip("Integrate occluded directional Rough Specular and Sky Visibility from Screen Probe octahedral radiance (UE Lumen RoughSpecularIndirect) to replace unoccluded Sky IBL indoors.")]
+        public BoolParameter screenProbeRoughSpecular = new(true);
+
         [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
         public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);
 

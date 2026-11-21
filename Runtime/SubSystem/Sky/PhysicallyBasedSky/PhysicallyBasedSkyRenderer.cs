@@ -144,9 +144,30 @@ namespace VividRP.Runtime
             hash = AppendHash(hash, planet.ComputeHashCode());
             hash = AppendHash(hash, includeSunInBaking);
             hash = AppendHash(hash, intensityMultiplier);
-            hash = AppendHash(hash, ResolveCameraPosition(context, volume.planetRadius.value));
+            hash = AppendHash(hash, ComputeSkyHashCameraPositionHash(planet, ResolveWorldCameraPosition(context)));
             hash = AppendHash(hash, PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
             return hash;
+        }
+
+        internal static int ComputeSkyHashCameraPositionHash(in SkyPlanet planet, Vector3 worldCameraPosition)
+        {
+            var planetUpAltitude = planet.GetPlanetUpAltitude(worldCameraPosition);
+            var altitude = Mathf.Max(planetUpAltitude.w, 1.0f);
+            var altitudeStep = Mathf.Clamp(planet.radius * 0.0001f, 50.0f, 500.0f);
+            var altitudeBucket = Mathf.FloorToInt(altitude / altitudeStep);
+            var upX = Mathf.RoundToInt(planetUpAltitude.x * 128.0f);
+            var upY = Mathf.RoundToInt(planetUpAltitude.y * 128.0f);
+            var upZ = Mathf.RoundToInt(planetUpAltitude.z * 128.0f);
+
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, upX);
+                hash = AppendHash(hash, upY);
+                hash = AppendHash(hash, upZ);
+                hash = AppendHash(hash, altitudeBucket);
+                return hash;
+            }
         }
 
         public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)

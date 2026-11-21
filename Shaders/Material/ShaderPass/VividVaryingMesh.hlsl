@@ -70,6 +70,7 @@ struct VividVaryingsMesh
 #if defined(VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS)
     float4 positionCSNoJitter;
     float4 previousPositionCSNoJitter;
+    float objectMotion;
 #endif
 #if defined(VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS) && defined(EDITOR_VISUALIZATION)
     float2 metaVizUV;
@@ -97,6 +98,7 @@ struct VividPackedVaryingsMesh
 #if defined(VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS)
     float4 positionCSNoJitter : TEXCOORD5;
     float4 previousPositionCSNoJitter : TEXCOORD6;
+    float objectMotion : TEXCOORD7;
 #endif
 #if defined(VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS) && defined(EDITOR_VISUALIZATION)
     float2 metaVizUV : TEXCOORD5;
@@ -134,6 +136,7 @@ VividPackedVaryingsMesh PackVividVaryingsMesh(VividVaryingsMesh input)
 #if defined(VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS)
     output.positionCSNoJitter = input.positionCSNoJitter;
     output.previousPositionCSNoJitter = input.previousPositionCSNoJitter;
+    output.objectMotion = input.objectMotion;
 #endif
 #if defined(VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS) && defined(EDITOR_VISUALIZATION)
     output.metaVizUV = input.metaVizUV;

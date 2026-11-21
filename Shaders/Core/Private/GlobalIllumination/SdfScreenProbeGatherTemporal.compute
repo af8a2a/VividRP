@@ -516,6 +516,11 @@ Texture2D<float> _SdfPreviousPreExposure;
 RWTexture2D<float> _SdfCurrentPreExposureOutput;
 uint _SdfPreExposureHistoryEnabled;
 uint _SdfPreviousPreExposureValid;
+Texture2D<float4> _SdfCurrentRoughSpecular;
+Texture2D<float4> _SdfPreviousRoughSpecular;
+RWTexture2D<float4> _SdfRoughSpecularHistoryOutput;
+uint _SdfRoughSpecularEnabled;
+uint _SdfPreviousRoughSpecularValid;
 uint _SdfDisocclusionSpatialFilter;
 Texture2D<float> _SdfTemporalScalarNoise;
 uint _SdfTemporalScalarNoiseEnabled;
@@ -674,6 +679,8 @@ struct ScreenProbeTemporalHistory
     float foreground;
     float objectMotionPixels;
     float fastUpdate;
+    float3 roughSpecular;
+    float skyVisibility;
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     half4 shortRangeAO;
 #endif
@@ -859,6 +866,13 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
         history.age += weight * (numFramesAccumulated + 1.0f);
         history.fastUpdate += weight * fastUpdate;
         history.footprint += weight;
+        if (_SdfRoughSpecularEnabled != 0u && _SdfPreviousRoughSpecularValid != 0u)
+        {
+            float4 prevSpec = _SdfPreviousRoughSpecular.Load(int3(tap, 0));
+            prevSpec.rgb *= historyExposureScale * _SdfHistoryLightScale.rgb;
+            history.roughSpecular += weight * prevSpec.rgb;
+            history.skyVisibility += weight * prevSpec.a;
+        }
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
         if (_SdfBentHistoryValid != 0u)
             history.shortRangeAO += half(weight) * UnpackSharedShortRangeAO(_SdfBentPrevious.Load(int3(tap, 0)));
@@ -882,6 +896,8 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     history.coverage = coveredWeight * invGeometryWeight;
     history.age = min(history.age * invFootprint, _SdfPixelHistoryMaxAge);
     history.fastUpdate *= invFootprint;
+    history.roughSpecular *= invFootprint;
+    history.skyVisibility *= invFootprint;
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     history.shortRangeAO /= max(half(history.footprint), half(1e-4));
 #endif
@@ -1002,6 +1018,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 #endif
     float3 currentPreExposed = result.rgb * currentPreExposure;
     float3 blendedPreExposed = min(currentPreExposed, 65000.0);
+    float currentWeight = 1.0f;
 
     if (historyAccepted)
     {
@@ -1044,10 +1061,25 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         historyStatus = fastUpdate > 0.2 || coverageAgreement < 0.8
             ? ScreenProbeHistoryCoverageLimited : ScreenProbeHistoryAccepted;
 
-        float currentWeight = ScreenProbeCurrentSampleWeight(bLightingIsValid, numFramesAccumulated);
+        currentWeight = ScreenProbeCurrentSampleWeight(bLightingIsValid, numFramesAccumulated);
         float3 coveredPreExposed = lerp(rectified * history.coverage, currentPreExposed * result.a, currentWeight);
         result.a = lerp(history.coverage, result.a, currentWeight);
         blendedPreExposed = min(coveredPreExposed / max(result.a, 1e-5), 65000.0);
+    }
+
+    if (_SdfRoughSpecularEnabled != 0u)
+    {
+        float4 currentRoughSpec = _SdfCurrentRoughSpecular.Load(int3(id.xy, 0));
+        float3 currentRoughSpecPreExposed = currentRoughSpec.rgb * currentPreExposure;
+        float3 blendedRoughSpecPreExposed = currentRoughSpecPreExposed;
+        float blendedSkyVis = currentRoughSpec.a;
+        if (historyAccepted && _SdfPreviousRoughSpecularValid != 0u)
+        {
+            blendedRoughSpecPreExposed = lerp(history.roughSpecular, currentRoughSpecPreExposed, currentWeight);
+            blendedSkyVis = lerp(history.skyVisibility, currentRoughSpec.a, currentWeight);
+        }
+        _SdfRoughSpecularHistoryOutput[id.xy] = RoundSdfHistory(
+            float4(min(blendedRoughSpecPreExposed, 65000.0f), saturate(blendedSkyVis)));
     }
 
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)

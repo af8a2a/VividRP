@@ -35,6 +35,8 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("PreIntegratedFGD", source);
             StringAssert.Contains("baseEnergy.singleScatterSpecularAlbedo * baseEnvironmentWeight", source);
             StringAssert.Contains("topEnergy.singleScatterSpecularAlbedo * topWeight", source);
+            StringAssert.DoesNotContain("GetWorldSpaceViewDir(", source);
+            StringAssert.Contains("GetWorldSpaceCameraViewDir(", source);
             string header = Read("Shaders/Core/Public/VividSimpleSlabDeferredLighting.hlsl");
             StringAssert.Contains($"#define VIVID_SIMPLE_SLAB_DEFERRED_LIGHTING_VERSION {MaterialProgramContract.SimpleSlabDeferredLightingVersion}u", header);
             foreach (string legacy in new[] { "HdrpLitLighting.hlsl", "PreIntegratedFGD.hlsl", "VividLitBSDFData", "PostEvaluateBSDF" })
@@ -408,6 +410,7 @@ namespace VividRP.Editor.Tests
                 foreach (ComputeShader shader in new[] { production, control })
                 {
                     Vector(shader, "_VividScreenSize", new Vector4(8, 8, 0.125f, 0.125f));
+                    Vector(shader, "_VividOrthoParams", new Vector4(0, 0, 0, 1));
                     Matrix(shader, "_VividGlstateMatrixProjection", Matrix4x4.identity);
                     Matrix4x4 view = Matrix4x4.identity;
                     if (environment == 5)
@@ -469,6 +472,8 @@ namespace VividRP.Editor.Tests
                 Texture(production, shade, "_GTAOTexture", ao);
                 Texture(production, shade, "_DirectionalShadowTexture", shadow);
                 Texture(production, shade, "_ScreenSpaceReflectionTexture", ssr);
+                Texture(production, shade, "_RealtimeRoughSpecular", shadow);
+                Int(production, "_RealtimeRoughSpecularEnabled", 0);
                 Texture(production, shade, "_ReflectionAtlas", atlas);
                 Bind(production, shade, "_ReflectionProbes", probes);
                 Bind(production, shade, "_VividAmbientProbeData", ambient);
@@ -549,6 +554,7 @@ namespace VividRP.Editor.Tests
                 var globals = new ShaderVariablesGlobal
                 {
                     _VividScreenSize = m_RasterProperties.GetVector("_VividScreenSize"),
+                    _VividOrthoParams = m_RasterProperties.GetVector("_VividOrthoParams"),
                     _VividGlstateMatrixProjection = m_RasterProperties.GetMatrix("_VividGlstateMatrixProjection"),
                     _VividMatrixV = m_RasterProperties.GetMatrix("_VividMatrixV"),
                     _VividMatrixInvVP = m_RasterProperties.GetMatrix("_VividMatrixInvVP")

@@ -23,7 +23,11 @@
 #include "SdfScreenProbeIrradiance.hlsl"
 Texture2D<float> _SdfProbeMoving;
 Texture2D<uint> _SdfLumenBentNormal;
+Texture2D<float4> _SdfDirectionalFiltered;
 RWTexture2D<float> _SdfResolvedMovingOutput;
+RWTexture2D<float4> _SdfRoughSpecularOutput;
+float4 _SdfProbeCameraPosition;
+uint _SdfWriteRoughSpecular;
 #endif
 
 // 0: baked fallback is available, 1: same-surface repair, 2: also trace screen radiance.
@@ -919,9 +923,48 @@ float3 ResolveScreenProbeIrradiance(SdfProbeIrradiance sh, float3 normal, float4
     return irradiance;
 }
 
-float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, float3 normal, out float moving)
+uint2 WrapScreenProbeOctahedralCell(int2 cell)
+{
+    if (cell.x < 0) { cell.x = 0; cell.y = 7 - cell.y; }
+    else if (cell.x > 7) { cell.x = 7; cell.y = 7 - cell.y; }
+    if (cell.y < 0) { cell.y = 0; cell.x = 7 - cell.x; }
+    else if (cell.y > 7) { cell.y = 7; cell.x = 7 - cell.x; }
+    return uint2(clamp(cell, 0, 7));
+}
+
+float4 SampleScreenProbeOctahedralRadianceAndSky(uint2 tile, float3 direction)
+{
+    float2 octCoord = ProbeSphereUV(direction) * 8.0f - 0.5f;
+    int2 baseCell = int2(floor(octCoord));
+    float2 fracCell = frac(octCoord);
+    float3 radianceSum = 0.0f;
+    float skyVisSum = 0.0f;
+    float weightSum = 0.0f;
+    [unroll]
+    for (uint c = 0u; c < 4u; ++c)
+    {
+        int2 offset = int2(c & 1u, c >> 1u);
+        float2 bw = lerp(1.0f - fracCell, fracCell, float2(offset));
+        float w = bw.x * bw.y;
+        uint2 cell = WrapScreenProbeOctahedralCell(baseCell + offset);
+        float4 tap = _SdfDirectionalFiltered.Load(int3(tile * 8u + cell, 0));
+        if (tap.a > 0.0f)
+        {
+            radianceSum += tap.rgb * w;
+            skyVisSum += saturate(tap.a - 1.0f) * w;
+            weightSum += w;
+        }
+    }
+    if (weightSum <= 1e-5f)
+        return 0.0f;
+    return float4(radianceSum / weightSum, saturate(skyVisSum / weightSum));
+}
+
+float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, float3 normal,
+    out float moving, out float4 roughSpecular)
 {
     moving = 0.0;
+    roughSpecular = 0.0;
     uint2 grid = ProbeGridSize(size);
     float eyeDepth = max(0.1, dot(float4(position, 1.0), _SdfProbeCameraForward));
     bool stochasticInterpolation = _SdfScreenProbeStochasticInterpolation != 0u;
@@ -946,6 +989,22 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     SdfProbeIrradiance sh = (SdfProbeIrradiance)0;
     uint2 stride = uint2(grid.x, 0u);
     float interpolationWeight = totalWeight;
+    bool computeRoughSpecular = _SdfWriteRoughSpecular != 0u && _SdfScreenProbeFullSphere != 0u;
+    float roughness = computeRoughSpecular ? saturate(_SdfDiffuseGBuffer1.Load(int3(pixel, 0)).z) : 1.0f;
+    float3 dominantDir = normal;
+    if (computeRoughSpecular)
+    {
+        float3 viewDir = _SdfProbeCameraPosition.w > 0.5f
+            ? SafeNormalize(_SdfProbeCameraPosition.xyz - position)
+            : -_SdfProbeCameraForward.xyz;
+        float3 reflDir = reflect(-viewDir, normal);
+        float smoothness = saturate(1.0f - roughness);
+        float lerpFactor = smoothness * (sqrt(smoothness) + roughness);
+        dominantDir = SafeNormalize(lerp(normal, reflDir, lerpFactor));
+    }
+    float3 specRadianceSum = 0.0f;
+    float specSkyVisSum = 0.0f;
+    float specWeightSum = 0.0f;
     if (totalWeight >= MinProbeInterpolationFallbackWeight)
     {
         if (stochasticInterpolation)
@@ -958,9 +1017,17 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
         {
             if (samples.weights[i] > 0.0)
             {
-                moving += samples.weights[i] * _SdfProbeMoving.Load(int3(samples.tileX[i], samples.tileY[i], 0));
-                AccumulateScreenProbeIrradiance(uint2(samples.tileX[i], samples.tileY[i]), stride,
+                uint2 probeTile = uint2(samples.tileX[i], samples.tileY[i]);
+                moving += samples.weights[i] * _SdfProbeMoving.Load(int3(probeTile, 0));
+                AccumulateScreenProbeIrradiance(probeTile, stride,
                     samples.weights[i], sh, coveredWeight);
+                if (computeRoughSpecular)
+                {
+                    float4 octSample = SampleScreenProbeOctahedralRadianceAndSky(probeTile, dominantDir);
+                    specRadianceSum += samples.weights[i] * octSample.rgb;
+                    specSkyVisSum += samples.weights[i] * octSample.a;
+                    specWeightSum += samples.weights[i];
+                }
             }
         }
         moving /= interpolationWeight;
@@ -1016,6 +1083,15 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
             result = BlendProbeResolveRepair(result, TraceProbeResolveRepair(pixel, position, normal, eyeDepth, contact),
                 1.0 - smoothstep(0.0, 0.08, result.a));
     }
+    if (computeRoughSpecular)
+    {
+        float shBlend = smoothstep(0.35f, 0.95f, roughness);
+        float3 roughSpecRadiance = specWeightSum > 1e-5f
+            ? lerp(specRadianceSum / specWeightSum, result.rgb, shBlend)
+            : result.rgb;
+        float skyVisibility = specWeightSum > 1e-5f ? saturate(specSkyVisSum / specWeightSum) : 0.0f;
+        roughSpecular = float4(min(roughSpecRadiance, 65000.0f), skyVisibility);
+    }
     return result;
 }
 
@@ -1028,10 +1104,13 @@ void ScreenProbeIntegrateCS(uint3 id : SV_DispatchThreadID)
 
     float3 position, normal;
     float4 lighting = 0.0;
+    float4 roughSpecular = 0.0;
     float moving = 0.0;
     if (LoadReceiver(id.xy, position, normal))
-        lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal, moving);
+        lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal, moving, roughSpecular);
     _SdfResolvedMovingOutput[id.xy] = moving;
     _SdfDiffuseOutput[id.xy] = lighting;
+    if (_SdfWriteRoughSpecular != 0u)
+        _SdfRoughSpecularOutput[id.xy] = roughSpecular;
 }
 #endif

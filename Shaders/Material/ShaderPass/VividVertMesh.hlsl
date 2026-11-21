@@ -43,13 +43,16 @@ VividVaryingsMesh VividVertMesh(VividAttributesMesh input)
 #endif
 
 #if defined(VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS)
-    output.positionCSNoJitter = mul(_NonJitteredViewProjMatrix, mul(UNITY_MATRIX_M, input.positionOS));
+    float4 worldPosMotion = mul(UNITY_MATRIX_M, input.positionOS);
+    output.positionCSNoJitter = mul(_NonJitteredViewProjMatrix, worldPosMotion);
 
     float4 previousPositionOS = unity_MotionVectorsParams.x == 1.0
         ? float4(input.previousPositionOS, 1.0)
         : input.positionOS;
 
-    output.previousPositionCSNoJitter = mul(_PrevViewProjMatrix, mul(UNITY_PREV_MATRIX_M, previousPositionOS));
+    float4 previousWorldPosMotion = mul(UNITY_PREV_MATRIX_M, previousPositionOS);
+    output.previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWorldPosMotion);
+    output.objectMotion = any(abs(worldPosMotion.xyz - previousWorldPosMotion.xyz) > 1e-5) ? 1.0 : 0.0;
 #endif
 
 #if defined(VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS) && defined(EDITOR_VISUALIZATION)

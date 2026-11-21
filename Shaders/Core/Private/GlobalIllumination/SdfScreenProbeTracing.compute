@@ -178,9 +178,10 @@ void StoreDirectionalRay(uint2 tile, uint ray, uint bin, float inverseRelativePd
     uint2 address = DirectionalAddress(tile, ray);
     uint source = state & 7u;
     float hit = 0.0;
-    if (source == RayScreenHit || source == RaySdfHit || (state & RayFarCache) != 0u)
+    if (source == RayScreenHit || source == RaySdfHit || (state & RayFarCache) != 0u
+        || (_SdfScreenProbeFullSphere != 0u && (source == RayBackface || source == RayMissingSurface)))
         hit = clamp(distance, 1e-3, 65000.0);
-    else if (source == RaySkyVisible)
+    else if (source == RaySkyVisible || (_SdfScreenProbeFullSphere != 0u && source != RayOffscreenOnlyRejected))
         hit = -1.0;
     // This path writes traces where the legacy gather writes its integrated probe.
     _SdfDiffuseProbes[address] = float4(clamp(radiance, 0.0, 65000.0), hit);

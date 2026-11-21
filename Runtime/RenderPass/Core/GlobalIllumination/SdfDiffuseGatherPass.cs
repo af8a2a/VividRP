@@ -101,6 +101,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId CoveredPixelHistoryId = CameraHistoryId.Create("SdfScreenProbeCoveredPixelHistory");
         private static readonly CameraHistoryId FastUpdateHistoryId = CameraHistoryId.Create("SdfScreenProbeFastUpdateAndFrames");
         private static readonly int PreviousFastUpdateId = Shader.PropertyToID("_SdfPreviousFastUpdate");
+        private static readonly int ProbeDirectionNoiseId = Shader.PropertyToID("_SdfProbeDirectionNoise");
+        private static readonly int HasProbeDirectionNoiseId = Shader.PropertyToID("_SdfHasProbeDirectionNoise");
         private static readonly int ScatterNoiseId = Shader.PropertyToID("_SdfScatterNoise");
         private static readonly int HasScatterNoiseId = Shader.PropertyToID("_SdfHasScatterNoise");
         private static readonly int DitherTraceDirectionsId = Shader.PropertyToID("_SdfDitherTraceDirections");
@@ -659,7 +661,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_DirectionalCache, m_DirectionalGuide, m_DirectionalHistoryValid, m_DirectionalGuideHistoryValid;
         private bool m_DirectionalHierarchicalGuide, m_FullSphere, m_ProbeTemporal, m_DitherTraceDirections;
         private float m_MaxRayIntensity;
-        private TextureHandle m_ScatterNoise;
+        private TextureHandle m_ProbeDirectionNoise, m_ScatterNoise;
         private TextureHandle m_SpatialFilterScalarNoise, m_SpatialFilterVectorNoise;
         private TextureHandle m_InterpolationScalarNoise, m_InterpolationVectorNoise;
         private bool m_StochasticInterpolation, m_InterpolationFlipY;
@@ -1011,6 +1013,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BentScalarNoise = default;
             m_StochasticInterpolation = false;
             m_InterpolationScalarNoise = m_InterpolationVectorNoise = default;
+            m_ProbeDirectionNoise = m_ScatterNoise = default;
             m_SpatialFilterScalarNoise = m_SpatialFilterVectorNoise = default;
             m_BentComposite = false;
             m_BentDuringIntegration = false;
@@ -1172,6 +1175,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ClosestHzb.Resize(1, 1);
             if (m_FullSphere && m_AdaptiveProbes)
                 m_AtlasHeight = m_ProbeHeight + (m_ProbeHeight + 1) / 2;
+            if (m_FullSphere && BlueNoise.Instance != null)
+            {
+                m_ProbeDirectionNoise = BlueNoise.Instance.VectorAtlas;
+                if (m_ProbeDirectionNoise.IsValid())
+                    PassRecorder.RegisterImportedTextureForPass(this, m_ProbeDirectionNoise);
+            }
             if (m_FullSphere && m_SpatialFilter && m_LumenDirectionalFilterKernel >= 0 && BlueNoise.Instance != null)
             {
                 m_SpatialFilterScalarNoise = BlueNoise.Instance.ScalarAtlas;
@@ -1685,6 +1694,8 @@ namespace VividRP.Runtime.RenderPass.Core
             bool useDirectionalGuideHistory = m_DirectionalGuide && hasHistory && m_DirectionalGuideHistoryValid
                 && m_PreviousDirectionalFiltered.innerHandle.IsValid();
             BindDirectionalGuideMode(cmd, m_TraceCompute);
+            cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ProbeDirectionNoiseId,
+                m_ProbeDirectionNoise.IsValid() ? m_ProbeDirectionNoise : black);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, DirectionalGuideId, m_DirectionalGuide
                 ? (m_FrozenGuideActive ? m_CurrentProposal.innerHandle : m_DirectionalGuideTexture.innerHandle) : black);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, PreviousProbeId, useProbeHistory ? m_PreviousProbes.innerHandle : black);
@@ -3163,6 +3174,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeBufferParam(m_TraceCompute, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
             }
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ProbeDirectionNoiseId,
+                m_ProbeDirectionNoise.IsValid() ? m_ProbeDirectionNoise : black);
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, DirectionalGuideId, m_DirectionalGuide
                 ? (m_FrozenGuideActive ? m_CurrentProposal.innerHandle : m_DirectionalGuideTexture.innerHandle) : black);
             BindScreenTraceHistory(cmd, m_TraceCompute, kernel, true, black);
@@ -3254,6 +3267,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeMatrixParam(m_ImportanceSamplingCompute, PreviousViewProjectionId, m_State.ViewProjection);
             cmd.SetComputeIntParam(m_ImportanceSamplingCompute, DirectionalHasHistoryId, hasHistory ? 1 : 0);
             cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, PlacementId, placement);
+            cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, ProbeDirectionNoiseId,
+                m_ProbeDirectionNoise.IsValid() ? m_ProbeDirectionNoise : black);
             cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, PreviousGeometryId, hasHistory ? m_PreviousGeometry.innerHandle : black);
             cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, DirectionalPreviousId,
                 hasHistory ? m_PreviousDirectionalFiltered.innerHandle : black);
@@ -3291,6 +3306,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var temporal = m_DirectionalTemporal.innerHandle;
             var filtered = m_CurrentDirectionalFiltered.innerHandle;
             int kernel = m_DirectionalCompositeKernel;
+            cmd.SetComputeTextureParam(shader, kernel, ProbeDirectionNoiseId, m_ProbeDirectionNoise.IsValid() ? m_ProbeDirectionNoise : black);
+            cmd.SetComputeIntParam(shader, HasProbeDirectionNoiseId, m_ProbeDirectionNoise.IsValid() ? 1 : 0);
             cmd.SetComputeTextureParam(shader, kernel, ScatterNoiseId, m_ScatterNoise.IsValid() ? m_ScatterNoise : black);
             cmd.SetComputeIntParam(shader, HasScatterNoiseId, m_ScatterNoise.IsValid() ? 1 : 0);
             cmd.SetComputeIntParam(shader, DitherTraceDirectionsId, m_DitherTraceDirections ? 1 : 0);
@@ -3337,7 +3354,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(shader, kernel, ProbeMovingId, m_ProbeMoving.innerHandle);
                     cmd.SetComputeTextureParam(shader, kernel, SpatialFilterScalarNoiseId, m_SpatialFilterScalarNoise);
                     cmd.SetComputeTextureParam(shader, kernel, SpatialFilterVectorNoiseId, m_SpatialFilterVectorNoise);
-                    cmd.SetComputeFloatParam(shader, SkyTraceDistanceId, m_SkyTraceDistance);
+                    cmd.SetComputeFloatParam(shader, SkyTraceDistanceId,
+                        Mathf.Max(m_SkyTraceDistance, Mathf.Max(m_TraceDistance, m_FarDistance)));
                 }
                 // Use this frame's hit distances with the two-frame radiance estimate.
                 TextureHandle spatialInput = temporal;
@@ -3410,6 +3428,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(shader, DirectionalCacheEnabledId, m_DirectionalCache ? 1 : 0);
             cmd.SetComputeIntParam(shader, DirectionalGuideEnabledId,
                 m_DirectionalHierarchicalGuide ? 2 : m_DirectionalGuide ? 1 : 0);
+            cmd.SetComputeIntParam(shader, HasProbeDirectionNoiseId, m_ProbeDirectionNoise.IsValid() ? 1 : 0);
         }
 
         private void BindOccludedSky(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)

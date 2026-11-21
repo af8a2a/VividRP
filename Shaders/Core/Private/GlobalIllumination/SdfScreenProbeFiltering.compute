@@ -286,11 +286,9 @@ uint DitherSphereBin(uint2 tile, uint ray)
     uint seed = ProbeSeed(tile), parent;
     float mass;
     float2 continuous = SphereRayTexel(tile, ray, seed, parent, mass) - 0.5;
-    uint2 pixel;
-    LoadProbeReceiverPixel(tile, uint2(_SdfDiffuseScreenSize.xy), pixel);
-    uint2 address = (pixel / ProbeSpacing) & 127u;
-    address.y = 8191u - (((_SdfDiffuseFrame + 32u) & 63u) * 128u + address.y);
-    float2 threshold = _SdfHasScatterNoise != 0u ? _SdfScatterNoise.Load(int3(address, 0))
+    uint2 owner = GetScreenProbeTileCoord(tile);
+    float2 threshold = _SdfHasScatterNoise != 0u
+        ? _SdfScatterNoise.Load(ProbeDirectionBlueNoiseCoord(owner, (_SdfDiffuseFrame & 7u) + 31u))
         : float2(DirectionalRandom(seed ^ 0x21ab8c65u), DirectionalRandom(seed ^ 0x12ed3749u));
     int2 q = int2(floor(continuous)) + int2(frac(continuous) >= threshold);
     if (q.x < 0 || q.x > 7) q = int2(clamp(q.x, 0, 7), 7 - q.y);
@@ -744,7 +742,8 @@ float GetSpatialFilterHitDistance(uint2 Address, uint2 MetadataOffset)
     // Zero is undrawn, and a resolved sky trace uses its configured range.
     float SignedDistance = _SdfDirectionalComposite.Load(int3(Address + MetadataOffset, 0)).x;
     const float ProbeMaxHitDistance = 65504.0f;
-    float DistanceInCentimeters = (SignedDistance < 0.0f ? _SdfDiffuseSkyTraceDistance : SignedDistance) * 100.0f;
+    float DistanceInCentimeters = (SignedDistance < 0.0f
+        ? max(_SdfDiffuseSkyTraceDistance, _SdfDiffuseMaxDistance) : SignedDistance) * 100.0f;
     float Encoded = SignedDistance == 0.0f ? 0.0f
         : sqrt(DistanceInCentimeters / ProbeMaxHitDistance) * 254.0f / 255.0f + 1.0f / 255.0f;
     Encoded = round(saturate(Encoded) * 255.0f) / 255.0f;

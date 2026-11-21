@@ -7,11 +7,13 @@ static const uint DirectionalBinCount = 8u;
 
 uint _SdfDirectionalCacheEnabled;
 uint _SdfDirectionalGuideEnabled;
+uint _SdfHasProbeDirectionNoise;
 
 // YZ holds the previous tile plus one. In the original guide X is the bin,
 // and W selects the full bin, an azimuth half (-1/-2), or a merged bin (+1).
 // Hierarchical rays pack the octahedral rectangle in X and its guide source in W.
 Texture2D<float4> _SdfDirectionalGuide;
+Texture2D<float2> _SdfProbeDirectionNoise;
 
 uint2 DirectionalGrid()
 {
@@ -217,13 +219,38 @@ uint4 UnpackDirectionalOctRect(uint code)
     return uint4(code & 3u, (code >> 2u) & 3u, 1u << ((code >> 4u) & 1u), 1u << ((code >> 5u) & 1u));
 }
 
+uint3 ProbeDirectionBlueNoiseCoord(uint2 coordinate, uint frameIndex)
+{
+    uint3 wrapped = uint3(coordinate, frameIndex) & uint3(127u, 127u, 63u);
+    return uint3(wrapped.x, 8191u - (wrapped.z * 128u + wrapped.y), 0u);
+}
+
+uint2 GetScreenProbeTileCoord(uint2 tile)
+{
+    uint2 grid = DirectionalGrid();
+    uint2 owner = tile;
+    if (_SdfDiffuseAdaptiveProbes != 0u && tile.y >= grid.y)
+    {
+        uint2 pixel;
+        CompactReceiver(tile, grid, owner, pixel);
+    }
+    return owner;
+}
+
+float2 GetScreenProbeTexelCenter(uint2 tile, uint seed)
+{
+    if (_SdfHasProbeDirectionNoise != 0u)
+        return _SdfProbeDirectionNoise.Load(ProbeDirectionBlueNoiseCoord(GetScreenProbeTileCoord(tile), _SdfDiffuseFrame & 7u));
+    return clamp(DirectionalTemporalSample(tile, 0u, seed), 1e-5, 1.0 - 1e-5);
+}
+
 float2 SphereRayTexel(uint2 tile, uint ray, uint seed, out uint bin, out float inverseRelativePdf)
 {
     uint code = _SdfDirectionalGuideEnabled != 0u
         ? uint(_SdfDirectionalGuide.Load(int3(ProbeTraceAddress(tile, ray), 0)).x) : ray;
     bin = code & 63u;
     uint child = code >> 6u;
-    float2 offset = clamp(DirectionalTemporalSample(tile, 0u, seed), 1e-5, 1.0 - 1e-5);
+    float2 offset = GetScreenProbeTexelCenter(tile, seed);
     if (child != 0u)
         offset = 0.5 * (offset + float2((child - 1u) & 1u, (child - 1u) >> 1u));
     inverseRelativePdf = child == 0u ? 1.0 : 0.25;

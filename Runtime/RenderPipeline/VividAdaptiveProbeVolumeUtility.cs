@@ -11,7 +11,7 @@ namespace VividRP.Runtime
 
         private static readonly int s_EnableProbeVolumesId = Shader.PropertyToID("_EnableProbeVolumes");
 
-        internal static void Initialize(VividRenderPipelineAsset asset)
+        internal static bool Initialize(VividRenderPipelineAsset asset)
         {
             bool supportProbeVolume = asset != null && asset.SupportProbeVolume;
 
@@ -56,7 +56,7 @@ namespace VividRP.Runtime
 
 
             if (!supportProbeVolume)
-                return;
+                return false;
 
 #pragma warning disable 618
             ProbeVolumeSceneData sceneData = VividRenderPipelineGlobalSettings.instance?.GetOrCreateAPVSceneData();
@@ -75,14 +75,13 @@ namespace VividRP.Runtime
                 sceneData = sceneData,
 #pragma warning restore 618
             });
+            return ProbeReferenceVolume.instance.isInitialized;
         }
 
-        internal static void Cleanup(VividRenderPipelineAsset asset)
+        internal static void Cleanup(bool initialized)
         {
-            if (asset == null || !asset.SupportProbeVolume)
-                return;
-
-            ProbeReferenceVolume.instance.Cleanup();
+            if (initialized)
+                ProbeReferenceVolume.instance.Cleanup();
         }
 
         internal static void UpdatePerCamera(VividRenderPipelineAsset asset, Camera camera, CommandBuffer cmd, int frameIndex)

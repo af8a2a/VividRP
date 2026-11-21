@@ -225,6 +225,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsClusteredReflectionProbes;
         private bool m_IsLogBaseBufferEnabled;
         private bool m_IsPassResourceLayoutDirty;
+        private bool m_UseRealtimeDiffuseGI;
         private readonly RenderGraphTexture m_LocalDiffuseIrradiance;
         private readonly RenderGraphTexture m_LocalRealtimeDiffuseGI;
         private readonly RenderGraphTexture m_LocalLayerAux0;
@@ -362,6 +363,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            m_UseRealtimeDiffuseGI = VividRenderPipelineAsset.GetActiveAsset()?.SupportProbeVolume != true;
             var cameraData = frameData.Get<VividCameraData>();
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -641,7 +643,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
         {
             var rgDefaultResource = context.renderGraphContext.defaultResources;
-            bool hasRealtimeGI = !ReferenceEquals(m_RealtimeDiffuseGI, m_LocalRealtimeDiffuseGI)
+            bool hasRealtimeGI = m_UseRealtimeDiffuseGI && !ReferenceEquals(m_RealtimeDiffuseGI, m_LocalRealtimeDiffuseGI)
                 && m_RealtimeDiffuseGI?.innerHandle.IsValid() == true;
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, RealtimeDiffuseGIId,
                 hasRealtimeGI ? m_RealtimeDiffuseGI.innerHandle : rgDefaultResource.blackTexture);

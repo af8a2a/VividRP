@@ -22,7 +22,9 @@ namespace VividRP.Editor.RenderPipeline
             "GPU Driven Decal",
             "Enables decals. The selected Decal Technique determines whether decals use clustered bindless sampling or are composed into Terrain RVT pages.");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
-        private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
+        private static readonly GUIContent s_GlobalIlluminationLabel = EditorGUIUtility.TrTextContent(
+            "Global Illumination",
+            "Realtime GI uses the render graph's SDF Diffuse Gather pass. APV uses baked Adaptive Probe Volumes.");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
         private static readonly GUIContent s_ReflectionProbeAtlasResolutionLabel =
             EditorGUIUtility.TrTextContent("Atlas Resolution", "Size of the runtime texture atlas used for visible reflection probes.");
@@ -171,22 +173,7 @@ namespace VividRP.Editor.RenderPipeline
             };
             root.Add(srpBatcherField);
 
-            var supportProbeVolumeField = new PropertyField(
-                serializedObject.FindProperty("m_SupportProbeVolume"),
-                s_SupportProbeVolumeLabel.text)
-            {
-                name = "vivid-rp-asset-support-probe-volume-field",
-            };
-            root.Add(supportProbeVolumeField);
-
-            var probeVolumeShBandsField = new PropertyField(
-                serializedObject.FindProperty("m_ProbeVolumeSHBands"),
-                s_ProbeVolumeShBandsLabel.text)
-            {
-                name = "vivid-rp-asset-probe-volume-sh-bands-field",
-            };
-            root.Add(probeVolumeShBandsField);
-
+            AddGlobalIlluminationFields(root);
             AddReflectionProbeAtlasFoldout(root);
 
             root.Bind(serializedObject);
@@ -235,6 +222,39 @@ namespace VividRP.Editor.RenderPipeline
             SubscribeToPipelineCreated();
 
             return root;
+        }
+
+        private void AddGlobalIlluminationFields(VisualElement root)
+        {
+            var apvProperty = serializedObject.FindProperty("m_SupportProbeVolume");
+            var modeField = new EnumField(s_GlobalIlluminationLabel.text, ((VividRenderPipelineAsset)target).GlobalIlluminationMode)
+            {
+                name = "vivid-rp-asset-global-illumination-field",
+                tooltip = s_GlobalIlluminationLabel.tooltip,
+            };
+            root.Add(modeField);
+
+            var shBandsField = new PropertyField(serializedObject.FindProperty("m_ProbeVolumeSHBands"), s_ProbeVolumeShBandsLabel.text)
+            {
+                name = "vivid-rp-asset-probe-volume-sh-bands-field",
+            };
+            root.Add(shBandsField);
+
+            void RefreshMode(SerializedProperty property)
+            {
+                modeField.SetValueWithoutNotify(((VividRenderPipelineAsset)target).GlobalIlluminationMode);
+                shBandsField.style.display = property.boolValue ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+
+            modeField.RegisterValueChangedCallback(evt =>
+            {
+                serializedObject.UpdateIfRequiredOrScript();
+                apvProperty.boolValue = (VividGlobalIlluminationMode)evt.newValue == VividGlobalIlluminationMode.AdaptiveProbeVolumes;
+                serializedObject.ApplyModifiedProperties();
+                RefreshMode(apvProperty);
+            });
+            root.TrackPropertyValue(apvProperty, RefreshMode);
+            RefreshMode(apvProperty);
         }
 
         private void AddLocalVolumetricFogFoldout(VisualElement root)

@@ -51,6 +51,14 @@ namespace VividRP.Runtime
         HDRP,
     }
 
+    public enum VividGlobalIlluminationMode
+    {
+        [InspectorName("Realtime GI")]
+        RealtimeGI,
+        [InspectorName("APV")]
+        AdaptiveProbeVolumes,
+    }
+
     public enum VividDecalTechnique
     {
         ClusteredBindless = 0,
@@ -119,6 +127,7 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_EnableSRPBatcher = true;
 
+        // Preserve existing assets' serialized APV choice.
         [SerializeField]
         private bool m_SupportProbeVolume;
 
@@ -161,6 +170,12 @@ namespace VividRP.Runtime
         {
             get => m_SupportProbeVolume;
             set => m_SupportProbeVolume = value;
+        }
+
+        public VividGlobalIlluminationMode GlobalIlluminationMode
+        {
+            get => SupportProbeVolume ? VividGlobalIlluminationMode.AdaptiveProbeVolumes : VividGlobalIlluminationMode.RealtimeGI;
+            set => SupportProbeVolume = value == VividGlobalIlluminationMode.AdaptiveProbeVolumes;
         }
 
         public ProbeVolumeSHBands ProbeVolumeSHBands

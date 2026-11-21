@@ -503,6 +503,9 @@ MonoBehaviour:
   pixelHistoryMaxAge:
     m_OverrideState: 1
     m_Value: 10
+  screenProbeFastUpdateNeighborhoodClamp:
+    m_OverrideState: 0
+    m_Value: 1
   spatialDenoise:
     m_OverrideState: 1
     m_Value: 0

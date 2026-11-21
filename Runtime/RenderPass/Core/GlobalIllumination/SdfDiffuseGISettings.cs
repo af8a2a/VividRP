@@ -64,7 +64,7 @@ namespace VividRP.Runtime.RenderPass.Core
     [Serializable, VolumeComponentMenu("VividRP/Lighting/SDF Diffuse GI")]
     public sealed class SdfDiffuseGISettings : VolumeComponent
     {
-        [Tooltip("Enable SDF diffuse GI in graphs that contain the gather pass.")]
+        [Tooltip("Enable the gather pass for cameras using the pipeline asset's Realtime GI mode.")]
         public BoolParameter enabled = new(true);
 
         [Tooltip("Choose the final gather independently of the trace mode. Screen Probe Gather filters directional probe radiance. ReSTIR Gather resamples 2×2 reservoirs and requires a usable Mesh SDF scene.")]

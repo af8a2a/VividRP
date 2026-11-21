@@ -1126,6 +1126,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private int FindOptionalKernel(string name) => HasKernel(m_TraceCompute, name) ? m_TraceCompute.FindKernel(name) : -1;
 
+        public override bool IsActive(ContextContainer frameData) =>
+            VividRenderPipelineAsset.GetActiveAsset()?.SupportProbeVolume != true;
+
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
@@ -1714,6 +1717,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public void PrepareRenderGraph(ContextContainer frameData)
         {
+            if (!IsActive(frameData))
+                return;
+
             if (m_ReceiverVisibilitySource != null)
             {
                 m_ReceiverVisibility = m_ReceiverVisibilitySource.innerHandle;

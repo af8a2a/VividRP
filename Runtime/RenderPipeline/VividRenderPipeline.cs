@@ -73,6 +73,7 @@ namespace VividRP.Runtime
         };
 
         private readonly VividRenderPipelineAsset m_Asset;
+        private bool m_ProbeVolumesInitialized;
         private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
         private bool m_EnableHdrOnce = true;
         private DebugDisplaySettingsUI m_DebugDisplaySettingsUI;
@@ -494,7 +495,7 @@ namespace VividRP.Runtime
             Hammersley.Initialize();
             RTHandles.Initialize(Screen.width, Screen.height);
             LensFlareCommonSRP.Initialize();
-            VividAdaptiveProbeVolumeUtility.Initialize(m_Asset);
+            m_ProbeVolumesInitialized = VividAdaptiveProbeVolumeUtility.Initialize(m_Asset);
             VividPerObjectBufferSystem.Initialize();
             VividPreIntegratedFGDSystem.Initialize();
             VividReflectionProbeAtlasSystem.Initialize();
@@ -963,7 +964,7 @@ namespace VividRP.Runtime
             Blitter.Cleanup();
             VividPerObjectBufferSystem.Deinitialize();
             PipelineResourceManager.Cleanup();
-            VividAdaptiveProbeVolumeUtility.Cleanup(m_Asset);
+            VividAdaptiveProbeVolumeUtility.Cleanup(m_ProbeVolumesInitialized);
             ReleaseConstantBuffersForShutdown();
 
             var currentPipeline = RenderPipelineManager.currentPipeline;

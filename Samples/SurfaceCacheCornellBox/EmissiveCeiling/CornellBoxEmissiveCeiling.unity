@@ -287,6 +287,7 @@ Transform:
   - {fileID: 1749314792}
   - {fileID: 2024625396}
   - {fileID: 186297866}
+  - {fileID: 1767378907}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &343086240
@@ -700,6 +701,153 @@ MonoBehaviour:
   m_MaterialProxies:
   - {fileID: 11400000, guid: 80dc63d891862dd4c86ba6f11f7bbd79, type: 2}
   m_TakeOverSourceRenderer: 1
+--- !u!1 &1767378906
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1767378907}
+  - component: {fileID: 1767378910}
+  - component: {fileID: 1767378909}
+  - component: {fileID: 1767378908}
+  m_Layer: 29
+  m_Name: followcamera
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 0
+--- !u!4 &1767378907
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1767378906}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0.13535124, y: -0.031561036, z: 0.0041303625, w: 0.9902863}
+  m_LocalPosition: {x: 0.47706702, y: 1.8628265, z: -0.9480063}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 224926325}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1767378908
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1767378906}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6e84bfbaaaf843edbb38b3110dc32755, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.VividDebugCameraController
+  _sceneSync: 1
+  _lerpSpeed: 2.5
+  _syncFOV: 1
+  _moveSpeed: 5
+  _rotationSpeed: 120
+--- !u!114 &1767378909
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1767378906}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2d2442bcd0654a71b0e8643e7f3ff88f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.VividAdditionalCameraData
+  m_RenderType: 0
+  m_ClearDepth: 1
+  m_VolumeLayerMask:
+    serializedVersion: 2
+    m_Bits: 536870912
+  m_ExposureTarget: {fileID: 0}
+  m_StopNaNs: 0
+  m_Dithering: 0
+  m_Antialiasing: 6
+  m_EnableTAA: 0
+  m_LegacyAntialiasingMigrated: 1
+  m_TAAJitterSpread: 1
+  m_TAASampleCount: 8
+  m_TAABaseBlendFactor: 0.95
+  m_TAAMotionWeightDecay: 3
+  m_TAAAntiFlickerIntensity: 0.5
+  m_DLSSQuality: 1
+  m_DLSSNeuralRenderingPreset: 0
+  m_DLSSNeuralRenderingStyle: 0
+  m_DLSSNeuralRenderingUpscaling: 0
+  m_DLSSNeuralRenderingIntensity: 1
+  m_DLSSNeuralRenderingLocalToneStrength: 1
+  m_DLSSNeuralRenderingLocalStructureStrength: 1
+  m_DLSSNeuralRenderingSkinStructureStrength: -1
+  m_DLSSNeuralRenderingUseAutoMask: 0
+  m_DLSSNeuralRenderingUICorrection: 0
+  m_FSR3Quality: 2
+  m_FSR3EnableSharpening: 1
+  m_FSR3Sharpness: 0.2
+  m_TSRQuality: 0
+  m_TSREnableSharpening: 1
+  m_TSRSharpness: 0.867
+  m_TSRHistorySampleCount: 16
+--- !u!20 &1767378910
+Camera:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1767378906}
+  m_Enabled: 1
+  serializedVersion: 2
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 1}
+  m_projectionMatrixMode: 1
+  m_GateFitMode: 2
+  m_FOVAxisMode: 0
+  m_Iso: 200
+  m_ShutterSpeed: 0.005
+  m_Aperture: 16
+  m_FocusDistance: 10
+  m_FocalLength: 50
+  m_BladeCount: 5
+  m_Curvature: {x: 2, y: 11}
+  m_BarrelClipping: 0.25
+  m_Anamorphism: 0
+  m_SensorSize: {x: 36, y: 24}
+  m_LensShift: {x: 0, y: 0}
+  m_NormalizedViewPortRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+  near clip plane: 0.05
+  far clip plane: 20
+  field of view: 60.00229
+  orthographic: 0
+  orthographic size: 5
+  m_Depth: 101
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 536870912
+  m_RenderingPath: -1
+  m_TargetTexture: {fileID: 0}
+  m_TargetDisplay: 0
+  m_TargetEye: 3
+  m_HDR: 1
+  m_AllowMSAA: 1
+  m_AllowDynamicResolution: 0
+  m_ForceIntoRT: 0
+  m_OcclusionCulling: 1
+  m_StereoConvergence: 10
+  m_StereoSeparation: 0.022
 --- !u!1 &1771974967
 GameObject:
   m_ObjectHideFlags: 0
@@ -815,7 +963,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
   m_IsGlobal: 1
-  priority: 100
+  priority: 0
   blendDistance: 0
   weight: 1
   sharedProfile: {fileID: 11400000, guid: de1e9934f70b09f45bc50f413006843e, type: 2}

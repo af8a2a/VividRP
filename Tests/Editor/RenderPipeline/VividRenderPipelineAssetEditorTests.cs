@@ -107,7 +107,7 @@ namespace VividRP.Tests
                 Assert.That(root.Q<HelpBox>("vivid-rp-asset-terrain-rvt-decal-dependencies"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-debug-overlay-field"), Is.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-srp-batcher-field"), Is.Not.Null);
-                Assert.That(root.Q<PropertyField>("vivid-rp-asset-support-probe-volume-field"), Is.Not.Null);
+                Assert.That(root.Q<EnumField>("vivid-rp-asset-global-illumination-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-probe-volume-sh-bands-field"), Is.Not.Null);
                 Assert.That(root.Q<Foldout>("vivid-rp-asset-reflection-probe-atlas-foldout"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-reflection-probe-atlas-resolution-field"), Is.Not.Null);
@@ -139,12 +139,30 @@ namespace VividRP.Tests
             Assert.That(m_PipelineAsset.DecalTechnique, Is.EqualTo(VividDecalTechnique.ClusteredBindless));
             Assert.That(m_PipelineAsset.EnableSRPBatcher, Is.True);
             Assert.That(m_PipelineAsset.SupportProbeVolume, Is.False);
+            Assert.That(m_PipelineAsset.GlobalIlluminationMode, Is.EqualTo(VividGlobalIlluminationMode.RealtimeGI));
             Assert.That(m_PipelineAsset.ProbeVolumeSHBands, Is.EqualTo(ProbeVolumeSHBands.SphericalHarmonicsL2));
             Assert.That(m_PipelineAsset.ReflectionProbeAtlasResolution, Is.EqualTo(VividReflectionProbeAtlasResolution.Resolution4096x4096));
             Assert.That(m_PipelineAsset.ReflectionProbeAtlasFormat, Is.EqualTo(VividReflectionProbeAtlasFormat.R16G16B16A16));
             Assert.That(m_PipelineAsset.ReflectionProbeAtlasDimensions, Is.EqualTo(new Vector2Int(4096, 4096)));
             Assert.That(m_PipelineAsset.ReflectionProbeAtlasLastValidCubeMip, Is.EqualTo(3));
             Assert.That(m_PipelineAsset.ReflectionProbeAtlasDecreaseResToFit, Is.True);
+        }
+
+        [Test]
+        public void GlobalIlluminationMode_UsesSerializedProbeVolumeChoice()
+        {
+            var attributes = new SerializedObject(m_PipelineAsset);
+            var apv = attributes.FindProperty("m_SupportProbeVolume");
+            apv.boolValue = true;
+            attributes.ApplyModifiedProperties();
+
+            Assert.That(m_PipelineAsset.GlobalIlluminationMode, Is.EqualTo(VividGlobalIlluminationMode.AdaptiveProbeVolumes));
+            Assert.That(((IProbeVolumeEnabledRenderPipeline)m_PipelineAsset).supportProbeVolume, Is.True);
+
+            m_PipelineAsset.GlobalIlluminationMode = VividGlobalIlluminationMode.RealtimeGI;
+            attributes.Update();
+
+            Assert.That(apv.boolValue, Is.False);
         }
 
         [Test]

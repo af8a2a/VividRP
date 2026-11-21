@@ -58,12 +58,10 @@ float4 _Jitter;
 float4 TSR_LoadPreviousGuide(int2 coord, out bool valid)
 {
     float2 uv = (float2(coord) + 0.5) * _RenderSize.zw;
-    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    jitterDelta.y = -jitterDelta.y;
-#endif
+    float2 jitterDelta = TSR_JitterUV(_Jitter.zw - _Jitter.xy);
     float2 historyUV = uv - _DilatedMotion[coord] + jitterDelta;
-    float2 meta = _ReprojectedHistoryMeta.SampleLevel(sampler_PointClamp, uv, 0);
+    float2 unjitteredUV = uv - TSR_JitterUV(_Jitter.xy);
+    float2 meta = _ReprojectedHistoryMeta.SampleLevel(sampler_PointClamp, unjitteredUV, 0);
     float2 halfTexel = _RenderSize.zw * 0.5;
     valid = _TSRParams.x > 0.5 && meta.x > 0.0
         && all(historyUV >= halfTexel) && all(historyUV <= 1.0 - halfTexel)
@@ -273,7 +271,7 @@ void TSR_NeighborhoodShadingChange(int2 renderCoord, int2 renderSize,
             int2 coord = clamp(renderCoord + int2(x, y), int2(0, 0), renderSize - 1);
             // History is already reprojected onto the current output grid. Use
             // the same input footprint even when render and output sizes differ.
-            float2 uv = (float2(coord) + 0.5) / float2(renderSize);
+            float2 uv = (float2(coord) + 0.5) / float2(renderSize) - TSR_JitterUV(_Jitter.xy);
             float3 history = TSR_RGBToYCoCg(_ReprojectedHistoryColor.SampleLevel(sampler_LinearClamp, uv, 0).rgb);
             float3 delta = TSR_RGBToYCoCg(_InputColor[coord].rgb) - history;
             historyMean += history;
@@ -295,10 +293,10 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (any(pixelCoord >= outputSize))
         return;
 
-    float2 uv = TSR_OutputUV(pixelCoord, outputSize);
-    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
+    float2 inputUV = TSR_OutputToInputUV(pixelCoord, outputSize, _Jitter.xy);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize, _Jitter.xy);
 
-    float3 currentColor = TSR_SampleCatmullRom(_InputColor, uv, float2(renderSize)).rgb;
+    float3 currentColor = TSR_SampleCatmullRom(_InputColor, inputUV, float2(renderSize)).rgb;
     float3 historyColor = _ReprojectedHistoryColor[pixelCoord].rgb;
     float3 unclippedHistoryColor = historyColor;
     float2 historyMeta = _ReprojectedHistoryMeta[pixelCoord];
@@ -524,8 +522,8 @@ float2 TSR_MeasureResurrectionRejection(int2 origin, uint2 tid, uint lane, bool 
     for(uint i=lane;i<400;i+=64)
     {
         int2 p=clamp(origin+int2(i%20,i/20)-6,0,size-1);
-        float2 uv=(float2(p)+0.5)/float2(size);
-        ResurrectionInput0[i]=TSR_ShadingMeasurementColor(_InputColor.SampleLevel(sampler_LinearClamp,uv,0).rgb);
+        float2 inputUV=TSR_OutputToInputUV(p,size,_Jitter.xy);
+        ResurrectionInput0[i]=TSR_ShadingMeasurementColor(_InputColor.SampleLevel(sampler_LinearClamp,inputUV,0).rgb);
         float3 history=candidate?_ReprojectedResurrectionColor[p].rgb:_ReprojectedHistoryColor[p].rgb;
         ResurrectionHistory0[i]=TSR_ShadingMeasurementColor(history);
     }
@@ -600,7 +598,7 @@ float2 TSR_MeasureResurrectionRejection(int2 origin, uint2 tid, uint lane, bool 
         float3 error=max(max(q.xxx,variation),range*(filteringWeight*0.25))+q;
         lo-=error;hi+=error;
         int2 pixel=clamp(origin+int2(p)-2,0,size-1);
-        int2 r=TSR_OutputToRenderCoord(pixel,size,int2(_RenderSize.xy));
+        int2 r=TSR_OutputToRenderCoord(pixel,size,int2(_RenderSize.xy),_Jitter.xy);
         // UE explicitly disables flicker relaxation for the resurrection score.
         float moire=candidate?0.0:_LumaInstability[r];
         float3 stableLo=min(lo,hi-3.0*moire),stableHi=max(hi,lo+3.0*moire);
@@ -648,8 +646,8 @@ void CSSelectResurrection(uint3 group : SV_GroupID, uint3 tid : SV_GroupThreadID
     for(uint i=lane;i<144;i+=64)
     {
         int2 p=clamp(origin+int2(i%12,i/12)-2,0,size-1);
-        float2 uv=(float2(p)+0.5)/float2(size);
-        ResurrectionInput0[i]=TSR_ShadingMeasurementColor(_InputColor.SampleLevel(sampler_LinearClamp,uv,0).rgb);
+        float2 inputUV=TSR_OutputToInputUV(p,size,_Jitter.xy);
+        ResurrectionInput0[i]=TSR_ShadingMeasurementColor(_InputColor.SampleLevel(sampler_LinearClamp,inputUV,0).rgb);
         ResurrectionHistory0[i]=TSR_ShadingMeasurementColor(_ReprojectedHistoryColor[p].rgb);
         ResurrectionInput1[i]=TSR_ShadingMeasurementColor(_ReprojectedResurrectionColor[p].rgb);
     }
@@ -687,7 +685,7 @@ void CSSelectResurrection(uint3 group : SV_GroupID, uint3 tid : SV_GroupThreadID
     float2 candidateScore=TSR_MeasureResurrectionRejection(origin,tid.xy,lane,true);
     if(!closer || candidateScore.x-previous.x<=0.1)return;
     float3 candidate=_ReprojectedResurrectionColor[pixel].rgb;
-    int2 r=TSR_OutputToRenderCoord(pixel,size,int2(_RenderSize.xy));
+    int2 r=TSR_OutputToRenderCoord(pixel,size,int2(_RenderSize.xy),_Jitter.xy);
     float3 lo,hi;TSR_NeighborhoodYCoCgBounds(_InputColor,r,int2(_RenderSize.xy),lo,hi);
     float3 clipped=max(TSR_YCoCgToRGB(TSR_ClipToAABB(TSR_RGBToYCoCg(candidate),lo,hi)),0.0);
     float historyUncertainty=1.0;
@@ -703,8 +701,8 @@ void CSSelectResurrection(uint3 group : SV_GroupID, uint3 tid : SV_GroupThreadID
 void CSUpdateResurrectedGuide(uint3 id : SV_DispatchThreadID)
 {
     int2 p=id.xy,size=int2(_RenderSize.xy);if(any(p>=size))return;
-    float2 uv=(float2(p)+0.5)/float2(size);
-    int2 q=clamp(int2(uv*_OutputSize.xy),0,int2(_OutputSize.xy)-1);
+    float2 uv=(float2(p)+0.5)/float2(size)-TSR_JitterUV(_Jitter.xy);
+    int2 q=clamp(int2(floor(uv*_OutputSize.xy)),0,int2(_OutputSize.xy)-1);
     float4 control=_HistoryWeightControl[q];if(control.z<0.5)return;
     float3 history=_ReprojectedResurrectionColor[q].rgb;
     float ratio=(_OutputSize.x*_OutputSize.y)/(_RenderSize.x*_RenderSize.y);

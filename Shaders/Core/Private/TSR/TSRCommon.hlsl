@@ -201,15 +201,38 @@ float4 TSR_SampleCatmullRom(Texture2D<float4> textureSource, float2 uv, float2 t
     return max(result, 0.0);
 }
 
-int2 TSR_OutputToRenderCoord(int2 outputCoord, int2 outputSize, int2 renderSize)
-{
-    float2 uv = (float2(outputCoord) + 0.5) / float2(outputSize);
-    return clamp(int2(uv * float2(renderSize)), int2(0, 0), renderSize - 1);
-}
-
 float2 TSR_OutputUV(int2 outputCoord, int2 outputSize)
 {
     return (float2(outputCoord) + 0.5) / float2(outputSize);
+}
+
+// _Jitter stores camera projection translation in OpenGL clip NDC, which has
+// the same bottom-up Y orientation as VividRP's renderIntoTexture targets on
+// all graphics APIs. Do not flip Y under UNITY_UV_STARTS_AT_TOP.
+float2 TSR_JitterUV(float2 projectionJitter)
+{
+    return projectionJitter * 0.5;
+}
+
+float2 TSR_OutputToInputUV(int2 outputCoord, int2 outputSize, float2 projectionJitter)
+{
+    return TSR_OutputUV(outputCoord, outputSize) + TSR_JitterUV(projectionJitter);
+}
+
+float2 TSR_OutputToInputPixelPos(int2 outputCoord, int2 outputSize, int2 renderSize, float2 projectionJitter)
+{
+    return TSR_OutputToInputUV(outputCoord, outputSize, projectionJitter) * float2(renderSize);
+}
+
+int2 TSR_OutputToRenderCoord(int2 outputCoord, int2 outputSize, int2 renderSize, float2 projectionJitter)
+{
+    float2 inputPixelPos = TSR_OutputToInputPixelPos(outputCoord, outputSize, renderSize, projectionJitter);
+    return clamp(int2(floor(inputPixelPos)), int2(0, 0), renderSize - 1);
+}
+
+int2 TSR_OutputToRenderCoord(int2 outputCoord, int2 outputSize, int2 renderSize)
+{
+    return TSR_OutputToRenderCoord(outputCoord, outputSize, renderSize, 0.0);
 }
 
 void TSR_NeighborhoodYCoCgBounds(

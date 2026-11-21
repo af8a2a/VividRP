@@ -61,13 +61,9 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     float2 uv = TSR_OutputUV(pixelCoord, outputSize);
-    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize, _Jitter.xy);
     float2 motion = _DilatedMotion[renderCoord];
-    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    jitterDelta.y = -jitterDelta.y;
-#endif
-    float2 historyUV = uv - motion + jitterDelta;
+    float2 historyUV = uv - motion;
     bool validHistoryUV = all(historyUV >= 0.0) && all(historyUV <= 1.0);
     bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV && _ReprojectionValidity[renderCoord].x >= 0.5;
 
@@ -81,9 +77,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         float4 color = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
         _ReprojectedHistoryColor[pixelCoord] = float4(color.rgb * exposureCorrection, color.a);
         _ReprojectedHistoryMeta[pixelCoord] = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
-        float2 stateUV = uv - motion;
-        shadingState = all(stateUV >= 0.0) && all(stateUV <= 1.0)
-            ? _ResurrectionColor.SampleLevel(sampler_PointClamp, stateUV, 0).a : 0.0;
+        shadingState = _ResurrectionColor.SampleLevel(sampler_PointClamp, historyUV, 0).a;
     }
 
     // A persistent frame has its own camera transform and exposure. Primary
@@ -92,10 +86,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     _ReprojectedResurrectionMeta[pixelCoord] = 0.0;
     if (_PersistentParams.x > 0.5)
     {
-        float2 jitterUV = _Jitter.xy * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-        jitterUV.y = -jitterUV.y;
-#endif
+        float2 jitterUV = TSR_JitterUV(_Jitter.xy);
         // UE stores velocity at the input pixel center and applies its Jacobian
         // at the output sample. Do not apply the correction to an already exact
         // per-output projection (that would count the displacement twice).
@@ -110,7 +101,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         snapshotUV.y = 1.0 - snapshotUV.y;
 #endif
         float2x2 jacobian = TSR_PersistentVelocityJacobian(_ClipToPersistentClip, rcp(max(clip.w,1e-8)), _RenderSize.xy);
-        float2 offset = (uv-anchorUV)*_RenderSize.xy;
+        float2 offset = (TSR_OutputToInputUV(pixelCoord, outputSize, _Jitter.xy)-anchorUV)*_RenderSize.xy;
         snapshotUV += (offset-mul(offset,jacobian))*_RenderSize.zw;
         snapshotUV += _PersistentParams.yz;
         float2 halfTexel = 0.5 / previousSize;
@@ -128,7 +119,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
             bool valid = meta.x > 0.0 && abs(meta.y-z) <= max(depthScale * 0.02, 1e-5);
             float correction = TSR_CurrentPreExposure() / max(_PersistentPreExposure[int2(0,0)], 1e-6);
             _ReprojectedResurrectionColor[pixelCoord] = float4(color.rgb * correction, shadingState);
-            _ReprojectedResurrectionMeta[pixelCoord] = valid ? float4(meta.x, saturate(color.a), (uv-jitterUV)-(snapshotUV-_PersistentParams.yz)) : 0.0;
+            _ReprojectedResurrectionMeta[pixelCoord] = valid ? float4(meta.x, saturate(color.a), uv-(snapshotUV-_PersistentParams.yz)) : 0.0;
         }
     }
 }
@@ -138,11 +129,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 // Motion is XY-only in Vivid; camera reprojection supplies previous device Z.
 float2 TSR_OcclusionJitter(float2 jitter)
 {
-    float2 result = jitter * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    result.y = -result.y;
-#endif
-    return result;
+    return TSR_JitterUV(jitter);
 }
 float TSR_OcclusionPreviousDepth(int2 p, float depth)
 {
@@ -270,7 +257,7 @@ void CSStorePersistentHistory(uint3 id : SV_DispatchThreadID)
 {
     int2 p=id.xy, size=int2(_OutputSize.xy);
     if(any(p>=size)) return;
-    int2 r=TSR_OutputToRenderCoord(p,size,int2(_RenderSize.xy));
+    int2 r=TSR_OutputToRenderCoord(p,size,int2(_RenderSize.xy),_Jitter.xy);
     _OutputPersistentColor[p]=float4(_SnapshotHistoryColor[p].rgb,_ReprojectionValidity[r].y);
     _OutputPersistentMeta[p]=_SnapshotHistoryMeta[p];
     if(all(p==0)) _OutputPersistentExposure[p]=TSR_CurrentPreExposure();

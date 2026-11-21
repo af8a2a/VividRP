@@ -415,9 +415,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.PersistentStoreSlot = -1;
                 passData.CanResurrect = false;
                 passData.ClipToPersistent = cameraState.PersistentViewProjection[readSlot] * invCurrentVP;
-                var snapshotJitter = cameraState.PersistentJitter[readSlot] * 0.5f;
-                if (SystemInfo.graphicsUVStartsAtTop) snapshotJitter.y = -snapshotJitter.y;
-                passData.PersistentParams = new Vector4(passData.CanResurrect ? 1 : 0, snapshotJitter.x, snapshotJitter.y, 0);
+                // Persistent history stores unjittered output pixels from CurrentHistoryColor.
+                passData.PersistentParams = new Vector4(passData.CanResurrect ? 1 : 0, 0, 0, 0);
                 // Reset may clear both slots, even if only one is sampled/stored.
                 for (int slot = 0; slot < 2; slot++)
                 {

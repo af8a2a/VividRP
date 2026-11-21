@@ -50,19 +50,14 @@ void CSPrepareFlicker(uint3 id : SV_DispatchThreadID)
     int2 p = id.xy, size = int2(_RenderSize.xy);
     if (any(p >= size)) return;
     float2 uv = (float2(p) + 0.5) * _RenderSize.zw;
-    float2 delta = (_Jitter.zw - _Jitter.xy) * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    delta.y = -delta.y;
-#endif
+    float2 delta = TSR_JitterUV(_Jitter.zw - _Jitter.xy);
     float2 motion = _DilatedMotion[p];
     float2 previousUV = uv - motion + delta;
     float depth = _DilatedDepth[p];
-    float2 previousMeta = _FlickerPreviousDepth.SampleLevel(sampler_PointClamp, previousUV, 0);
-    float2 currentJitterUV = _Jitter.xy * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    currentJitterUV.y = -currentJitterUV.y;
-#endif
+    float2 currentJitterUV = TSR_JitterUV(_Jitter.xy);
     float2 unjitteredUV = uv - currentJitterUV;
+    float2 previousUnjitteredUV = unjitteredUV - motion;
+    float2 previousMeta = _FlickerPreviousDepth.SampleLevel(sampler_PointClamp, previousUnjitteredUV, 0);
     float4 clip = float4(TSR_FlickerScreen(unjitteredUV), depth, 1.0);
     float4 previousClip = mul(_FlickerClipToPrevClip, clip);
     float4 rotationalClip = mul(_FlickerRotationalClipToPrevClip, clip);
@@ -81,7 +76,6 @@ void CSPrepareFlicker(uint3 id : SV_DispatchThreadID)
     float2 rotationalScreen = rotationalClip.xy / max(abs(rotationalClip.w), 1e-8);
     float parallax = 0.5 * length((rotationalScreen - previousClip.xy * invPrevW) * _RenderSize.xy);
     float3 world = TSR_FlickerWorld(unjitteredUV, depth, _FlickerInvViewProjection);
-    float2 previousUnjitteredUV = unjitteredUV - motion;
     float3 previousWorld = TSR_FlickerWorld(previousUnjitteredUV, previousMeta.y, _FlickerPrevInvViewProjection);
     float radius = 2.0 * length(TSR_FlickerWorld(unjitteredUV + float2(_RenderSize.z, 0), depth, _FlickerInvViewProjection) - world);
     float moving = max(saturate(length(world - previousWorld) / max(radius, 1e-6) - 1.0),

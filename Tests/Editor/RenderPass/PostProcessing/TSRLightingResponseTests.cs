@@ -4,6 +4,8 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -509,13 +511,21 @@ namespace VividRP.Editor.Tests
         [TestCase(13, 0f, 0.75f, 0.25f)]
         [TestCase(8, 0.75f, -0.5f, 0f)]
         [TestCase(8, -0.75f, 0.5f, 0f)]
-        public void PendingReprojection_IgnoresJitterWhileColorUsesIt(int outputSize, float shiftPixels, float jitterX, float jitterY)
+        public void PendingReprojection_UnjitteredOutputHistoryIgnoresCameraJitter(int outputSize, float shiftPixels, float jitterX, float jitterY)
         {
             ReprojectionResult result = InspectReprojectedState(outputSize, shiftPixels, true, false, new Vector2(jitterX, jitterY));
             Assert.That(result.statesMatch && result.metadataMatch && result.paddingUntouched, Is.True);
-            Assert.That(result.filteredColorPixels, Is.GreaterThan(0));
-            if (shiftPixels == 0) Assert.That(result.colorOnlyInvalidPixels, Is.GreaterThan(0));
-            else Assert.That(result.stateOnlyInvalidPixels, Is.GreaterThan(0));
+            Assert.That(result.colorOnlyInvalidPixels, Is.Zero);
+            Assert.That(result.stateOnlyInvalidPixels, Is.Zero);
+            if (shiftPixels == 0)
+            {
+                Assert.That(result.invalidPixels, Is.Zero);
+                Assert.That(result.filteredColorPixels, Is.Zero);
+            }
+            else
+            {
+                Assert.That(result.filteredColorPixels, Is.GreaterThan(0));
+            }
         }
 
         [TestCase(false)]
@@ -527,7 +537,8 @@ namespace VividRP.Editor.Tests
             foreach (ReprojectionResult result in InspectEightJitterPhases(waveOps))
             {
                 Assert.That(result.statesMatch && result.metadataMatch && result.paddingUntouched, Is.True, "Phase " + result.phase);
-                Assert.That(result.filteredColorPixels, Is.GreaterThan(0));
+                Assert.That(result.invalidPixels, Is.Zero, "Phase " + result.phase);
+                Assert.That(result.filteredColorPixels, Is.Zero, "Phase " + result.phase);
             }
         }
 
@@ -545,9 +556,341 @@ namespace VividRP.Editor.Tests
                 new Vector2(.25f, -.75f), new Vector2(-.4375f, 5f / 9f) })
             {
                 ReprojectionResult result = InspectReprojectedState(outputSize, 0, true, waveOps,
-                    offset, constantColor: new Color(.25f, 2, 16));
+                    constantColor: new Color(.25f, 2, 16), subpixelMotionPixels: offset);
                 Assert.That(result.constantColorMaxError, Is.LessThan(.0001f), "Offset " + offset);
                 Assert.That(result.statesMatch && result.metadataMatch && result.paddingUntouched, Is.True);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CameraJitter_UnjittersRasterizedGradientOnBothAxesAndWeightsInputAlignment(bool waveOps)
+        {
+            if (waveOps) Assume.That(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
+                || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan, Is.True);
+            Shader spriteShader = Shader.Find("Sprites/Default");
+            Assume.That(spriteShader, Is.Not.Null);
+
+            const int size = 16;
+            const int phaseCount = 8;
+            var owned = new System.Collections.Generic.List<Object>();
+            using var frameExposure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
+            frameExposure.SetData(new[] { new Vector4(1f, 0f, 0f, 0f) });
+            try
+            {
+                var quad = new Mesh();
+                owned.Add(quad);
+                quad.vertices = new[]
+                {
+                    new Vector3(-1f, -1f, 0f),
+                    new Vector3( 1f, -1f, 0f),
+                    new Vector3(-1f,  1f, 0f),
+                    new Vector3( 1f,  1f, 0f)
+                };
+                quad.uv = new[] { Vector2.zero, Vector2.right, Vector2.up, Vector2.one };
+                quad.colors = new[]
+                {
+                    new Color(0f, 0f, 0f, 1f),
+                    new Color(1f, 0f, 0f, 1f),
+                    new Color(0f, 1f, 0f, 1f),
+                    new Color(1f, 1f, 0f, 1f)
+                };
+                quad.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+
+                var mat = new Material(spriteShader);
+                owned.Add(mat);
+
+                RenderTexture CreateRT(GraphicsFormat format)
+                {
+                    var rt = new RenderTexture(new RenderTextureDescriptor(size, size)
+                    {
+                        graphicsFormat = format,
+                        depthStencilFormat = GraphicsFormat.None,
+                        enableRandomWrite = true,
+                        msaaSamples = 1
+                    })
+                    {
+                        filterMode = FilterMode.Bilinear,
+                        wrapMode = TextureWrapMode.Clamp
+                    };
+                    Assert.That(rt.Create(), Is.True);
+                    owned.Add(rt);
+                    return rt;
+                }
+
+                Texture2D ConstantTex(int width, int height, int channels, float v0, float v1 = 0f)
+                {
+                    GraphicsFormat fmt = channels == 1 ? GraphicsFormat.R32_SFloat : channels == 2
+                        ? GraphicsFormat.R32G32_SFloat : GraphicsFormat.R32G32B32A32_SFloat;
+                    var tex = new Texture2D(width, height, fmt, TextureCreationFlags.None)
+                    {
+                        filterMode = FilterMode.Point,
+                        wrapMode = TextureWrapMode.Clamp
+                    };
+                    owned.Add(tex);
+                    var vals = new float[width * height * channels];
+                    for (int p = 0; p < width * height; p++)
+                    {
+                        vals[p * channels] = v0;
+                        if (channels > 1) vals[p * channels + 1] = v1;
+                    }
+                    tex.SetPixelData(vals, 0);
+                    tex.Apply(false, false);
+                    return tex;
+                }
+
+                float[] ReadRT(RenderTexture rt)
+                {
+                    var req = AsyncGPUReadback.Request(rt, 0);
+                    req.WaitForCompletion();
+                    Assert.That(req.hasError, Is.False);
+                    return req.GetData<float>().ToArray();
+                }
+
+                Matrix4x4 nonJitteredProj = Matrix4x4.Ortho(-1f, 1f, -1f, 1f, -1f, 1f);
+                void RasterizeGradient(RenderTexture target, Vector2 jitterOffset, out Vector2 clipJitter)
+                {
+                    var jitterMatrix = Matrix4x4.identity;
+                    jitterMatrix.m03 = jitterOffset.x * 2f / size;
+                    jitterMatrix.m13 = -jitterOffset.y * 2f / size;
+                    Matrix4x4 jitteredProj = jitterMatrix * nonJitteredProj;
+                    clipJitter = new Vector2(jitteredProj.m03, jitteredProj.m13);
+                    using var cmd = new CommandBuffer();
+                    cmd.SetRenderTarget(target);
+                    cmd.ClearRenderTarget(false, true, Color.clear);
+                    cmd.SetViewProjectionMatrices(Matrix4x4.identity, jitteredProj);
+                    cmd.DrawMesh(quad, Matrix4x4.identity, mat, 0, 0);
+                    Graphics.ExecuteCommandBuffer(cmd);
+                }
+
+                var referenceRT = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                RasterizeGradient(referenceRT, Vector2.zero, out _);
+                float[] reference = ReadRT(referenceRT);
+
+                var inputColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var prevHistoryColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var currHistoryColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var prevHistoryMeta = CreateRT(GraphicsFormat.R32G32_SFloat);
+                var currHistoryMeta = CreateRT(GraphicsFormat.R32G32_SFloat);
+                var prevResurrectionColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var currResurrectionColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var prevResurrectionMeta = CreateRT(GraphicsFormat.R32G32_SFloat);
+                var currResurrectionMeta = CreateRT(GraphicsFormat.R32G32_SFloat);
+                var reprojectedColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var reprojectedMeta = CreateRT(GraphicsFormat.R32G32_SFloat);
+                var reprojectedResColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var reprojectedResMeta = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var acceptedColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var rejectionMask = CreateRT(GraphicsFormat.R32_SFloat);
+                var weightControl = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var spatialColor = CreateRT(GraphicsFormat.R32G32B32A32_SFloat);
+                var prevExposure = ConstantTex(1, 1, 1, 1f);
+                var outExposure = CreateRT(GraphicsFormat.R32_SFloat);
+
+                var zero1 = ConstantTex(size, size, 1, 0f);
+                var zero2 = ConstantTex(size, size, 2, 0f, 0f);
+                var zero4 = ConstantTex(size, size, 4, 0f);
+                var depthTex = ConstantTex(size, size, 1, 0.5f);
+                var validityTex = ConstantTex(size, size, 2, 1f, 1f);
+
+                ComputeShader LoadClone(string file)
+                {
+                    var asset = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                        "Packages/com.vivid.render-pipelines/Shaders/Core/Private/TSR/" + file);
+                    Assert.That(asset, Is.Not.Null, file);
+                    var clone = Object.Instantiate(asset);
+                    owned.Add(clone);
+                    if (waveOps) clone.EnableKeyword("VIVID_TSR_WAVE_OPS");
+                    else clone.DisableKeyword("VIVID_TSR_WAVE_OPS");
+                    clone.DisableKeyword("VIVID_TSR_PAIRED_GUIDES");
+                    return clone;
+                }
+
+                var reproject = LoadClone("TSRReprojectHistory.compute");
+                var reject = LoadClone("TSRRejectShading.compute");
+                var spatial = LoadClone("TSRSpatialAntiAliasing.compute");
+                var update = LoadClone("TSRUpdateHistory.compute");
+                var sizeVec = new Vector4(size, size, 1f / size, 1f / size);
+
+                Vector2 prevClipJitter = Vector2.zero;
+                float minFirstSampleCount = float.MaxValue;
+                float maxFirstSampleCount = float.MinValue;
+
+                // Verify first-frame TSR_InputAlignment subpixel weighting across all 8 Halton phases.
+                for (int phase = 0; phase < phaseCount; phase++)
+                {
+                    Vector2 offset = TSRUpscalerUtility.GetJitterOffset(phase, phaseCount);
+                    RasterizeGradient(inputColor, offset, out Vector2 clipJitter);
+                    var jitterVec = new Vector4(clipJitter.x, clipJitter.y, 0f, 0f);
+                    var tsrParams = new Vector4(0f, 16f, 0f, 0f);
+
+                    int kReproject = reproject.FindKernel("CS");
+                    reproject.SetVector("_RenderSize", sizeVec);
+                    reproject.SetVector("_OutputSize", sizeVec);
+                    reproject.SetVector("_PreviousOutputSize", sizeVec);
+                    reproject.SetVector("_Jitter", jitterVec);
+                    reproject.SetVector("_TSRParams", tsrParams);
+                    reproject.SetVector("_PersistentParams", Vector4.zero);
+                    reproject.SetMatrix("_ClipToPersistentClip", Matrix4x4.identity);
+                    reproject.SetBuffer(kReproject, "_TSRFramePreExposure", frameExposure);
+                    reproject.SetTexture(kReproject, "_TSRPreviousPreExposure", prevExposure);
+                    reproject.SetTexture(kReproject, "_ReprojectionValidity", validityTex);
+                    reproject.SetTexture(kReproject, "_DilatedMotion", zero2);
+                    reproject.SetTexture(kReproject, "_ReprojectionBoundary", zero1);
+                    reproject.SetTexture(kReproject, "_ThinGeometryCoverage", zero1);
+                    reproject.SetTexture(kReproject, "_LumaInstability", zero1);
+                    reproject.SetTexture(kReproject, "_HistoryColor", prevHistoryColor);
+                    reproject.SetTexture(kReproject, "_HistoryMeta", prevHistoryMeta);
+                    reproject.SetTexture(kReproject, "_PersistentHistoryColor", prevHistoryColor);
+                    reproject.SetTexture(kReproject, "_PersistentHistoryMeta", prevHistoryMeta);
+                    reproject.SetTexture(kReproject, "_PersistentPreExposure", prevExposure);
+                    reproject.SetTexture(kReproject, "_DilatedDepth", depthTex);
+                    reproject.SetTexture(kReproject, "_ResurrectionColor", prevResurrectionColor);
+                    reproject.SetTexture(kReproject, "_ResurrectionMeta", prevResurrectionMeta);
+                    reproject.SetTexture(kReproject, "_ReprojectedHistoryColor", reprojectedColor);
+                    reproject.SetTexture(kReproject, "_ReprojectedHistoryMeta", reprojectedMeta);
+                    reproject.SetTexture(kReproject, "_ReprojectedResurrectionColor", reprojectedResColor);
+                    reproject.SetTexture(kReproject, "_ReprojectedResurrectionMeta", reprojectedResMeta);
+                    reproject.Dispatch(kReproject, size / 8, size / 8, 1);
+
+                    int kReject = reject.FindKernel("CS");
+                    reject.SetVector("_RenderSize", sizeVec);
+                    reject.SetVector("_OutputSize", sizeVec);
+                    reject.SetVector("_Jitter", jitterVec);
+                    reject.SetVector("_TSRParams", tsrParams);
+                    reject.SetVector("_TSRRejectionParams", new Vector4(0.003f, 16f, 0.28f, 0.35f));
+                    reject.SetTexture(kReject, "_ShadingGuideConfidence", zero4);
+                    reject.SetTexture(kReject, "_InputShadingGuide", zero4);
+                    reject.SetTexture(kReject, "_HistoryShadingGuide", zero4);
+                    reject.SetTexture(kReject, "_ReprojectionValidity", validityTex);
+                    reject.SetTexture(kReject, "_InputColor", inputColor);
+                    reject.SetTexture(kReject, "_InputDepth", depthTex);
+                    reject.SetTexture(kReject, "_DilatedDepth", depthTex);
+                    reject.SetTexture(kReject, "_DilatedMotion", zero2);
+                    reject.SetTexture(kReject, "_DepthError", zero1);
+                    reject.SetTexture(kReject, "_ReprojectionBoundary", zero1);
+                    reject.SetTexture(kReject, "_LumaInstability", zero1);
+                    reject.SetTexture(kReject, "_ReprojectedHistoryColor", reprojectedColor);
+                    reject.SetTexture(kReject, "_ReprojectedHistoryMeta", reprojectedMeta);
+                    reject.SetTexture(kReject, "_ReprojectedResurrectionColor", reprojectedResColor);
+                    reject.SetTexture(kReject, "_HistoryWeightControl", weightControl);
+                    reject.SetTexture(kReject, "_AcceptedHistoryColor", acceptedColor);
+                    reject.SetTexture(kReject, "_RejectionMask", rejectionMask);
+                    reject.Dispatch(kReject, size / 8, size / 8, 1);
+
+                    int kSpatial = spatial.FindKernel("CS");
+                    spatial.SetVector("_RenderSize", sizeVec);
+                    spatial.SetVector("_OutputSize", sizeVec);
+                    spatial.SetVector("_Jitter", jitterVec);
+                    spatial.SetTexture(kSpatial, "_InputColor", inputColor);
+                    spatial.SetTexture(kSpatial, "_RejectionMask", rejectionMask);
+                    spatial.SetTexture(kSpatial, "_SpatialAntiAliasedColor", spatialColor);
+                    spatial.Dispatch(kSpatial, size / 8, size / 8, 1);
+
+                    int kUpdate = update.FindKernel("CS");
+                    update.SetVector("_RenderSize", sizeVec);
+                    update.SetVector("_OutputSize", sizeVec);
+                    update.SetVector("_Jitter", jitterVec);
+                    update.SetVector("_TSRParams", tsrParams);
+                    update.SetMatrix("_ClipToPersistentClip", Matrix4x4.identity);
+                    update.SetBuffer(kUpdate, "_TSRFramePreExposure", frameExposure);
+                    update.SetTexture(kUpdate, "_TSROutputPreExposure", outExposure);
+                    update.SetTexture(kUpdate, "_HistoryWeightControl", weightControl);
+                    update.SetTexture(kUpdate, "_CurrentFrameColor", spatialColor);
+                    update.SetTexture(kUpdate, "_DilatedMotion", zero2);
+                    update.SetTexture(kUpdate, "_DilatedDepth", depthTex);
+                    update.SetTexture(kUpdate, "_ReprojectionBoundary", zero1);
+                    update.SetTexture(kUpdate, "_ThinGeometryCoverage", zero1);
+                    update.SetTexture(kUpdate, "_LumaInstability", zero1);
+                    update.SetTexture(kUpdate, "_AcceptedHistoryColor", acceptedColor);
+                    update.SetTexture(kUpdate, "_ReprojectedHistoryMeta", reprojectedMeta);
+                    update.SetTexture(kUpdate, "_ReprojectedResurrectionColor", reprojectedResColor);
+                    update.SetTexture(kUpdate, "_ReprojectedResurrectionMeta", reprojectedResMeta);
+                    update.SetTexture(kUpdate, "_RejectionMask", rejectionMask);
+                    update.SetTexture(kUpdate, "_UpdatedHistoryColor", currHistoryColor);
+                    update.SetTexture(kUpdate, "_UpdatedHistoryMeta", currHistoryMeta);
+                    update.SetTexture(kUpdate, "_UpdatedResurrectionColor", currResurrectionColor);
+                    update.SetTexture(kUpdate, "_UpdatedResurrectionMeta", currResurrectionMeta);
+                    update.Dispatch(kUpdate, size / 8, size / 8, 1);
+
+                    float centerSamples = ReadRT(currHistoryMeta)[((size / 2) * size + (size / 2)) * 2];
+                    minFirstSampleCount = Mathf.Min(minFirstSampleCount, centerSamples);
+                    maxFirstSampleCount = Mathf.Max(maxFirstSampleCount, centerSamples);
+                }
+                Assert.That(maxFirstSampleCount - minFirstSampleCount, Is.GreaterThan(0.2f),
+                    "TSRUpdateHistory must weight current samples by jitter subpixel alignment at NativeAA.");
+
+                // Accumulate two full 8-phase cycles and verify every phase stays unjittered on both X and Y.
+                for (int frame = 0; frame < phaseCount * 2; frame++)
+                {
+                    Vector2 offset = TSRUpscalerUtility.GetJitterOffset(frame, phaseCount);
+                    RasterizeGradient(inputColor, offset, out Vector2 clipJitter);
+                    var jitterVec = new Vector4(clipJitter.x, clipJitter.y, prevClipJitter.x, prevClipJitter.y);
+                    var tsrParams = new Vector4(frame > 0 ? 1f : 0f, 16f, 0f, 0f);
+
+                    int kReproject = reproject.FindKernel("CS");
+                    reproject.SetVector("_Jitter", jitterVec);
+                    reproject.SetVector("_TSRParams", tsrParams);
+                    reproject.SetTexture(kReproject, "_HistoryColor", prevHistoryColor);
+                    reproject.SetTexture(kReproject, "_HistoryMeta", prevHistoryMeta);
+                    reproject.SetTexture(kReproject, "_PersistentHistoryColor", prevHistoryColor);
+                    reproject.SetTexture(kReproject, "_PersistentHistoryMeta", prevHistoryMeta);
+                    reproject.SetTexture(kReproject, "_ResurrectionColor", prevResurrectionColor);
+                    reproject.SetTexture(kReproject, "_ResurrectionMeta", prevResurrectionMeta);
+                    reproject.Dispatch(kReproject, size / 8, size / 8, 1);
+
+                    int kReject = reject.FindKernel("CS");
+                    reject.SetVector("_Jitter", jitterVec);
+                    reject.SetVector("_TSRParams", tsrParams);
+                    reject.SetTexture(kReject, "_InputColor", inputColor);
+                    reject.Dispatch(kReject, size / 8, size / 8, 1);
+
+                    int kSpatial = spatial.FindKernel("CS");
+                    spatial.SetVector("_Jitter", jitterVec);
+                    spatial.SetTexture(kSpatial, "_InputColor", inputColor);
+                    spatial.Dispatch(kSpatial, size / 8, size / 8, 1);
+
+                    int kUpdate = update.FindKernel("CS");
+                    update.SetVector("_Jitter", jitterVec);
+                    update.SetVector("_TSRParams", tsrParams);
+                    update.SetTexture(kUpdate, "_UpdatedHistoryColor", currHistoryColor);
+                    update.SetTexture(kUpdate, "_UpdatedHistoryMeta", currHistoryMeta);
+                    update.SetTexture(kUpdate, "_UpdatedResurrectionColor", currResurrectionColor);
+                    update.SetTexture(kUpdate, "_UpdatedResurrectionMeta", currResurrectionMeta);
+                    update.Dispatch(kUpdate, size / 8, size / 8, 1);
+
+                    if (frame >= phaseCount)
+                    {
+                        float[] resolved = ReadRT(currHistoryColor);
+                        float maxErrorX = 0f;
+                        float maxErrorY = 0f;
+                        for (int y = 3; y < size - 3; y++)
+                        {
+                            for (int x = 3; x < size - 3; x++)
+                            {
+                                int idx = (y * size + x) * 4;
+                                maxErrorX = Mathf.Max(maxErrorX, Mathf.Abs(resolved[idx] - reference[idx]));
+                                maxErrorY = Mathf.Max(maxErrorY, Mathf.Abs(resolved[idx + 1] - reference[idx + 1]));
+                            }
+                        }
+                        Assert.That(maxErrorX, Is.LessThan(0.002f), $"Frame {frame} X unjitter error");
+                        Assert.That(maxErrorY, Is.LessThan(0.002f), $"Frame {frame} Y unjitter error");
+                    }
+
+                    (prevHistoryColor, currHistoryColor) = (currHistoryColor, prevHistoryColor);
+                    (prevHistoryMeta, currHistoryMeta) = (currHistoryMeta, prevHistoryMeta);
+                    (prevResurrectionColor, currResurrectionColor) = (currResurrectionColor, prevResurrectionColor);
+                    (prevResurrectionMeta, currResurrectionMeta) = (currResurrectionMeta, prevResurrectionMeta);
+                    prevClipJitter = clipJitter;
+                }
+            }
+            finally
+            {
+                foreach (Object obj in owned)
+                {
+                    if (obj is RenderTexture rt) rt.Release();
+                    Object.DestroyImmediate(obj);
+                }
             }
         }
 
@@ -588,10 +931,11 @@ namespace VividRP.Editor.Tests
         }
 
         private static ReprojectionResult InspectReprojectedState(int outputSize, float shiftPixels, bool hasHistory, bool waveOps,
-            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f, bool persistent = false, float persistentExposure = 1f, float snapshotClipOffset = 0f, float snapshotDepth = .5f, Matrix4x4? persistentTransform = null)
+            Vector2 jitterPixels = default, float[] previousStates = null, int phase = 0, Color? constantColor = null, float currentPreExposure = 1f, float previousPreExposure = 1f, bool persistent = false, float persistentExposure = 1f, float snapshotClipOffset = 0f, float snapshotDepth = .5f, Matrix4x4? persistentTransform = null, Vector2? subpixelMotionPixels = null)
         {
             const int renderSize = 8;
             int paddedSize = (outputSize + 7) / 8 * 8;
+            Vector2 motionShift = subpixelMotionPixels ?? new Vector2(shiftPixels, 0f);
             using var frameExposure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
             frameExposure.SetData(new[] { new Vector4(currentPreExposure, 0, 0, 0) });
             var owned = new System.Collections.Generic.List<Object>();
@@ -621,7 +965,11 @@ namespace VividRP.Editor.Tests
                 }
                 var motion = InputTexture(renderSize, 2, 0);
                 var motionValues = new float[renderSize * renderSize * 2];
-                for (int i = 0; i < renderSize * renderSize; i++) motionValues[i * 2] = -shiftPixels / outputSize;
+                for (int i = 0; i < renderSize * renderSize; i++)
+                {
+                    motionValues[i * 2] = -motionShift.x / outputSize;
+                    motionValues[i * 2 + 1] = -motionShift.y / outputSize;
+                }
                 motion.SetPixelData(motionValues, 0); motion.Apply(false, false);
                 var boundary = InputTexture(renderSize, 1, 1);
                 var zero = InputTexture(renderSize, 1, 0);
@@ -633,7 +981,7 @@ namespace VividRP.Editor.Tests
                     bool odd = (x + y) % 2 != 0;
                     for (int c = 0; c < 3; c++)
                         colorValues[pixel * 4 + c] = constantColor.HasValue ? constantColor.Value[c] : (odd ? 0.8f : 0.2f);
-                    colorValues[pixel * 4 + 3] = previousStates != null ? previousStates[pixel] : (odd ? 26 : 5);
+                    colorValues[pixel * 4 + 3] = previousStates != null ? previousStates[pixel] : (constantColor.HasValue ? 26 : (odd ? 26 : 5));
                 }
                 sourceColor.SetPixelData(colorValues, 0); sourceColor.Apply(false, false);
                 var historyMeta = InputTexture(outputSize, 2, 0);
@@ -657,8 +1005,7 @@ namespace VividRP.Editor.Tests
                 shader.SetVector("_RenderSize", new Vector4(renderSize, renderSize, 1f / renderSize, 1f / renderSize));
                 shader.SetVector("_OutputSize", new Vector4(outputSize, outputSize, 1f / outputSize, 1f / outputSize));
                 shader.SetVector("_PreviousOutputSize", new Vector4(outputSize, outputSize, 1f / outputSize, 1f / outputSize));
-                shader.SetVector("_Jitter", new Vector4(0, 0, 2 * jitterPixels.x / outputSize,
-                    (SystemInfo.graphicsUVStartsAtTop ? -2 : 2) * jitterPixels.y / outputSize));
+                shader.SetVector("_Jitter", new Vector4(2 * jitterPixels.x / renderSize, -2 * jitterPixels.y / renderSize, 0, 0));
                 shader.SetVector("_TSRParams", new Vector4(hasHistory ? 1 : 0, 16, 0, 0));
                 shader.SetBuffer(kernel, "_TSRFramePreExposure", frameExposure);
                 shader.SetTexture(kernel, "_TSRPreviousPreExposure", InputTexture(1, 1, previousPreExposure));
@@ -703,14 +1050,14 @@ namespace VividRP.Editor.Tests
                         for (int c = 0; c < 2; c++) result.paddingUntouched &= mainMetadata[pixel * 2 + c] == -17 && cacheMetadata[pixel * 4 + c] == -17;
                         continue;
                     }
-                    float statePixelX = x + 0.5f + shiftPixels;
-                    float historyPixelX = statePixelX + jitterPixels.x;
-                    float historyPixelY = y + 0.5f + jitterPixels.y;
-                    bool validColor = hasHistory && historyPixelX >= 0 && historyPixelX <= outputSize
-                        && historyPixelY >= 0 && historyPixelY <= outputSize;
-                    bool validState = hasHistory && statePixelX >= 0 && statePixelX <= outputSize;
-                    int sourceX = Mathf.Clamp(Mathf.FloorToInt(statePixelX), 0, outputSize - 1);
-                    float expectedState = validColor && validState ? colorValues[(y * outputSize + sourceX) * 4 + 3] : 0;
+                    float historyUVX = (x + 0.5f) / outputSize - (-motionShift.x / outputSize);
+                    float historyUVY = (y + 0.5f) / outputSize - (-motionShift.y / outputSize);
+                    bool validColor = hasHistory && historyUVX >= 0f && historyUVX <= 1f
+                        && historyUVY >= 0f && historyUVY <= 1f;
+                    bool validState = validColor;
+                    int sourceX = Mathf.Clamp(Mathf.FloorToInt(historyUVX * outputSize), 0, outputSize - 1);
+                    int sourceY = Mathf.Clamp(Mathf.FloorToInt(historyUVY * outputSize), 0, outputSize - 1);
+                    float expectedState = validColor && validState ? colorValues[(sourceY * outputSize + sourceX) * 4 + 3] : 0;
                     result.stateGrid[y * outputSize + x] = colors[pixel * 4 + 3];
                     result.statesMatch &= colors[pixel * 4 + 3] == expectedState;
                     result.metadataMatch &= Mathf.Abs(mainMetadata[pixel * 2] - (validColor ? 16 : 0)) < 0.003f
@@ -728,7 +1075,7 @@ namespace VividRP.Editor.Tests
                             }
                         }
                         result.statePixels++;
-                        float pointColor = (sourceX + y) % 2 != 0 ? 0.8f : 0.2f;
+                        float pointColor = (sourceX + sourceY) % 2 != 0 ? 0.8f : 0.2f;
                         if (Mathf.Abs(mainColors[pixel * 4] - pointColor) > 0.003f) result.filteredColorPixels++;
                     }
                     else result.invalidPixels++;

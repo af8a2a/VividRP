@@ -59,7 +59,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (all(pixelCoord == 0))
         _TSROutputPreExposure[int2(0, 0)] = TSR_CurrentPreExposure();
 
-    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize, _Jitter.xy);
 
     float3 currentColor = _CurrentFrameColor[pixelCoord].rgb;
     float3 historyColor = _AcceptedHistoryColor[pixelCoord].rgb;
@@ -80,7 +80,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float updateInstability = max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage);
     float maxSampleCount = max(_TSRParams.y, 1.0);
     float hysteresis = rcp(maxSampleCount);
-    float2 inputPosition = TSR_OutputUV(pixelCoord, outputSize) * float2(renderSize);
+    float2 inputPosition = TSR_OutputToInputPixelPos(pixelCoord, outputSize, renderSize, _Jitter.xy);
     float2 inputDelta = frac(inputPosition) - 0.5;
     float inputToHistoryFactor = max((float)outputSize.x / renderSize.x, 1.0);
     float coarseContribution = TSR_InputAlignment(1.0, inputDelta) * hysteresis;
@@ -89,10 +89,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float2 control = saturate(_HistoryWeightControl[pixelCoord].xy);
     if (resurrected)
     {
-        float2 jitterUV = _Jitter.xy*0.5;
-#if UNITY_UV_STARTS_AT_TOP
-        jitterUV.y = -jitterUV.y;
-#endif
+        float2 jitterUV = TSR_JitterUV(_Jitter.xy);
         float2 screen = ((float2(renderCoord)+0.5)*_RenderSize.zw-jitterUV)*2.0-1.0;
 #if UNITY_UV_STARTS_AT_TOP
         screen.y = -screen.y;

@@ -322,6 +322,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GlobalNearId = Shader.PropertyToID("_GlobalSdfNear");
         private static readonly int GlobalMiddleId = Shader.PropertyToID("_GlobalSdfMiddle");
         private static readonly int GlobalFarId = Shader.PropertyToID("_GlobalSdfFar");
+        private static readonly int GlobalMipId = Shader.PropertyToID("_GlobalSdfMip");
+        private static readonly int GlobalUseMipId = Shader.PropertyToID("_GlobalSdfUseMipTrace");
         private static readonly int GlobalLevelsId = Shader.PropertyToID("_GlobalSdfLevels");
         private static readonly int GlobalScrollId = Shader.PropertyToID("_GlobalSdfScroll");
         private static readonly int GlobalPagesId = Shader.PropertyToID("_GlobalSdfPages");
@@ -811,7 +813,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_FarAtlas;
         private BufferHandle m_FarHitIds;
         private VividGlobalSdfFrameData m_GlobalClipmap;
-        private TextureHandle m_GlobalNear, m_GlobalMiddle, m_GlobalFar;
+        private TextureHandle m_GlobalNear, m_GlobalMiddle, m_GlobalFar, m_GlobalMip;
         private BufferHandle m_GlobalPages, m_GlobalThinBricks;
         private float m_MeshDetailDistance;
         private Vector3Int m_FarWindow;
@@ -1256,7 +1258,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_Scene.SurfaceCache = cache;
                 m_Scene.Update(VividMeshletRendererDatabase.instance, cameraData.frameIndex);
-                m_UseSdf = m_Scene.NodeCount != 0 && m_Scene.DiffuseSurfaces != null;
+                m_UseSdf = m_Scene.NodeCount != 0 && m_Scene.DiffuseSurfaces != null && m_Scene.PrepareBrickTexture(this);
                 if (m_UseSdf && cache != null)
                 {
                     m_CardAlbedoDepth = PassRecorder.ImportTextureForPass(this, cache.AlbedoDepthHandle);
@@ -1726,6 +1728,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GlobalNear = m_ClipmapNear.innerHandle;
             m_GlobalMiddle = clipmap.Outputs[1].innerHandle;
             m_GlobalFar = clipmap.Outputs[2].innerHandle;
+            m_GlobalMip = clipmap.Mip.innerHandle;
             m_GlobalPages = clipmap.Pages.innerHandle;
             m_GlobalThinBricks = clipmap.ThinBricks.innerHandle;
             if (!m_GlobalNear.IsValid() || !m_GlobalMiddle.IsValid() || !m_GlobalFar.IsValid()
@@ -1735,6 +1738,7 @@ namespace VividRP.Runtime.RenderPass.Core
             // Share the producer's handles so the graph orders the atlas and page-table accesses.
             PassRecorder.RegisterImportedTextureForPass(this, m_GlobalMiddle);
             PassRecorder.RegisterImportedTextureForPass(this, m_GlobalFar);
+            PassRecorder.RegisterImportedTextureForPass(this, m_GlobalMip);
             PassRecorder.RegisterImportedBufferForPass(this, m_GlobalPages);
             PassRecorder.RegisterImportedBufferForPass(this, m_GlobalThinBricks);
             m_GlobalClipmap = clipmap;
@@ -3223,6 +3227,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, GlobalNearId, useGlobalClipmap ? m_GlobalNear : fallback);
             cmd.SetComputeTextureParam(shader, kernel, GlobalMiddleId, useGlobalClipmap ? m_GlobalMiddle : fallback);
             cmd.SetComputeTextureParam(shader, kernel, GlobalFarId, useGlobalClipmap ? m_GlobalFar : fallback);
+            bool useMip = useGlobalClipmap && m_GlobalMip.IsValid();
+            cmd.SetComputeTextureParam(shader, kernel, GlobalMipId, useMip ? m_GlobalMip : fallback);
+            cmd.SetComputeIntParam(shader, GlobalUseMipId, useMip ? 1 : 0);
             if (!useGlobalClipmap)
             {
                 cmd.SetComputeBufferParam(shader, kernel, ObjectWorkId, m_Scene.LeafInstances);

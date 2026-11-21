@@ -15,11 +15,16 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal const int RegionsPerLevel = 3;
         internal const int BrickShift = 3;
         internal const int BrickSize = 1 << BrickShift;
+        internal const int StoredBrickSize = BrickSize + 1;
         internal const int BrickResolution = Resolution >> BrickShift;
+        internal const int AtlasResolution = BrickResolution * StoredBrickSize;
         internal const int PagesPerSlice = BrickResolution * BrickResolution;
         internal const int PagesPerLevel = PagesPerSlice * BrickResolution;
         internal const int PageCount = LevelCount * PagesPerLevel;
         internal const float Band = 8f;
+        internal const int MipFactor = 4;
+        internal const int MipResolution = Resolution / MipFactor;
+        internal const int MipPropagationSteps = 5;
         internal const int ThinBrickShift = 3;
         // An unaligned 128-cell window can span one extra brick on each axis.
         internal const int ThinBrickResolution = (Resolution >> ThinBrickShift) + 1;
@@ -59,7 +64,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     continue;
 
                 // Composition limits distances by BVH leaf bounds, which can enclose multiple instances.
-                int3 firstBrick = (int3)math.max(origin, math.floor((min - band) / voxel)) >> BrickShift;
+                // The upper sample face belongs to this page as well as the next page.
+                int3 firstBrick = (int3)math.max(origin, math.floor((min - band) / voxel) - 1) >> BrickShift;
                 int3 lastBrick = (int3)math.min(last, math.ceil((max + band) / voxel)) >> BrickShift;
                 for (int z = firstBrick.z; z <= lastBrick.z; z++)
                 for (int y = firstBrick.y; y <= lastBrick.y; y++)
@@ -72,7 +78,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                         continue;
                     int3 cell = brick << BrickShift;
                     float3 sampleMin = (float3)math.max(origin, cell) * voxel;
-                    float3 sampleMax = (float3)math.min(last, cell + BrickSize - 1) * voxel;
+                    float3 sampleMax = (float3)math.min(last, cell + BrickSize) * voxel;
                     float3 gap = math.max(0f, math.max(min - sampleMax, sampleMin - max));
                     required[page] = math.lengthsq(gap) <= band * band;
                 }
@@ -125,6 +131,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private readonly bool[] m_UsedSlots = new bool[VividGlobalSdfClipmap.PagesPerLevel];
         internal GraphicsBuffer Pages;
         internal GraphicsBuffer ThinBricks;
+        internal RTHandle Mip;
         internal bool Valid;
         internal uint SceneRevision;
         internal int LayerMask;
@@ -150,12 +157,24 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
         }
 
+        internal void EnsureMip(GraphicsFormat format)
+        {
+            if (Mip?.rt != null && Mip.rt.IsCreated() && Mip.rt.graphicsFormat == format)
+                return;
+            Valid = false;
+            Mip?.Release();
+            const int size = VividGlobalSdfClipmap.MipResolution;
+            Mip = RTHandles.Alloc(size, size, slices: size * VividGlobalSdfClipmap.LevelCount,
+                dimension: TextureDimension.Tex3D, colorFormat: format, filterMode: FilterMode.Bilinear,
+                enableRandomWrite: true, name: "Global SDF Coarse Mip");
+        }
+
         internal bool UpdateResidency(int level, int3 origin, float voxel, uint layerMask, GraphicsFormat format,
             bool rebuild, VividMeshSdfGpuScene scene)
         {
             const int pagesPerLevel = VividGlobalSdfClipmap.PagesPerLevel;
             const int pagesPerSlice = VividGlobalSdfClipmap.PagesPerSlice;
-            const int brickSize = VividGlobalSdfClipmap.BrickSize;
+            const int brickSize = VividGlobalSdfClipmap.StoredBrickSize;
             VividGlobalSdfClipmap.MarkRequiredPages(scene.BvhNodes, origin, voxel, layerMask, m_Required);
             int required = 0;
             for (int page = 0; page < pagesPerLevel; page++)
@@ -167,13 +186,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (resized)
                 capacity = required == 0 ? 0 : math.min(pagesPerLevel,
                     CoreUtils.DivRoundUp(required + GrowthReserve, pagesPerSlice) * pagesPerSlice);
-            if (resized || Textures[level]?.rt == null || !Textures[level].rt.IsCreated())
+            if (resized || Textures[level]?.rt == null || !Textures[level].rt.IsCreated() || Textures[level].rt.graphicsFormat != format)
             {
-                int size = capacity == 0 ? brickSize : VividGlobalSdfClipmap.Resolution;
+                int size = capacity == 0 ? brickSize : VividGlobalSdfClipmap.AtlasResolution;
                 int depth = math.max(1, capacity / pagesPerSlice) * brickSize;
                 Textures[level]?.Release();
                 Textures[level] = RTHandles.Alloc(size, size, slices: depth, dimension: TextureDimension.Tex3D,
-                    colorFormat: format, filterMode: FilterMode.Point, enableRandomWrite: true,
+                    colorFormat: format, filterMode: FilterMode.Bilinear, enableRandomWrite: true,
                     name: "Global SDF Brick Atlas " + level);
                 m_Capacities[level] = capacity;
                 rebuild = true;
@@ -227,11 +246,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             Pages?.Dispose();
             Pages = null;
             Valid = false;
+            Mip?.Release();
+            Mip = null;
         }
     }
 
     // Object identities belong to the gather scene. Keep its page table separate
-    // from the distance atlas, whose unbordered bricks have a different lattice.
+    // from the distance atlas, whose bricks have a different lattice.
     internal sealed class VividGlobalSdfObjectGrid : IDisposable
     {
         internal const int Resolution = 36;
@@ -314,6 +335,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal readonly int3[] Origins = new int3[VividGlobalSdfClipmap.LevelCount];
         internal VividGlobalSdfCameraState State;
         internal RenderGraphTexture[] Outputs;
+        internal RenderGraphTexture Mip;
         internal VividMeshSdfGpuScene MeshScene;
         internal RenderGraphBuffer ThinBricks;
         internal RenderGraphBuffer Pages;
@@ -337,6 +359,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             State = null;
             Outputs = null;
+            Mip = null;
             MeshScene = null;
             ThinBricks = null;
             Pages = null;

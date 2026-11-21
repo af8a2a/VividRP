@@ -403,7 +403,8 @@ float4 TraceFarProbe(float3 origin, float3 direction, float start, out uint inst
         VividGlobalSdfHit global;
         if (VividTraceGlobalSdf(origin, direction, start, end, global))
         {
-            GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(origin + direction * global.distance,
+            float cardDistance = global.distance + 0.5f * global.expandSurfaceAmount;
+            GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(origin + direction * cardDistance,
                 global.normalWS, direction, global.level);
             instance = lighting.instance + 1u;
             return float4(lighting.sum, max(global.distance, 0.001f));

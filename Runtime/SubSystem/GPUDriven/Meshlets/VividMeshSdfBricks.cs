@@ -8,12 +8,74 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
     {
         // Keep these constants in sync with MeshSdfTrace.hlsl.
         internal const int CellSize = 12;
+        internal const int StoredSize = CellSize + 1;
         internal const uint EmptyOutside = uint.MaxValue;
         internal const uint EmptyInside = uint.MaxValue - 1;
         internal const uint Dense = uint.MaxValue;
         internal const float BandVoxels = 2f;
 
         internal static int3 BrickCount(int3 dimensions) => (dimensions + CellSize - 2) / CellSize;
+
+        internal static uint PlanAtlas(NativeArray<ushort> source, int3 dimensions, float voxelSize,
+            List<uint> pages, ref int nextSlot)
+        {
+            uint first = (uint)pages.Count;
+            int3 counts = BrickCount(dimensions);
+            int band = ((half)(voxelSize * BandVoxels)).value;
+            for (int z = 0; z < counts.z; z++)
+            for (int y = 0; y < counts.y; y++)
+            for (int x = 0; x < counts.x; x++)
+            {
+                int3 origin = new int3(x, y, z) * CellSize;
+                int3 size = math.min(dimensions - origin, StoredSize);
+                uint entry = Classify(source, dimensions, origin, size, band);
+                pages.Add(entry == 0 ? (uint)nextSlot++ : entry);
+            }
+            return first;
+        }
+
+        internal static bool TryGetAtlasLayout(int slots, int maxDimension, out int3 layout)
+        {
+            layout = default;
+            int maxAcross = maxDimension / StoredSize;
+            if (maxAcross < 1 || (long)maxAcross * maxAcross * maxAcross < slots)
+                return false;
+
+            int across = 1;
+            while ((long)across * across * across < slots)
+                across++;
+            int layers = math.max(1, (slots + across * across - 1) / (across * across));
+            layout = new int3(across, across, layers);
+            // Unity's staging and texture upload sizes must fit in a signed byte count.
+            return (long)layout.x * layout.y * layout.z * StoredSize * StoredSize * StoredSize * sizeof(ushort) <= int.MaxValue;
+        }
+
+        internal static void WriteAtlas(NativeArray<ushort> source, int3 dimensions, List<uint> pages,
+            uint first, NativeArray<ushort> destination, int across)
+        {
+            int3 counts = BrickCount(dimensions);
+            int page = (int)first;
+            int width = across * StoredSize;
+            for (int z = 0; z < counts.z; z++)
+            for (int y = 0; y < counts.y; y++)
+            for (int x = 0; x < counts.x; x++)
+            {
+                uint entry = pages[page++];
+                if (entry == EmptyOutside || entry == EmptyInside)
+                    continue;
+                int slot = (int)entry;
+                int3 tile = new int3(slot % across, slot / across % across, slot / (across * across)) * StoredSize;
+                int3 origin = new int3(x, y, z) * CellSize;
+                int3 size = math.min(dimensions - origin, StoredSize);
+                for (int slice = 0; slice < size.z; slice++)
+                for (int row = 0; row < size.y; row++)
+                {
+                    int read = origin.x + dimensions.x * (origin.y + row + dimensions.y * (origin.z + slice));
+                    int write = tile.x + width * (tile.y + row + width * (tile.z + slice));
+                    NativeArray<ushort>.Copy(source, read, destination, write, size.x);
+                }
+            }
+        }
 
         internal static int Plan(
             NativeArray<ushort> source, int3 dimensions, float voxelSize, List<uint> pages, out uint pageOffset)

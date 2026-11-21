@@ -226,6 +226,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GlobalSdfResidency_IncludesOwnersOfOverlappingSampleFaces()
+        {
+            Vector3 point = new(15.5f, 0f, 0f);
+            var nodes = new[]
+            {
+                new VividMeshSdfGpuScene.Node
+                {
+                    Min = point, Max = point, LeafCount = 1, EscapeIndex = 1, LayerMask = 1,
+                },
+            };
+            var required = new bool[VividGlobalSdfClipmap.PagesPerLevel];
+            VividGlobalSdfClipmap.MarkRequiredPages(nodes, int3.zero, 1f, 1u, required);
+
+            Assert.That(required[0], Is.True, "The page owns a sample at x=8 within the eight-voxel band.");
+            Assert.That(required[1], Is.True);
+        }
+
+        [Test]
         public void MeshSdfBricks_OmitsUniformRegionsAndPreservesBorderSamples()
         {
             var dimensions = new int3(41, 3, 2);
@@ -256,6 +274,37 @@ namespace VividRP.Editor.Tests
             Assert.That(VividMeshSdfBricks.Plan(small, new int3(3, 2, 2), 1f, pages, out pageOffset), Is.EqualTo(6));
             Assert.That(pageOffset, Is.EqualTo(VividMeshSdfBricks.Dense));
             Assert.That(pages.Count, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void MeshSdfTextureAtlas_CopiesSharedPlaneAndPartialBrick()
+        {
+            var dimensions = new int3(17, 3, 2);
+            using var storage = new NativeArray<ushort>(17 * 3 * 2, Allocator.Temp);
+            var source = storage;
+            for (int i = 0; i < source.Length; i++)
+                source[i] = ((half)(i % 17 - 12)).value;
+            var pages = new List<uint>();
+            int slots = 0;
+            uint first = VividMeshSdfBricks.PlanAtlas(source, dimensions, 1f, pages, ref slots);
+            Assert.That(first, Is.Zero);
+            Assert.That(pages, Is.EqualTo(new[] { 0u, 1u }));
+            Assert.That(VividMeshSdfBricks.TryGetAtlasLayout(slots, 26, out var layout), Is.True);
+            Assert.That(layout, Is.EqualTo(new int3(2, 2, 1)));
+            Assert.That(VividMeshSdfBricks.TryGetAtlasLayout(slots, 13, out _), Is.False);
+
+            const int width = 2 * VividMeshSdfBricks.StoredSize;
+            using var atlas = new NativeArray<ushort>(width * width * VividMeshSdfBricks.StoredSize, Allocator.Temp);
+            VividMeshSdfBricks.WriteAtlas(source, dimensions, pages, first, atlas, layout.x);
+            for (int z = 0; z < dimensions.z; z++)
+            for (int y = 0; y < dimensions.y; y++)
+            {
+                int src = 17 * (y + dimensions.y * z);
+                int dst = width * (y + width * z);
+                Assert.That(atlas[dst + 12], Is.EqualTo(source[src + 12]));
+                Assert.That(atlas[dst + 13], Is.EqualTo(source[src + 12]));
+                Assert.That(atlas[dst + 17], Is.EqualTo(source[src + 16]));
+            }
         }
 
         [TestCase(false)]

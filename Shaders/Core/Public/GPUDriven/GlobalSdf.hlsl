@@ -9,6 +9,7 @@ static const uint VividGlobalSdfLevelCount = 3u;
 static const float VividGlobalSdfBand = 8.0;
 static const uint VividGlobalSdfBrickShift = 3u;
 static const uint VividGlobalSdfBrickSize = 1u << VividGlobalSdfBrickShift;
+static const uint VividGlobalSdfStoredBrickSize = VividGlobalSdfBrickSize + 1u;
 static const uint VividGlobalSdfBrickResolution = uint(VividGlobalSdfResolution) >> VividGlobalSdfBrickShift;
 static const uint VividGlobalSdfPagesPerSlice = VividGlobalSdfBrickResolution * VividGlobalSdfBrickResolution;
 static const uint VividGlobalSdfPagesPerLevel = VividGlobalSdfPagesPerSlice * VividGlobalSdfBrickResolution;
@@ -17,6 +18,15 @@ static const int VividGlobalSdfThinBrickResolution = VividGlobalSdfResolution / 
 static const uint VividGlobalSdfThinBrickWords =
     (VividGlobalSdfThinBrickResolution * VividGlobalSdfThinBrickResolution * VividGlobalSdfThinBrickResolution + 31) / 32;
 
+// UE stores the coarse distance field at one-quarter resolution. Vivid stores
+// the decoded distances in fine-voxel units rather than encoding them in UNORM.
+static const uint VividGlobalSdfMipFactor = 4u;
+static const uint VividGlobalSdfMipResolution = uint(VividGlobalSdfResolution) / VividGlobalSdfMipFactor;
+static const float VividGlobalSdfMipTransition = 4.0f;
+static const float VividGlobalSdfMipBand = VividGlobalSdfMipFactor * VividGlobalSdfMipTransition;
+
+Texture3D<float> _GlobalSdfMip;
+uint _GlobalSdfUseMipTrace;
 Texture3D<float> _GlobalSdfNear;
 Texture3D<float> _GlobalSdfMiddle;
 Texture3D<float> _GlobalSdfFar;
@@ -31,6 +41,7 @@ struct VividGlobalSdfHit
     float distance;
     float3 normalWS;
     uint level;
+    float expandSurfaceAmount;
 };
 
 uint VividGlobalSdfPage(uint3 physical, uint level)
@@ -45,45 +56,29 @@ uint3 VividGlobalSdfAtlasCell(uint slot, uint3 physical)
     uint3 tile = uint3(slot % VividGlobalSdfBrickResolution,
         (slot / VividGlobalSdfBrickResolution) % VividGlobalSdfBrickResolution,
         slot / VividGlobalSdfPagesPerSlice);
-    return tile * VividGlobalSdfBrickSize + (physical & (VividGlobalSdfBrickSize - 1u));
+    return tile * VividGlobalSdfStoredBrickSize + (physical & (VividGlobalSdfBrickSize - 1u));
 }
 
-float VividGlobalSdfLoadCell(Texture3D<float> atlas, uint3 cell, uint level)
+float VividGlobalSdfSampleAtlas(Texture3D<float> atlas, float3 cell, uint level, float emptyDistance = VividGlobalSdfBand)
 {
-    uint3 physical = cell & (uint(VividGlobalSdfResolution) - 1u);
+    uint3 physical = uint3(cell) & (uint(VividGlobalSdfResolution) - 1u);
     uint page = VividGlobalSdfPage(physical, level);
     if (page == 0u)
-        return VividGlobalSdfBand;
-    return atlas.Load(int4(VividGlobalSdfAtlasCell(page - 1u, physical), 0));
+        return emptyDistance;
+    uint3 size;
+    atlas.GetDimensions(size.x, size.y, size.z);
+    float3 atlasCell = float3(VividGlobalSdfAtlasCell(page - 1u, physical)) + frac(cell);
+    return atlas.SampleLevel(sampler_LinearClamp, (atlasCell + 0.5f) / float3(size), 0.0f);
 }
 
-float VividGlobalSdfSampleAtlas(Texture3D<float> atlas, float3 cell, uint level)
+float VividGlobalSdfSampleFine(float3 grid, uint level, float emptyDistance)
 {
-    uint3 low = uint3(cell);
-    float3 blend = frac(cell);
-    uint3 local = low & (VividGlobalSdfBrickSize - 1u);
-    if (all(local < VividGlobalSdfBrickSize - 1u))
-    {
-        uint3 physical = low & (uint(VividGlobalSdfResolution) - 1u);
-        uint page = VividGlobalSdfPage(physical, level);
-        if (page == 0u)
-            return VividGlobalSdfBand;
-        uint3 size;
-        atlas.GetDimensions(size.x, size.y, size.z);
-        float3 atlasCell = float3(VividGlobalSdfAtlasCell(page - 1u, physical)) + blend;
-        return atlas.SampleLevel(sampler_LinearClamp, (atlasCell + 0.5) / float3(size), 0);
-    }
-
-    // Interpolate across pages in clipmap space so atlas neighbors cannot bleed into a sample.
-    float x00 = lerp(VividGlobalSdfLoadCell(atlas, low, level),
-        VividGlobalSdfLoadCell(atlas, low + uint3(1, 0, 0), level), blend.x);
-    float x10 = lerp(VividGlobalSdfLoadCell(atlas, low + uint3(0, 1, 0), level),
-        VividGlobalSdfLoadCell(atlas, low + uint3(1, 1, 0), level), blend.x);
-    float x01 = lerp(VividGlobalSdfLoadCell(atlas, low + uint3(0, 0, 1), level),
-        VividGlobalSdfLoadCell(atlas, low + uint3(1, 0, 1), level), blend.x);
-    float x11 = lerp(VividGlobalSdfLoadCell(atlas, low + uint3(0, 1, 1), level),
-        VividGlobalSdfLoadCell(atlas, low + uint3(1, 1, 1), level), blend.x);
-    return lerp(lerp(x00, x10, blend.y), lerp(x01, x11, blend.y), blend.z);
+    float3 cell = grid + _GlobalSdfScroll[level].xyz;
+    if (level == 0u)
+        return VividGlobalSdfSampleAtlas(_GlobalSdfNear, cell, level, emptyDistance);
+    if (level == 1u)
+        return VividGlobalSdfSampleAtlas(_GlobalSdfMiddle, cell, level, emptyDistance);
+    return VividGlobalSdfSampleAtlas(_GlobalSdfFar, cell, level, emptyDistance);
 }
 
 float VividGlobalSdfSampleLevel(float3 positionWS, uint level)
@@ -91,15 +86,24 @@ float VividGlobalSdfSampleLevel(float3 positionWS, uint level)
     level = min(level, VividGlobalSdfLevelCount - 1u);
     float4 layout = _GlobalSdfLevels[level];
     float3 grid = clamp((positionWS - layout.xyz) / layout.w, 0.0, VividGlobalSdfResolution - 1.0);
-    float3 cell = grid + _GlobalSdfScroll[level].xyz;
-    float value;
-    if (level == 0u)
-        value = VividGlobalSdfSampleAtlas(_GlobalSdfNear, cell, level);
-    else if (level == 1u)
-        value = VividGlobalSdfSampleAtlas(_GlobalSdfMiddle, cell, level);
-    else
-        value = VividGlobalSdfSampleAtlas(_GlobalSdfFar, cell, level);
-    return value * layout.w;
+    return VividGlobalSdfSampleFine(grid, level, VividGlobalSdfBand) * layout.w;
+}
+
+float VividGlobalSdfSampleTraceDistance(float3 positionWS, uint level, bool useMip)
+{
+    float4 layout = _GlobalSdfLevels[level];
+    float3 grid = clamp((positionWS - layout.xyz) / layout.w, 0.0, VividGlobalSdfResolution - 1.0);
+    if (!useMip)
+        return VividGlobalSdfSampleFine(grid, level, VividGlobalSdfBand) * layout.w;
+
+    float3 texel = clamp((grid + 0.5f) / VividGlobalSdfMipFactor, 0.5f, VividGlobalSdfMipResolution - 0.5f);
+    texel.z += level * VividGlobalSdfMipResolution;
+    float3 uv = texel / float3(VividGlobalSdfMipResolution, VividGlobalSdfMipResolution,
+        VividGlobalSdfMipResolution * VividGlobalSdfLevelCount);
+    float distance = _GlobalSdfMip.SampleLevel(sampler_LinearClamp, uv, 0.0f);
+    if (distance < VividGlobalSdfMipTransition)
+        distance = VividGlobalSdfSampleFine(grid, level, distance);
+    return distance * layout.w;
 }
 
 bool VividGlobalSdfTrySample(float3 positionWS, out float distance, out uint level)
@@ -199,6 +203,7 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
         exit[i] = b;
     }
 
+    bool useMip = _GlobalSdfUseMipTrace != 0u;
     float t = entry.z;
     float previousT = t;
     float previousDistance = 0.0;
@@ -217,11 +222,18 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
         float voxel = _GlobalSdfLevels[level].w;
         float tolerance = 0.18 * voxel;
         float3 position = originWS + t * directionWS;
-        float distance = VividGlobalSdfSampleLevel(position, level);
+        float distance = VividGlobalSdfSampleTraceDistance(position, level, useMip);
+        float expandSurfaceDistance = 0.5f * voxel; // UE ClipmapVoxelExtent.
+        float expandSurfaceAmount = expandSurfaceDistance * saturate(t / (2.0f * expandSurfaceDistance));
         bool crossed = previousLevel == level && (distance < 0.0) != (previousDistance < 0.0);
-        if (crossed || abs(distance) <= tolerance)
+        if (useMip ? distance < expandSurfaceAmount : crossed || abs(distance) <= tolerance)
         {
-            if (crossed)
+            if (useMip)
+            {
+                // The detail trace owns the prefix before this clipmap interval.
+                t = max(t + distance - expandSurfaceAmount, entry[level]);
+            }
+            else if (crossed)
             {
                 float a = previousT;
                 float b = t;
@@ -243,6 +255,7 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
             {
                 hit.distance = t;
                 hit.level = level;
+                hit.expandSurfaceAmount = useMip ? expandSurfaceAmount : 0.0f;
                 if (computeNormal)
                     hit.normalWS = VividGlobalSdfNormal(originWS + t * directionWS, level);
             }
@@ -282,7 +295,7 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
         previousLevel = level;
         previousT = t;
         previousDistance = distance;
-        float advance = max(tolerance, 0.65 * abs(distance));
+        float advance = useMip ? max(distance, expandSurfaceDistance) : max(tolerance, 0.65 * abs(distance));
         float next = min(t + advance, min(segmentEnd, thinHit.distance));
         if (next <= t)
             break;

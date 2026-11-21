@@ -14,6 +14,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string KernelName = "ComposeGlobalSdf";
         private const string ClearKernelName = "ClearGlobalSdfPages";
         private const string ThinKernelName = "ComposeGlobalSdfThinBricks";
+        private const string BorderKernelName = "CopyGlobalSdfPageBorders";
+        private const string MipSeedKernelName = "SeedGlobalSdfMip";
+        private const string MipPropagateKernelName = "PropagateGlobalSdfMip";
         private static readonly int OutputId = Shader.PropertyToID("_GlobalSdfWrite");
         private static readonly int PagesId = Shader.PropertyToID("_GlobalSdfPages");
         private static readonly int FirstPageId = Shader.PropertyToID("_GlobalSdfFirstPage");
@@ -23,15 +26,28 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RegionSizeId = Shader.PropertyToID("_GlobalSdfRegionSize");
         private static readonly int VoxelSizeId = Shader.PropertyToID("_GlobalSdfVoxelSize");
         private static readonly int LayerMaskId = Shader.PropertyToID("_GlobalSdfLayerMask");
+        private static readonly int ScrollId = Shader.PropertyToID("_GlobalSdfScroll");
+        private static readonly int MipFineAtlasId = Shader.PropertyToID("_GlobalSdfMipFineAtlas");
+        private static readonly int MipSourceId = Shader.PropertyToID("_GlobalSdfMipSource");
+        private static readonly int MipOutputId = Shader.PropertyToID("_GlobalSdfMipOutput");
+        private static readonly int MipReadOffsetId = Shader.PropertyToID("_GlobalSdfMipReadOffset");
+        private static readonly int MipWriteOffsetId = Shader.PropertyToID("_GlobalSdfMipWriteOffset");
 
-        [RenderGraphResource(Name = "Near", Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "Near", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_Near = CreateOutput("Global SDF Near");
 
-        [RenderGraphResource(Name = "Middle", Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "Middle", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_Middle = CreateOutput("Global SDF Middle");
 
-        [RenderGraphResource(Name = "Far", Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "Far", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_Far = CreateOutput("Global SDF Far");
+
+        [RenderGraphResource(Name = "Coarse Mip", Access = AccessFlags.ReadWrite)]
+        private readonly RenderGraphTexture m_Mip = CreateMipTexture("Global SDF Coarse Mip", VividGlobalSdfClipmap.LevelCount);
+
+        [RenderGraphResource(Name = "Coarse Mip Scratch", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_MipScratch = CreateMipTexture("Global SDF Coarse Mip Scratch", 1);
 
         [RenderGraphResource(Name = "Page Table", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_Pages = RenderGraphBuffer.CreateStructured(
@@ -63,25 +79,31 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_SparseBricks;
         private int m_ClearKernel = -1;
         private int m_ThinKernel = -1;
+        private int m_BorderKernel = -1, m_MipSeedKernel = -1, m_MipPropagateKernel = -1;
 
         public GlobalSdfClipmapPass() => profilingSampler = new ProfilingSampler(nameof(GlobalSdfClipmapPass));
 
         public override void Create()
         {
             m_Shader = PipelineResourceManager.Get<VividRPCoreResources>()?.GlobalSdfCompute;
-            const GraphicsFormatUsage usage = GraphicsFormatUsage.Sample | GraphicsFormatUsage.LoadStore;
+            const GraphicsFormatUsage usage = GraphicsFormatUsage.Sample | GraphicsFormatUsage.Linear | GraphicsFormatUsage.LoadStore;
             m_Format = SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, usage)
                 ? GraphicsFormat.R16_SFloat
                 : GraphicsFormat.R32_SFloat;
             if (m_Shader != null && m_Shader.HasKernel(KernelName) && m_Shader.HasKernel(ClearKernelName)
-                && m_Shader.HasKernel(ThinKernelName) && SystemInfo.supportsComputeShaders
-                && SystemInfo.maxTexture3DSize >= VividGlobalSdfClipmap.Resolution
+                && m_Shader.HasKernel(ThinKernelName) && m_Shader.HasKernel(BorderKernelName)
+                && m_Shader.HasKernel(MipSeedKernelName) && m_Shader.HasKernel(MipPropagateKernelName)
+                && SystemInfo.supportsComputeShaders && SystemInfo.maxTexture3DSize >= VividGlobalSdfClipmap.AtlasResolution
                 && SystemInfo.IsFormatSupported(m_Format, usage))
             {
                 m_Kernel = m_Shader.FindKernel(KernelName);
                 m_SparseKernel = m_Shader.FindKernel("ComposeGlobalSdfSparse");
                 m_ClearKernel = m_Shader.FindKernel(ClearKernelName);
                 m_ThinKernel = m_Shader.FindKernel(ThinKernelName);
+                m_BorderKernel = m_Shader.FindKernel(BorderKernelName);
+                m_MipSeedKernel = m_Shader.FindKernel(MipSeedKernelName);
+                m_MipPropagateKernel = m_Shader.FindKernel(MipPropagateKernelName);
+                m_Mip.desc.ColorFormat = m_MipScratch.desc.ColorFormat = m_Format;
             }
             else
                 Debug.LogWarning("[VividRP] Global SDF composition requires a supported compute kernel and writable 3D texture.");
@@ -96,7 +118,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_Scene.Update(VividMeshletRendererDatabase.instance);
-            if (m_Scene.NodeCount == 0)
+            if (m_Scene.NodeCount == 0 || !m_Scene.PrepareBrickTexture(this))
                 return;
             if (m_Scene.SparseAtlas.Active)
                 m_SparseBricks = PassRecorder.ImportTextureForPass(this, m_Scene.SparseAtlas.BricksHandle);
@@ -104,6 +126,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Cameras.PurgeDestroyedCameras();
             var state = m_Cameras.GetOrCreateBase(camera);
             state.EnsureBuffers();
+            state.EnsureMip(m_Format);
             float baseVoxelSize = float.IsFinite(m_BaseVoxelSize)
                 ? Mathf.Clamp(m_BaseVoxelSize, 0.05f, 2f)
                 : VividGlobalSdfClipmap.DefaultVoxelSize;
@@ -116,6 +139,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Outputs[2] = m_Far;
             m_Frame.State = state;
             m_Frame.Outputs = m_Outputs;
+            m_Frame.Mip = m_Mip;
             m_Frame.MeshScene = m_Scene;
             m_Frame.Pages = m_Pages;
             m_Frame.ThinBricks = m_ThinBricks;
@@ -167,11 +191,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ThinBricks.SetImportedBuffer(m_Frame.State.ThinBricks);
             for (int level = 0; level < m_Outputs.Length; level++)
                 PassRecorder.ImportTexture(m_Outputs[level], m_Frame.State.Textures[level]);
+            PassRecorder.ImportTexture(m_Mip, m_Frame.State.Mip);
         }
 
         public override void Record(ComputePassContext context)
         {
-            if (m_Frame?.State == null || !m_ThinBricks.innerHandle.IsValid() || !m_Pages.innerHandle.IsValid())
+            if (m_Frame?.State == null || !m_ThinBricks.innerHandle.IsValid() || !m_Pages.innerHandle.IsValid()
+                || !m_Mip.innerHandle.IsValid() || !m_MipScratch.innerHandle.IsValid())
                 return;
             for (int level = 0; level < m_Outputs.Length; level++)
                 if (!m_Outputs[level].innerHandle.IsValid())
@@ -198,6 +224,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     }
                     m_Scene.Bind(cmd, m_Shader, m_ThinKernel);
                     cmd.SetComputeBufferParam(m_Shader, composeKernel, PagesId, m_Pages.innerHandle);
+                    cmd.SetComputeBufferParam(m_Shader, m_BorderKernel, PagesId, m_Pages.innerHandle);
+                    cmd.SetComputeBufferParam(m_Shader, m_MipSeedKernel, PagesId, m_Pages.innerHandle);
+                    cmd.SetComputeVectorArrayParam(m_Shader, ScrollId, m_Frame.Scroll);
                     cmd.SetComputeBufferParam(m_Shader, m_ThinKernel, ThinBricksId, m_ThinBricks.innerHandle);
                     cmd.SetComputeIntParam(m_Shader, LayerMaskId, m_Frame.LayerMask);
                     bound = true;
@@ -210,6 +239,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     ClearNewPages(cmd, level);
                     cmd.SetComputeTextureParam(m_Shader, composeKernel, OutputId, m_Outputs[level].innerHandle);
                     DispatchRegions(cmd, composeKernel, m_Regions, start, count);
+                    cmd.SetComputeTextureParam(m_Shader, m_BorderKernel, OutputId, m_Outputs[level].innerHandle);
+                    cmd.DispatchCompute(m_Shader, m_BorderKernel, VividGlobalSdfClipmap.PagesPerLevel, 1, 1);
+                    RecordCoarseMip(cmd, level);
                 }
                 if (thinCount != 0)
                     DispatchRegions(cmd, m_ThinKernel, m_ThinRegions, start, thinCount);
@@ -230,6 +262,28 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Kernel = -1;
             m_ClearKernel = -1;
             m_ThinKernel = -1;
+            m_BorderKernel = m_MipSeedKernel = m_MipPropagateKernel = -1;
+        }
+
+        private void RecordCoarseMip(ComputeCommandBuffer cmd, int level)
+        {
+            const int groups = VividGlobalSdfClipmap.MipResolution / GroupSize;
+            int offset = level * VividGlobalSdfClipmap.MipResolution;
+            var mip = m_Mip.innerHandle;
+            var scratch = m_MipScratch.innerHandle;
+            cmd.SetComputeTextureParam(m_Shader, m_MipSeedKernel, MipFineAtlasId, m_Outputs[level].innerHandle);
+            cmd.SetComputeTextureParam(m_Shader, m_MipSeedKernel, MipOutputId, mip);
+            cmd.SetComputeIntParam(m_Shader, MipWriteOffsetId, offset);
+            cmd.DispatchCompute(m_Shader, m_MipSeedKernel, groups, groups, groups);
+            for (int step = 1; step < VividGlobalSdfClipmap.MipPropagationSteps; step++)
+            {
+                bool writeMip = (step & 1) == 0;
+                cmd.SetComputeTextureParam(m_Shader, m_MipPropagateKernel, MipSourceId, writeMip ? scratch : mip);
+                cmd.SetComputeTextureParam(m_Shader, m_MipPropagateKernel, MipOutputId, writeMip ? mip : scratch);
+                cmd.SetComputeIntParam(m_Shader, MipReadOffsetId, writeMip ? 0 : offset);
+                cmd.SetComputeIntParam(m_Shader, MipWriteOffsetId, writeMip ? offset : 0);
+                cmd.DispatchCompute(m_Shader, m_MipPropagateKernel, groups, groups, groups);
+            }
         }
 
         private void ClearNewPages(ComputeCommandBuffer cmd, int level)
@@ -274,12 +328,24 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static RenderGraphTexture CreateOutput(string name)
         {
-            const int size = VividGlobalSdfClipmap.Resolution;
+            const int size = VividGlobalSdfClipmap.AtlasResolution;
             var texture = RenderGraphTexture.CreateOutput(name, GraphicsFormat.R16_SFloat);
             texture.Resize(size, size);
             texture.desc.Dimension = TextureDimension.Tex3D;
             texture.desc.Slices = size;
-            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.FilterMode = FilterMode.Bilinear;
+            texture.desc.EnableRandomWrite = true;
+            return texture;
+        }
+
+        private static RenderGraphTexture CreateMipTexture(string name, int levelCount)
+        {
+            const int size = VividGlobalSdfClipmap.MipResolution;
+            var texture = RenderGraphTexture.CreateOutput(name, GraphicsFormat.R16_SFloat);
+            texture.Resize(size, size);
+            texture.desc.Dimension = TextureDimension.Tex3D;
+            texture.desc.Slices = size * levelCount;
+            texture.desc.FilterMode = FilterMode.Bilinear;
             texture.desc.EnableRandomWrite = true;
             return texture;
         }

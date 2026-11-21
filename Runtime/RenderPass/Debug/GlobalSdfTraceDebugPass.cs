@@ -19,6 +19,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int NearId = Shader.PropertyToID("_GlobalSdfNear");
         private static readonly int MiddleId = Shader.PropertyToID("_GlobalSdfMiddle");
         private static readonly int FarId = Shader.PropertyToID("_GlobalSdfFar");
+        private static readonly int MipId = Shader.PropertyToID("_GlobalSdfMip");
+        private static readonly int UseMipId = Shader.PropertyToID("_GlobalSdfUseMipTrace");
         private static readonly int LevelsId = Shader.PropertyToID("_GlobalSdfLevels");
         private static readonly int ScrollId = Shader.PropertyToID("_GlobalSdfScroll");
         private static readonly int OutputId = Shader.PropertyToID("_GlobalSdfDebugOutput");
@@ -102,8 +104,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public void PrepareRenderGraph(ContextContainer frameData)
         {
-            if (!HasClipmapInputs()
-                || (ReferenceEquals(m_ThinBricks, m_Frame.ThinBricks) && ReferenceEquals(m_Pages, m_Frame.Pages)))
+            if (!HasClipmapInputs())
+                return;
+            m_Frame.MeshScene.RegisterBrickTexture(this);
+            if (m_Frame.Mip.innerHandle.IsValid())
+                PassRecorder.RegisterImportedTextureForPass(this, m_Frame.Mip.innerHandle);
+            if (ReferenceEquals(m_ThinBricks, m_Frame.ThinBricks) && ReferenceEquals(m_Pages, m_Frame.Pages))
                 return;
 
             // Existing graphs connect the three level textures. The matching producer supplies the lookup buffers.
@@ -126,6 +132,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, NearId, m_Near.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, MiddleId, m_Middle.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, FarId, m_Far.innerHandle);
+            var mip = m_Frame.Mip.innerHandle;
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, MipId, mip.IsValid() ? mip : m_Near.innerHandle);
+            cmd.SetComputeIntParam(m_Shader, UseMipId, mip.IsValid() ? 1 : 0);
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, OutputId, m_OutputTexture.innerHandle);
             cmd.SetComputeVectorArrayParam(m_Shader, LevelsId, m_Frame.Levels);
             cmd.SetComputeVectorArrayParam(m_Shader, ScrollId, m_Frame.Scroll);

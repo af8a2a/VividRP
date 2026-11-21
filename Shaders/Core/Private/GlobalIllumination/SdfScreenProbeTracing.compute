@@ -285,6 +285,7 @@ bool TraceProbeGlobal(float3 origin, float3 direction, float start, float end, i
     VividGlobalSdfHit global;
     if (start >= end || !VividTraceGlobalSdf(origin, direction, start, end, global)) return false;
     hit.distance = global.distance;
+    hit.lightingDistanceOffset = 0.5f * global.expandSurfaceAmount;
     hit.normalWS = global.normalWS;
     // The card gather needs the distance clipmap index before it resolves an owner.
     hit.instanceIndex = 0xffffffffu;
@@ -465,7 +466,7 @@ ProbeRaySample ResolveProbeRay(uint2 tile, uint ray, uint seed, float3 position,
     if (traceStage == TraceStageGlobal || (traceStage == TraceStageLegacy
         && _SdfUseGlobalClipmap == 2u && (traceState & RayGlobalCandidate) != 0u && hit.instanceIndex == 0xffffffffu))
     {
-        float3 endpoint = origin + direction * hit.distance;
+        float3 endpoint = origin + direction * (hit.distance + hit.lightingDistanceOffset);
         GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(endpoint, hit.normalWS, direction, hit.signMode);
         result.distance = hit.distance;
         result.hitNormal = hit.normalWS;
@@ -955,7 +956,7 @@ struct CompactGlobalResult
 {
     float3 normalOrCacheRadiance;
     float distance;
-    float traceLimit;
+    float lightingOffsetOrTraceLimit;
     uint source; // 0: queued for Mesh retry, 1: miss, 2 + clipmap level: hit.
 };
 
@@ -1224,7 +1225,7 @@ void TraceGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupInd
     CompactGlobalResult traversal;
     traversal.normalOrCacheRadiance = traced ? hit.normalWS : worldRadiance;
     traversal.distance = traced ? hit.distance : worldDistance;
-    traversal.traceLimit = limit;
+    traversal.lightingOffsetOrTraceLimit = traced ? hit.lightingDistanceOffset : limit;
     traversal.source = traced ? CompactGlobalHitBase + hit.signMode : CompactGlobalMiss;
     _SdfCompactGlobalResults[index] = traversal;
 }
@@ -1254,6 +1255,7 @@ void ResolveGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupI
     if (traced)
     {
         hit.distance = traversal.distance;
+        hit.lightingDistanceOffset = traversal.lightingOffsetOrTraceLimit;
         hit.normalWS = traversal.normalOrCacheRadiance;
         hit.signMode = traversal.source - CompactGlobalHitBase;
     }
@@ -1266,7 +1268,7 @@ void ResolveGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupI
     if (!traced && worldDistance <= 0.0 && useSky)
         receiver = LoadCompactReceiver(probe);
     result = ResolveProbeRay(tile, ray, 0u, probe.position, probe.normal, origin, probe.receiverSpeed,
-        receiver, useSky, 0u, traced ? RayGlobalCandidate : 0u, hit, false, false, traced, traversal.traceLimit,
+        receiver, useSky, 0u, traced ? RayGlobalCandidate : 0u, hit, false, false, traced, traversal.lightingOffsetOrTraceLimit,
         worldRadiance, worldDistance, TraceStageGlobal, result, accum);
     StoreCompactRay(tile, ray, address, result, accum);
 }

@@ -63,6 +63,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_InverseViewProjection = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true).inverse;
             m_FarClip = camera.farClipPlane;
             m_Scene.Update(VividMeshletRendererDatabase.instance);
+            if (m_Scene.NodeCount != 0 && !m_Scene.PrepareBrickTexture(this))
+                m_LayerMask = 0;
         }
 
         public override void Record(ComputePassContext context)

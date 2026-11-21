@@ -2,6 +2,7 @@
 #define VIVID_MESH_SDF_TRACE_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 
 // Structured buffer layouts match VividMeshSdfGpuScene.
 struct VividMeshSdfField
@@ -46,6 +47,7 @@ struct VividMeshSdfHit
     uint2 entityId;
     uint instanceIndex;
     uint signMode;
+    float lightingDistanceOffset;
 };
 
 struct VividMeshSdfReceiver
@@ -56,13 +58,15 @@ struct VividMeshSdfReceiver
 };
 
 StructuredBuffer<uint> _MeshSdfVoxels;
+Texture3D<float> _MeshSdfBrickAtlas;
+float4 _MeshSdfBrickAtlasSize; // Reciprocal texture dimensions and bricks per row, zero for the packed fallback.
 StructuredBuffer<VividMeshSdfField> _MeshSdfFields;
 StructuredBuffer<VividMeshSdfInstance> _MeshSdfInstances;
 StructuredBuffer<VividMeshSdfNode> _MeshSdfNodes;
 StructuredBuffer<uint> _MeshSdfLeafInstances;
 uint _MeshSdfNodeCount;
 
-// The page directory lives at the start of _MeshSdfVoxels. Entries address words relative to the field payload.
+// The page directory lives at the start of _MeshSdfVoxels. Entries are atlas slots or relative word offsets.
 static const uint VividMeshSdfBrickCells = 12u;
 static const uint VividMeshSdfDense = 0xffffffffu;
 static const uint VividMeshSdfEmptyOutside = 0xffffffffu;
@@ -124,6 +128,18 @@ float VividMeshSdfSampleBlock(uint3 dimensions, uint wordOffset, float3 voxel)
     return lerp(z0, z1, f.z);
 }
 
+float VividMeshSdfSampleBrick(VividMeshSdfField field, uint3 dimensions, uint page, float3 voxel)
+{
+    if (_MeshSdfBrickAtlasSize.w == 0.0)
+        return VividMeshSdfSampleBlock(dimensions, field.wordOffset + page, voxel);
+
+    uint across = (uint)_MeshSdfBrickAtlasSize.w;
+    uint3 tile = uint3(page % across, page / across % across, page / (across * across));
+    float3 coord = float3(tile * (VividMeshSdfBrickCells + 1u))
+        + clamp(voxel, 0.0, float3(dimensions - 1u)) + 0.5;
+    return _MeshSdfBrickAtlas.SampleLevel(sampler_LinearClamp, coord * _MeshSdfBrickAtlasSize.xyz, 0.0);
+}
+
 float VividMeshSdfSample(VividMeshSdfField field, float3 positionInGrid)
 {
     float3 voxel = positionInGrid / field.originAndVoxelSize.w;
@@ -146,7 +162,7 @@ float VividMeshSdfSample(VividMeshSdfField field, float3 positionInGrid)
         {
             uint3 start = brick * VividMeshSdfBrickCells;
             uint3 size = min(field.dimensions - start, VividMeshSdfBrickCells + 1u);
-            value = VividMeshSdfSampleBlock(size, field.wordOffset + page, voxel - start);
+            value = VividMeshSdfSampleBrick(field, size, page, voxel - start);
         }
     }
     return value;
@@ -178,6 +194,12 @@ bool VividMeshSdfTraceBricks(VividMeshSdfField field, float3 entry, float3 direc
     float sampleT = 0.0;
     int samples = 0;
     float voxelSize = field.originAndVoxelSize.w;
+    bool hardwareBrick = _MeshSdfBrickAtlasSize.w > 0.0;
+    int maxSteps = hardwareBrick ? 64 : 192;
+    float stepFactor = hardwareBrick ? 1.0f : 0.7f;
+    bool hasPrevious = false;
+    float previousT = 0.0f;
+    float previousSignedDistance = 0.0f;
     hitT = 0.0;
     exhausted = false;
 
@@ -195,21 +217,44 @@ bool VividMeshSdfTraceBricks(VividMeshSdfField field, float3 entry, float3 direc
             [loop]
             while (sampleT <= brickExit)
             {
-                if (samples++ >= 192)
+                if (samples++ >= maxSteps)
                 {
                     exhausted = true;
                     return false;
                 }
                 float3 voxel = entry + sampleT * direction - start;
-                float distanceInVoxels = abs(VividMeshSdfSampleBlock(size, field.wordOffset + page, voxel)) / voxelSize;
+                float signedDistance = VividMeshSdfSampleBrick(field, size, page, voxel);
+                float distanceInVoxels = abs(signedDistance) / voxelSize;
                 if (distanceInVoxels <= 0.075)
                 {
                     hitT = sampleT;
                     return true;
                 }
-                sampleT += distanceInVoxels * 0.7;
+                // Unit steps can cross the trilinear zero set. Retain an exit hit
+                // for shell receivers and recover the crossing within the bracket.
+                if (hardwareBrick && hasPrevious && (signedDistance < 0.0f) != (previousSignedDistance < 0.0f))
+                {
+                    float a = previousT, b = sampleT;
+                    [loop] for (int refine = 0; refine < 5; ++refine)
+                    {
+                        float middle = 0.5f * (a + b);
+                        float value = VividMeshSdfSample(field, (entry + middle * direction) * voxelSize);
+                        if ((value < 0.0f) == (previousSignedDistance < 0.0f))
+                            a = middle;
+                        else
+                            b = middle;
+                    }
+                    hitT = 0.5f * (a + b);
+                    return true;
+                }
+                hasPrevious = true;
+                previousT = sampleT;
+                previousSignedDistance = signedDistance;
+                sampleT += distanceInVoxels * stepFactor;
             }
         }
+        else
+            hasPrevious = false;
         if (boundary >= tExit)
             break;
 

@@ -1,6 +1,9 @@
 #pragma kernel ComposeGlobalSdf
 #pragma kernel ComposeGlobalSdfSparse VIVID_SPARSE_MESH_DISTANCE_FIELDS
 #pragma kernel ClearGlobalSdfPages
+#pragma kernel CopyGlobalSdfPageBorders
+#pragma kernel SeedGlobalSdfMip
+#pragma kernel PropagateGlobalSdfMip
 #pragma kernel ComposeGlobalSdfThinBricks
 #pragma kernel TraceGlobalSdfDebug
 
@@ -105,6 +108,113 @@ void ClearGlobalSdfPages(uint3 id : SV_DispatchThreadID)
 {
     uint slot = _GlobalSdfFirstPage + (id.x >> VividGlobalSdfBrickShift);
     _GlobalSdfWrite[VividGlobalSdfAtlasCell(slot, id)] = VividGlobalSdfBand;
+}
+
+[numthreads(64, 1, 1)]
+void CopyGlobalSdfPageBorders(uint3 groupId : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint group = groupId.x;
+    uint page = _GlobalSdfPages[_GlobalSdfWriteLevel * VividGlobalSdfPagesPerLevel + group];
+    if (page == 0u)
+        return;
+
+    uint3 brick = uint3(group % VividGlobalSdfBrickResolution,
+        group / VividGlobalSdfBrickResolution % VividGlobalSdfBrickResolution, group / VividGlobalSdfPagesPerSlice);
+    uint3 physical = brick * VividGlobalSdfBrickSize;
+    uint3 dst = VividGlobalSdfAtlasCell(page - 1u, physical);
+    const uint faceZ = VividGlobalSdfStoredBrickSize * VividGlobalSdfStoredBrickSize;
+    const uint faceY = VividGlobalSdfStoredBrickSize * VividGlobalSdfBrickSize;
+    const uint faceX = VividGlobalSdfBrickSize * VividGlobalSdfBrickSize;
+    for (uint i = lane; i < faceZ + faceY + faceX; i += 64u)
+    {
+        uint3 texel;
+        if (i < faceZ)
+            texel = uint3(i % VividGlobalSdfStoredBrickSize, i / VividGlobalSdfStoredBrickSize, VividGlobalSdfBrickSize);
+        else if (i < faceZ + faceY)
+        {
+            uint j = i - faceZ;
+            texel = uint3(j % VividGlobalSdfStoredBrickSize, VividGlobalSdfBrickSize, j / VividGlobalSdfStoredBrickSize);
+        }
+        else
+        {
+            uint j = i - faceZ - faceY;
+            texel = uint3(VividGlobalSdfBrickSize, j % VividGlobalSdfBrickSize, j / VividGlobalSdfBrickSize);
+        }
+
+        // The source is always an interior sample, including at a toroidal seam.
+        uint3 sourceCell = (physical + texel) & (uint(VividGlobalSdfResolution) - 1u);
+        uint sourcePage = VividGlobalSdfPage(sourceCell, _GlobalSdfWriteLevel);
+        float distance = VividGlobalSdfBand;
+        if (sourcePage != 0u)
+            distance = _GlobalSdfWrite[VividGlobalSdfAtlasCell(sourcePage - 1u, sourceCell)];
+        _GlobalSdfWrite[dst + texel] = distance;
+    }
+}
+
+Texture3D<float> _GlobalSdfMipFineAtlas;
+Texture3D<float> _GlobalSdfMipSource;
+RWTexture3D<float> _GlobalSdfMipOutput;
+uint _GlobalSdfMipReadOffset;
+uint _GlobalSdfMipWriteOffset;
+
+// GlobalDistanceFieldMip.usf uses the sorted axis minima for one Eikonal iteration.
+// The step is expressed in decoded fine voxels so it equals the mip factor.
+float PropagateGlobalSdfDistance(float center, float3 v)
+{
+    float minV = min(v.x, min(v.y, v.z));
+    float maxV = max(v.x, max(v.y, v.z));
+    float x = minV;
+    float y = (v.x != minV && v.x != maxV) ? v.x : ((v.y != minV && v.y != maxV) ? v.y : v.z);
+    float z = maxV;
+    const float step = VividGlobalSdfMipFactor;
+    center = min(center, x + step);
+    float sum = x + y;
+    float sumSquared = x * x + y * y;
+    center = min(center, (1.0f / 2.0f) * (sum + sqrt(sum * sum - 2.0f * (sumSquared - step * step))));
+    sum = x + y + z;
+    sumSquared = x * x + y * y + z * z;
+    center = min(center, (1.0f / 3.0f) * (sum + sqrt(sum * sum - 3.0f * (sumSquared - step * step))));
+    return center;
+}
+
+float SeedGlobalSdfMipCell(int3 coord)
+{
+    coord = clamp(coord, 0, int(VividGlobalSdfMipResolution) - 1);
+    float3 grid = (float3(coord) + 0.5f) * VividGlobalSdfMipFactor - 0.5f;
+    float3 cell = grid + _GlobalSdfScroll[_GlobalSdfWriteLevel].xyz;
+    float detailed = VividGlobalSdfSampleAtlas(_GlobalSdfMipFineAtlas, cell, _GlobalSdfWriteLevel);
+    return detailed < VividGlobalSdfMipTransition ? max(detailed, -VividGlobalSdfMipTransition) : VividGlobalSdfMipBand;
+}
+
+[numthreads(4, 4, 4)]
+void SeedGlobalSdfMip(uint3 id : SV_DispatchThreadID)
+{
+    int3 p = int3(id);
+    float3 v;
+    v.x = min(SeedGlobalSdfMipCell(p - int3(1, 0, 0)), SeedGlobalSdfMipCell(p + int3(1, 0, 0)));
+    v.y = min(SeedGlobalSdfMipCell(p - int3(0, 1, 0)), SeedGlobalSdfMipCell(p + int3(0, 1, 0)));
+    v.z = min(SeedGlobalSdfMipCell(p - int3(0, 0, 1)), SeedGlobalSdfMipCell(p + int3(0, 0, 1)));
+    _GlobalSdfMipOutput[id + uint3(0, 0, _GlobalSdfMipWriteOffset)] =
+        PropagateGlobalSdfDistance(SeedGlobalSdfMipCell(p), v);
+}
+
+float LoadGlobalSdfMipCell(int3 coord)
+{
+    coord = clamp(coord, 0, int(VividGlobalSdfMipResolution) - 1);
+    coord.z += _GlobalSdfMipReadOffset;
+    return _GlobalSdfMipSource.Load(int4(coord, 0));
+}
+
+[numthreads(4, 4, 4)]
+void PropagateGlobalSdfMip(uint3 id : SV_DispatchThreadID)
+{
+    int3 p = int3(id);
+    float3 v;
+    v.x = min(LoadGlobalSdfMipCell(p - int3(1, 0, 0)), LoadGlobalSdfMipCell(p + int3(1, 0, 0)));
+    v.y = min(LoadGlobalSdfMipCell(p - int3(0, 1, 0)), LoadGlobalSdfMipCell(p + int3(0, 1, 0)));
+    v.z = min(LoadGlobalSdfMipCell(p - int3(0, 0, 1)), LoadGlobalSdfMipCell(p + int3(0, 0, 1)));
+    _GlobalSdfMipOutput[id + uint3(0, 0, _GlobalSdfMipWriteOffset)] =
+        PropagateGlobalSdfDistance(LoadGlobalSdfMipCell(p), v);
 }
 
 bool GlobalSdfBrickContainsThinShell(float3 center, float halfExtent)

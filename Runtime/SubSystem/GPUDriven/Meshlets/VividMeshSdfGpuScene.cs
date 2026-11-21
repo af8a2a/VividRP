@@ -7,6 +7,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.GPUDriven.Meshlets
 {
@@ -16,6 +17,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal static bool EditorForceTwoSidedEmission;
 #endif
         private static readonly int VoxelsId = Shader.PropertyToID("_MeshSdfVoxels");
+        private static readonly int BrickAtlasId = Shader.PropertyToID("_MeshSdfBrickAtlas");
+        private static readonly int BrickAtlasSizeId = Shader.PropertyToID("_MeshSdfBrickAtlasSize");
         private static readonly int FieldsId = Shader.PropertyToID("_MeshSdfFields");
         private static readonly int InstancesId = Shader.PropertyToID("_MeshSdfInstances");
         private static readonly int NodesId = Shader.PropertyToID("_MeshSdfNodes");
@@ -157,6 +160,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private readonly List<uint> m_LeafInstanceUpload = new();
 
         private GraphicsBuffer m_Voxels;
+        private Texture3D m_BrickAtlas;
+        private RTHandle m_BrickAtlasHandle, m_EmptyBrickAtlasHandle;
+        private TextureHandle m_ImportedBrickAtlas;
+        private Vector4 m_BrickAtlasSize;
         private GraphicsBuffer m_FieldBuffer;
         private GraphicsBuffer m_InstanceBuffer;
         private GraphicsBuffer m_NodeBuffer;
@@ -224,9 +231,20 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextSurfaceLightingInstances = new List<uint>();
         }
 
+        internal bool PrepareBrickTexture(IRenderPass pass)
+        {
+            var handle = m_BrickAtlasHandle ?? (m_EmptyBrickAtlasHandle ??= RTHandles.Alloc(CoreUtils.blackVolumeTexture));
+            m_ImportedBrickAtlas = PassRecorder.ImportTextureForPass(pass, handle);
+            return m_ImportedBrickAtlas.IsValid();
+        }
+
+        internal void RegisterBrickTexture(IRenderPass pass) => PassRecorder.RegisterImportedTextureForPass(pass, m_ImportedBrickAtlas);
+
         internal void Bind(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
         {
             cmd.SetComputeBufferParam(shader, kernel, VoxelsId, m_Voxels);
+            cmd.SetComputeTextureParam(shader, kernel, BrickAtlasId, m_ImportedBrickAtlas);
+            cmd.SetComputeVectorParam(shader, BrickAtlasSizeId, m_BrickAtlasSize);
             cmd.SetComputeBufferParam(shader, kernel, FieldsId, m_FieldBuffer);
             cmd.SetComputeBufferParam(shader, kernel, InstancesId, m_InstanceBuffer);
             cmd.SetComputeBufferParam(shader, kernel, NodesId, m_NodeBuffer);
@@ -591,6 +609,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         private bool UploadFields()
         {
+            if (TryUploadBrickAtlas())
+                return true;
+            ReleaseBrickAtlas();
             m_FieldUpload.Clear();
             m_BrickPages.Clear();
             long payloadWords = 0;
@@ -637,6 +658,76 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_Voxels.SetData(words, 0, 0, words.Length);
             Upload(ref m_FieldBuffer, m_FieldUpload, "Mesh SDF Fields");
             return true;
+        }
+
+        private bool TryUploadBrickAtlas()
+        {
+            const GraphicsFormat format = GraphicsFormat.R16_SFloat;
+            if (!SystemInfo.IsFormatSupported(format, GraphicsFormatUsage.Sample | GraphicsFormatUsage.Linear))
+                return false;
+
+            m_FieldUpload.Clear();
+            m_BrickPages.Clear();
+            int slots = 0;
+            foreach (var source in m_NextFields)
+            {
+                var field = source.Layout;
+                var size = new int3((int)field.Width, (int)field.Height, (int)field.Depth);
+                if (math.any(size < 2))
+                    return false;
+
+                field.PageOffset = VividMeshSdfBricks.PlanAtlas(source.Texture.GetPixelData<ushort>(0), size,
+                    field.OriginAndVoxelSize.w, m_BrickPages, ref slots);
+                m_FieldUpload.Add(field);
+            }
+
+            if (!VividMeshSdfBricks.TryGetAtlasLayout(slots, SystemInfo.maxTexture3DSize, out var layout))
+                return false;
+            int3 dimensions = layout * VividMeshSdfBricks.StoredSize;
+            using var texels = new NativeArray<ushort>(dimensions.x * dimensions.y * dimensions.z, Allocator.TempJob);
+            for (int i = 0; i < m_FieldUpload.Count; i++)
+            {
+                var field = m_FieldUpload[i];
+                VividMeshSdfBricks.WriteAtlas(m_NextFields[i].Texture.GetPixelData<ushort>(0),
+                    new int3((int)field.Width, (int)field.Height, (int)field.Depth),
+                    m_BrickPages, field.PageOffset, texels, layout.x);
+            }
+
+            var atlas = new Texture3D(dimensions.x, dimensions.y, dimensions.z, format, TextureCreationFlags.None)
+                { name = "Mesh SDF Brick Atlas", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            try
+            {
+                atlas.SetPixelData(texels, 0);
+                atlas.Apply(false, true);
+                if (m_BrickAtlas == null)
+                {
+                    m_Voxels?.Dispose();
+                    m_Voxels = null;
+                }
+                Upload(ref m_Voxels, m_BrickPages, "Mesh SDF Brick Pages");
+                Upload(ref m_FieldBuffer, m_FieldUpload, "Mesh SDF Fields");
+            }
+            catch
+            {
+                CoreUtils.Destroy(atlas);
+                throw;
+            }
+            ReleaseBrickAtlas();
+            m_BrickAtlas = atlas;
+            m_BrickAtlasHandle = RTHandles.Alloc(atlas);
+            m_BrickAtlasSize = new Vector4(1f / dimensions.x, 1f / dimensions.y, 1f / dimensions.z, layout.x);
+            m_LastRejectedBytes = 0;
+            return true;
+        }
+
+        private void ReleaseBrickAtlas()
+        {
+            m_BrickAtlasHandle?.Release();
+            m_BrickAtlasHandle = null;
+            CoreUtils.Destroy(m_BrickAtlas);
+            m_BrickAtlas = null;
+            m_BrickAtlasSize = default;
+            m_ImportedBrickAtlas = default;
         }
 
         private bool HasSameInstanceOrder()
@@ -839,6 +930,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         public void Dispose()
         {
             SparseAtlas?.Dispose();
+            ReleaseBrickAtlas();
+            m_EmptyBrickAtlasHandle?.Release();
+            m_EmptyBrickAtlasHandle = null;
             m_Voxels?.Dispose();
             m_FieldBuffer?.Dispose();
             m_InstanceBuffer?.Dispose();

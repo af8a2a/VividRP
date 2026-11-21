@@ -150,6 +150,47 @@ float4 _SdfFinalLightingLayout; // Baked card width, height, atlas columns, card
 uint _SdfFinalLightingCardCount; // Number of published cards in priority order.
 StructuredBuffer<uint> _SdfFinalLightingOrder; // Rank to card, followed by card to rank.
 
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK) || defined(VIVID_CLEAR_SURFACE_CACHE_FEEDBACK)
+RWStructuredBuffer<uint2> _SdfSurfaceCacheLastUsed; // Always-resident and high-resolution feedback, indexed by sampled card.
+#endif
+
+#if defined(VIVID_CLEAR_SURFACE_CACHE_FEEDBACK)
+[numthreads(64, 1, 1)]
+void LumenDebugClearCardFeedbackCS(uint card : SV_DispatchThreadID)
+{
+    uint count, stride;
+    _SdfSurfaceCacheLastUsed.GetDimensions(count, stride);
+    if (card < count)
+        _SdfSurfaceCacheLastUsed[card] = 0u;
+}
+#endif
+
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+uint _SdfSurfaceCacheFeedbackFrame; // Camera gather frame plus one. Zero denotes a page with no recorded access.
+
+uint ReverseFeedbackMortonCode2(uint x)
+{
+    x &= 0x55u;
+    x = (x ^ (x >> 1u)) & 0x33u;
+    return (x ^ (x >> 2u)) & 0x0fu;
+}
+
+void WriteSurfaceCacheFeedback(uint2 DitherScreenCoord, float SampleWeightSum, uint CardPageIndex, bool bHiResSurface)
+{
+    // LumenSurfaceCacheFeedback.cpp, with the default 16x16 tile.
+    uint PixelIndex = (_SdfSurfaceCacheFeedbackFrame - 1u) % 256u;
+    uint PixelAddress = reversebits(PixelIndex) >> 24u;
+    uint2 TileJitter = uint2(ReverseFeedbackMortonCode2(PixelAddress), ReverseFeedbackMortonCode2(PixelAddress >> 1u));
+    if (all((DitherScreenCoord & 15u) == TileJitter) && SampleWeightSum > 0.1f)
+    {
+        if (bHiResSurface)
+            InterlockedMax(_SdfSurfaceCacheLastUsed[CardPageIndex].y, _SdfSurfaceCacheFeedbackFrame);
+        else
+            InterlockedMax(_SdfSurfaceCacheLastUsed[CardPageIndex].x, _SdfSurfaceCacheFeedbackFrame);
+    }
+}
+#endif
+
 uint2 FinalLightingCardOrigin(uint card)
 {
     uint columns = (uint)_SdfFinalLightingLayout.z;
@@ -174,10 +215,9 @@ bool TryGetFinalLightingCard(DiffuseSurface surface, uint slot, out uint card)
     return _SdfFinalLightingOrder[capacity + card] < _SdfFinalLightingCardCount;
 }
 
-bool TryLoadCardFinalLighting(DiffuseSurface surface, uint3 cardTexel, out float3 lighting)
+bool TryLoadCardFinalLighting(DiffuseSurface surface, uint3 cardTexel, out float3 lighting, out uint card)
 {
     lighting = 0.0;
-    uint card;
     if (!TryGetFinalLightingCard(surface, cardTexel.z, card))
         return false;
     lighting = _SdfFinalLightingAtlas.Load(int3(FinalLightingCardOrigin(card) + cardTexel.xy, 0)).rgb;
@@ -255,8 +295,21 @@ float3 LoadCardIndirect(DiffuseSurface surface, VividMeshSdfHit hit, uint3 cardT
 float3 LoadCardFinalLightingOrEmission(DiffuseSurface surface, uint3 cardTexel)
 {
     float3 lighting;
-    return TryLoadCardFinalLighting(surface, cardTexel, lighting) ? lighting : max(surface.emission.rgb, 0.0);
+    uint card;
+    return TryLoadCardFinalLighting(surface, cardTexel, lighting, card) ? lighting : max(surface.emission.rgb, 0.0);
 }
+
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+float3 LoadCardFinalLightingOrEmission(DiffuseSurface surface, uint3 cardTexel, uint2 ditherScreenCoord, bool bHiResSurface)
+{
+    float3 lighting;
+    uint card;
+    if (!TryLoadCardFinalLighting(surface, cardTexel, lighting, card))
+        return max(surface.emission.rgb, 0.0);
+    WriteSurfaceCacheFeedback(ditherScreenCoord, 1.0f, card, bHiResSurface);
+    return lighting;
+}
+#endif
 
 float3 LoadSdfSurfaceRadiance(float3 originalNormal, float3 rayDirection, DiffuseSurface surface, uint3 cardTexel)
 {

@@ -324,6 +324,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly int[] m_CompactScreenKernels = new int[2];
         private readonly int[] m_CompactMeshKernels = new int[2];
         private readonly int[] m_CompactResolveGlobalKernels = new int[2];
+        private readonly int[] m_FeedbackTraceKernels = new int[2];
+        private readonly int[] m_FeedbackCompactMeshKernels = new int[2];
+        private readonly int[] m_FeedbackCompactResolveKernels = new int[2];
         private int m_CompactFinalizeKernel = -1;
         private int m_CompactResetKernel = -1, m_CompactArgsKernel = -1;
         private int m_MeshCardGridKernel = -1;
@@ -983,6 +986,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_RestirPixelIntegration;
         private ulong m_RestirCardVersion;
         private bool m_RecordRayDiagnostics;
+        private readonly LumenDebugViewPass m_LumenDebugView = new();
+        private int m_DebugTextureKernel, m_DebugSurfaceKernel, m_DebugGlobalSdfKernel, m_DebugBentKernel, m_DebugCardFramesKernel;
+        private int m_DebugClearCardFeedbackKernel, m_DebugSurfaceFeedbackKernel;
+        private bool m_SurfaceCacheFeedbackSupported;
         private bool m_RecordFirstHitDiagnostics;
         private bool m_RecordProbeAnchorDiagnostics;
         private bool m_SpatialAnchor, m_AnchorPreFilter;
@@ -1023,6 +1030,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_TraceKernel = m_TraceCompute.FindKernel("TraceSdfDiffuseProbes");
+            m_DebugTextureKernel = FindOptionalKernel("LumenDebugTextureCS");
+            m_DebugSurfaceKernel = FindOptionalKernel("LumenDebugSurfaceCS");
+            m_DebugGlobalSdfKernel = FindOptionalKernel("LumenDebugGlobalSdfCS");
+            m_DebugBentKernel = FindOptionalKernel("LumenDebugBentNormalCS");
+            m_DebugCardFramesKernel = FindOptionalKernel("LumenDebugCardFramesCS");
+            m_DebugClearCardFeedbackKernel = FindOptionalKernel("LumenDebugClearCardFeedbackCS");
+            m_DebugSurfaceFeedbackKernel = FindOptionalKernel("LumenDebugSurfaceFeedbackCS");
             if (HasKernel(m_TraceCompute, "TraceSdfReceiverProbes"))
                 m_ReceiverTraceKernel = m_TraceCompute.FindKernel("TraceSdfReceiverProbes");
             if (HasKernel(m_TraceCompute, "TraceSdfReceiverCachedProbes"))
@@ -1212,6 +1226,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             m_CompactTraceSupported = SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
                 && FindCompactKernels();
+            m_FeedbackTraceKernels[0] = FindOptionalKernel("TraceSdfDiffuseCachedProbesFeedback");
+            m_FeedbackTraceKernels[1] = FindOptionalKernel("TraceSdfReceiverCachedProbesFeedback");
+            m_SurfaceCacheFeedbackSupported = m_DebugClearCardFeedbackKernel >= 0 && m_DebugSurfaceFeedbackKernel >= 0
+                && System.Array.IndexOf(m_FeedbackTraceKernels, -1) < 0
+                && (!m_CompactTraceSupported || (System.Array.IndexOf(m_FeedbackCompactMeshKernels, -1) < 0
+                    && System.Array.IndexOf(m_FeedbackCompactResolveKernels, -1) < 0));
             m_Scene = new VividMeshSdfGpuScene(Shader.Find("VividRP/Material/StandardLit"));
         }
 
@@ -1227,6 +1247,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CompactGlobalKernel = FindOptionalKernel("TraceGlobalSdfCompactedCS");
             m_CompactResolveGlobalKernels[0] = FindOptionalKernel("ResolveGlobalSdfCompactedCS");
             m_CompactResolveGlobalKernels[1] = FindOptionalKernel("ResolveGlobalSdfReceiverCompactedCS");
+            m_FeedbackCompactMeshKernels[0] = FindOptionalKernel("TraceMeshSdfCompactedFeedbackCS");
+            m_FeedbackCompactMeshKernels[1] = FindOptionalKernel("TraceMeshSdfReceiverCompactedFeedbackCS");
+            m_FeedbackCompactResolveKernels[0] = FindOptionalKernel("ResolveGlobalSdfCompactedFeedbackCS");
+            m_FeedbackCompactResolveKernels[1] = FindOptionalKernel("ResolveGlobalSdfReceiverCompactedFeedbackCS");
             m_CompactFinalizeKernel = FindOptionalKernel("FinalizeProbeGatherCS");
 
             return m_CompactResetKernel >= 0 && m_CompactArgsKernel >= 0 && m_MeshCardGridKernel >= 0
@@ -1337,8 +1361,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SpatialFilter = useSettings && m_FilterKernel >= 0 && IsEnabledForGather(settings.screenProbeSpatialFilter, legacyGather);
             m_HitDistanceFilter = m_SpatialFilter && m_HitFilterKernel >= 0 && settings.screenProbeHitDistanceFilter.value;
             m_Output.Resize(m_Width, m_Height);
-            m_RecordRayDiagnostics = useSettings && settings.recordRayDiagnostics.value;
-            m_RecordFirstHitDiagnostics = m_RecordRayDiagnostics && settings.recordFirstHitDiagnostics.value;
+            var debugMode = VividRenderingDebugDisplaySettings.Data.lumenDebugMode;
+            m_RecordRayDiagnostics = (useSettings && settings.recordRayDiagnostics.value)
+                || debugMode == LumenDebugViewMode.ScreenProbeRayState;
+            m_RecordFirstHitDiagnostics = useSettings && settings.recordRayDiagnostics.value && settings.recordFirstHitDiagnostics.value;
             m_RadiositySamples = useSettings ? Mathf.Clamp(settings.surfaceCacheRadiositySamples.value, 16, 4096) : 16;
             m_RadiosityAccumulate = useSettings && settings.surfaceCacheRadiosityAccumulate.value
                 && m_RadiosityAccumulationKernel >= 0 && m_RadiosityPublishKernel >= 0;
@@ -1657,6 +1683,14 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             if (m_UseSdf && cache != null && m_CardFinalLightingKernel >= 0)
                 PrepareFinalLighting(camera, cache);
+            m_LumenDebugView.Prepare(this, frameData, camera, m_Width, m_Height, debugMode,
+                m_CardFinalAtlas.IsValid() ? (int)m_FinalLightingLayout.w : 0,
+                m_FinalLightingPreviousReadyCards == 0 || !ReferenceEquals(m_State.Cache, cache));
+            bool captureFeedback = m_SurfaceCacheFeedbackSupported && m_CardFinalAtlas.IsValid()
+                && (LumenDebugViewPass.IsFeedbackView(debugMode) || VividRenderingDebugDisplaySettings.Data.lumenCaptureVisualizationFeedback);
+            m_LumenDebugView.PrepareFeedback(this, camera, captureFeedback ? (int)m_FinalLightingLayout.w : 0,
+                !ReferenceEquals(m_State.Cache, cache) || m_State.FinalLightingCardVersion != (cache?.CardVersion ?? 0)
+                    || m_State.RadiosityLayoutVersion != m_Scene.RadiosityLayoutVersion);
             // Dense reservoirs and card lighting need the exact raster hit pixel.
             bool storeScreenPixel = screenConfigured && (m_RestirPixelIntegration
                 || (m_ScreenCardLightingRequested && m_ReceiverVisibilitySource != null && m_RadiosityInput.IsValid()));
@@ -1917,7 +1951,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_CompactMeshArgs.IsValid() && m_CompactGlobalArgs.IsValid()
                 && (!m_CompactTraceMayRetryMesh || (m_CompactRetryMeshArgs.IsValid() && m_CompactRetryGlobalArgs.IsValid()));
             int receiverVariant = hasReceiverSource ? 1 : 0;
-            if (compactTrace)
+            if (m_LumenDebugView.HasSurfaceCacheFeedback)
+                traceKernel = (compactTrace ? m_FeedbackCompactMeshKernels : m_FeedbackTraceKernels)[receiverVariant];
+            else if (compactTrace)
                 traceKernel = m_CompactMeshKernels[receiverVariant];
             if (hasReceiverSource)
             {
@@ -2099,6 +2135,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     RecordScreenTrace(cmd, groupsX, groupsY, placement, black, validScreenRadiance);
                 using (new ProfilingScope(cmd, GatherSampler))
                 {
+                    if (m_LumenDebugView.HasSurfaceCacheFeedback)
+                    {
+                        m_LumenDebugView.BeginFeedback(cmd, m_TraceCompute, m_DebugClearCardFeedbackKernel, m_State.Frame);
+                        m_LumenDebugView.BindFeedback(cmd, m_TraceCompute, traceKernel);
+                    }
                     if (compactTrace)
                     {
                         RecordMeshSdfCardGrid(cmd, traceKernel, cameraData);
@@ -2189,6 +2230,9 @@ namespace VividRP.Runtime.RenderPass.Core
             diffuse.SkyHandled = m_SkyTextureParams.w > 0.5f;
             diffuse.RealtimeOnly = m_RealtimeOnly;
             diffuse.OpenPbrSource = m_RestirOpenPbrDiffuse ? this : null;
+            if (m_LumenDebugView.Mode != LumenDebugViewMode.None)
+                RecordLumenDebugView(context, cache, black, pixelTemporal, compositeBent, frame);
+            m_LumenDebugView.MarkFeedbackWritten();
 #if UNITY_EDITOR
             EditorTraceCapture?.Invoke(context, m_TraceSources.innerHandle.ResolveTexture(),
                 m_Output.innerHandle.ResolveTexture(), m_Geometry.innerHandle.ResolveTexture());
@@ -2793,7 +2837,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = m_TraceCompute;
             int classify = m_CompactScreenKernels[receiverVariant];
             int global = m_CompactGlobalKernel;
-            int resolveGlobal = m_CompactResolveGlobalKernels[receiverVariant];
+            int resolveGlobal = (m_LumenDebugView.HasSurfaceCacheFeedback
+                ? m_FeedbackCompactResolveKernels : m_CompactResolveGlobalKernels)[receiverVariant];
             int finalize = m_CompactFinalizeKernel;
             var screenRays = useScreenRays ? m_ScreenRays.innerHandle : black;
             var directionNoise = m_ProbeDirectionNoise.IsValid() ? m_ProbeDirectionNoise : black;
@@ -2847,6 +2892,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, resolveGlobal, RadiosityInputId, m_RadiosityInput.IsValid() ? m_RadiosityInput : black);
             cmd.SetComputeBufferParam(shader, resolveGlobal, RadiosityWorkId, CardLightingWork);
             BindFinalLighting(cmd, shader, resolveGlobal, m_CardFinalAtlas, black);
+            m_LumenDebugView.BindFeedback(cmd, shader, resolveGlobal);
             cmd.SetComputeBufferParam(shader, resolveGlobal, SurfaceId, m_Scene.DiffuseSurfaces);
             cmd.SetComputeBufferParam(shader, resolveGlobal, LocalCardTableId, cache.LocalCardTable);
             cmd.SetComputeBufferParam(shader, resolveGlobal, CompactInputId, m_CompactGlobalRays.innerHandle);
@@ -4223,6 +4269,112 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(shader, kernel, ProbeId, m_Probes.innerHandle);
                 cmd.DispatchCompute(shader, kernel, groupsX, groupsY, 1);
             }
+        }
+
+        private void RecordLumenDebugView(ComputePassContext context, VividSdfSurfaceCache cache, TextureHandle black,
+            bool pixelTemporal, bool compositeBent, int frame)
+        {
+            if (m_DebugTextureKernel < 0 || !context.TryGet<VividLumenDebugFrameData>(out var debug) || !debug.Output.IsValid())
+                return;
+
+            var cmd = context.cmd;
+            var shader = m_TraceCompute;
+            var mode = debug.Mode;
+            int kernel = m_DebugTextureKernel;
+            bool available;
+            using var scope = new ProfilingScope(cmd, LumenDebugViewPass.Sampler);
+
+            bool surface = LumenDebugViewPass.IsSurfaceView(mode) && m_DebugSurfaceKernel >= 0 && cache != null && m_UseSdf;
+            surface &= mode switch
+            {
+                LumenDebugViewMode.DirectLighting => m_CardDirectAtlas.IsValid(),
+                LumenDebugViewMode.IndirectLighting => m_RadiosityInput.IsValid(),
+                LumenDebugViewMode.DirectLightingUpdates or LumenDebugViewMode.IndirectLightingUpdates =>
+                    m_LumenDebugView.CardFrames.IsValid() && m_DebugCardFramesKernel >= 0,
+                LumenDebugViewMode.LastUsedPages or LumenDebugViewMode.LastUsedHighResPages =>
+                    m_LumenDebugView.HasSurfaceCacheFeedback,
+                _ => true,
+            };
+            if (surface)
+            {
+                available = true;
+                kernel = m_LumenDebugView.HasSurfaceCacheFeedback ? m_DebugSurfaceFeedbackKernel : m_DebugSurfaceKernel;
+                m_LumenDebugView.RecordCardFrames(cmd, shader, m_DebugCardFramesKernel, m_State.FinalLightingPriority?.Buffer,
+                    (int)m_FinalLightingLayout.w, frame,
+                    new Vector4(m_CardDirectAtlas.IsValid() ? m_FinalLightingUpdateFirst : 0,
+                        m_CardDirectAtlas.IsValid() ? m_FinalLightingUpdateFirst + m_FinalLightingNewCards : 0,
+                        m_RadiosityCursor, m_RadiosityCursor + m_RadiosityUpdateCards), m_RadiosityFeedback);
+                cmd.SetComputeVectorParam(shader, LumenDebugViewPass.FrameParametersId, new Vector4(frame, 0f, 0f, 0f));
+                BindProbeFrame(cmd, shader);
+                BindSdfTraceConstants(cmd, shader);
+                m_Scene.Bind(cmd, shader, kernel);
+                cmd.SetComputeBufferParam(shader, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
+                cmd.SetComputeBufferParam(shader, kernel, LocalCardTableId, cache.LocalCardTable);
+                cmd.SetComputeBufferParam(shader, kernel, RadiosityWorkId, CardLightingWork);
+                cmd.SetComputeIntParam(shader, RadiosityLayoutId, m_RadiosityInput.IsValid() ? m_Scene.RadiosityCardCount : 0);
+                cmd.SetComputeTextureParam(shader, kernel, RadiosityInputId, m_RadiosityInput.IsValid() ? m_RadiosityInput : black);
+                cmd.SetComputeTextureParam(shader, kernel, CardAlbedoDepthId, m_CardAlbedoDepth);
+                cmd.SetComputeTextureParam(shader, kernel, CardNormalCoverageId, m_CardNormalCoverage);
+                cmd.SetComputeTextureParam(shader, kernel, DepthId, m_Depth.innerHandle);
+                cmd.SetComputeTextureParam(shader, kernel, LumenDebugViewPass.DirectId, m_CardDirectAtlas.IsValid() ? m_CardDirectAtlas : black);
+                var cardFrames = m_LumenDebugView.CardFrames;
+                cmd.SetComputeTextureParam(shader, kernel, LumenDebugViewPass.CardFramesId, cardFrames.IsValid() ? cardFrames : black);
+                BindFinalLighting(cmd, shader, kernel, m_CardFinalAtlas, black);
+                if (m_LumenDebugView.HasSurfaceCacheFeedback)
+                {
+                    m_LumenDebugView.BindFeedback(cmd, shader, kernel);
+                    bool captureVisualization = VividRenderingDebugDisplaySettings.Data.lumenCaptureVisualizationFeedback
+                        && mode is LumenDebugViewMode.LumenScene or LumenDebugViewMode.SurfaceCache;
+                    cmd.SetComputeIntParam(shader, LumenDebugViewPass.VisualizeFeedbackId,
+                        captureVisualization ? 1 : 0);
+                }
+            }
+            else if (mode == LumenDebugViewMode.GlobalSdf && m_DebugGlobalSdfKernel >= 0 && m_GlobalClipmap?.Recorded == true)
+            {
+                available = true;
+                kernel = m_DebugGlobalSdfKernel;
+                BindProbeFrame(cmd, shader);
+                BindGlobalTracingResources(cmd, shader, kernel, true);
+            }
+            else if ((mode == LumenDebugViewMode.ShortRangeAO || mode == LumenDebugViewMode.BentNormal)
+                && m_DebugBentKernel >= 0 && (compositeBent || m_BentDuringIntegration) && m_LumenBentNormal.innerHandle.IsValid())
+            {
+                available = true;
+                kernel = m_DebugBentKernel;
+                cmd.SetComputeTextureParam(shader, kernel, LumenDebugViewPass.PackedFeedId,
+                    compositeBent ? m_CurrentBentNormal.innerHandle : m_LumenBentNormal.innerHandle);
+            }
+            else
+            {
+                var source = mode switch
+                {
+                    LumenDebugViewMode.FastUpdateAmount or LumenDebugViewMode.FramesAccumulated
+                        when pixelTemporal && m_FastUpdateHistory != null => m_CurrentFastUpdate.innerHandle,
+                    LumenDebugViewMode.ScreenProbeTraceSources => m_TraceSources.innerHandle,
+                    LumenDebugViewMode.ScreenProbeRadiance => m_HitLighting.innerHandle,
+                    LumenDebugViewMode.DiffuseGI => m_Output.innerHandle,
+                    LumenDebugViewMode.ShortRangeAO or LumenDebugViewMode.BentNormal
+                        when !m_BentComposite && m_BentNormalHistory != null && m_PixelGeometryHistory != null => m_CurrentBentNormal.innerHandle,
+                    LumenDebugViewMode.RadiosityAtlas => m_RadiosityInput,
+                    LumenDebugViewMode.WorldRadianceCache or LumenDebugViewMode.WorldProbeAge when m_FullSphere && IsFarCacheReady() => m_FarAtlas,
+                    LumenDebugViewMode.ScreenProbeRayState when m_RecordRayDiagnostics => m_RayDiagnostics.innerHandle,
+                    _ => default,
+                };
+                available = source.IsValid();
+                cmd.SetComputeTextureParam(shader, kernel, LumenDebugViewPass.FeedId, available ? source : black);
+            }
+
+            float exposure = VividRenderingDebugDisplaySettings.Data.lumenDebugExposure;
+            float distance = context.Get<VividCameraData>().camera.farClipPlane;
+            int motionFrame = context.Get<VividCameraData>().frameIndex;
+            cmd.SetComputeIntParam(shader, LumenDebugViewPass.ModeId, (int)mode);
+            cmd.SetComputeVectorParam(shader, LumenDebugViewPass.ParametersId,
+                new Vector4(Mathf.Pow(2f, Mathf.Clamp(float.IsFinite(exposure) ? exposure : 0f, -16f, 16f)), available ? 1f : 0f,
+                    mode == LumenDebugViewMode.Velocity ? motionFrame : frame, distance));
+            cmd.SetComputeTextureParam(shader, kernel, LumenDebugViewPass.OutputId, debug.Output);
+            cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_LumenDebugView.Width, GroupSize),
+                CoreUtils.DivRoundUp(m_LumenDebugView.Height, GroupSize), 1);
+            debug.Produced = true;
         }
 
         private void BindProbeFrame(ComputeCommandBuffer cmd, ComputeShader shader)

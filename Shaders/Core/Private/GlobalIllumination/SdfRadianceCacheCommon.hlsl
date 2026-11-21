@@ -189,6 +189,11 @@ struct GridCardLighting
     float total;
     float maximumWeight;
     uint instance;
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+    float feedbackWeightSum;
+    float feedbackMaxSampleWeight;
+    uint feedbackCard;
+#endif
 };
 
 void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 cardMin, float3 sizeLS,
@@ -293,6 +298,16 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
         return;
     }
 
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+    // The feedback representative is the highest-weight page actually sampled.
+    float feedbackWeight = NormalWeight * dot(lightWeights, 1.0f);
+    accum.feedbackWeightSum += feedbackWeight;
+    if (feedbackWeight > accum.feedbackMaxSampleWeight)
+    {
+        accum.feedbackMaxSampleWeight = feedbackWeight;
+        accum.feedbackCard = finalCard;
+    }
+#endif
     uint2 atlasOrigin = FinalLightingCardOrigin(finalCard);
     if (all(lightWeights == TexelBilinearWeights))
     {

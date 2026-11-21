@@ -23,6 +23,20 @@
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel TraceReceiverDiffuseScreenRays VIVID_SDF_RECEIVER
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
+#pragma kernel LumenDebugTextureCS VIVID_LUMEN_DEBUG_VIEW
+#pragma kernel LumenDebugBentNormalCS VIVID_LUMEN_DEBUG_VIEW
+#pragma kernel LumenDebugGlobalSdfCS VIVID_LUMEN_DEBUG_VIEW
+#pragma kernel LumenDebugSurfaceCS VIVID_LUMEN_DEBUG_VIEW VIVID_LUMEN_DEBUG_SURFACE VIVID_SDF_SURFACE_CACHE
+#pragma kernel LumenDebugCardFramesCS VIVID_LUMEN_DEBUG_VIEW VIVID_LUMEN_DEBUG_SURFACE VIVID_SDF_SURFACE_CACHE
+
+#pragma kernel TraceSdfDiffuseCachedProbesFeedback VIVID_SDF_SURFACE_CACHE VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel TraceSdfReceiverCachedProbesFeedback VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel TraceMeshSdfCompactedFeedbackCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_MESH_SDF_CARD_GRID VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel TraceMeshSdfReceiverCompactedFeedbackCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_MESH_SDF_CARD_GRID VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel ResolveGlobalSdfCompactedFeedbackCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel ResolveGlobalSdfReceiverCompactedFeedbackCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel LumenDebugSurfaceFeedbackCS VIVID_LUMEN_DEBUG_VIEW VIVID_LUMEN_DEBUG_SURFACE VIVID_SDF_SURFACE_CACHE VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel LumenDebugClearCardFeedbackCS VIVID_CLEAR_SURFACE_CACHE_FEEDBACK VIVID_SDF_SURFACE_CACHE
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfScreenProbeReceiver.hlsl"
@@ -34,6 +48,9 @@
 #include "SdfDiffuseReSTIR.hlsl"
 
 #include "../../Public/AutoExposure.hlsl"
+#if defined(VIVID_LUMEN_DEBUG_VIEW)
+#include "../Debug/LumenDebugView.hlsl"
+#endif
 
 #if defined(VIVID_BUILD_MESH_SDF_CARD_GRID)
 RWStructuredBuffer<uint> _MeshSdfCardGridWrite;
@@ -534,11 +551,19 @@ ProbeRaySample ResolveProbeRay(uint2 tile, uint ray, uint seed, float3 position,
     }
 
     #if defined(VIVID_SDF_SURFACE_CACHE)
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+    // Lumen's feedback dither coordinates use a 2D ray tile, independent of atlas storage.
+    uint traceResolution = (uint)ceil(sqrt((float)ProbeRayCount()));
+    uint2 ditherScreenCoord = tile * traceResolution + uint2(ray % traceResolution, ray / traceResolution);
+    #endif
     if (traceStage == TraceStageGlobal || (traceStage == TraceStageLegacy
         && _SdfUseGlobalClipmap == 2u && (traceState & RayGlobalCandidate) != 0u && hit.instanceIndex == 0xffffffffu))
     {
         float3 endpoint = origin + direction * (hit.distance + hit.lightingDistanceOffset);
         GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(endpoint, hit.normalWS, direction, hit.signMode);
+        #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+        WriteSurfaceCacheFeedback(ditherScreenCoord, lighting.feedbackWeightSum, lighting.feedbackCard, false);
+        #endif
         result.distance = hit.distance;
         result.hitNormal = hit.normalWS;
         result.hitInstance = lighting.instance;
@@ -642,7 +667,9 @@ ProbeRaySample ResolveProbeRay(uint2 tile, uint ray, uint seed, float3 position,
     }
     else if (cacheCoverage < 1.0)
     {
-        #if defined(VIVID_SDF_SURFACE_CACHE)
+        #if defined(VIVID_SDF_SURFACE_CACHE) && defined(VIVID_SURFACE_CACHE_FEEDBACK)
+            float3 exactLighting = LoadCardFinalLightingOrEmission(surface, cardTexel, ditherScreenCoord, false);
+        #elif defined(VIVID_SDF_SURFACE_CACHE)
             float3 exactLighting = LoadCardFinalLightingOrEmission(surface, cardTexel);
         #else
             float3 exactLighting = max(surface.emission.rgb, 0.0);
@@ -955,9 +982,17 @@ void GatherScreenDiffuseProbes(uint3 id : SV_DispatchThreadID)
 #elif defined(VIVID_SDF_SURFACE_CACHE)
 [numthreads(8, 8, 1)]
 #if defined(VIVID_SDF_RECEIVER)
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void TraceSdfReceiverCachedProbesFeedback(uint3 id : SV_DispatchThreadID)
+    #else
 void TraceSdfReceiverCachedProbes(uint3 id : SV_DispatchThreadID)
+    #endif
 #else
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void TraceSdfDiffuseCachedProbesFeedback(uint3 id : SV_DispatchThreadID)
+    #else
 void TraceSdfDiffuseCachedProbes(uint3 id : SV_DispatchThreadID)
+    #endif
 #endif
 {
     TraceProbe(id);
@@ -1170,9 +1205,17 @@ VividMeshSdfReceiver LoadCompactReceiver(CompactProbe probe)
 
 [numthreads(64, 1, 1)]
 #if defined(VIVID_SDF_RECEIVER)
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void TraceMeshSdfReceiverCompactedFeedbackCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #else
 void TraceMeshSdfReceiverCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #endif
 #else
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void TraceMeshSdfCompactedFeedbackCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #else
 void TraceMeshSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #endif
 #endif
 {
     uint index = CompactDispatchIndex(group, lane);
@@ -1278,9 +1321,17 @@ void TraceGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupInd
 
 [numthreads(64, 1, 1)]
 #if defined(VIVID_SDF_RECEIVER)
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void ResolveGlobalSdfReceiverCompactedFeedbackCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #else
 void ResolveGlobalSdfReceiverCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #endif
 #else
+    #if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void ResolveGlobalSdfCompactedFeedbackCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #else
 void ResolveGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+    #endif
 #endif
 {
     uint index = CompactDispatchIndex(group, lane);

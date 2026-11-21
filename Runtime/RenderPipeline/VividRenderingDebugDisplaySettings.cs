@@ -120,6 +120,13 @@ namespace VividRP.Runtime
         private float m_ReGIRDebugOpacity = DefaultReGIRDebugOpacity;
 
         [SerializeField]
+        internal LumenDebugViewMode lumenDebugMode;
+        internal bool lumenCaptureVisualizationFeedback;
+
+        [SerializeField]
+        internal float lumenDebugExposure;
+
+        [SerializeField]
         private ReferencedPathTracingTransportDebugMode
             m_ReferencedPathTracingTransportDebugMode =
                 DefaultReferencedPathTracingTransportDebugMode;
@@ -607,6 +614,8 @@ namespace VividRP.Runtime
             || m_ClusterDebugMode != ClusterDebugMode.VisualizeOpaque
             || !Mathf.Approximately(m_ClusterDebugDistance, 1f)
             || reGIRDebugMode != DefaultReGIRDebugMode
+            || lumenDebugMode != LumenDebugViewMode.None
+            || lumenCaptureVisualizationFeedback
             || !Mathf.Approximately(m_ReGIRDebugOpacity, DefaultReGIRDebugOpacity)
             || referencedPathTracingTransportDebugMode
                 != DefaultReferencedPathTracingTransportDebugMode
@@ -667,6 +676,9 @@ namespace VividRP.Runtime
             m_ClusterDebugDistance = 1f;
             m_ReGIRDebugMode = DefaultReGIRDebugMode;
             m_ReGIRDebugOpacity = DefaultReGIRDebugOpacity;
+            lumenDebugMode = LumenDebugViewMode.None;
+            lumenCaptureVisualizationFeedback = false;
+            lumenDebugExposure = 0f;
             m_ReferencedPathTracingTransportDebugMode =
                 DefaultReferencedPathTracingTransportDebugMode;
             m_ReferencedPathTracingEnvironmentDebugMode =
@@ -1174,6 +1186,7 @@ namespace VividRP.Runtime
 
                 root.children.Add(CreateClusterFoldout(data));
                 root.children.Add(CreateReGIRFoldout(data));
+                root.children.Add(CreateLumenFoldout(data));
                 root.children.Add(
                     CreateReferencedPathTracingFoldout(data));
                 root.children.Add(CreateExposureFoldout(data));
@@ -1192,6 +1205,37 @@ namespace VividRP.Runtime
                 root.children.Add(CreateSliderFoldout(data));
                 root.children.Add(CreateVirtualTextureFoldout(data));
                 return root;
+            }
+
+            private static DebugUI.Foldout CreateLumenFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout { displayName = "Lumen Debug Views" };
+                foldout.children.Add(CreateEnumField(
+                    new NameAndTooltip { name = "View", tooltip = "Visualize realtime GI and its tracing data after post-processing." },
+                    () => data.lumenDebugMode, value => data.lumenDebugMode = value));
+                foldout.children.Add(new DebugUI.BoolField
+                {
+                    displayName = "Capture Visualization Feedback",
+                    tooltip = "Keep recording page accesses. Lumen Scene and Surface Cache also record high-resolution requests to the actual resident page.",
+                    getter = () => data.lumenCaptureVisualizationFeedback,
+                    setter = value => data.lumenCaptureVisualizationFeedback = value,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    displayName = "Exposure (EV)",
+                    getter = () => data.lumenDebugExposure,
+                    setter = value => data.lumenDebugExposure = value,
+                    min = () => -16f,
+                    max = () => 16f,
+                    isHiddenCallback = () => data.lumenDebugMode == LumenDebugViewMode.None,
+                });
+                foldout.children.Add(new DebugUI.Value
+                {
+                    displayName = "Legend",
+                    getter = () => LumenDebugViewPass.ModeDescription(data.lumenDebugMode),
+                    isHiddenCallback = () => data.lumenDebugMode == LumenDebugViewMode.None,
+                });
+                return foldout;
             }
 
             private static DebugUI.Foldout CreateClusterFoldout(VividRenderingDebugSettingsData data)

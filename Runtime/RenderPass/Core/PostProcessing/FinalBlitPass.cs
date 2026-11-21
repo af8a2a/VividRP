@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class FinalBlitPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
+    public class FinalBlitPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout, IRenderGraphPreparePass
     {
         private static readonly int HDROutputParamsId = Shader.PropertyToID("_HDROutputParams");
 
@@ -100,6 +100,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Material = CoreUtils.CreateEngineMaterial(resources.FinalBlitShader);
         }
 
+        public void PrepareRenderGraph(ContextContainer frameData)
+        {
+            if (frameData.Contains<VividLumenDebugFrameData>())
+                PassRecorder.RegisterImportedTextureForPass(this, frameData.Get<VividLumenDebugFrameData>().Output);
+        }
+
         public override void Record(UnsafePassContext context)
         {
             if (m_Material == null)
@@ -119,10 +125,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var unsafeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
             var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);
             var scaleBias = sourceHandle.GetScaleBias(sourceTextureUVOrigin, m_CameraBackBufferTextureUVOrigin);
+            var debug = context.TryGet<VividLumenDebugFrameData>(out var debugFrame) && debugFrame.Produced
+                ? debugFrame : null;
             cmd.SetRenderTarget(m_CameraBackBufferTarget);
             if (m_ShouldSetViewport)
                 cmd.SetViewport(m_Viewport);
-            Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
+            BlitDisplay(context, unsafeCmd, sourceHandle, scaleBias, m_Viewport, m_CameraBackBufferTextureUVOrigin, debug);
 
 #if UNITY_EDITOR
             var camera = context.Get<VividCameraData>()?.camera;
@@ -130,8 +138,9 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 var screenshotScaleBias = sourceHandle.GetScaleBias(sourceTextureUVOrigin, TextureUVOrigin.BottomLeft);
                 cmd.SetRenderTarget(screenshotTarget);
-                cmd.SetViewport(new Rect(0f, 0f, screenshotTarget.width, screenshotTarget.height));
-                Blitter.BlitTexture(unsafeCmd, sourceHandle, screenshotScaleBias, m_Material, 0);
+                var screenshotViewport = new Rect(0f, 0f, screenshotTarget.width, screenshotTarget.height);
+                cmd.SetViewport(screenshotViewport);
+                BlitDisplay(context, unsafeCmd, sourceHandle, screenshotScaleBias, screenshotViewport, TextureUVOrigin.BottomLeft, debug);
                 VividAdditionalCameraData.MarkFinalFrameScreenshotCaptureTargetWritten(camera);
 
                 cmd.SetRenderTarget(m_CameraBackBufferTarget);
@@ -139,6 +148,23 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetViewport(m_Viewport);
             }
 #endif
+        }
+
+        private void BlitDisplay(UnsafePassContext context, CommandBuffer cmd, RTHandle sourceHandle,
+            Vector4 scaleBias, Rect viewport, TextureUVOrigin targetOrigin, VividLumenDebugFrameData debug)
+        {
+            RTHandle debugHandle = debug?.Output ?? default;
+            bool overview = debugHandle != null && LumenDebugViewPass.IsOverview(debug.Mode);
+            if (debugHandle == null || overview)
+                Blitter.BlitTexture(cmd, sourceHandle, scaleBias, m_Material, 0);
+            if (debugHandle == null)
+                return;
+            if (overview)
+                cmd.SetViewport(LumenDebugViewPass.GetOverviewViewport(viewport));
+            var debugScaleBias = debugHandle.GetScaleBias(context.GetTextureUVOrigin(debug.Output), targetOrigin);
+            Blitter.BlitTexture(cmd, debugHandle, debugScaleBias, m_Material, 0);
+            if (overview)
+                cmd.SetViewport(viewport);
         }
 
         public override void Dispose()

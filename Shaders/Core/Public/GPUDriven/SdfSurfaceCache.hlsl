@@ -203,16 +203,4 @@ void VividGetSdfCardProjection(DiffuseSurface surface, uint slot, out uint slice
 }
 #endif
 
-#if defined(VIVID_SDF_CACHED_SUN) || defined(VIVID_SDF_SUN_UPDATE)
-// xy: baked card resolution, z: atlas columns. Each resident instance owns
-// six consecutive cards in the same face order as the material capture.
-float4 _SdfSunLayout;
-
-uint2 VividSdfSunAtlasPixel(uint card, uint2 pixel)
-{
-    uint columns = (uint)_SdfSunLayout.z;
-    return uint2(card % columns, card / columns) * uint2(_SdfSunLayout.xy) + pixel;
-}
-#endif
-
 #endif

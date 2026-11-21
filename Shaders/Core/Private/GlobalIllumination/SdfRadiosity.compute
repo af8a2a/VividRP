@@ -4,12 +4,20 @@
 #pragma kernel PublishSdfSurfaceRadiosityCards VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
 #pragma kernel ClearSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
 #pragma kernel RescaleSdfSurfaceRadiosity VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_UPDATE
+#pragma kernel PrepareRadiosityFeedbackProbesCS VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_FEEDBACK
+#pragma kernel TraceRadiosityFeedbackRaysCS VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_FEEDBACK
+#pragma kernel ResolveRadiosityFeedbackRaysCS VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_FEEDBACK VIVID_SDF_RADIOSITY_FEEDBACK_RESOLVE
+#pragma kernel IntegrateRadiosityFeedbackCS VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_FEEDBACK
+#pragma kernel ClearRadiosityFeedbackCS VIVID_SDF_SURFACE_CACHE VIVID_SDF_RADIOSITY_FEEDBACK
 #pragma kernel ClearSdfSkyRadianceBound VIVID_SDF_SCREEN_ONLY
 #pragma kernel MeasureSdfSkyRadianceBound VIVID_SDF_SCREEN_ONLY
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfScreenProbeReceiver.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
+#if defined(VIVID_SDF_RADIOSITY_FEEDBACK_RESOLVE)
+#include "SdfRadianceCacheCommon.hlsl"
+#endif
 
 RWStructuredBuffer<uint> _SdfSkyRadianceBound;
 uint _SdfSkyRadianceBoundSize;
@@ -46,14 +54,17 @@ void MeasureSdfSkyRadianceBound(uint3 id : SV_DispatchThreadID, uint lane : SV_G
         InterlockedMax(_SdfSkyRadianceBound[0], SkyRadianceBound[0]);
 }
 
-#if defined(VIVID_SDF_RADIOSITY_UPDATE)
+#if defined(VIVID_SDF_RADIOSITY_UPDATE) || defined(VIVID_SDF_RADIOSITY_FEEDBACK)
 RWTexture2D<float4> _SdfRadiosityOutput;
 uint _SdfRadiosityFirstCard;
-uint _SdfRadiositySamples;
 uint _SdfRadiositySeed;
+uint _SdfRadiosityCardCount;
+#endif
+
+#if defined(VIVID_SDF_RADIOSITY_UPDATE)
+uint _SdfRadiositySamples;
 uint _SdfRadiosityBatch;
 uint _SdfRadiosityBounce;
-uint _SdfRadiosityCardCount;
 float _SdfRadiosityPublishBlend;
 float4 _SdfRadiosityHistoryScale;
 
@@ -106,7 +117,7 @@ float4 GatherCardIndirect(uint card, uint2 cell)
     {
         float3 direction = CosineRayDirection(ray, rayCount, seed, basis);
         if (dot(receiver.normalWS, direction) > 0.0)
-            sum += TraceCardRadiance(origin, direction, receiver);
+            sum += TraceLegacyCardRadiance(origin, direction, receiver);
     }
     // p(w) = cos(theta) / PI, so mean incoming radiance estimates E / PI.
     // The receiving card's albedo is applied only when this cache is read at a hit.
@@ -181,5 +192,195 @@ void RescaleSdfSurfaceRadiosity(uint3 id : SV_DispatchThreadID)
     else
         old = 0.0;
     _SdfRadiosityOutput[pixel] = SdfRoundToNearestHalf(old);
+}
+#endif
+
+#if defined(VIVID_SDF_RADIOSITY_FEEDBACK)
+struct RadiosityFeedbackProbe
+{
+    float4 positionAndDepth;
+    float4 normal;
+};
+
+struct RadiosityFeedbackRay
+{
+    float3 direction;
+    float distance;
+    float3 normal;
+    uint level;
+};
+
+static const uint RadiosityProbesPerCard = RadiosityCardSize * RadiosityCardSize;
+static const float RadiositySurfaceBias = 0.10f; // 10 cm in LumenRadiosityDistanceFieldTracingCS.
+RWStructuredBuffer<RadiosityFeedbackProbe> _SdfRadiosityFeedbackProbesWrite;
+StructuredBuffer<RadiosityFeedbackProbe> _SdfRadiosityFeedbackProbes;
+RWStructuredBuffer<RadiosityFeedbackRay> _SdfRadiosityFeedbackRaysWrite;
+StructuredBuffer<RadiosityFeedbackRay> _SdfRadiosityFeedbackRays;
+RWStructuredBuffer<float3> _SdfRadiosityFeedbackRadianceWrite;
+StructuredBuffer<float3> _SdfRadiosityFeedbackRadiance;
+RWTexture2D<float> _SdfRadiosityFeedbackCount;
+uint _SdfRadiosityFeedbackDispatchWidth;
+groupshared float3 RadiosityIntegrated[RadiosityProbesPerCard];
+
+[numthreads(8, 8, 1)]
+void PrepareRadiosityFeedbackProbesCS(uint3 id : SV_DispatchThreadID, uint probe : SV_GroupIndex)
+{
+    uint card = _SdfFinalLightingOrder[_SdfRadiosityFirstCard + id.z];
+    uint work = _SdfRadiosityWork[0] + 2u * card;
+    uint instanceIndex = _SdfRadiosityWork[work];
+    uint slot = _SdfRadiosityWork[work + 1u];
+    uint slice, axis;
+    float3 lower, extent;
+    VividGetSdfCardProjection(_SdfDiffuseSurfaces[instanceIndex], slot, slice, axis, lower, extent);
+    uint2 size;
+    uint slices;
+    _SdfSurfaceAlbedoDepth.GetDimensions(size.x, size.y, slices);
+    uint2 pixel = RadiosityCardPixel(id.xy, size);
+    float4 packedNormal = _SdfSurfaceNormalCoverage.Load(int4(pixel, slice, 0));
+    VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+    RadiosityFeedbackProbe data = (RadiosityFeedbackProbe)0;
+    if (packedNormal.a > 0.0f && (instance.layerMask & _SdfDiffuseLayerMask) != 0u)
+    {
+        float depth = _SdfSurfaceAlbedoDepth.Load(int4(pixel, slice, 0)).a;
+        float2 uv = (float2(pixel) + 0.5f) / float2(size);
+        float3 relative = axis == 0u ? float3(depth, uv) : axis == 1u ? float3(uv.x, depth, uv.y) : float3(uv, depth);
+        float3 r0 = instance.worldToLocal0.xyz, r1 = instance.worldToLocal1.xyz, r2 = instance.worldToLocal2.xyz;
+        float3 delta = lower + relative * extent
+            - float3(instance.worldToLocal0.w, instance.worldToLocal1.w, instance.worldToLocal2.w);
+        float3 c0 = cross(r1, r2);
+        float3 position = (c0 * delta.x + cross(r2, r0) * delta.y + cross(r0, r1) * delta.z) / dot(r0, c0);
+        float3 normalLS = packedNormal.xyz * 2.0f - 1.0f;
+        if (all(isfinite(position)))
+        {
+            data.positionAndDepth = float4(position, 1.0f + depth);
+            data.normal = float4(SafeNormalize(normalLS.x * r0 + normalLS.y * r1 + normalLS.z * r2), 0.0f);
+        }
+    }
+    _SdfRadiosityFeedbackProbesWrite[id.z * RadiosityProbesPerCard + probe] = data;
+}
+
+uint RadiosityRayAddress(uint2 group, uint lane)
+{
+    return (group.x + group.y * _SdfRadiosityFeedbackDispatchWidth) * 64u + lane;
+}
+
+float3 RadiosityRayOrigin(RadiosityFeedbackProbe probe, float3 direction)
+{
+    return (probe.positionAndDepth.xyz + probe.normal.xyz * RadiositySurfaceBias) + direction * RadiositySurfaceBias;
+}
+
+[numthreads(64, 1, 1)]
+void TraceRadiosityFeedbackRaysCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint address = RadiosityRayAddress(group, lane);
+    uint probeIndex = address / RadiosityRays;
+    if (probeIndex >= _SdfRadiosityCardCount * RadiosityProbesPerCard)
+        return;
+
+    RadiosityFeedbackProbe probe = _SdfRadiosityFeedbackProbes[probeIndex];
+    RadiosityFeedbackRay ray = (RadiosityFeedbackRay)0;
+    ray.distance = FLT_MAX;
+    if (probe.positionAndDepth.w > 0.0f)
+    {
+        uint card = _SdfFinalLightingOrder[_SdfRadiosityFirstCard + probeIndex / RadiosityProbesPerCard];
+        uint seed = HashProbe(card * RadiosityProbesPerCard + probeIndex % RadiosityProbesPerCard
+            ^ _SdfRadiositySeed ^ (_SdfDiffuseFrame * 0x9e3779b9u));
+        ray.direction = CosineRayDirection(address % RadiosityRays, RadiosityRays, seed, GetLocalFrame(probe.normal.xyz));
+        VividGlobalSdfHit hit;
+        if (VividTraceGlobalSdf(RadiosityRayOrigin(probe, ray.direction), ray.direction,
+            RadiositySurfaceBias, _SdfDiffuseMaxDistance, hit, true, false))
+        {
+            ray.distance = hit.distance + 0.5f * hit.expandSurfaceAmount;
+            ray.normal = hit.normalWS;
+            ray.level = hit.level;
+        }
+    }
+    _SdfRadiosityFeedbackRaysWrite[address] = ray;
+}
+
+#if defined(VIVID_SDF_RADIOSITY_FEEDBACK_RESOLVE)
+[numthreads(64, 1, 1)]
+void ResolveRadiosityFeedbackRaysCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint address = RadiosityRayAddress(group, lane);
+    uint probeIndex = address / RadiosityRays;
+    if (probeIndex >= _SdfRadiosityCardCount * RadiosityProbesPerCard)
+        return;
+
+    RadiosityFeedbackProbe probe = _SdfRadiosityFeedbackProbes[probeIndex];
+    float3 radiance = 0.0f;
+    if (probe.positionAndDepth.w > 0.0f)
+    {
+        RadiosityFeedbackRay ray = _SdfRadiosityFeedbackRays[address];
+        if (ray.distance < FLT_MAX)
+        {
+            float3 position = RadiosityRayOrigin(probe, ray.direction) + ray.direction * ray.distance;
+            GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(position, ray.normal, ray.direction, ray.level);
+            radiance = lighting.sum;
+        }
+        else if (HasSkyTexture())
+            radiance = SampleSkyTexture(ray.direction, 0.0f);
+    }
+    _SdfRadiosityFeedbackRadianceWrite[address] = clamp(radiance, 0.0f, 65000.0f);
+}
+#endif
+
+float RadiosityFeedbackPlaneWeight(float3 WorldPosition, float3 WorldNormal, float3 ProbeWorldPosition)
+{
+    float4 TexelPlane = float4(WorldNormal, dot(ProbeWorldPosition, WorldNormal));
+    float PlaneDistance = abs(dot(float4(WorldPosition, -1), TexelPlane));
+    float RelativeDistance = max(PlaneDistance / (length(ProbeWorldPosition - WorldPosition) + .01f), .1f);
+    float DepthWeight = exp2(-100.0f * (RelativeDistance * RelativeDistance));
+    return DepthWeight > .01f ? 1 : 0;
+}
+
+[numthreads(8, 8, 1)]
+void IntegrateRadiosityFeedbackCS(uint3 id : SV_DispatchThreadID, uint lane : SV_GroupIndex)
+{
+    uint probeStart = id.z * RadiosityProbesPerCard;
+    uint probeIndex = probeStart + lane;
+    float3 sum = 0.0f;
+    [unroll] for (uint ray = 0u; ray < RadiosityRays; ++ray)
+        sum += _SdfRadiosityFeedbackRadiance[probeIndex * RadiosityRays + ray];
+    RadiosityIntegrated[lane] = sum / float(RadiosityRays);
+    GroupMemoryBarrierWithGroupSync();
+
+    uint card = _SdfFinalLightingOrder[_SdfRadiosityFirstCard + id.z];
+    uint2 pixel = RadiosityAtlasPixel(card, id.xy);
+    RadiosityFeedbackProbe probe = _SdfRadiosityFeedbackProbes[probeIndex];
+    float4 result = 0.0f;
+    float newFrames = 0.0f;
+    if (probe.positionAndDepth.w > 0.0f)
+    {
+        float weightSum = 2.0f;
+        float3 filtered = RadiosityIntegrated[lane] * weightSum;
+        const int2 offsets[4] = { int2(0, 1), int2(1, 0), int2(0, -1), int2(-1, 0) };
+        [unroll] for (uint tap = 0u; tap < 4u; ++tap)
+        {
+            int2 cell = int2(id.xy) + offsets[tap];
+            if (any(cell < 0) || any(cell >= int(RadiosityCardSize))) continue;
+            uint neighbor = uint(cell.x) + RadiosityCardSize * uint(cell.y);
+            RadiosityFeedbackProbe other = _SdfRadiosityFeedbackProbes[probeStart + neighbor];
+            if (other.positionAndDepth.w <= 0.0f || dot(probe.normal.xyz, other.normal.xyz) < 0.9f) continue;
+            float w = RadiosityFeedbackPlaneWeight(probe.positionAndDepth.xyz, probe.normal.xyz, other.positionAndDepth.xyz);
+            filtered += w * RadiosityIntegrated[neighbor];
+            weightSum += w;
+        }
+
+        float4 old = _SdfRadiosityOutput[pixel];
+        float frames = abs(old.a - probe.positionAndDepth.w) <= 0.002f ? _SdfRadiosityFeedbackCount[pixel] : 0.0f;
+        newFrames = min(frames + 1.0f, 4.0f);
+        float alpha = 1.0f / (1.0f + frames);
+        result = SdfRoundToNearestHalf(float4(lerp(old.rgb, filtered / weightSum, alpha), probe.positionAndDepth.w));
+    }
+    _SdfRadiosityOutput[pixel] = result;
+    _SdfRadiosityFeedbackCount[pixel] = newFrames;
+}
+
+[numthreads(8, 8, 1)]
+void ClearRadiosityFeedbackCS(uint3 id : SV_DispatchThreadID)
+{
+    _SdfRadiosityOutput[id.xy] = 0.0f;
+    _SdfRadiosityFeedbackCount[id.xy] = 0.0f;
 }
 #endif

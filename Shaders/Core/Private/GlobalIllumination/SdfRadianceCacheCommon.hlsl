@@ -262,74 +262,56 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
         accum.maximumWeight = CardSampleWeight;
         accum.instance = index;
     }
-    VividMeshSdfInstance inst = _MeshSdfInstances[index];
-    float3 a = inst.worldToLocal0.xyz, b = inst.worldToLocal1.xyz, c = inst.worldToLocal2.xyz;
     DiffuseSurface surface = _SdfDiffuseSurfaces[index];
     uint finalCard;
+    bool ready = TryGetFinalLightingCard(surface, slot, finalCard);
+    float3 emission = max(surface.emission.rgb, 0.0f);
     [branch]
-    if (TryGetFinalLightingCard(surface, slot, finalCard))
-    {
-        // A material side that is culled still contributes to CardSampleWeight.
-        // Keep its radiance black while preserving opaque coverage.
-        float4 lightWeights = TexelWeights;
-        if (surface.emission.w != 0.0f)
-        {
-            [unroll] for (uint tap = 0u; tap < 4u; ++tap)
-            {
-                if (lightWeights[tap] <= 0.0f) continue;
-                float3 normalLS = packedNormals[tap].xyz * 2.0f - 1.0f;
-                float3 normal = SafeNormalize(a * normalLS.x + b * normalLS.y + c * normalLS.z);
-                float3 originalNormal = packedNormals[tap].w < 0.75f ? -normal : normal;
-                if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
-                    lightWeights[tap] = 0.0f;
-            }
-        }
+    if (!ready && !any(emission > 0.0f)) return;
 
-        uint2 atlasOrigin = FinalLightingCardOrigin(finalCard);
-        if (all(lightWeights == TexelBilinearWeights))
+    // Culled material sides remain opaque and contribute black to the normalized result.
+    float4 lightWeights = TexelWeights;
+    if (surface.emission.w != 0.0f)
+    {
+        VividMeshSdfInstance inst = _MeshSdfInstances[index];
+        float3 a = inst.worldToLocal0.xyz, b = inst.worldToLocal1.xyz, c = inst.worldToLocal2.xyz;
+        [unroll] for (uint tap = 0u; tap < 4u; ++tap)
         {
-            uint atlasWidth, atlasHeight;
-            _SdfFinalLightingAtlas.GetDimensions(atlasWidth, atlasHeight);
-            float2 texel = clamp(float2(low) + FracUV + 0.5f, 0.5f, float2(width, height) - 0.5f);
-            float2 atlasUV = (float2(atlasOrigin) + texel) / float2(atlasWidth, atlasHeight);
-            accum.sum += CardSampleWeight * _SdfFinalLightingAtlas.SampleLevel(sampler_LinearClamp, atlasUV, 0.0f).rgb;
+            if (lightWeights[tap] <= 0.0f) continue;
+            float3 normalLS = packedNormals[tap].xyz * 2.0f - 1.0f;
+            float3 normal = SafeNormalize(a * normalLS.x + b * normalLS.y + c * normalLS.z);
+            float3 originalNormal = packedNormals[tap].w < 0.75f ? -normal : normal;
+            if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
+                lightWeights[tap] = 0.0f;
         }
-        else
-        {
-            // Depth and material masks produce nonseparable weights at card edges.
-            [unroll] for (uint tap = 0u; tap < 4u; ++tap)
-            {
-                float weight = NormalWeight * lightWeights[tap];
-                if (weight <= 0.0f) continue;
-                uint2 pixel = min(low + uint2(tap == 1u || tap == 2u, tap < 2u), uint2(width - 1u, height - 1u));
-                accum.sum += weight * _SdfFinalLightingAtlas.Load(int3(atlasOrigin + pixel, 0)).rgb;
-            }
-        }
+    }
+
+    [branch]
+    if (!ready)
+    {
+        accum.sum += NormalWeight * dot(lightWeights, 1.0f) * emission;
         return;
     }
 
-    float3 cx = cross(b,c), cy = cross(c,a), cz = cross(a,b);
-    VividMeshSdfHit hit = (VividMeshSdfHit)0;
-    hit.instanceIndex = index;
-    [loop] for (uint tap = 0u; tap < 4u; ++tap)
+    uint2 atlasOrigin = FinalLightingCardOrigin(finalCard);
+    if (all(lightWeights == TexelBilinearWeights))
     {
-        float weight = NormalWeight * TexelWeights[tap];
-        if (weight <= 0.0f) continue;
-        uint2 xy = min(low + uint2(tap == 1u || tap == 2u, tap < 2u), uint2(width-1u,height-1u));
-        float4 albedoDepth = _SdfSurfaceAlbedoDepth.Load(int4(xy,slice,0));
-        float4 normalCoverage = packedNormals[tap];
-        float3 normalLS = normalCoverage.xyz * 2.0f - 1.0f;
-        hit.normalWS = SafeNormalize(a * normalLS.x + b * normalLS.y + c * normalLS.z);
-        float3 originalNormal = normalCoverage.w < 0.75f ? -hit.normalWS : hit.normalWS;
-        float3 local = cardMin;
-        local[tangent.x] += (xy.x + 0.5f) / width * sizeLS[tangent.x];
-        local[tangent.y] += (xy.y + 0.5f) / height * sizeLS[tangent.y];
-        local[axis] += albedoDepth.w * sizeLS[axis];
-        float3 delta = local - float3(inst.worldToLocal0.w,inst.worldToLocal1.w,inst.worldToLocal2.w);
-        float3 position = (cx*delta.x + cy*delta.y + cz*delta.z) / dot(a,cx);
-        surface.albedoAndValid.rgb = albedoDepth.rgb;
-        if (VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
-            accum.sum += weight * EvaluateUncachedSdfSurfaceRadiance(position, hit.normalWS, hit, surface, uint3(xy,slot), -1.0f);
+        uint atlasWidth, atlasHeight;
+        _SdfFinalLightingAtlas.GetDimensions(atlasWidth, atlasHeight);
+        float2 texel = clamp(float2(low) + FracUV + 0.5f, 0.5f, float2(width, height) - 0.5f);
+        float2 atlasUV = (float2(atlasOrigin) + texel) / float2(atlasWidth, atlasHeight);
+        accum.sum += CardSampleWeight * _SdfFinalLightingAtlas.SampleLevel(sampler_LinearClamp, atlasUV, 0.0f).rgb;
+    }
+    else
+    {
+        // Depth and material masks produce nonseparable weights at card edges.
+        [unroll] for (uint tap = 0u; tap < 4u; ++tap)
+        {
+            float weight = NormalWeight * lightWeights[tap];
+            if (weight <= 0.0f) continue;
+            uint2 pixel = min(low + uint2(tap == 1u || tap == 2u, tap < 2u), uint2(width - 1u, height - 1u));
+            accum.sum += weight * _SdfFinalLightingAtlas.Load(int3(atlasOrigin + pixel, 0)).rgb;
+        }
     }
 }
 
@@ -438,7 +420,7 @@ float4 TraceFarProbe(float3 origin, float3 direction, float start, out uint inst
     float error;
     if (surface.albedoAndValid.a == 0.0 || !VividTrySampleSdfSurface(hit, position, surface, normal, originalNormal, texel, error))
         return 0.0;
-    float3 radiance = TraceSdfSurfaceRadiance(position, normal, originalNormal, direction, hit, surface, texel);
+    float3 radiance = LoadSdfSurfaceRadiance(originalNormal, direction, surface, texel);
     instance = hit.instanceIndex + 1u;
     return float4(clamp(radiance, 0.0, 65000.0), hit.distance);
 }

@@ -182,7 +182,7 @@ float3 VividGlobalSdfNormal(float3 positionWS, uint level)
 
 // directionWS is normalized. Distances are in world units.
 bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    out VividGlobalSdfHit hit, bool computeNormal = true)
+    out VividGlobalSdfHit hit, bool computeNormal = true, bool traceThinShells = true)
 {
     hit = (VividGlobalSdfHit)0;
     float3 entry = FLT_MAX;
@@ -275,7 +275,7 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
         if (level > 1u && entry.y > t)
             segmentEnd = min(segmentEnd, entry.y);
 
-        if (level != previousLevel && VividGlobalSdfSegmentHasThinShell(originWS, directionWS, t, segmentEnd, level))
+        if (traceThinShells && level != previousLevel && VividGlobalSdfSegmentHasThinShell(originWS, directionWS, t, segmentEnd, level))
         {
             VividMeshSdfHit meshHit;
             if (VividTraceMeshSdfSceneFiltered(originWS, directionWS, t, segmentEnd,

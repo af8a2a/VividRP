@@ -480,6 +480,20 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_RadiosityCardLimit = limit;
         }
 
+        internal Bounds GetLightingCardBounds(int card)
+        {
+            int work = (int)m_RadiosityWork[0] + 2 * card;
+            int instance = (int)m_RadiosityWork[work];
+            int slot = (int)m_RadiosityWork[work + 1];
+            var surface = m_DiffuseSurfaces[instance];
+            Vector3 size = surface.CardExtent;
+            Vector3 min = surface.CardMinAndFirst;
+            Bounds local = slot < VividSdfSurfaceCache.CardsPerMesh
+                ? new Bounds(min + 0.5f * size, size)
+                : SurfaceCache.GetLocalCardBounds((int)surface.CardMinAndFirst.w - 1, slot);
+            return VividMeshletRendererDatabase.TransformBounds(local, m_Instances[instance].LocalToWorld);
+        }
+
         private void CollectSources(VividMeshletRendererDatabase database)
         {
             m_FieldIndices.Clear();

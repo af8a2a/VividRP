@@ -74,11 +74,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField, HideInInspector]
         internal VividSdfSurfaceCacheParameter surfaceCache = new(null);
 
-        [Tooltip("Update instance card visibility for the directional sun in bounded batches. Unresolved card texels trace shadows at the hit.")]
+        // Retain serialization for profiles created before direct lighting moved to FinalLighting.
+        [HideInInspector]
         public BoolParameter cacheSunVisibility = new(false);
 
         [Tooltip("Additional diffuse bounce orders propagated through the Surface Cache. Zero uses direct light and emission at SDF hits.")]
         public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 8);
+
+        [Tooltip("Use Global SDF and continue indirect lighting in one feedback atlas when the graph provides Global SDF cards. Bounce orders above zero enable feedback.")]
+        public BoolParameter surfaceCacheRadiosityFeedback = new(true);
 
         [Tooltip("Cosine rays per radiosity texel and bounce sweep. Higher counts reduce fixed Surface Cache sampling error; use a smaller card update budget for expensive reference solves.")]
         public ClampedIntParameter surfaceCacheRadiositySamples = new(16, 16, 4096);

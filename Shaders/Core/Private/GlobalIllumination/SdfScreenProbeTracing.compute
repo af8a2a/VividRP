@@ -1,10 +1,8 @@
 #pragma use_dxc
 #pragma kernel TraceSdfDiffuseProbes
 #pragma kernel TraceSdfDiffuseCachedProbes VIVID_SDF_SURFACE_CACHE
-#pragma kernel TraceSdfDiffuseCachedSunProbes VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 #pragma kernel TraceSdfReceiverProbes VIVID_SDF_RECEIVER
 #pragma kernel TraceSdfReceiverCachedProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE
-#pragma kernel TraceSdfReceiverCachedSunProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 
 #pragma kernel ResetCompactTracesCS VIVID_COMPACT_PROBE_TRACE
 #pragma kernel SetupIndirectArgsCS VIVID_COMPACT_PROBE_TRACE
@@ -13,13 +11,10 @@
 #pragma kernel CompactScreenProbeTracesWithReceiverCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_RECEIVER VIVID_MESH_SDF_CARD_GRID
 #pragma kernel TraceMeshSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_MESH_SDF_CARD_GRID
 #pragma kernel TraceMeshSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_MESH_SDF_CARD_GRID
-#pragma kernel TraceMeshSdfSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN VIVID_MESH_SDF_CARD_GRID
-#pragma kernel TraceMeshSdfReceiverSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_SDF_CACHED_SUN VIVID_MESH_SDF_CARD_GRID
 #pragma kernel TraceGlobalSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
 #pragma kernel ResolveGlobalSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
 #pragma kernel ResolveGlobalSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER
 #pragma kernel FinalizeProbeGatherCS VIVID_COMPACT_PROBE_TRACE
-#pragma kernel FinalizeProbeGatherWithSunCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 
 #pragma kernel BuildScreenProbeClosestHZB VIVID_BUILD_CLOSEST_HZB
 #pragma kernel CaptureScreenProbeSceneColor VIVID_CAPTURE_SCENE_COLOR
@@ -448,7 +443,7 @@ bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver rec
 
 struct ProbeTraceAccumulation
 {
-    uint screenHits, skyHits, farHits, cachedSunHits;
+    uint screenHits, skyHits, farHits;
     uint valid;
     float validWeight;
     float3 sum;
@@ -647,21 +642,9 @@ ProbeRaySample ResolveProbeRay(uint2 tile, uint ray, uint seed, float3 position,
     else if (cacheCoverage < 1.0)
     {
         #if defined(VIVID_SDF_SURFACE_CACHE)
-            float3 exactLighting;
-            if (!TryLoadCardFinalLighting(surface, cardTexel, exactLighting))
-            {
-                float cachedVisibility = -1.0;
-                #if defined(VIVID_SDF_CACHED_SUN)
-                    if (!farSegment)
-                    {
-                        cachedVisibility = LoadCachedSunVisibility(surface, cardTexel, surfaceError, hit, lightingNormal);
-                        accum.cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
-                    }
-                #endif
-                exactLighting = EvaluateUncachedSdfSurfaceRadiance(hitPosition, lightingNormal, hit, surface, cardTexel, cachedVisibility);
-            }
+            float3 exactLighting = LoadCardFinalLightingOrEmission(surface, cardTexel);
         #else
-            float3 exactLighting = TraceHitLighting(hitPosition, lightingNormal, hit, surface, -1.0f);
+            float3 exactLighting = max(surface.emission.rgb, 0.0);
         #endif
         radiance = lerp(exactLighting, cacheLighting, cacheCoverage);
     }
@@ -894,9 +877,6 @@ void TraceProbe(uint3 id)
                 }
             }
         }
-        #if defined(VIVID_SDF_CACHED_SUN)
-            _SdfSunCacheHits[tile] = 0.0;
-        #endif
         return;
     }
 
@@ -963,24 +943,11 @@ void TraceProbe(uint3 id)
     _SdfDiffuseHitLighting[tile] = float4(min(accum.sum / normalization, 65000.0), confidence);
     // Sky and the far cache occupy the residual of the three source fractions.
     _SdfDiffuseTraceSources[tile] = float4(float3(accum.screenHits, accum.valid - accum.screenHits - accum.skyHits - accum.farHits, rayCount - accum.valid) / rayCount, 1.0);
-    #if defined(VIVID_SDF_CACHED_SUN)
-        _SdfSunCacheHits[tile] = float4(float(accum.cachedSunHits) / rayCount, 0.0, 0.0, 1.0);
-    #endif
 }
 
 #if defined(VIVID_SDF_SCREEN_ONLY)
 [numthreads(8, 8, 1)]
 void GatherScreenDiffuseProbes(uint3 id : SV_DispatchThreadID)
-{
-    TraceProbe(id);
-}
-#elif defined(VIVID_SDF_CACHED_SUN)
-[numthreads(8, 8, 1)]
-#if defined(VIVID_SDF_RECEIVER)
-void TraceSdfReceiverCachedSunProbes(uint3 id : SV_DispatchThreadID)
-#else
-void TraceSdfDiffuseCachedSunProbes(uint3 id : SV_DispatchThreadID)
-#endif
 {
     TraceProbe(id);
 }
@@ -1120,7 +1087,7 @@ void StoreCompactRay(uint2 tile, uint ray, uint address, ProbeRaySample result, 
     contribution.validWeight = accum.validWeight;
     contribution.movingWeight = accum.movingRays;
     contribution.sources = accum.valid | (accum.screenHits << 1u) | (accum.skyHits << 2u)
-        | (accum.farHits << 3u) | (accum.cachedSunHits << 4u);
+        | (accum.farHits << 3u);
     _SdfCompactContributions[address] = contribution;
 }
 
@@ -1201,12 +1168,8 @@ VividMeshSdfReceiver LoadCompactReceiver(CompactProbe probe)
 }
 
 [numthreads(64, 1, 1)]
-#if defined(VIVID_SDF_RECEIVER) && defined(VIVID_SDF_CACHED_SUN)
-void TraceMeshSdfReceiverSunCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
-#elif defined(VIVID_SDF_RECEIVER)
+#if defined(VIVID_SDF_RECEIVER)
 void TraceMeshSdfReceiverCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
-#elif defined(VIVID_SDF_CACHED_SUN)
-void TraceMeshSdfSunCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
 #else
 void TraceMeshSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
 #endif
@@ -1357,11 +1320,7 @@ void ResolveGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupI
 #endif
 
 [numthreads(8, 8, 1)]
-#if defined(VIVID_SDF_CACHED_SUN)
-void FinalizeProbeGatherWithSunCS(uint2 tile : SV_DispatchThreadID)
-#else
 void FinalizeProbeGatherCS(uint2 tile : SV_DispatchThreadID)
-#endif
 {
     uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
     if (any(tile >= uint2(grid.x, ProbeAtlasHeight(grid)))) return;
@@ -1373,16 +1332,13 @@ void FinalizeProbeGatherCS(uint2 tile : SV_DispatchThreadID)
         _SdfDiffuseHitLighting[tile] = 0.0;
         _SdfDiffuseTraceSources[tile] = 0.0;
         _SdfProbeMovingOutput[tile] = 0.0;
-        #if defined(VIVID_SDF_CACHED_SUN)
-            _SdfSunCacheHits[tile] = 0.0;
-        #endif
         return;
     }
 
     float3 sum = 0.0;
     float weight = 0.0;
     float moving = 0.0;
-    uint valid = 0u, screenHits = 0u, skyHits = 0u, farHits = 0u, sunHits = 0u;
+    uint valid = 0u, screenHits = 0u, skyHits = 0u, farHits = 0u;
     // Preserve the serial sum order, independent of the order each queue allocated its rays.
     [loop] for (uint ray = 0u; ray < CompactGroupSize; ++ray)
     {
@@ -1395,16 +1351,12 @@ void FinalizeProbeGatherCS(uint2 tile : SV_DispatchThreadID)
         screenHits += (contribution.sources >> 1u) & 1u;
         skyHits += (contribution.sources >> 2u) & 1u;
         farHits += (contribution.sources >> 3u) & 1u;
-        sunHits += (contribution.sources >> 4u) & 1u;
     }
     _SdfDiffuseGeometry[tile] = float4(probe.position, PackProbeNormal(probe.normal));
     _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1e-5, weight), 65000.0), saturate(weight / CompactGroupSize));
     _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits - skyHits - farHits, CompactGroupSize - valid)
         / CompactGroupSize, 1.0);
     _SdfProbeMovingOutput[tile] = saturate(moving / CompactGroupSize);
-    #if defined(VIVID_SDF_CACHED_SUN)
-        _SdfSunCacheHits[tile] = float4(float(sunHits) / CompactGroupSize, 0.0, 0.0, 1.0);
-    #endif
 }
 #endif
 

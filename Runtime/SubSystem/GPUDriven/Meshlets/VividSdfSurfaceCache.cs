@@ -41,6 +41,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private RTHandle m_AlbedoDepthHandle, m_NormalCoverageHandle;
         private GraphicsBuffer m_LocalCardTable;
         private int[] m_LocalCardCounts;
+        private Vector4[] m_LocalCardData;
 
         internal RTHandle AlbedoDepthHandle => m_AlbedoDepthHandle ??= RTHandles.Alloc(m_AlbedoDepth);
         internal RTHandle NormalCoverageHandle => m_NormalCoverageHandle ??= RTHandles.Alloc(m_NormalCoverage);
@@ -59,6 +60,15 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         {
             _ = LocalCardTable;
             return m_LocalCardCounts[firstCard / CardsPerMesh];
+        }
+
+        internal Bounds GetLocalCardBounds(int firstCard, int slot)
+        {
+            _ = LocalCardTable;
+            int row = (int)m_LocalCardData[firstCard / CardsPerMesh].x + 2 * (slot - CardsPerMesh);
+            Vector3 min = m_LocalCardData[row];
+            Vector3 size = m_LocalCardData[row + 1];
+            return new Bounds(min + 0.5f * size, size);
         }
         internal bool IsUsable => m_Entries != null && m_Entries.Length != 0
             && m_AlbedoDepth != null && m_NormalCoverage != null
@@ -147,6 +157,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             {
                 buffer.SetData(table);
                 m_LocalCardCounts = counts;
+                m_LocalCardData = table;
                 return buffer;
             }
             catch
@@ -164,6 +175,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_LocalCardTable?.Dispose();
             m_LocalCardTable = null;
             m_LocalCardCounts = null;
+            m_LocalCardData = null;
         }
 
         internal bool TryGetCards(Mesh mesh, Material material, out Bounds bounds, out int firstCard)

@@ -6,6 +6,20 @@
 #pragma kernel TraceSdfReceiverCachedProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE
 #pragma kernel TraceSdfReceiverCachedSunProbes VIVID_SDF_RECEIVER VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
 
+#pragma kernel ResetCompactTracesCS VIVID_COMPACT_PROBE_TRACE
+#pragma kernel SetupIndirectArgsCS VIVID_COMPACT_PROBE_TRACE
+#pragma kernel CompactScreenProbeTracesCS VIVID_COMPACT_PROBE_TRACE
+#pragma kernel CompactScreenProbeTracesWithReceiverCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_RECEIVER
+#pragma kernel TraceMeshSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
+#pragma kernel TraceMeshSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER
+#pragma kernel TraceMeshSdfSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
+#pragma kernel TraceMeshSdfReceiverSunCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER VIVID_SDF_CACHED_SUN
+#pragma kernel TraceGlobalSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
+#pragma kernel ResolveGlobalSdfCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE
+#pragma kernel ResolveGlobalSdfReceiverCompactedCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_RECEIVER
+#pragma kernel FinalizeProbeGatherCS VIVID_COMPACT_PROBE_TRACE
+#pragma kernel FinalizeProbeGatherWithSunCS VIVID_COMPACT_PROBE_TRACE VIVID_SDF_SURFACE_CACHE VIVID_SDF_CACHED_SUN
+
 #pragma kernel BuildScreenProbeClosestHZB VIVID_BUILD_CLOSEST_HZB
 #pragma kernel CaptureScreenProbeSceneColor VIVID_CAPTURE_SCENE_COLOR
 #pragma kernel TraceLumenScreenRays VIVID_LUMEN_SCREEN
@@ -249,6 +263,36 @@ void StoreFirstHitDiagnostic(uint2 tile, uint ray, float3 origin, float3 directi
 }
 
 #if !defined(VIVID_SDF_SCREEN_ONLY)
+#if defined(VIVID_SDF_SURFACE_CACHE)
+float ProbeSdfStart(float screenDistance)
+{
+    return _SdfLumenScreenTrace != 0u && _SdfDiffuseUseScreenRays != 0u
+        ? max(0.0001f, screenDistance - 0.10f) : 0.0f;
+}
+
+bool TraceProbeMeshDetail(float3 origin, float3 direction, VividMeshSdfReceiver receiver,
+    float screenStart, float detailEnd, out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete)
+{
+    hit = (VividMeshSdfHit)0;
+    advancedReceiver = incomplete = false;
+    if (!(screenStart < detailEnd)) return false;
+    return VividTraceMeshSdfSceneInternal(origin, direction, screenStart, detailEnd,
+        _SdfDiffuseLayerMask, 0.0f, false, receiver, hit, advancedReceiver, incomplete);
+}
+
+bool TraceProbeGlobal(float3 origin, float3 direction, float start, float end, inout VividMeshSdfHit hit)
+{
+    VividGlobalSdfHit global;
+    if (start >= end || !VividTraceGlobalSdf(origin, direction, start, end, global)) return false;
+    hit.distance = global.distance;
+    hit.normalWS = global.normalWS;
+    // The card gather needs the distance clipmap index before it resolves an owner.
+    hit.instanceIndex = 0xffffffffu;
+    hit.signMode = global.level;
+    return true;
+}
+#endif
+
 bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver receiver, float screenDistance,
     uint screenState, float nearLimit, bool stopAtCache, out VividMeshSdfHit hit, out bool advancedReceiver, out bool incomplete,
     out uint traceState, out float tracedDistance)
@@ -260,24 +304,13 @@ bool TraceSdfGatherHit(float3 origin, float3 direction, VividMeshSdfReceiver rec
     {
         float detailEnd = min(nearLimit, _SdfMeshDetailDistance);
         tracedDistance = detailEnd;
-        float screenStart = _SdfLumenScreenTrace != 0u && _SdfDiffuseUseScreenRays != 0u
-            ? max(0.0001f, screenDistance - 0.10f) : 0.0f;
-        hit = (VividMeshSdfHit)0;
-        incomplete = false;
-        bool detailHit = false;
-        if (screenStart < detailEnd)
-            detailHit = VividTraceMeshSdfSceneInternal(origin, direction, screenStart, detailEnd,
-                _SdfDiffuseLayerMask, 0.0f, false, receiver, hit, advancedReceiver, incomplete);
+        float screenStart = ProbeSdfStart(screenDistance);
+        bool detailHit = TraceProbeMeshDetail(origin, direction, receiver, screenStart, detailEnd,
+            hit, advancedReceiver, incomplete);
         if (detailHit || incomplete || detailEnd >= nearLimit) return detailHit;
-        VividGlobalSdfHit global;
         tracedDistance = nearLimit;
-        if (max(screenStart, detailEnd) >= nearLimit || !VividTraceGlobalSdf(origin, direction, max(screenStart, detailEnd), nearLimit, global)) return false;
+        if (!TraceProbeGlobal(origin, direction, max(screenStart, detailEnd), nearLimit, hit)) return false;
         traceState = RayGlobalCandidate;
-        hit.distance = global.distance;
-        hit.normalWS = global.normalWS;
-        // The card gather needs the distance clipmap index before it resolves an owner.
-        hit.instanceIndex = 0xffffffffu;
-        hit.signMode = global.level;
         return true;
     }
     #endif
@@ -363,6 +396,249 @@ struct ProbeRaySample
     float inverseRelativePdf;
 };
 
+#if !defined(VIVID_SDF_SCREEN_ONLY)
+static const uint TraceStageLegacy = 0u;
+static const uint TraceStageMesh = 1u;
+static const uint TraceStageGlobal = 2u;
+
+ProbeRaySample ResolveProbeRay(uint2 tile, uint ray, uint seed, float3 position, float3 normal, float3 origin,
+    float receiverSpeed, VividMeshSdfReceiver receiver, bool useSky, uint screenState, uint traceState,
+    VividMeshSdfHit hit, bool advancedReceiver, bool incomplete, bool traced, float tracedDistance,
+    float3 worldRadiance, float worldDistance, uint traceStage, ProbeRaySample result, inout ProbeTraceAccumulation accum)
+{
+    float3 direction = result.direction;
+    float inverseRelativePdf = result.inverseRelativePdf;
+    uint rayState = screenState | traceState;
+    if (!traced || incomplete)
+    {
+        uint missState = RayMiss;
+        float3 radiance = 0.0;
+        float farDistance = 0.0;
+        #if defined(VIVID_SDF_SURFACE_CACHE)
+            [branch]
+            if (worldDistance > 0.0)
+            {
+                radiance = worldRadiance;
+                farDistance = worldDistance;
+                missState |= RayFarCache;
+                accum.farHits++;
+            }
+            else if (traceStage == TraceStageLegacy && _SdfScreenProbeFullSphere == 0u && _SdfMeshDetailDistance <= 0.0 && _SdfFarTraceDistance > 0.0 && !incomplete && screenState == 0u)
+            {
+                if (TryLoadFarRadiance(origin, direction, radiance, farDistance))
+                {
+                    missState |= RayFarCache;
+                    accum.farHits++;
+                }
+            }
+        #endif
+        [branch]
+        if (missState == RayMiss && useSky)
+        {
+            float skyStart = _SdfMeshDetailDistance > 0.0 && (traceState & RayFarSegment) == 0u ? 0.0 : tracedDistance;
+            missState = ResolveSdfSkyMiss(origin, direction, skyStart, incomplete, screenState, receiver);
+        }
+        if (missState == RaySkyVisible)
+        {
+            radiance = clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0);
+            accum.skyHits++;
+        }
+        if (missState == RaySkyVisible || (missState & RayFarCache) != 0u)
+        {
+            accum.sum += inverseRelativePdf * radiance;
+            accum.distant += radiance;
+            accum.distantDirection = direction;
+            if (traceStage == TraceStageLegacy && _SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
+                accum.moments += ProbeSampleMoments(radiance, direction, normal);
+            accum.valid++;
+            accum.validWeight += inverseRelativePdf;
+        }
+        result.state = rayState | missState | (incomplete ? RayTraceIncomplete : 0u);
+        result.distance = farDistance;
+        result.radiance = radiance;
+        if (traceStage == TraceStageLegacy && _SdfDiffuseRecordFirstHitDiagnostics != 0u)
+            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
+        return result;
+    }
+
+    #if defined(VIVID_SDF_SURFACE_CACHE)
+    if (traceStage == TraceStageGlobal || (traceStage == TraceStageLegacy
+        && _SdfUseGlobalClipmap == 2u && (traceState & RayGlobalCandidate) != 0u && hit.instanceIndex == 0xffffffffu))
+    {
+        float3 endpoint = origin + direction * hit.distance;
+        GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(endpoint, hit.normalWS, direction, hit.signMode);
+        result.distance = hit.distance;
+        result.hitNormal = hit.normalWS;
+        result.hitInstance = lighting.instance;
+        result.radiance = lighting.sum;
+        // EvaluateGlobalDistanceFieldHit always writes an opaque hit distance.
+        // No contributing Mesh Card means covered black for this direction.
+        result.state = rayState | RaySdfHit;
+        accum.valid++;
+        accum.validWeight += inverseRelativePdf;
+        accum.sum += inverseRelativePdf * lighting.sum;
+        if (_SdfDirectionalCacheEnabled != 0u && lighting.instance != 0xffffffffu)
+            accum.movingRays += inverseRelativePdf * RelativeHitMotion(receiverSpeed, InstanceSpeed(lighting.instance, endpoint), position);
+        if (traceStage == TraceStageLegacy && _SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
+            accum.moments += ProbeSampleMoments(lighting.sum, direction, normal);
+        if (traceStage == TraceStageLegacy && _SdfDiffuseRecordFirstHitDiagnostics != 0u)
+        {
+            hit.instanceIndex = lighting.instance;
+            if (lighting.total > 0.0f)
+            {
+                VividMeshSdfInstance inst = _MeshSdfInstances[lighting.instance];
+                hit.entityId = inst.entityId;
+                hit.signMode = _MeshSdfFields[inst.fieldIndex].signMode;
+            }
+            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, lighting.total > 0.0f ? 0u : 6u, advancedReceiver);
+        }
+        return result;
+    }
+    #endif
+    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
+    bool backface = dot(hit.normalWS, direction) >= 0.0;
+    bool insideShellExit = false;
+    // A biased receiver can start inside a neighboring artificial shell.
+    // Only that exit is reliable here; retain rejection for outside starts.
+    if (backface && hit.signMode == 2u && surface.albedoAndValid.a != 0.0)
+    {
+        VividMeshSdfInstance instance = _MeshSdfInstances[hit.instanceIndex];
+        VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
+        float4 shellOrigin = float4(origin, 1.0);
+        float3 grid = float3(dot(instance.worldToLocal0, shellOrigin), dot(instance.worldToLocal1, shellOrigin),
+            dot(instance.worldToLocal2, shellOrigin)) - field.originAndVoxelSize.xyz;
+        float3 extent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
+        if (all(grid >= 0.0) && all(grid <= extent))
+            insideShellExit = VividMeshSdfSample(field, grid) <= 0.0;
+    }
+    // Recover the captured material normal below: a culled side is covered black.
+    if (surface.albedoAndValid.a == 0.0 || (backface && !insideShellExit))
+    {
+        result.state = rayState | (backface ? RayBackface : RayMissingSurface);
+        result.distance = hit.distance;
+        if (traceStage == TraceStageLegacy && _SdfDiffuseRecordFirstHitDiagnostics != 0u)
+            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, backface ? 0u : 6u, advancedReceiver);
+        return result;
+    }
+    float3 hitPosition = origin + hit.distance * direction;
+    float3 lightingNormal = hit.normalWS;
+    float3 originalNormal = lightingNormal;
+    #if defined(VIVID_SDF_SURFACE_CACHE)
+        uint3 cardTexel;
+        float surfaceError;
+        uint rejection;
+        if (!VividTrySampleSdfSurface(hit, hitPosition, surface, lightingNormal, originalNormal, cardTexel, surfaceError,
+            traceStage == TraceStageLegacy && _SdfDiffuseRecordFirstHitDiagnostics != 0u, rejection))
+        {
+            result.state = rayState | RayMissingSurface;
+            result.distance = hit.distance;
+            if (traceStage == TraceStageLegacy && _SdfDiffuseRecordFirstHitDiagnostics != 0u)
+                StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, rejection, advancedReceiver);
+            return result;
+        }
+    #endif
+    if (traceStage == TraceStageLegacy && _SdfDiffuseRecordFirstHitDiagnostics != 0u)
+        StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
+    accum.valid++;
+    accum.validWeight += inverseRelativePdf;
+    if (traceStage == TraceStageLegacy && _SdfDiffuseOffscreenOnly != 0u)
+    {
+        float4 hitClip = mul(_SdfDiffuseVP, float4(hitPosition, 1.0));
+        if (hitClip.w > 0.0 && all(abs(hitClip.xy) <= hitClip.w))
+        {
+            result.state = screenState | RayOffscreenOnlyRejected;
+            result.distance = hit.distance;
+            result.direction = 0.0;
+            result.bin = 0u;
+            result.inverseRelativePdf = 1.0;
+            return result;
+        }
+    }
+    bool farSegment = traceStage == TraceStageLegacy && (traceState & RayFarSegment) != 0u;
+    float cacheCoverage = 0.0;
+    float3 cacheLighting = 0.0;
+    #if defined(VIVID_SDF_SURFACE_CACHE)
+        if (farSegment && _SdfScreenProbeFullSphere == 0u)
+            cacheLighting = ReconstructFarRadiance(origin + _SdfDiffuseMaxDistance * direction, hitPosition, hit, cacheCoverage);
+    #endif
+    float3 radiance = cacheLighting;
+    bool visibleMaterialSide = VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -direction);
+    if (!visibleMaterialSide)
+    {
+        radiance = 0.0;
+        rayState |= RayMaterialBackface;
+    }
+    else if (cacheCoverage < 1.0)
+    {
+        float cachedVisibility = -1.0;
+        #if defined(VIVID_SDF_CACHED_SUN)
+            if (!farSegment)
+            {
+                cachedVisibility = LoadCachedSunVisibility(surface, cardTexel, surfaceError, hit, lightingNormal);
+                accum.cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
+            }
+        #endif
+        #if defined(VIVID_SDF_SURFACE_CACHE)
+            float3 exactLighting = TraceSdfSurfaceRadiance(hitPosition, lightingNormal, originalNormal,
+                direction, hit, surface, cardTexel, cachedVisibility);
+        #else
+            float3 exactLighting = TraceHitLighting(hitPosition, lightingNormal, hit, surface, cachedVisibility);
+        #endif
+        radiance = lerp(exactLighting, cacheLighting, cacheCoverage);
+    }
+    if (farSegment)
+    {
+        accum.distant += radiance;
+        accum.distantDirection = direction;
+        accum.farHits++;
+        if (cacheCoverage > 0.0)
+            rayState |= RayFarCache;
+    }
+    else if (traceStage == TraceStageLegacy && _SdfRestirEnabled != 0u)
+    {
+        RestirSample sample;
+        sample.position = hitPosition;
+        sample.normal = hit.normalWS;
+        sample.radiance = radiance;
+        sample.fromScreen = false;
+        // Target and the original proposal both contain the receiver cosine.
+        RestirUpdate(accum.reservoir, accum.reservoirWeightSum, sample, RestirLuminance(radiance), 0u,
+            RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));
+    }
+    if (_SdfDirectionalCacheEnabled != 0u)
+        accum.movingRays += inverseRelativePdf * RelativeHitMotion(receiverSpeed, InstanceSpeed(hit.instanceIndex, hitPosition), position);
+    result.state = rayState | RaySdfHit;
+    result.distance = hit.distance;
+    result.radiance = radiance;
+    result.hitNormal = hit.normalWS;
+    result.hitInstance = hit.instanceIndex;
+    accum.sum += inverseRelativePdf * radiance;
+    if (traceStage == TraceStageLegacy && _SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
+        accum.moments += ProbeSampleMoments(radiance, direction, normal);
+    return result;
+}
+#endif
+
+ProbeRaySample InitProbeRay(float3 direction, uint bin, float inverseRelativePdf)
+{
+    ProbeRaySample result = (ProbeRaySample)0;
+    result.hitInstance = 0xffffffffu;
+    result.direction = direction;
+    result.bin = bin;
+    result.inverseRelativePdf = inverseRelativePdf;
+    return result;
+}
+
+float ProbeReceiverSpeed(uint2 pixel, float3 position)
+{
+#if defined(VIVID_SDF_RECEIVER)
+    uint receiverIndex = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    if (_SdfDirectionalCacheEnabled != 0u && receiverIndex < _SdfReceiverCount)
+        return InstanceSpeed(_SdfReceiverEntities[receiverIndex].z, position);
+#endif
+    return 0.0;
+}
+
 ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
     float3 position, float3 normal, float3 origin, float receiverSpeed,
 #if !defined(VIVID_SDF_SCREEN_ONLY)
@@ -371,11 +647,7 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
     uint worldLevel, bool useSky, float3 direction, uint bin, float inverseRelativePdf,
     inout ProbeTraceAccumulation accum)
 {
-    ProbeRaySample result = (ProbeRaySample)0;
-    result.hitInstance = 0xffffffffu;
-    result.direction = direction;
-    result.bin = bin;
-    result.inverseRelativePdf = inverseRelativePdf;
+    ProbeRaySample result = InitProbeRay(direction, bin, inverseRelativePdf);
     uint screenState = 0u;
     float screenDistance = FLT_MAX;
     bool reachedRadianceCache = false;
@@ -492,212 +764,9 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
         if (SampleWorldCache(cachePosition, direction, worldLevel, worldRadiance, worldDistance)) break;
         worldDistance = 0.0;
     }
-    uint rayState = screenState | traceState;
-    if (!traced || incomplete)
-    {
-        uint missState = RayMiss;
-        float3 radiance = 0.0;
-        float farDistance = 0.0;
-        #if defined(VIVID_SDF_SURFACE_CACHE)
-            [branch]
-            if (worldDistance > 0.0)
-            {
-                radiance = worldRadiance;
-                farDistance = worldDistance;
-                missState |= RayFarCache;
-                accum.farHits++;
-            }
-            else if (_SdfScreenProbeFullSphere == 0u && _SdfMeshDetailDistance <= 0.0 && _SdfFarTraceDistance > 0.0 && !incomplete && screenState == 0u)
-            {
-                if (TryLoadFarRadiance(origin, direction, radiance, farDistance))
-                {
-                    missState |= RayFarCache;
-                    accum.farHits++;
-                }
-            }
-        #endif
-        [branch]
-        if (missState == RayMiss && useSky)
-        {
-            float skyStart = _SdfMeshDetailDistance > 0.0 && (traceState & RayFarSegment) == 0u ? 0.0 : tracedDistance;
-            missState = ResolveSdfSkyMiss(origin, direction, skyStart, incomplete, screenState, receiver);
-        }
-        if (missState == RaySkyVisible)
-        {
-            radiance = clamp(SampleSkyTexture(direction, 0.0), 0.0, 65000.0);
-            accum.skyHits++;
-        }
-        if (missState == RaySkyVisible || (missState & RayFarCache) != 0u)
-        {
-            accum.sum += inverseRelativePdf * radiance;
-            accum.distant += radiance;
-            accum.distantDirection = direction;
-            if (_SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
-                accum.moments += ProbeSampleMoments(radiance, direction, normal);
-            accum.valid++;
-            accum.validWeight += inverseRelativePdf;
-        }
-        result.state = rayState | missState | (incomplete ? RayTraceIncomplete : 0u);
-        result.distance = farDistance;
-        result.radiance = radiance;
-        if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
-            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
-        return result;
-    }
-
-    #if defined(VIVID_SDF_SURFACE_CACHE)
-    if (_SdfUseGlobalClipmap == 2u && (traceState & RayGlobalCandidate) != 0u && hit.instanceIndex == 0xffffffffu)
-    {
-        float3 endpoint = origin + direction * hit.distance;
-        GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(endpoint, hit.normalWS, direction, hit.signMode);
-        result.distance = hit.distance;
-        result.hitNormal = hit.normalWS;
-        result.hitInstance = lighting.instance;
-        result.radiance = lighting.sum;
-        // EvaluateGlobalDistanceFieldHit always writes an opaque hit distance.
-        // No contributing Mesh Card means covered black for this direction.
-        result.state = rayState | RaySdfHit;
-        accum.valid++;
-        accum.validWeight += inverseRelativePdf;
-        accum.sum += inverseRelativePdf * lighting.sum;
-        if (_SdfDirectionalCacheEnabled != 0u && lighting.instance != 0xffffffffu)
-            accum.movingRays += inverseRelativePdf * RelativeHitMotion(receiverSpeed, InstanceSpeed(lighting.instance, endpoint), position);
-        if (_SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
-            accum.moments += ProbeSampleMoments(lighting.sum, direction, normal);
-        if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
-        {
-            hit.instanceIndex = lighting.instance;
-            if (lighting.total > 0.0f)
-            {
-                VividMeshSdfInstance inst = _MeshSdfInstances[lighting.instance];
-                hit.entityId = inst.entityId;
-                hit.signMode = _MeshSdfFields[inst.fieldIndex].signMode;
-            }
-            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, lighting.total > 0.0f ? 0u : 6u, advancedReceiver);
-        }
-        return result;
-    }
-    #endif
-    DiffuseSurface surface = _SdfDiffuseSurfaces[hit.instanceIndex];
-    bool backface = dot(hit.normalWS, direction) >= 0.0;
-    bool insideShellExit = false;
-    // A biased receiver can start inside a neighboring artificial shell.
-    // Only that exit is reliable here; retain rejection for outside starts.
-    if (backface && hit.signMode == 2u && surface.albedoAndValid.a != 0.0)
-    {
-        VividMeshSdfInstance instance = _MeshSdfInstances[hit.instanceIndex];
-        VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
-        float4 shellOrigin = float4(origin, 1.0);
-        float3 grid = float3(dot(instance.worldToLocal0, shellOrigin), dot(instance.worldToLocal1, shellOrigin),
-            dot(instance.worldToLocal2, shellOrigin)) - field.originAndVoxelSize.xyz;
-        float3 extent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
-        if (all(grid >= 0.0) && all(grid <= extent))
-            insideShellExit = VividMeshSdfSample(field, grid) <= 0.0;
-    }
-    // Recover the captured material normal below: a culled side is covered black.
-    if (surface.albedoAndValid.a == 0.0 || (backface && !insideShellExit))
-    {
-        result.state = rayState | (backface ? RayBackface : RayMissingSurface);
-        result.distance = hit.distance;
-        if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
-            StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, backface ? 0u : 6u, advancedReceiver);
-        return result;
-    }
-    float3 hitPosition = origin + hit.distance * direction;
-    float3 lightingNormal = hit.normalWS;
-    float3 originalNormal = lightingNormal;
-    #if defined(VIVID_SDF_SURFACE_CACHE)
-        uint3 cardTexel;
-        float surfaceError;
-        uint rejection;
-        if (!VividTrySampleSdfSurface(hit, hitPosition, surface, lightingNormal, originalNormal, cardTexel, surfaceError,
-            _SdfDiffuseRecordFirstHitDiagnostics != 0u, rejection))
-        {
-            result.state = rayState | RayMissingSurface;
-            result.distance = hit.distance;
-            if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
-                StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, rejection, advancedReceiver);
-            return result;
-        }
-    #endif
-    if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
-        StoreFirstHitDiagnostic(tile, ray, origin, direction, hit, 0u, advancedReceiver);
-    accum.valid++;
-    accum.validWeight += inverseRelativePdf;
-    if (_SdfDiffuseOffscreenOnly != 0u)
-    {
-        float4 hitClip = mul(_SdfDiffuseVP, float4(hitPosition, 1.0));
-        if (hitClip.w > 0.0 && all(abs(hitClip.xy) <= hitClip.w))
-        {
-            result.state = screenState | RayOffscreenOnlyRejected;
-            result.distance = hit.distance;
-            result.direction = 0.0;
-            result.bin = 0u;
-            result.inverseRelativePdf = 1.0;
-            return result;
-        }
-    }
-    bool farSegment = (traceState & RayFarSegment) != 0u;
-    float cacheCoverage = 0.0;
-    float3 cacheLighting = 0.0;
-    #if defined(VIVID_SDF_SURFACE_CACHE)
-        if (farSegment && _SdfScreenProbeFullSphere == 0u)
-            cacheLighting = ReconstructFarRadiance(origin + _SdfDiffuseMaxDistance * direction, hitPosition, hit, cacheCoverage);
-    #endif
-    float3 radiance = cacheLighting;
-    bool visibleMaterialSide = VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -direction);
-    if (!visibleMaterialSide)
-    {
-        radiance = 0.0;
-        rayState |= RayMaterialBackface;
-    }
-    else if (cacheCoverage < 1.0)
-    {
-        float cachedVisibility = -1.0;
-        #if defined(VIVID_SDF_CACHED_SUN)
-            if (!farSegment)
-            {
-                cachedVisibility = LoadCachedSunVisibility(surface, cardTexel, surfaceError, hit, lightingNormal);
-                accum.cachedSunHits += cachedVisibility >= 0.0 ? 1u : 0u;
-            }
-        #endif
-        #if defined(VIVID_SDF_SURFACE_CACHE)
-            float3 exactLighting = TraceSdfSurfaceRadiance(hitPosition, lightingNormal, originalNormal,
-                direction, hit, surface, cardTexel, cachedVisibility);
-        #else
-            float3 exactLighting = TraceHitLighting(hitPosition, lightingNormal, hit, surface, cachedVisibility);
-        #endif
-        radiance = lerp(exactLighting, cacheLighting, cacheCoverage);
-    }
-    if (farSegment)
-    {
-        accum.distant += radiance;
-        accum.distantDirection = direction;
-        accum.farHits++;
-        if (cacheCoverage > 0.0)
-            rayState |= RayFarCache;
-    }
-    else if (_SdfRestirEnabled != 0u)
-    {
-        RestirSample sample;
-        sample.position = hitPosition;
-        sample.normal = hit.normalWS;
-        sample.radiance = radiance;
-        sample.fromScreen = false;
-        // Target and the original proposal both contain the receiver cosine.
-        RestirUpdate(accum.reservoir, accum.reservoirWeightSum, sample, RestirLuminance(radiance), 0u,
-            RestirRandom(seed ^ (0xca5a826bu * (ray + 1u))));
-    }
-    if (_SdfDirectionalCacheEnabled != 0u)
-        accum.movingRays += inverseRelativePdf * RelativeHitMotion(receiverSpeed, InstanceSpeed(hit.instanceIndex, hitPosition), position);
-    result.state = rayState | RaySdfHit;
-    result.distance = hit.distance;
-    result.radiance = radiance;
-    result.hitNormal = hit.normalWS;
-    result.hitInstance = hit.instanceIndex;
-    accum.sum += inverseRelativePdf * radiance;
-    if (_SdfDiffuseDirectionalProbes != 0u && _SdfDirectionalCacheEnabled == 0u)
-        accum.moments += ProbeSampleMoments(radiance, direction, normal);
+    return ResolveProbeRay(tile, ray, seed, position, normal, origin, receiverSpeed, receiver, useSky,
+        screenState, traceState, hit, advancedReceiver, incomplete, traced, tracedDistance,
+        worldRadiance, worldDistance, TraceStageLegacy, result, accum);
     #else
         result.state = screenState | RayMiss;
         if (_SdfDiffuseRecordFirstHitDiagnostics != 0u)
@@ -763,12 +832,7 @@ void TraceProbe(uint3 id)
             receiver = LoadSdfReceiver(receiverPixel, position, normal);
     #endif
     uint seed = ProbeSeed(tile);
-    float receiverSpeed = 0.0;
-    #if defined(VIVID_SDF_RECEIVER)
-        uint receiverIndex = _SdfReceiverVisibility.Load(int3(receiverPixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
-        if (_SdfDirectionalCacheEnabled != 0u && receiverIndex < _SdfReceiverCount)
-            receiverSpeed = InstanceSpeed(_SdfReceiverEntities[receiverIndex].z, position);
-    #endif
+    float receiverSpeed = ProbeReceiverSpeed(receiverPixel, position);
     ProbeTraceAccumulation accum = (ProbeTraceAccumulation)0;
     #if defined(VIVID_SDF_SCREEN_ONLY)
         const bool useSky = false;
@@ -860,6 +924,400 @@ void TraceSdfDiffuseProbes(uint3 id : SV_DispatchThreadID)
 #endif
 {
     TraceProbe(id);
+}
+#endif
+
+#if defined(VIVID_COMPACT_PROBE_TRACE)
+// Keep the strides in sync with the transient buffers in SdfDiffuseGatherPass.
+struct CompactProbe
+{
+    float3 position;
+    uint valid;
+    float3 normal;
+    uint worldLevel;
+    uint2 pixel;
+    float receiverSpeed;
+    uint padding;
+};
+
+struct CompactContribution
+{
+    float3 radiance;
+    float validWeight;
+    float movingWeight;
+    uint sources;
+};
+
+struct CompactGlobalResult
+{
+    float3 normalOrCacheRadiance;
+    float distance;
+    float traceLimit;
+    uint source; // 0: queued for Mesh retry, 1: miss, 2 + clipmap level: hit.
+};
+
+static const uint CompactGlobalMiss = 1u;
+static const uint CompactGlobalHitBase = 2u;
+
+RWStructuredBuffer<CompactProbe> _SdfCompactProbes;
+RWStructuredBuffer<CompactContribution> _SdfCompactContributions;
+RWStructuredBuffer<uint> _SdfCompactCounts;
+RWStructuredBuffer<uint> _SdfCompactMeshRays;
+RWStructuredBuffer<uint> _SdfCompactGlobalRays;
+RWStructuredBuffer<uint> _SdfCompactRetryRays;
+RWStructuredBuffer<CompactGlobalResult> _SdfCompactGlobalResults;
+StructuredBuffer<CompactGlobalResult> _SdfCompactGlobalResultsRead;
+StructuredBuffer<uint> _SdfCompactInput;
+RWStructuredBuffer<uint> _SdfCompactArgs;
+uint _SdfCompactQueueIndex;
+uint _SdfCompactRetry;
+groupshared CompactProbe SharedCompactProbe;
+
+static const uint CompactMeshQueue = 0u;
+static const uint CompactGlobalQueue = 1u;
+static const uint CompactRetryMeshQueue = 2u;
+static const uint CompactRetryGlobalQueue = 3u;
+static const uint CompactGroupSize = 64u;
+static const uint CompactMaxDispatchWidth = 65535u;
+
+[numthreads(1, 1, 1)]
+void ResetCompactTracesCS()
+{
+    [unroll] for (uint queue = 0u; queue <= CompactRetryGlobalQueue; ++queue)
+        _SdfCompactCounts[queue] = 0u;
+}
+
+[numthreads(1, 1, 1)]
+void SetupIndirectArgsCS()
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    uint maxRays = grid.x * ProbeAtlasHeight(grid) * CompactGroupSize;
+    uint count = min(_SdfCompactCounts[_SdfCompactQueueIndex], maxRays);
+    uint groups = max(1u, (count + CompactGroupSize - 1u) / CompactGroupSize);
+    uint width = min(groups, CompactMaxDispatchWidth);
+    _SdfCompactArgs[0] = width;
+    _SdfCompactArgs[1] = (groups + width - 1u) / width;
+    _SdfCompactArgs[2] = 1u;
+}
+
+uint AllocateCompactRay(uint queue)
+{
+    uint count = WaveActiveCountBits(true);
+    uint lane = WavePrefixCountBits(true);
+    uint baseIndex = 0u;
+    if (WaveIsFirstLane())
+        InterlockedAdd(_SdfCompactCounts[queue], count, baseIndex);
+    return WaveReadLaneFirst(baseIndex) + lane;
+}
+
+FProbeRayDistance LoadCompactScreenRay(uint2 tile, uint ray, out float3 radiance)
+{
+    FProbeRayDistance screen = (FProbeRayDistance)0;
+    screen.HitDistance = FLT_MAX;
+    radiance = 0.0;
+    if (_SdfDiffuseUseScreenRays != 0u)
+    {
+        float4 payload = _SdfScreenRays.Load(int3(ProbeTraceAddress(tile, ray), 0));
+        screen = DecodeProbeRayDistance(asuint(payload.a));
+        radiance = payload.rgb;
+    }
+    return screen;
+}
+
+ProbeRaySample SampleCompactRay(uint2 tile, uint ray, float3 normal)
+{
+    uint bin;
+    float inverseRelativePdf;
+    float3 direction = SampleDiffuseProbeRay(tile, ray, ProbeSeed(tile), DiffuseProbeFrame(normal), bin, inverseRelativePdf);
+    return InitProbeRay(direction, bin, inverseRelativePdf);
+}
+
+void StoreCompactRay(uint2 tile, uint ray, uint address, ProbeRaySample result, ProbeTraceAccumulation accum)
+{
+    StoreTraceSample(tile, ray, result.state, result.distance, result.radiance, result.direction, result.bin,
+        result.inverseRelativePdf, result.hitNormal, result.hitInstance);
+    CompactContribution contribution;
+    contribution.radiance = result.radiance;
+    contribution.validWeight = accum.validWeight;
+    contribution.movingWeight = accum.movingRays;
+    contribution.sources = accum.valid | (accum.screenHits << 1u) | (accum.skyHits << 2u)
+        | (accum.farHits << 3u) | (accum.cachedSunHits << 4u);
+    _SdfCompactContributions[address] = contribution;
+}
+
+[numthreads(64, 1, 1)]
+#if defined(VIVID_SDF_RECEIVER)
+void CompactScreenProbeTracesWithReceiverCS(uint2 tile : SV_GroupID, uint ray : SV_GroupIndex)
+#else
+void CompactScreenProbeTracesCS(uint2 tile : SV_GroupID, uint ray : SV_GroupIndex)
+#endif
+{
+    uint2 size = uint2(_SdfDiffuseScreenSize.xy);
+    uint probeIndex = tile.y * ProbeGridSize(size).x + tile.x;
+    if (ray == 0u)
+    {
+        CompactProbe probe = (CompactProbe)0;
+        if (LoadProbeReceiverPixel(tile, size, probe.pixel) && LoadReceiver(probe.pixel, probe.position, probe.normal))
+        {
+            probe.valid = 1u;
+            probe.worldLevel = GetWorldCoverage(probe.position);
+            probe.receiverSpeed = ProbeReceiverSpeed(probe.pixel, probe.position);
+        }
+        _SdfCompactProbes[probeIndex] = probe;
+        SharedCompactProbe = probe;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (SharedCompactProbe.valid == 0u)
+    {
+        if (_SdfDiffuseRecordRayDiagnostics != 0u)
+            StoreTraceSample(tile, ray, 0u, 0.0, 0.0);
+        return;
+    }
+
+    uint address = probeIndex * CompactGroupSize + ray;
+    float3 radiance;
+    FProbeRayDistance screen = LoadCompactScreenRay(tile, ray, radiance);
+    if (!screen.bHit)
+    {
+        _SdfCompactMeshRays[AllocateCompactRay(CompactMeshQueue)] = address;
+        return;
+    }
+
+    ProbeRaySample result = SampleCompactRay(tile, ray, SharedCompactProbe.normal);
+    result.state = RayScreenHit;
+    result.distance = screen.HitDistance;
+    result.radiance = radiance;
+    ProbeTraceAccumulation accum = (ProbeTraceAccumulation)0;
+    accum.valid = accum.screenHits = 1u;
+    accum.validWeight = result.inverseRelativePdf;
+    accum.movingRays = screen.bMoving ? result.inverseRelativePdf : 0.0f;
+    StoreCompactRay(tile, ray, address, result, accum);
+}
+
+#if defined(VIVID_SDF_SURFACE_CACHE)
+uint CompactDispatchIndex(uint2 group, uint lane)
+{
+    return (group.y * CompactMaxDispatchWidth + group.x) * CompactGroupSize + lane;
+}
+
+CompactProbe LoadCompactProbe(uint address, out uint2 tile, out uint ray)
+{
+    uint probeIndex = address / CompactGroupSize;
+    uint width = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy)).x;
+    tile = uint2(probeIndex % width, probeIndex / width);
+    ray = address % CompactGroupSize;
+    return _SdfCompactProbes[probeIndex];
+}
+
+VividMeshSdfReceiver LoadCompactReceiver(CompactProbe probe)
+{
+#if defined(VIVID_SDF_RECEIVER)
+    if (_SdfCorrectReceiverSelfHits != 0u)
+        return LoadSdfReceiver(probe.pixel, probe.position, probe.normal);
+#endif
+    return (VividMeshSdfReceiver)0;
+}
+
+[numthreads(64, 1, 1)]
+#if defined(VIVID_SDF_RECEIVER) && defined(VIVID_SDF_CACHED_SUN)
+void TraceMeshSdfReceiverSunCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+#elif defined(VIVID_SDF_RECEIVER)
+void TraceMeshSdfReceiverCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+#elif defined(VIVID_SDF_CACHED_SUN)
+void TraceMeshSdfSunCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+#else
+void TraceMeshSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+#endif
+{
+    uint index = CompactDispatchIndex(group, lane);
+    bool retry = _SdfCompactRetry != 0u;
+    if (index >= _SdfCompactCounts[retry ? CompactRetryMeshQueue : CompactMeshQueue]) return;
+    uint address = _SdfCompactInput[index];
+    uint2 tile;
+    uint ray;
+    CompactProbe probe = LoadCompactProbe(address, tile, ray);
+    ProbeRaySample result = SampleCompactRay(tile, ray, probe.normal);
+    float3 origin = probe.position + probe.normal * _SdfDiffuseRayBias;
+    float3 unused;
+    FProbeRayDistance screen = LoadCompactScreenRay(tile, ray, unused);
+    bool useWorld = !retry && probe.worldLevel < WorldClipmaps;
+    float3 worldRadiance = 0.0;
+    float worldDistance = 0.0;
+    ProbeTraceAccumulation accum = (ProbeTraceAccumulation)0;
+    VividMeshSdfHit hit = (VividMeshSdfHit)0;
+    VividMeshSdfReceiver receiver = LoadCompactReceiver(probe);
+    if (useWorld && screen.bReachedRadianceCache)
+    {
+        if (SampleWorldCache(probe.position, result.direction, probe.worldLevel, worldRadiance, worldDistance))
+        {
+            result = ResolveProbeRay(tile, ray, 0u, probe.position, probe.normal, origin, probe.receiverSpeed,
+                receiver, HasSkyTexture(), 0u, 0u, hit, false, false, false, screen.HitDistance,
+                worldRadiance, worldDistance, TraceStageMesh, result, accum);
+            StoreCompactRay(tile, ray, address, result, accum);
+            return;
+        }
+    }
+
+    float limit = useWorld ? WorldNearDistance(probe.worldLevel) : max(_SdfFarTraceDistance, _SdfDiffuseMaxDistance);
+    float detailEnd = min(limit, _SdfMeshDetailDistance);
+    bool advancedReceiver, incomplete;
+    bool traced = TraceProbeMeshDetail(origin, result.direction, receiver, ProbeSdfStart(screen.HitDistance),
+        detailEnd, hit, advancedReceiver, incomplete);
+    if (!traced && !incomplete && (detailEnd < limit || useWorld))
+    {
+        uint slot = AllocateCompactRay(retry ? CompactRetryGlobalQueue : CompactGlobalQueue);
+        _SdfCompactGlobalRays[slot] = address;
+        return;
+    }
+    result = ResolveProbeRay(tile, ray, 0u, probe.position, probe.normal, origin, probe.receiverSpeed,
+        receiver, HasSkyTexture(), 0u, 0u, hit, advancedReceiver, incomplete, traced, detailEnd,
+        worldRadiance, worldDistance, TraceStageMesh, result, accum);
+    StoreCompactRay(tile, ray, address, result, accum);
+}
+
+[numthreads(64, 1, 1)]
+void TraceGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    uint index = CompactDispatchIndex(group, lane);
+    bool retry = _SdfCompactRetry != 0u;
+    if (index >= _SdfCompactCounts[retry ? CompactRetryGlobalQueue : CompactGlobalQueue]) return;
+    uint address = _SdfCompactInput[index];
+    uint2 tile;
+    uint ray;
+    CompactProbe probe = LoadCompactProbe(address, tile, ray);
+    ProbeRaySample result = SampleCompactRay(tile, ray, probe.normal);
+    float3 origin = probe.position + probe.normal * _SdfDiffuseRayBias;
+    float3 unused;
+    float screenStart = ProbeSdfStart(LoadCompactScreenRay(tile, ray, unused).HitDistance);
+    bool useWorld = !retry && probe.worldLevel < WorldClipmaps;
+    float fullLimit = max(_SdfFarTraceDistance, _SdfDiffuseMaxDistance);
+    float limit = useWorld ? WorldNearDistance(probe.worldLevel) : fullLimit;
+    float detailEnd = min(limit, _SdfMeshDetailDistance);
+    VividMeshSdfHit hit = (VividMeshSdfHit)0;
+    bool traced;
+    float3 worldRadiance = 0.0;
+    float worldDistance = 0.0;
+    // As in the serial gather, share one traversal body between both ranges.
+    [loop] for (uint attempt = 0u; ; ++attempt)
+    {
+        traced = TraceProbeGlobal(origin, result.direction, max(screenStart, detailEnd), limit, hit);
+        if (!useWorld || attempt != 0u || traced) break;
+        if (SampleWorldCache(probe.position, result.direction, probe.worldLevel, worldRadiance, worldDistance)) break;
+
+        // The serial path repeats Mesh SDF first. Reuse its miss only if the interval is identical.
+        float fullDetailEnd = min(fullLimit, _SdfMeshDetailDistance);
+        if (detailEnd != fullDetailEnd && screenStart < fullDetailEnd)
+        {
+            _SdfCompactGlobalResults[index] = (CompactGlobalResult)0;
+            _SdfCompactRetryRays[AllocateCompactRay(CompactRetryMeshQueue)] = address;
+            return;
+        }
+        limit = fullLimit;
+        detailEnd = fullDetailEnd;
+    }
+
+    // Resolve cards in a separate dispatch to keep their traversal out of the
+    // clipmap marcher. Both dispatches consume the same compact ray indices.
+    CompactGlobalResult traversal;
+    traversal.normalOrCacheRadiance = traced ? hit.normalWS : worldRadiance;
+    traversal.distance = traced ? hit.distance : worldDistance;
+    traversal.traceLimit = limit;
+    traversal.source = traced ? CompactGlobalHitBase + hit.signMode : CompactGlobalMiss;
+    _SdfCompactGlobalResults[index] = traversal;
+}
+
+[numthreads(64, 1, 1)]
+#if defined(VIVID_SDF_RECEIVER)
+void ResolveGlobalSdfReceiverCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+#else
+void ResolveGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupIndex)
+#endif
+{
+    uint index = CompactDispatchIndex(group, lane);
+    bool retry = _SdfCompactRetry != 0u;
+    if (index >= _SdfCompactCounts[retry ? CompactRetryGlobalQueue : CompactGlobalQueue]) return;
+    CompactGlobalResult traversal = _SdfCompactGlobalResultsRead[index];
+    if (traversal.source == 0u) return;
+
+    uint address = _SdfCompactInput[index];
+    uint2 tile;
+    uint ray;
+    CompactProbe probe = LoadCompactProbe(address, tile, ray);
+    ProbeRaySample result = SampleCompactRay(tile, ray, probe.normal);
+    float3 origin = probe.position + probe.normal * _SdfDiffuseRayBias;
+    bool traced = traversal.source >= CompactGlobalHitBase;
+    VividMeshSdfHit hit = (VividMeshSdfHit)0;
+    hit.instanceIndex = 0xffffffffu;
+    if (traced)
+    {
+        hit.distance = traversal.distance;
+        hit.normalWS = traversal.normalOrCacheRadiance;
+        hit.signMode = traversal.source - CompactGlobalHitBase;
+    }
+    float worldDistance = traced ? 0.0f : traversal.distance;
+    float3 worldRadiance = traced ? 0.0f : traversal.normalOrCacheRadiance;
+    ProbeTraceAccumulation accum = (ProbeTraceAccumulation)0;
+    // Only the sky-visibility miss path needs the original receiver.
+    bool useSky = HasSkyTexture();
+    VividMeshSdfReceiver receiver = (VividMeshSdfReceiver)0;
+    if (!traced && worldDistance <= 0.0 && useSky)
+        receiver = LoadCompactReceiver(probe);
+    result = ResolveProbeRay(tile, ray, 0u, probe.position, probe.normal, origin, probe.receiverSpeed,
+        receiver, useSky, 0u, traced ? RayGlobalCandidate : 0u, hit, false, false, traced, traversal.traceLimit,
+        worldRadiance, worldDistance, TraceStageGlobal, result, accum);
+    StoreCompactRay(tile, ray, address, result, accum);
+}
+#endif
+
+[numthreads(8, 8, 1)]
+#if defined(VIVID_SDF_CACHED_SUN)
+void FinalizeProbeGatherWithSunCS(uint2 tile : SV_DispatchThreadID)
+#else
+void FinalizeProbeGatherCS(uint2 tile : SV_DispatchThreadID)
+#endif
+{
+    uint2 grid = ProbeGridSize(uint2(_SdfDiffuseScreenSize.xy));
+    if (any(tile >= uint2(grid.x, ProbeAtlasHeight(grid)))) return;
+    uint probeIndex = tile.y * grid.x + tile.x;
+    CompactProbe probe = _SdfCompactProbes[probeIndex];
+    if (probe.valid == 0u)
+    {
+        _SdfDiffuseGeometry[tile] = float4(0.0, 0.0, 0.0, -1.0);
+        _SdfDiffuseHitLighting[tile] = 0.0;
+        _SdfDiffuseTraceSources[tile] = 0.0;
+        _SdfProbeMovingOutput[tile] = 0.0;
+        #if defined(VIVID_SDF_CACHED_SUN)
+            _SdfSunCacheHits[tile] = 0.0;
+        #endif
+        return;
+    }
+
+    float3 sum = 0.0;
+    float weight = 0.0;
+    float moving = 0.0;
+    uint valid = 0u, screenHits = 0u, skyHits = 0u, farHits = 0u, sunHits = 0u;
+    // Preserve the serial sum order, independent of the order each queue allocated its rays.
+    [loop] for (uint ray = 0u; ray < CompactGroupSize; ++ray)
+    {
+        CompactContribution contribution = _SdfCompactContributions[probeIndex * CompactGroupSize + ray];
+        if ((contribution.sources & 1u) == 0u) continue;
+        sum += contribution.validWeight * contribution.radiance;
+        weight += contribution.validWeight;
+        moving += contribution.movingWeight;
+        valid++;
+        screenHits += (contribution.sources >> 1u) & 1u;
+        skyHits += (contribution.sources >> 2u) & 1u;
+        farHits += (contribution.sources >> 3u) & 1u;
+        sunHits += (contribution.sources >> 4u) & 1u;
+    }
+    _SdfDiffuseGeometry[tile] = float4(probe.position, PackProbeNormal(probe.normal));
+    _SdfDiffuseHitLighting[tile] = float4(min(sum / max(1e-5, weight), 65000.0), saturate(weight / CompactGroupSize));
+    _SdfDiffuseTraceSources[tile] = float4(float3(screenHits, valid - screenHits - skyHits - farHits, CompactGroupSize - valid)
+        / CompactGroupSize, 1.0);
+    _SdfProbeMovingOutput[tile] = saturate(moving / CompactGroupSize);
+    #if defined(VIVID_SDF_CACHED_SUN)
+        _SdfSunCacheHits[tile] = float4(float(sunHits) / CompactGroupSize, 0.0, 0.0, 1.0);
+    #endif
 }
 #endif
 

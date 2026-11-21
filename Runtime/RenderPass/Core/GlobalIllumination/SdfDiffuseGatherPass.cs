@@ -219,6 +219,70 @@ namespace VividRP.Runtime.RenderPass.Core
                 Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
             },
         };
+        private const int CompactRaysPerProbe = 64;
+        // A conservative lower bound on WorldNearDistance(0) in SdfRadianceCacheCommon.hlsl.
+        private const float CompactWorldNearDistanceFloor = 3.6f;
+        private static readonly int CompactProbesId = Shader.PropertyToID("_SdfCompactProbes");
+        private static readonly int CompactContributionsId = Shader.PropertyToID("_SdfCompactContributions");
+        private static readonly int CompactCountsId = Shader.PropertyToID("_SdfCompactCounts");
+        private static readonly int CompactMeshRaysId = Shader.PropertyToID("_SdfCompactMeshRays");
+        private static readonly int CompactGlobalRaysId = Shader.PropertyToID("_SdfCompactGlobalRays");
+        private static readonly int CompactRetryRaysId = Shader.PropertyToID("_SdfCompactRetryRays");
+        private static readonly int CompactGlobalResultsId = Shader.PropertyToID("_SdfCompactGlobalResults");
+        private static readonly int CompactGlobalResultsReadId = Shader.PropertyToID("_SdfCompactGlobalResultsRead");
+        private static readonly int CompactInputId = Shader.PropertyToID("_SdfCompactInput");
+        private static readonly int CompactArgsId = Shader.PropertyToID("_SdfCompactArgs");
+        private static readonly int CompactQueueIndexId = Shader.PropertyToID("_SdfCompactQueueIndex");
+        private static readonly int CompactRetryId = Shader.PropertyToID("_SdfCompactRetry");
+        private static readonly ProfilingSampler CompactScreenSampler = new("Compact Screen Probe Traces");
+        private static readonly ProfilingSampler CompactMeshSampler = new("Trace Compacted Mesh SDF");
+        private static readonly ProfilingSampler CompactGlobalSampler = new("Trace Compacted Global SDF");
+        private static readonly ProfilingSampler CompactGlobalLightingSampler = new("Resolve Compacted Global SDF");
+        private static readonly ProfilingSampler CompactFinalizeSampler = new("Finalize Probe Gather");
+        [RenderGraphResource(Name = "Compact Probe Receivers", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactProbes = RenderGraphBuffer.CreateStructured("Compact Probe Receivers", 48);
+        [RenderGraphResource(Name = "Compact Probe Contributions", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactContributions = RenderGraphBuffer.CreateStructured("Compact Probe Contributions", 24);
+        [RenderGraphResource(Name = "Compact Mesh SDF Rays", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactMeshRays = RenderGraphBuffer.CreateStructured("Compact Mesh SDF Rays", sizeof(uint));
+        [RenderGraphResource(Name = "Compact Global SDF Rays", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactGlobalRays = RenderGraphBuffer.CreateStructured("Compact Global SDF Rays", sizeof(uint));
+        [RenderGraphResource(Name = "Compact Global SDF Results", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactGlobalResults = RenderGraphBuffer.CreateStructured("Compact Global SDF Results", 24);
+        [RenderGraphResource(Name = "Compact Retry Rays", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactRetryRays = RenderGraphBuffer.CreateStructured("Compact Retry Rays", sizeof(uint));
+        [RenderGraphResource(Name = "Compact Trace Counts", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactCounts = RenderGraphBuffer.CreateStructured("Compact Trace Counts", 4, sizeof(uint));
+        [RenderGraphResource(Name = "Compact Mesh Dispatch Arguments", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactMeshArgs = CreateCompactDispatchArgs("Compact Mesh Dispatch Arguments");
+        [RenderGraphResource(Name = "Compact Global Dispatch Arguments", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactGlobalArgs = CreateCompactDispatchArgs("Compact Global Dispatch Arguments");
+        [RenderGraphResource(Name = "Compact Retry Mesh Dispatch Arguments", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactRetryMeshArgs = CreateCompactDispatchArgs("Compact Retry Mesh Dispatch Arguments");
+        [RenderGraphResource(Name = "Compact Retry Global Dispatch Arguments", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_CompactRetryGlobalArgs = CreateCompactDispatchArgs("Compact Retry Global Dispatch Arguments");
+
+        private static RenderGraphBuffer CreateCompactDispatchArgs(string name) => RenderGraphBuffer.CreateStructured(name, 3, sizeof(uint),
+            GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+        private readonly int[] m_CompactScreenKernels = new int[2];
+        private readonly int[] m_CompactMeshKernels = new int[4];
+        private readonly int[] m_CompactResolveGlobalKernels = new int[2];
+        private readonly int[] m_CompactFinalizeKernels = new int[2];
+        private int m_CompactResetKernel = -1, m_CompactArgsKernel = -1;
+        private int m_CompactGlobalKernel = -1;
+        private bool m_CompactTraceSupported, m_CompactTracePrepared, m_CompactTraceMayRetryMesh;
+
         private const int WorldAtlasHeight = 2052 + 4 * 48 * 48 * 48 / 2048;
         private int m_WorldReuseKernel, m_WorldAllocateKernel, m_WorldTicketsKernel;
         private int m_WorldArgsKernel, m_WorldFilterKernel;
@@ -998,8 +1062,35 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ScreenReceiverTraceKernel = m_TraceCompute.FindKernel("TraceReceiverDiffuseScreenRays");
                 m_ScreenGatherKernel = m_TraceCompute.FindKernel("GatherScreenDiffuseProbes");
             }
+            m_CompactTraceSupported = SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D12
+                && FindCompactKernels();
             m_Scene = new VividMeshSdfGpuScene(Shader.Find("VividRP/Material/StandardLit"));
         }
+
+        private bool FindCompactKernels()
+        {
+            m_CompactResetKernel = FindOptionalKernel("ResetCompactTracesCS");
+            m_CompactArgsKernel = FindOptionalKernel("SetupIndirectArgsCS");
+            m_CompactScreenKernels[0] = FindOptionalKernel("CompactScreenProbeTracesCS");
+            m_CompactScreenKernels[1] = FindOptionalKernel("CompactScreenProbeTracesWithReceiverCS");
+            m_CompactMeshKernels[0] = FindOptionalKernel("TraceMeshSdfCompactedCS");
+            m_CompactMeshKernels[1] = FindOptionalKernel("TraceMeshSdfReceiverCompactedCS");
+            m_CompactMeshKernels[2] = FindOptionalKernel("TraceMeshSdfSunCompactedCS");
+            m_CompactMeshKernels[3] = FindOptionalKernel("TraceMeshSdfReceiverSunCompactedCS");
+            m_CompactGlobalKernel = FindOptionalKernel("TraceGlobalSdfCompactedCS");
+            m_CompactResolveGlobalKernels[0] = FindOptionalKernel("ResolveGlobalSdfCompactedCS");
+            m_CompactResolveGlobalKernels[1] = FindOptionalKernel("ResolveGlobalSdfReceiverCompactedCS");
+            m_CompactFinalizeKernels[0] = FindOptionalKernel("FinalizeProbeGatherCS");
+            m_CompactFinalizeKernels[1] = FindOptionalKernel("FinalizeProbeGatherWithSunCS");
+
+            return m_CompactResetKernel >= 0 && m_CompactArgsKernel >= 0
+                && System.Array.IndexOf(m_CompactScreenKernels, -1) < 0
+                && System.Array.IndexOf(m_CompactMeshKernels, -1) < 0
+                && m_CompactGlobalKernel >= 0 && System.Array.IndexOf(m_CompactResolveGlobalKernels, -1) < 0
+                && System.Array.IndexOf(m_CompactFinalizeKernels, -1) < 0;
+        }
+
+        private int FindOptionalKernel(string name) => HasKernel(m_TraceCompute, name) ? m_TraceCompute.FindKernel(name) : -1;
 
         public override void Prepare(ContextContainer frameData)
         {
@@ -1057,6 +1148,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarHitIds = default;
             m_GlobalClipmap = null;
             m_ObjectGrid = m_ObjectPageTable = m_ObjectPageWork = default;
+            m_CompactTracePrepared = false;
+            SizeCompactTraceBuffers(1);
             m_MeshDetailDistance = 0f;
             m_FarUpdateCount = 0;
             m_FarDistance = 0f;
@@ -1404,6 +1497,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ObjectGrid = PassRecorder.ImportBufferForPass(this, grid.Objects, grid.Dirty ? AccessFlags.ReadWrite : AccessFlags.Read);
                 m_ObjectPageTable = PassRecorder.ImportBufferForPass(this, grid.Table, AccessFlags.Read);
                 m_ObjectPageWork = PassRecorder.ImportBufferForPass(this, grid.PageWork, AccessFlags.Read);
+                m_CompactTracePrepared = m_CompactTraceSupported && m_LumenScreenTrace
+                    && cache != null && m_ObjectGrid.IsValid() && !m_RecordFirstHitDiagnostics;
+                if (m_CompactTracePrepared)
+                    SizeCompactTraceBuffers(m_ProbeWidth * m_AtlasHeight);
             }
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
@@ -1603,6 +1700,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GlobalClipmap = clipmap;
         }
 
+        private void SizeCompactTraceBuffers(int probeCount)
+        {
+            int rayCount = m_CompactTracePrepared ? probeCount * CompactRaysPerProbe : 1;
+            m_CompactTraceMayRetryMesh = m_CompactTracePrepared && m_MeshDetailDistance > CompactWorldNearDistanceFloor;
+            m_CompactProbes.desc.Count = probeCount;
+            m_CompactContributions.desc.Count = rayCount;
+            m_CompactMeshRays.desc.Count = rayCount;
+            m_CompactGlobalRays.desc.Count = rayCount;
+            m_CompactGlobalResults.desc.Count = rayCount;
+            m_CompactRetryRays.desc.Count = m_CompactTraceMayRetryMesh ? rayCount : 1;
+        }
+
         public override void Record(ComputePassContext context)
         {
             if (m_State == null || m_GeometryHistory == null || !m_Geometry.innerHandle.IsValid()
@@ -1627,11 +1736,21 @@ namespace VividRP.Runtime.RenderPass.Core
             bool correctReceiver = hasReceiverSource && m_CorrectReceiverSelfHits;
             bool screenCardLighting = hasReceiverSource && useScreenRays && m_ScreenCardLightingRequested && m_RadiosityInput.IsValid();
             if (hasReceiverSource)
-            {
                 traceKernel = receiverKernel;
-                cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ReceiverVisibilityId, m_ReceiverVisibility);
-                cmd.SetComputeBufferParam(m_TraceCompute, traceKernel, ReceiverEntitiesId, m_ReceiverEntities);
-                cmd.SetComputeIntParam(m_TraceCompute, ReceiverCountId, m_ReceiverCount);
+            bool useGlobalClipmap = m_UseSdf && m_GlobalClipmap?.Recorded == true;
+            bool compactTrace = m_CompactTracePrepared && useGlobalClipmap
+                && m_CompactProbes.IsValid() && m_CompactContributions.IsValid() && m_CompactCounts.IsValid()
+                && m_CompactMeshRays.IsValid() && m_CompactGlobalRays.IsValid() && m_CompactRetryRays.IsValid()
+                && m_CompactGlobalResults.IsValid()
+                && m_CompactMeshArgs.IsValid() && m_CompactGlobalArgs.IsValid()
+                && (!m_CompactTraceMayRetryMesh || (m_CompactRetryMeshArgs.IsValid() && m_CompactRetryGlobalArgs.IsValid()));
+            int receiverVariant = hasReceiverSource ? 1 : 0;
+            int sunVariant = useSunCache ? 1 : 0;
+            if (compactTrace)
+                traceKernel = m_CompactMeshKernels[receiverVariant + 2 * sunVariant];
+            if (hasReceiverSource)
+            {
+                BindTraceReceiver(cmd, traceKernel);
             }
             cmd.SetComputeIntParam(m_TraceCompute, LumenTraceId, m_LumenScreenTrace ? 1 : 0);
             cmd.SetComputeIntParam(m_TraceCompute, CorrectReceiverId, correctReceiver ? 1 : 0);
@@ -1645,7 +1764,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 probeTarget = m_FilteredProbes.innerHandle;
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, ProbeId, probeTarget);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, GeometryId, m_Geometry.innerHandle);
-            bool useGlobalClipmap = m_UseSdf && m_GlobalClipmap?.Recorded == true;
             if (m_UseSdf)
             {
                 m_Scene.Bind(cmd, m_TraceCompute, traceKernel);
@@ -1808,7 +1926,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (useScreenRays)
                     RecordScreenTrace(cmd, groupsX, groupsY, placement, black, validScreenRadiance);
                 using (new ProfilingScope(cmd, GatherSampler))
-                    cmd.DispatchCompute(m_TraceCompute, traceKernel, groupsX, groupsY, 1);
+                {
+                    if (compactTrace)
+                        RecordCompactProbeTraces(cmd, cache, black, placement, useScreenRays, receiverVariant, sunVariant,
+                            traceKernel, groupsX, groupsY);
+                    else
+                        cmd.DispatchCompute(m_TraceCompute, traceKernel, groupsX, groupsY, 1);
+                }
                 if (m_DirectionalCache || m_HitDistanceFilter || (m_SpatialFilter && !m_RestirGather))
                 {
                     BindProbeFrame(cmd, m_FilterCompute);
@@ -2480,6 +2604,137 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
+        private void BindTraceReceiver(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ReceiverVisibilityId, m_ReceiverVisibility);
+            cmd.SetComputeBufferParam(m_TraceCompute, kernel, ReceiverEntitiesId, m_ReceiverEntities);
+            cmd.SetComputeIntParam(m_TraceCompute, ReceiverCountId, m_ReceiverCount);
+        }
+
+        private void BindCompactRayOutput(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeBufferParam(m_TraceCompute, kernel, CompactProbesId, m_CompactProbes.innerHandle);
+            cmd.SetComputeBufferParam(m_TraceCompute, kernel, CompactContributionsId, m_CompactContributions.innerHandle);
+            cmd.SetComputeBufferParam(m_TraceCompute, kernel, CompactCountsId, m_CompactCounts.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, ProbeId, m_DirectionalRayTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, RayDiagnosticsId, m_RayDiagnostics.innerHandle);
+            cmd.SetComputeTextureParam(m_TraceCompute, kernel, HitSamplesId, m_HitSamples.innerHandle);
+        }
+
+        private void RecordCompactProbeTraces(ComputeCommandBuffer cmd, VividSdfSurfaceCache cache, TextureHandle black,
+            TextureHandle placement, bool useScreenRays, int receiverVariant, int sunVariant, int mesh, int groupsX, int groupsY)
+        {
+            var shader = m_TraceCompute;
+            int classify = m_CompactScreenKernels[receiverVariant];
+            int global = m_CompactGlobalKernel;
+            int resolveGlobal = m_CompactResolveGlobalKernels[receiverVariant];
+            int finalize = m_CompactFinalizeKernels[sunVariant];
+            var screenRays = useScreenRays ? m_ScreenRays.innerHandle : black;
+            var directionNoise = m_ProbeDirectionNoise.IsValid() ? m_ProbeDirectionNoise : black;
+            var guide = m_DirectionalGuide
+                ? (m_FrozenGuideActive ? m_CurrentProposal.innerHandle : m_DirectionalGuideTexture.innerHandle) : black;
+            var far = IsFarCacheReady() ? m_FarAtlas : black;
+
+            BindCompactRayOutput(cmd, classify);
+            BindReceiver(cmd, shader, classify);
+            if (receiverVariant != 0)
+            {
+                BindTraceReceiver(cmd, classify);
+                BindTraceReceiver(cmd, resolveGlobal);
+                m_Scene.Bind(cmd, shader, classify);
+            }
+            cmd.SetComputeTextureParam(shader, classify, PlacementId, placement);
+            cmd.SetComputeTextureParam(shader, classify, ProbeDirectionNoiseId, directionNoise);
+            cmd.SetComputeTextureParam(shader, classify, DirectionalGuideId, guide);
+            cmd.SetComputeTextureParam(shader, classify, FarRadianceId, far);
+            cmd.SetComputeTextureParam(shader, classify, ScreenRaysId, screenRays);
+            cmd.SetComputeBufferParam(shader, classify, CompactMeshRaysId, m_CompactMeshRays.innerHandle);
+            cmd.SetComputeBufferParam(shader, m_CompactResetKernel, CompactCountsId, m_CompactCounts.innerHandle);
+            cmd.SetComputeBufferParam(shader, m_CompactArgsKernel, CompactCountsId, m_CompactCounts.innerHandle);
+
+            BindCompactRayOutput(cmd, mesh);
+            cmd.SetComputeBufferParam(shader, mesh, CompactGlobalRaysId, m_CompactGlobalRays.innerHandle);
+            cmd.SetComputeBufferParam(shader, global, CompactProbesId, m_CompactProbes.innerHandle);
+            cmd.SetComputeBufferParam(shader, global, CompactCountsId, m_CompactCounts.innerHandle);
+            cmd.SetComputeBufferParam(shader, global, CompactRetryRaysId, m_CompactRetryRays.innerHandle);
+            cmd.SetComputeBufferParam(shader, global, CompactGlobalResultsId, m_CompactGlobalResults.innerHandle);
+            BindReceiver(cmd, shader, global);
+            BindGlobalTracingResources(cmd, shader, global, true);
+            m_Scene.Bind(cmd, shader, global);
+            cmd.SetComputeTextureParam(shader, global, PlacementId, placement);
+            cmd.SetComputeTextureParam(shader, global, ProbeDirectionNoiseId, directionNoise);
+            cmd.SetComputeTextureParam(shader, global, DirectionalGuideId, guide);
+            cmd.SetComputeTextureParam(shader, global, FarRadianceId, far);
+            cmd.SetComputeTextureParam(shader, global, ScreenRaysId, screenRays);
+            cmd.SetComputeBufferParam(shader, global, CompactInputId, m_CompactGlobalRays.innerHandle);
+
+            BindCompactRayOutput(cmd, resolveGlobal);
+            BindReceiver(cmd, shader, resolveGlobal);
+            BindGlobalTracingResources(cmd, shader, resolveGlobal, true);
+            BindOccludedSky(cmd, shader, resolveGlobal);
+            m_Scene.Bind(cmd, shader, resolveGlobal);
+            cmd.SetComputeTextureParam(shader, resolveGlobal, PlacementId, placement);
+            cmd.SetComputeTextureParam(shader, resolveGlobal, ProbeDirectionNoiseId, directionNoise);
+            cmd.SetComputeTextureParam(shader, resolveGlobal, DirectionalGuideId, guide);
+            cmd.SetComputeTextureParam(shader, resolveGlobal, CardAlbedoDepthId, m_CardAlbedoDepth);
+            cmd.SetComputeTextureParam(shader, resolveGlobal, CardNormalCoverageId, m_CardNormalCoverage);
+            cmd.SetComputeTextureParam(shader, resolveGlobal, RadiosityInputId, m_RadiosityInput.IsValid() ? m_RadiosityInput : black);
+            cmd.SetComputeBufferParam(shader, resolveGlobal, RadiosityWorkId,
+                m_RadiosityTargetOrders > 0 ? m_Scene.RadiosityWork : m_Scene.LeafInstances);
+            cmd.SetComputeBufferParam(shader, resolveGlobal, SurfaceId, m_Scene.DiffuseSurfaces);
+            cmd.SetComputeBufferParam(shader, resolveGlobal, LocalCardTableId, cache.LocalCardTable);
+            cmd.SetComputeBufferParam(shader, resolveGlobal, CompactInputId, m_CompactGlobalRays.innerHandle);
+            cmd.SetComputeBufferParam(shader, resolveGlobal, CompactGlobalResultsReadId, m_CompactGlobalResults.innerHandle);
+
+            using (new ProfilingScope(cmd, CompactScreenSampler))
+            {
+                cmd.DispatchCompute(shader, m_CompactResetKernel, 1, 1, 1);
+                cmd.DispatchCompute(shader, classify, m_ProbeWidth, m_AtlasHeight, 1);
+            }
+            cmd.SetComputeIntParam(shader, CompactRetryId, 0);
+            cmd.SetComputeBufferParam(shader, mesh, CompactInputId, m_CompactMeshRays.innerHandle);
+            DispatchCompactQueue(cmd, mesh, 0, m_CompactMeshArgs, CompactMeshSampler);
+            DispatchCompactGlobalQueue(cmd, global, resolveGlobal, 1, m_CompactGlobalArgs);
+            if (m_CompactTraceMayRetryMesh && IsFarCacheReady())
+            {
+                cmd.SetComputeIntParam(shader, CompactRetryId, 1);
+                cmd.SetComputeBufferParam(shader, mesh, CompactInputId, m_CompactRetryRays.innerHandle);
+                DispatchCompactQueue(cmd, mesh, 2, m_CompactRetryMeshArgs, CompactMeshSampler);
+                DispatchCompactGlobalQueue(cmd, global, resolveGlobal, 3, m_CompactRetryGlobalArgs);
+            }
+
+            using (new ProfilingScope(cmd, CompactFinalizeSampler))
+            {
+                cmd.SetComputeBufferParam(shader, finalize, CompactProbesId, m_CompactProbes.innerHandle);
+                cmd.SetComputeBufferParam(shader, finalize, CompactContributionsId, m_CompactContributions.innerHandle);
+                cmd.SetComputeTextureParam(shader, finalize, GeometryId, m_Geometry.innerHandle);
+                cmd.SetComputeTextureParam(shader, finalize, HitLightingId, m_HitLighting.innerHandle);
+                cmd.SetComputeTextureParam(shader, finalize, TraceSourcesId, m_TraceSources.innerHandle);
+                cmd.SetComputeTextureParam(shader, finalize, ProbeMovingOutputId, m_ProbeMoving.innerHandle);
+                if (sunVariant != 0)
+                    cmd.SetComputeTextureParam(shader, finalize, SunCacheHitsId, m_SunCacheHits.innerHandle);
+                cmd.DispatchCompute(shader, finalize, groupsX, groupsY, 1);
+            }
+        }
+
+        private void DispatchCompactGlobalQueue(ComputeCommandBuffer cmd, int trace, int resolve, int queueIndex,
+            RenderGraphBuffer arguments)
+        {
+            DispatchCompactQueue(cmd, trace, queueIndex, arguments, CompactGlobalSampler);
+            using var scope = new ProfilingScope(cmd, CompactGlobalLightingSampler);
+            cmd.DispatchCompute(m_TraceCompute, resolve, arguments.innerHandle, 0);
+        }
+
+        private void DispatchCompactQueue(ComputeCommandBuffer cmd, int kernel, int queueIndex, RenderGraphBuffer arguments,
+            ProfilingSampler sampler)
+        {
+            using var scope = new ProfilingScope(cmd, sampler);
+            cmd.SetComputeIntParam(m_TraceCompute, CompactQueueIndexId, queueIndex);
+            cmd.SetComputeBufferParam(m_TraceCompute, m_CompactArgsKernel, CompactArgsId, arguments.innerHandle);
+            cmd.DispatchCompute(m_TraceCompute, m_CompactArgsKernel, 1, 1, 1);
+            cmd.DispatchCompute(m_TraceCompute, kernel, arguments.innerHandle, 0);
+        }
+
         private void RecordRadiosity(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black)
         {
             if (m_RadiosityClear)
@@ -2657,11 +2912,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_FarUpdateCount > 0 ? AccessFlags.ReadWrite : AccessFlags.Read);
         }
 
+        private bool IsFarCacheReady() => m_FarAtlas.IsValid() && (m_FullSphere
+            ? m_WorldRawRadiance.IsValid() && m_WorldDispatchArgs.innerHandle.IsValid()
+            : m_FarHitIds.IsValid());
+
         private void RecordFarCache(ComputeCommandBuffer cmd, int traceKernel, VividSdfSurfaceCache cache, TextureHandle black, TextureHandle placement)
         {
-            bool ready = m_FarAtlas.IsValid() && (m_FullSphere
-                ? m_WorldRawRadiance.IsValid() && m_WorldDispatchArgs.innerHandle.IsValid()
-                : m_FarHitIds.IsValid());
+            bool ready = IsFarCacheReady();
             cmd.SetComputeFloatParam(m_TraceCompute, FarDistanceId, ready ? m_FarDistance : 0f);
             cmd.SetComputeTextureParam(m_TraceCompute, traceKernel, FarRadianceId, ready ? m_FarAtlas : black);
             if (ready && !m_FullSphere)
@@ -2763,6 +3020,11 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeFloatParam(shader, MeshDetailDistanceId, m_MeshDetailDistance);
             cmd.SetComputeFloatParam(shader, FarDistanceId, 0f);
             cmd.SetComputeIntParam(shader, UseGlobalClipmapId, useGlobalClipmap ? (m_ObjectGrid.IsValid() ? 2 : 1) : 0);
+            BindGlobalTracingResources(cmd, shader, kernel, useGlobalClipmap);
+        }
+
+        private void BindGlobalTracingResources(ComputeCommandBuffer cmd, ComputeShader shader, int kernel, bool useGlobalClipmap)
+        {
             var fallback = m_GlobalFallback.innerHandle;
             cmd.SetComputeTextureParam(shader, kernel, GlobalNearId, useGlobalClipmap ? m_GlobalNear : fallback);
             cmd.SetComputeTextureParam(shader, kernel, GlobalMiddleId, useGlobalClipmap ? m_GlobalMiddle : fallback);

@@ -44,13 +44,16 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
         internal RTHandle AlbedoDepthHandle => m_AlbedoDepthHandle ??= RTHandles.Alloc(m_AlbedoDepth);
         internal RTHandle NormalCoverageHandle => m_NormalCoverageHandle ??= RTHandles.Alloc(m_NormalCoverage);
+        internal Texture2DArray AlbedoDepth => m_AlbedoDepth;
+        internal Texture2DArray NormalCoverage => m_NormalCoverage;
+        internal Entry[] Entries => m_Entries;
         internal Vector2Int CardSize => new(m_AlbedoDepth.width, m_AlbedoDepth.height);
         internal bool HasOriginalNormals => m_OriginalNormalVersion >= 1;
         internal ulong CardVersion => ((ulong)m_AlbedoDepth.updateCount << 32) | m_NormalCoverage.updateCount;
         private bool HasLegacyLocalCard => m_LocalCardEntry >= 0 && m_LocalCardEntry < m_Entries.Length
             && (uint)m_LocalCardFace < CardsPerMesh && IsValidLocalCardBounds(m_LocalCardBounds)
             && m_AlbedoDepth.depth == m_Entries.Length * CardsPerMesh + 1;
-        private int LocalCardCount => m_LocalCards is { Length: > 0 } ? m_LocalCards.Length : HasLegacyLocalCard ? 1 : 0;
+        internal int LocalCardCount => m_LocalCards is { Length: > 0 } ? m_LocalCards.Length : HasLegacyLocalCard ? 1 : 0;
         internal GraphicsBuffer LocalCardTable => m_LocalCardTable ??= CreateLocalCardTable();
         internal int GetLocalCardCount(int firstCard)
         {
@@ -97,7 +100,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 && float.IsFinite(size.x) && float.IsFinite(size.y) && float.IsFinite(size.z);
         }
 
-        private LocalCard ReadLocalCard(int index)
+        internal LocalCard ReadLocalCard(int index)
         {
             return m_LocalCards is { Length: > 0 } ? m_LocalCards[index]
                 : new LocalCard { EntryIndex = m_LocalCardEntry, Bounds = m_LocalCardBounds, Face = m_LocalCardFace };

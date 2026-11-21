@@ -176,6 +176,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: 0}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -415,6 +417,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: 0}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -426,6 +430,51 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 233533804}
   m_Mesh: {fileID: 4300000, guid: 1e11f4ac56ba00c458bef406d7d06adc, type: 2}
+--- !u!1 &733214135
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 733214137}
+  - component: {fileID: 733214136}
+  m_Layer: 0
+  m_Name: Vivid Scene Surface Cache
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &733214136
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 733214135}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 40d28d1571e62e84986c7cdb6a3c5e40, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.GPUDriven.Meshlets.VividSdfSceneSurfaceCache
+  m_Cache: {fileID: 11400000, guid: a9bf1ed0b0bd0a34a9afdb40337d7a6d, type: 2}
+--- !u!4 &733214137
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 733214135}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &933204814
 GameObject:
   m_ObjectHideFlags: 0
@@ -483,6 +532,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: 336bc81574956354b97f89a2af2fdefe, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 788f15c5c9b5a7144b1f7b2f73aa9cb2, type: 2}
+  m_SparseDistanceField: {fileID: 0}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 47668e2f8364db3439296268005863a1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -680,6 +731,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: 0}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 1a7ec614d8b53f04a9224c13096be040, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -786,6 +839,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: 0}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 9c4b7544c795b854eae48aa2881e2ac1, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -854,6 +909,8 @@ MonoBehaviour:
   m_MeshletCollections:
   - {fileID: 6567494532471486805, guid: af8b5e772dbbe7d4c8b950ca78f35473, type: 3}
   m_MeshSdf: {fileID: 11400000, guid: 14e8bcb48262bdb44a96c6856b82be99, type: 2}
+  m_SparseDistanceField: {fileID: 0}
+  m_SparseFieldBakeScale: {x: 1, y: 1, z: 1}
   m_MaterialProxies:
   - {fileID: 11400000, guid: 348b5c5d21aba5f40ae288a1a48c8ae6, type: 2}
   m_TakeOverSourceRenderer: 1
@@ -924,3 +981,4 @@ SceneRoots:
   - {fileID: 1331316395}
   - {fileID: 169787106}
   - {fileID: 1211502961}
+  - {fileID: 733214137}

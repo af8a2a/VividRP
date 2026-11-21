@@ -45,6 +45,8 @@ using VividRP.Runtime.GPUDriven.Meshlets;
     if(ownLights)lights=EditorSceneManager.OpenScene(lightPath,OpenSceneMode.Additive);
     if(cornell)lights=scene;
     var roots=scene.GetRootGameObjects();
+    var cacheBinding=roots.SelectMany(root=>root.GetComponentsInChildren<VividSdfSceneSurfaceCache>()).SingleOrDefault();
+    var previousCache=cacheBinding?.Cache;
     var lightRoots=lights.GetRootGameObjects();
     var camera=roots.SelectMany(o=>o.GetComponentsInChildren<Camera>(true)).Single(c=>cornell||c.name=="Camera_1");
     var oldEnabled=camera.enabled;
@@ -60,7 +62,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
     var priorProfile=volume.HasInstantiatedProfile()?volume.profile:null;
     var profile=ScriptableObject.CreateInstance<VolumeProfile>();
     foreach(var component in (priorProfile??volume.sharedProfile).components)profile.components.Add(UnityEngine.Object.Instantiate(component));
-    if(!profile.TryGet<SdfDiffuseGISettings>(out var gi)||gi.surfaceCache.value==null||graph==null)
+    if(!profile.TryGet<SdfDiffuseGISettings>(out var gi)||previousCache==null||graph==null)
         throw new InvalidOperationException("Surface Cache fixture unavailable.");
     if(profile.TryGet<AutoExposure>(out var exposure)) {
         exposure.exposureMode.Override(AutoExposureExposureMode.Fixed);
@@ -183,8 +185,8 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         if(pipeline.RenderGraphAsset!=graph)throw new InvalidOperationException("Unexpected render graph");
         PassRecorder.Dispose();pipeline.EnableGPUDrivenOcclusionCulling=false;
         foreach(var o in hidden)o.o.SetActive(false);foreach(var o in otherCameras)o.c.enabled=false;
-        var full=AssetDatabase.LoadAssetAtPath<VividSdfSurfaceCache>("Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox/B - Inner Local Card.asset");
-        gi.surfaceCache.Override(full);
+        var full=AssetDatabase.LoadAssetAtPath<VividSdfSurfaceCache>("Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox/SurfaceCacheCornellBox/SurfaceCache/B - Inner Local Card.asset");
+        cacheBinding.Cache=full;
         RenderPipelineManager.beginCameraRendering+=Begin;Application.logMessageReceived+=Log;hook.SetValue(null,capture);
         await Run("reference-bright",false,4096,1,0,1,424);
         await Run("reference-dim",false,4096,1,0,1,424,1800f);
@@ -198,6 +200,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         stageHook.SetValue(null,previousStageHook);frameOverride.SetValue(null,previousFrameOverride);
         diagnosticMask.SetValue(null,previousMask);anchorBlend.SetValue(null,previousBlend);radioSeed.SetValue(null,previousRadioSeed);
         Application.logMessageReceived-=Log;RenderPipelineManager.beginCameraRendering-=Begin;
+        cacheBinding.Cache=previousCache;
         volume.profile=priorProfile;sun.intensity=sunIntensity;sunData.interactsWithSky=oldSky;
         camera.enabled=oldEnabled;camera.transform.SetPositionAndRotation(pose.Item1,pose.Item2);extra.antialiasing=oldAA;
         foreach(var x in hidden)if(x.o!=null)x.o.SetActive(x.activeSelf);

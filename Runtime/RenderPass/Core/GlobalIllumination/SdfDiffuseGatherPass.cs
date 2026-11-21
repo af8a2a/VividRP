@@ -1251,7 +1251,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (settings != null && settings.active && !settings.enabled.value)
                 return;
-            var cache = settings != null && settings.active ? settings.surfaceCache.value : null;
+            var cache = m_Scene.RefreshSurfaceCache();
             m_RealtimeOnly = settings != null && settings.active && settings.realtimeOnly.value;
             m_OffscreenOnly = settings != null && settings.active && settings.offscreenBounceOnly.value;
             m_TraceMode = settings != null && settings.active ? settings.traceMode.value : SdfDiffuseTraceMode.SdfOnly;
@@ -1259,7 +1259,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && (cache == null || (m_CachedTraceKernel >= 0 && cache.IsUsable));
             if (m_UseSdf)
             {
-                m_Scene.SurfaceCache = cache;
                 m_Scene.Update(VividMeshletRendererDatabase.instance, cameraData.frameIndex);
                 m_UseSdf = m_Scene.NodeCount != 0 && m_Scene.DiffuseSurfaces != null && m_Scene.PrepareBrickTexture(this);
                 if (m_UseSdf && cache != null)

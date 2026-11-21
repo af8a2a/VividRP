@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
+using VividRP.Runtime.RenderPass.Core;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
@@ -46,9 +50,101 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             var renderers = Selection.gameObjects.SelectMany(root => root.GetComponentsInChildren<MeshletRenderer>()).ToArray();
             if (renderers.Length == 0)
                 throw new InvalidOperationException("Select GameObjects with MeshletRenderer and baked Mesh SDFs.");
-            var path = EditorUtility.SaveFilePanelInProject("Bake SDF Surface Cache", "SDF Surface Cache", "asset", "Choose a new asset path.");
-            if (!string.IsNullOrEmpty(path))
-                Selection.activeObject = Bake(renderers, path);
+            var scene = renderers[0].gameObject.scene;
+            if (renderers.Any(renderer => renderer.gameObject.scene != scene))
+                throw new InvalidOperationException("Bake the renderers in one scene at a time.");
+            Selection.activeObject = BakeScene(scene, renderers);
+        }
+
+        [MenuItem("VividRP/Lighting/Bake Active Scene Surface Cache")]
+        private static void BakeActiveScene()
+        {
+            var scene = SceneManager.GetActiveScene();
+            var renderers = scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<MeshletRenderer>()).ToArray();
+            Selection.activeObject = BakeScene(scene, renderers);
+        }
+
+        [MenuItem("VividRP/Lighting/Migrate Active Scene Surface Cache")]
+        private static void MigrateActiveScene()
+        {
+            var scene = SceneManager.GetActiveScene();
+            var settings = scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<Volume>(true))
+                .Where(volume => volume.sharedProfile != null)
+                .Select(volume => volume.sharedProfile.TryGet<SdfDiffuseGISettings>(out var gi) ? gi : null)
+                .Where(gi => gi != null && gi.surfaceCache.value != null).Distinct().ToArray();
+            var caches = settings.Select(gi => gi.surfaceCache.value).Where(cache => cache.IsUsable).Distinct().ToArray();
+            var cache = Selection.activeObject as VividSdfSurfaceCache;
+            if (cache == null && caches.Length == 1)
+                cache = caches[0];
+            if (cache == null || !cache.IsUsable)
+                throw new InvalidOperationException("Select a usable baked cache, or use a scene with one legacy Volume cache.");
+
+            string source = AssetDatabase.GetAssetPath(cache);
+            string folder = EnsureSceneCacheFolder(scene.path);
+            if (!source.StartsWith(folder + "/", StringComparison.Ordinal))
+            {
+                // Keep the baked asset's GUID so any scene that already shares it still resolves it.
+                string destination = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + Path.GetFileName(source));
+                string error = AssetDatabase.MoveAsset(source, destination);
+                if (!string.IsNullOrEmpty(error))
+                    throw new InvalidOperationException(error);
+            }
+            BindSceneCache(scene, cache);
+            foreach (var gi in settings)
+            {
+                if (gi.surfaceCache.value != cache)
+                    continue;
+                Undo.RecordObject(gi, "Remove Legacy Volume Surface Cache");
+                gi.surfaceCache.value = null;
+                gi.surfaceCache.overrideState = false;
+                EditorUtility.SetDirty(gi);
+            }
+            Selection.activeObject = cache;
+        }
+
+        private static VividSdfSurfaceCache BakeScene(Scene scene, IReadOnlyList<MeshletRenderer> renderers)
+        {
+            var folder = EnsureSceneCacheFolder(scene.path);
+            string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/Surface Cache.asset");
+            var cache = Bake(renderers, path);
+            BindSceneCache(scene, cache);
+            return cache;
+        }
+
+        public static string EnsureSceneCacheFolder(string scenePath)
+        {
+            if (string.IsNullOrEmpty(scenePath) || !scenePath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Save the scene before creating its Surface Cache folder.", nameof(scenePath));
+            int slash = scenePath.LastIndexOf('/');
+            string parent = scenePath.Substring(0, slash);
+            string sceneFolder = parent + "/" + Path.GetFileNameWithoutExtension(scenePath);
+            if (!AssetDatabase.IsValidFolder(sceneFolder))
+                AssetDatabase.CreateFolder(parent, Path.GetFileName(sceneFolder));
+            string folder = sceneFolder + "/SurfaceCache";
+            if (!AssetDatabase.IsValidFolder(folder))
+                AssetDatabase.CreateFolder(sceneFolder, "SurfaceCache");
+            if (!AssetDatabase.IsValidFolder(folder))
+                throw new IOException("Could not create " + folder);
+            return folder;
+        }
+
+        public static VividSdfSceneSurfaceCache BindSceneCache(Scene scene, VividSdfSurfaceCache cache)
+        {
+            if (!scene.IsValid() || !scene.isLoaded || cache == null || !cache.IsUsable)
+                throw new ArgumentException("A loaded scene and a usable baked Surface Cache are required.");
+            var binding = scene.GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren<VividSdfSceneSurfaceCache>(true)).SingleOrDefault();
+            if (binding == null)
+            {
+                var owner = new GameObject("Vivid Scene Surface Cache");
+                SceneManager.MoveGameObjectToScene(owner, scene);
+                Undo.RegisterCreatedObjectUndo(owner, "Add Scene Surface Cache");
+                binding = Undo.AddComponent<VividSdfSceneSurfaceCache>(owner);
+            }
+            Undo.RecordObject(binding, "Assign Scene Surface Cache");
+            binding.Cache = cache;
+            EditorSceneManager.MarkSceneDirty(scene);
+            return binding;
         }
 
         public static VividSdfSurfaceCache Bake(IReadOnlyList<MeshletRenderer> renderers, string path, int resolution = 64)

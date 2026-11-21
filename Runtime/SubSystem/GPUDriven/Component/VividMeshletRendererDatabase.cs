@@ -134,6 +134,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMeshletRendererRenderData> m_RendererData = new();
         private readonly List<VividMeshletRendererResources> m_RendererResources = new();
         private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new();
+        private readonly List<EntityId> m_SdfRenderers = new();
+        private readonly Dictionary<EntityId, int> m_SdfRendererIndices = new();
         private readonly Dictionary<EntityId, VividMeshletRendererChangeFlags> m_PrimitiveChanges = new();
         private uint m_StructureRevision;
         private uint m_ResourceRevision;
@@ -156,6 +158,15 @@ namespace VividRP.Runtime.GPUDriven
 
         internal uint InstanceRevision => m_InstanceRevision;
 
+        internal int SdfRendererCount => m_SdfRenderers.Count;
+
+        internal void GetSdfRenderer(int index, out VividMeshletRendererRenderData data, out MeshletRenderer renderer)
+        {
+            int rendererIndex = m_EntityIdToDataIndex[m_SdfRenderers[index]];
+            data = m_RendererData[rendererIndex];
+            renderer = m_RendererResources[rendererIndex].MeshletRenderer;
+        }
+
         internal VividMeshletRendererRenderData RegisterRenderer(MeshletRenderer meshletRenderer)
         {
             return UpdateRendererData(meshletRenderer);
@@ -171,6 +182,7 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
             VividMeshletRendererResources trackedResources = CreateRendererResources(meshletRenderer);
             bool added = StoreRendererData(trackedData, trackedResources);
+            UpdateSdfRegistration(trackedData.meshletRendererEntityId, meshletRenderer.meshSdf != null);
             if (added)
                 MarkStructureChanged();
             else
@@ -416,6 +428,8 @@ namespace VividRP.Runtime.GPUDriven
             m_RendererData.Clear();
             m_RendererResources.Clear();
             m_EntityIdToDataIndex.Clear();
+            m_SdfRenderers.Clear();
+            m_SdfRendererIndices.Clear();
             m_PrimitiveChanges.Clear();
             m_PrimitiveChangeJournalRequiresFullResync = true;
             if (hadRenderers)
@@ -503,6 +517,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             VividMeshletRendererRenderData removedRendererData = m_RendererData[removedIndex];
             m_EntityIdToDataIndex.Remove(removedRendererData.meshletRendererEntityId);
+            UpdateSdfRegistration(removedRendererData.meshletRendererEntityId, false);
 
             int lastIndex = m_RendererData.Count - 1;
             if (removedIndex != lastIndex)
@@ -518,6 +533,29 @@ namespace VividRP.Runtime.GPUDriven
             m_RendererData.RemoveAt(lastIndex);
             m_RendererResources.RemoveAt(lastIndex);
             MarkStructureChanged();
+        }
+
+        private void UpdateSdfRegistration(EntityId id, bool hasSdf)
+        {
+            if (id.Equals(EntityId.None))
+                return;
+            if (hasSdf)
+            {
+                if (m_SdfRendererIndices.TryAdd(id, m_SdfRenderers.Count))
+                    m_SdfRenderers.Add(id);
+                return;
+            }
+            if (!m_SdfRendererIndices.Remove(id, out int index))
+                return;
+
+            int last = m_SdfRenderers.Count - 1;
+            if (index != last)
+            {
+                var replacement = m_SdfRenderers[last];
+                m_SdfRenderers[index] = replacement;
+                m_SdfRendererIndices[replacement] = index;
+            }
+            m_SdfRenderers.RemoveAt(last);
         }
 
         private void MarkStructureChanged()

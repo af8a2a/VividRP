@@ -2,7 +2,7 @@
 
 打开 `SurfaceCacheCornellBox.unity`，使用包含 `SdfDiffuseGatherPass` 的 VividRP Render Graph。场景中的相机和全局 Volume 使用第 30 层。
 
-在 `Cornell GI Volume` 的 Profile 中切换 `SDF Diffuse GI` 的 `Surface Cache`。
+在场景根部的 `Vivid Scene Surface Cache` 组件上切换 `Cache`。三份对照资产位于 `SurfaceCacheCornellBox/SurfaceCache`。烘焙新场景可使用 `VividRP > Lighting > Bake Active Scene Surface Cache`，烘焙结果写到 `<场景名>/SurfaceCache` 并绑定到场景。
 
 - `A - Six Axis Cards` 使用常规六面卡片。外层橙色板挡住了同一网格的内层青色板在 `-Z` 卡片中的投影。
 - `B - Inner Local Card` 在六面卡片之外增加一张 `-Z` 局部卡片。裁切范围仅覆盖内层右半边。场景默认使用 B。

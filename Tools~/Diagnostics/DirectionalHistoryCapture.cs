@@ -56,6 +56,8 @@ using VividRP.Runtime.GPUDriven.Meshlets;
     if(ownLights)lights=EditorSceneManager.OpenScene(lightPath,OpenSceneMode.Additive);
     if(cornell)lights=scene;
     var roots=scene.GetRootGameObjects();
+    var cacheBinding=roots.SelectMany(root=>root.GetComponentsInChildren<VividSdfSceneSurfaceCache>()).SingleOrDefault();
+    var previousCache=cacheBinding?.Cache;
     var lightRoots=lights.GetRootGameObjects();
     var camera=roots.SelectMany(o=>o.GetComponentsInChildren<Camera>(true)).Single(c=>cornell||c.name=="Camera_1");
     var oldEnabled=camera.enabled;
@@ -71,7 +73,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
     var priorProfile=volume.HasInstantiatedProfile()?volume.profile:null;
     var profile=ScriptableObject.CreateInstance<VolumeProfile>();
     foreach(var component in (priorProfile??volume.sharedProfile).components)profile.components.Add(UnityEngine.Object.Instantiate(component));
-    if(!profile.TryGet<SdfDiffuseGISettings>(out var gi)||gi.surfaceCache.value==null||graph==null)
+    if(!profile.TryGet<SdfDiffuseGISettings>(out var gi)||previousCache==null||graph==null)
         throw new InvalidOperationException("Surface Cache fixture unavailable.");
     if(profile.TryGet<AutoExposure>(out var exposure)) {
         exposure.exposureMode.Override(AutoExposureExposureMode.Fixed);
@@ -306,9 +308,9 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         Application.logMessageReceived+=Log;
         hook.SetValue(null,capture);
         var full=AssetDatabase.LoadAssetAtPath<VividSdfSurfaceCache>(
-            "Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox/B - Inner Local Card.asset");
+            "Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox/SurfaceCacheCornellBox/SurfaceCache/B - Inner Local Card.asset");
         if(full==null)throw new InvalidOperationException("Missing local card B.");
-        gi.surfaceCache.Override(full);
+        cacheBinding.Cache=full;
         sun.intensity=3600f;
         stageHook.SetValue(null,(Action<ComputePassContext,int,Texture>)((ctx,stage,texture)=>{
             if(!active||ctx.Get<VividCameraData>().camera!=camera)return;
@@ -332,6 +334,7 @@ using VividRP.Runtime.GPUDriven.Meshlets;
         radioSeed.SetValue(null,previousRadioSeed);
         Application.logMessageReceived-=Log;
         RenderPipelineManager.beginCameraRendering-=Begin;
+        cacheBinding.Cache=previousCache;
         volume.profile=priorProfile;
         sun.intensity=sunIntensity;
         camera.enabled=oldEnabled;

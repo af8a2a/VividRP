@@ -363,8 +363,8 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 0
   surfaceCache:
-    m_OverrideState: 1
-    m_Value: {fileID: 11400000, guid: 81386d422dd54ce49992ae85ae68fdee, type: 2}
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
   cacheSunVisibility:
     m_OverrideState: 1
     m_Value: 0

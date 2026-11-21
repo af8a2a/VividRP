@@ -7,6 +7,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using VividRP.Runtime.GPUDriven.Meshlets;
 using VividRP.Editor.Tools;
 {
     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
@@ -62,7 +63,8 @@ using VividRP.Editor.Tools;
             profile.components.Add(UnityEngine.Object.Instantiate(component));
         profile.TryGet<SdfDiffuseGISettings>(out var gi);
         profile.TryGet<AutoExposure>(out var exposure);
-        if (gi == null || exposure == null || gi.surfaceCache.value == null) throw new InvalidOperationException("Missing Sponza GI fixture.");
+        var surfaceCache = scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<VividSdfSceneSurfaceCache>()).SingleOrDefault();
+        if (gi == null || exposure == null || surfaceCache?.Cache == null) throw new InvalidOperationException("Missing Sponza GI fixture.");
         var type = typeof(SdfDiffuseGatherPass);
         var hooks = new[] { "EditorLinearCapture", "EditorTraceCapture", "EditorGatherStageCapture", "EditorGatherFrameOverride", "EditorRecordProbeAnchorDiagnostics", "EditorGatherHistoryDiagnostics" }
             .ToDictionary(n => n, n => type.GetField(n, stat));

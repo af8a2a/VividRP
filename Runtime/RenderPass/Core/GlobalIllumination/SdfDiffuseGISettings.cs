@@ -70,8 +70,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Choose the final gather independently of the trace mode. Screen Probe Gather filters directional probe radiance. ReSTIR Gather resamples 2×2 reservoirs and requires a usable Mesh SDF scene.")]
         public SdfDiffuseGatherMethodParameter gatherMethod = new(SdfDiffuseGatherMethod.ScreenProbeGather);
 
-        [Tooltip("Optional baked orthographic surface cards. Uncached SDFs still occlude rays.")]
-        public VividSdfSurfaceCacheParameter surfaceCache = new(null);
+        // Existing profiles retain their reference until the Editor migrates it to the owning scene.
+        [SerializeField, HideInInspector]
+        internal VividSdfSurfaceCacheParameter surfaceCache = new(null);
 
         [Tooltip("Update instance card visibility for the directional sun in bounded batches. Unresolved card texels trace shadows at the hit.")]
         public BoolParameter cacheSunVisibility = new(false);

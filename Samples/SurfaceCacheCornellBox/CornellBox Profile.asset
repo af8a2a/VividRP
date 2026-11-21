@@ -374,8 +374,8 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 0
   surfaceCache:
-    m_OverrideState: 1
-    m_Value: {fileID: 11400000, guid: a9bf1ed0b0bd0a34a9afdb40337d7a6d, type: 2}
+    m_OverrideState: 0
+    m_Value: {fileID: 0}
   cacheSunVisibility:
     m_OverrideState: 1
     m_Value: 0
@@ -412,6 +412,9 @@ MonoBehaviour:
   screenHitCardLighting:
     m_OverrideState: 0
     m_Value: 1
+  lumenScreenTracing:
+    m_OverrideState: 0
+    m_Value: 1
   traceMode:
     m_OverrideState: 1
     m_Value: 2
@@ -439,6 +442,12 @@ MonoBehaviour:
   directionalNearOcclusion:
     m_OverrideState: 0
     m_Value: 1
+  screenProbeBentNormalAO:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeBentNormalApplyDuringIntegration:
+    m_OverrideState: 0
+    m_Value: 0
   nearOcclusionRadius:
     m_OverrideState: 1
     m_Value: 0.35
@@ -448,6 +457,21 @@ MonoBehaviour:
   screenProbeDirectionalCache:
     m_OverrideState: 0
     m_Value: 1
+  screenProbeFullSphere:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeDitherTraceDirections:
+    m_OverrideState: 0
+    m_Value: 1
+  screenProbeStochasticInterpolation:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeTemporalFilter:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeMaxRayIntensity:
+    m_OverrideState: 0
+    m_Value: 10
   screenProbeSamplingGuide:
     m_OverrideState: 0
     m_Value: 1
@@ -466,6 +490,12 @@ MonoBehaviour:
   screenProbeSpatialAnchor:
     m_OverrideState: 0
     m_Value: 0
+  screenProbeAnchorPreFilter:
+    m_OverrideState: 0
+    m_Value: 0
+  screenProbeAnchorMaxAge:
+    m_OverrideState: 0
+    m_Value: 32
   screenProbeHitDistanceFilter:
     m_OverrideState: 0
     m_Value: 0
@@ -484,6 +514,9 @@ MonoBehaviour:
   pixelHistoryMaxAge:
     m_OverrideState: 0
     m_Value: 16
+  screenProbeFastUpdateNeighborhoodClamp:
+    m_OverrideState: 0
+    m_Value: 1
   spatialDenoise:
     m_OverrideState: 1
     m_Value: 2

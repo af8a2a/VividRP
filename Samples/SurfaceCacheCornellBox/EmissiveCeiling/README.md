@@ -12,7 +12,7 @@
 
 ## GI 基准
 
-本场景的 GI 重建设置参考 UE 5.7.4 的 Epic 档（`GlobalIlluminationQuality@3`）。使用独立的 `Emissive Ceiling Profile.asset` 与 `Emissive Ceiling Surface Cache.asset`，固定 EV100 = 4。Screen Probe Gather 使用 16 px 网格、每探针 8 条射线、Hybrid 追踪、方向重要性引导及接收面自相交修正。UE 同档的追踪分辨率为 8×8，每探针射线预算高于本场景。
+本场景的 GI 重建设置参考 UE 5.7.4 的 Epic 档（`GlobalIlluminationQuality@3`）。`Emissive Ceiling Profile.asset` 提供固定 EV100 = 4 和 GI 参数。场景根上的 `Vivid Scene Surface Cache` 引用 `CornellBoxEmissiveCeiling/SurfaceCache/Emissive Ceiling Surface Cache.asset`。Screen Probe Gather 使用 16 px 网格、每探针 64 条射线、Hybrid 追踪、方向重要性引导及接收面自相交修正。
 
 常规探针在 16 px 网格内按 8 相位移动。本场景启用方向辐亮度历史混合，当前帧与上一帧的射线散射结果各占 50%，无有效历史时完全采用当前帧。随后执行三轮探针空间滤波。全分辨率 GI 的像素历史上限为 10 帧，额外的 À-Trous 为零轮（`Spatial Denoise = Legacy`）。
 
@@ -24,7 +24,7 @@ Surface Cache 使用 64 × 64 卡片，覆盖房间、遮挡块和顶部面片�
 
 ## 预览与验证
 
-场景、相机和全局 Volume 使用第 29 层。打开菜单保留原场景的未保存内容，并临时关闭其他启用的 Game Camera，避免不同 Surface Cache 身份交替渲染而重置 GI 历史。切换到其他活动场景时关闭本实验相机并恢复其他相机；脚本重载后若本场景仍处于活动状态，会重新隔离预览。独立打开该场景时不需要其他 Cornell 场景。
+场景几何、相机和全局 Volume 使用第 29 层。打开菜单保留原场景的未保存内容，并临时关闭其他启用的 Game Camera。切换到其他活动场景时关闭本实验相机并恢复其他相机；脚本重载后若本场景仍处于活动状态，会重新隔离预览。场景加载和卸载时会注册或移除它的烘焙缓存，卡片按 SDF 实例所属场景查找。
 
 创建菜单 **Create Emissive Ceiling Cornell Box** 调用 `Editor/Tools/EmissiveCornellBoxSceneBuilder.cs`，仅在目标场景尚不存在时生成资产，拒绝覆盖已有实验。
 

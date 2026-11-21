@@ -5,9 +5,11 @@ using NUnit.Framework;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 using VividRP.Runtime.RenderPass.Core;
@@ -304,6 +306,98 @@ namespace VividRP.Editor.Tests
                 Assert.That(atlas[dst + 12], Is.EqualTo(source[src + 12]));
                 Assert.That(atlas[dst + 13], Is.EqualTo(source[src + 12]));
                 Assert.That(atlas[dst + 17], Is.EqualTo(source[src + 16]));
+            }
+        }
+
+        [Test]
+        public void SceneSurfaceCaches_ResolveOwnersAndDropOnlyTheUnloadedBinding()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                Assert.Ignore("Surface Cache composition requires a graphics device.");
+
+            var original = SceneManager.GetActiveScene();
+            var first = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            var second = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            var mesh = new Mesh();
+            var material = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            var caches = new VividSdfSceneCacheSet();
+            var firstCache = MakeCache(2, 1f, false);
+            var secondCache = MakeCache(4, 2f, true);
+            try
+            {
+                var firstBinding = Bind(first, firstCache);
+                var secondBinding = Bind(second, secondCache);
+                var both = new[] { firstBinding, secondBinding };
+                var merged = caches.Refresh(both);
+                Assert.That(merged.AlbedoDepth.depth, Is.EqualTo(13));
+                Assert.That(merged.CardSize, Is.EqualTo(new Vector2Int(4, 4)));
+                Assert.That(merged.GetLocalCardCount(6), Is.EqualTo(1));
+                Assert.That(caches.TryGetCards(first, mesh, material, out var a, out int slotA, out _), Is.True);
+                Assert.That(caches.TryGetCards(second, mesh, material, out var b, out int slotB, out _), Is.True);
+                Assert.That(slotA, Is.Zero);
+                Assert.That(slotB, Is.EqualTo(6));
+                Assert.That(a.size, Is.EqualTo(Vector3.one));
+                Assert.That(b.size, Is.EqualTo(Vector3.one * 2));
+
+                for (int i = 0; i < 8; i++)
+                    caches.Refresh(both);
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 32; i++)
+                    caches.Refresh(both);
+                long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+                Assert.That(caches.Cache, Is.SameAs(merged));
+
+                EditorSceneManager.CloseScene(second, true);
+                Assert.That(caches.Refresh(both), Is.SameAs(firstCache));
+                Assert.That(caches.TryGetCards(second, mesh, material, out _, out _, out _), Is.False);
+                Assert.That(caches.TryGetCards(first, mesh, material, out _, out slotA, out _), Is.True);
+                Assert.That(slotA, Is.Zero);
+            }
+            finally
+            {
+                caches.Dispose();
+                if (second.IsValid() && second.isLoaded)
+                    EditorSceneManager.CloseScene(second, true);
+                EditorSceneManager.CloseScene(first, true);
+                if (original.IsValid() && original.isLoaded)
+                    SceneManager.SetActiveScene(original);
+                DestroyCache(firstCache);
+                DestroyCache(secondCache);
+                Object.DestroyImmediate(mesh);
+                Object.DestroyImmediate(material);
+            }
+
+            VividSdfSurfaceCache MakeCache(int size, float extent, bool local)
+            {
+                var bounds = new Bounds(Vector3.zero, Vector3.one * extent);
+                var entries = new[] { new VividSdfSurfaceCache.Entry { Mesh = mesh, Material = material, Bounds = bounds } };
+                var cards = local ? new[] { new VividSdfSurfaceCache.LocalCard { Bounds = bounds } }
+                    : System.Array.Empty<VividSdfSurfaceCache.LocalCard>();
+                int slices = VividSdfSurfaceCache.CardsPerMesh + cards.Length;
+                var albedo = new Texture2DArray(size, size, slices, GraphicsFormat.R16G16B16A16_SFloat, TextureCreationFlags.None);
+                var normals = new Texture2DArray(size, size, slices, GraphicsFormat.R8G8B8A8_UNorm, TextureCreationFlags.None);
+                albedo.Apply(false, false);
+                normals.Apply(false, false);
+                var cache = ScriptableObject.CreateInstance<VividSdfSurfaceCache>();
+                cache.Initialize(entries, albedo, normals, cards);
+                return cache;
+            }
+
+            static VividSdfSceneSurfaceCache Bind(Scene scene, VividSdfSurfaceCache cache)
+            {
+                var owner = new GameObject("Test Scene Surface Cache");
+                SceneManager.MoveGameObjectToScene(owner, scene);
+                var binding = owner.AddComponent<VividSdfSceneSurfaceCache>();
+                binding.Cache = cache;
+                return binding;
+            }
+
+            static void DestroyCache(VividSdfSurfaceCache cache)
+            {
+                Object.DestroyImmediate(cache.AlbedoDepth);
+                Object.DestroyImmediate(cache.NormalCoverage);
+                Object.DestroyImmediate(cache);
             }
         }
 

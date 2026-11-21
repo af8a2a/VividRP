@@ -182,6 +182,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private List<DiffuseSurface> m_DiffuseSurfaces;
         private List<DiffuseSurface> m_NextDiffuseSurfaces;
         private readonly Shader m_DiffuseShader;
+        private readonly VividSdfSceneCacheSet m_SceneCaches;
         private long m_LastRejectedBytes;
 
         internal GraphicsBuffer Voxels => m_Voxels;
@@ -205,7 +206,9 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private Vector4 m_EmissionMaximum, m_PreviousEmissionMaximum;
         private bool m_LinearEmissionChange;
         internal bool HasEmissiveSurfaces { get; private set; }
-        internal VividSdfSurfaceCache SurfaceCache { get; set; }
+        internal VividSdfSurfaceCache SurfaceCache => m_SceneCaches?.Cache;
+
+        internal VividSdfSurfaceCache RefreshSurfaceCache() => m_SceneCaches?.Refresh(VividSdfSceneSurfaceCache.Active);
 
         internal void CopyInstanceIndices(Dictionary<ulong, uint> destination)
         {
@@ -226,6 +229,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         internal VividMeshSdfGpuScene(Shader diffuseShader)
         {
             m_DiffuseShader = diffuseShader;
+            m_SceneCaches = new VividSdfSceneCacheSet();
             m_DiffuseSurfaces = new List<DiffuseSurface>();
             m_NextDiffuseSurfaces = new List<DiffuseSurface>();
             m_NextSurfaceLightingInstances = new List<uint>();
@@ -260,7 +264,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             if (m_NextInstances.Count == 0)
             {
                 if (m_Voxels != null)
-                    Dispose();
+                    ReleaseGeometry();
                 return;
             }
 
@@ -479,15 +483,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextInstances.Clear();
             m_NextDiffuseSurfaces?.Clear();
             m_NextSurfaceLightingInstances?.Clear();
-            var rendererData = database.rendererData;
-            var resources = database.rendererResources;
-            for (int i = 0; i < rendererData.Count; i++)
+            for (int i = 0; i < database.SdfRendererCount; i++)
             {
-                var data = rendererData[i];
+                database.GetSdfRenderer(i, out var data, out var renderer);
                 if ((data.flags & VisibleFlags) != VisibleFlags)
                     continue;
 
-                var renderer = resources[i].MeshletRenderer;
                 var asset = renderer != null ? renderer.meshSdf : null;
                 if (asset == null)
                     continue;
@@ -581,13 +582,20 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             float diffuse = 1f - Mathf.Clamp01(material.GetFloat(MetallicId));
             if (!math.all(math.isfinite(baseColor)) || !math.all(math.isfinite(emission)) || !float.IsFinite(diffuse))
                 return default;
+            Bounds bounds = default;
+            int firstCard = 0;
+            bool originalNormals = false;
+            if (SurfaceCache != null && !m_SceneCaches.TryGetCards(renderer.gameObject.scene, renderer.sourceMesh, material,
+                    out bounds, out firstCard, out originalNormals))
+                return default;
+
             var surface = new DiffuseSurface
             {
                 AlbedoAndValid = new Vector4(baseColor.x * diffuse, baseColor.y * diffuse, baseColor.z * diffuse, 1f),
                 // Legacy cards discarded original facing. Retain their old two-sided
                 // behavior until explicitly recaptured instead of inventing a side.
                 Emission = new Vector4(emission.x, emission.y, emission.z,
-                    SurfaceCache != null && SurfaceCache.HasOriginalNormals
+                    originalNormals
                         ? (float)(proxy != null ? proxy.CullMode : material.HasProperty(CullId)
                             ? (CullMode)Mathf.RoundToInt(material.GetFloat(CullId)) : CullMode.Back)
                         : (float)CullMode.Off),
@@ -597,8 +605,6 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 #endif
             if (SurfaceCache == null)
                 return surface;
-            if (!SurfaceCache.TryGetCards(renderer.sourceMesh, material, out var bounds, out int firstCard))
-                return default;
 
             var min = bounds.min;
             var size = bounds.size;
@@ -928,6 +934,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         }
 
         public void Dispose()
+        {
+            ReleaseGeometry();
+            m_SceneCaches?.Dispose();
+        }
+
+        private void ReleaseGeometry()
         {
             SparseAtlas?.Dispose();
             ReleaseBrickAtlas();

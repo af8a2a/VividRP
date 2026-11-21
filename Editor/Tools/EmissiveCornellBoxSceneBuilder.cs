@@ -22,7 +22,7 @@ namespace VividRP.Editor.Tools
         public const string Folder = "Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox/EmissiveCeiling";
         public const string ScenePath = Folder + "/CornellBoxEmissiveCeiling.unity";
         public const string ProfilePath = Folder + "/Emissive Ceiling Profile.asset";
-        public const string CachePath = Folder + "/Emissive Ceiling Surface Cache.asset";
+        public const string CachePath = Folder + "/CornellBoxEmissiveCeiling/SurfaceCache/Emissive Ceiling Surface Cache.asset";
         public const string MaterialPath = Folder + "/Ceiling Emitter.mat";
         public const string ProxyPath = Folder + "/Ceiling Emitter Proxy.asset";
         private const string SourceFolder = "Packages/com.vivid.render-pipelines/Samples/SurfaceCacheCornellBox";
@@ -153,8 +153,10 @@ namespace VividRP.Editor.Tools
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
                 var renderers = root.GetComponentsInChildren<MeshletRenderer>();
+                VividSdfSurfaceCacheBaker.EnsureSceneCacheFolder(ScenePath);
                 var cache = VividSdfSurfaceCacheBaker.Bake(renderers, CachePath, 64);
                 created.Add(CachePath);
+                VividSdfSurfaceCacheBaker.BindSceneCache(scene, cache);
                 var profile = ScriptableObject.CreateInstance<VolumeProfile>();
                 profile.name = "Emissive Ceiling Profile";
                 Save(profile, ProfilePath);
@@ -176,7 +178,8 @@ namespace VividRP.Editor.Tools
                 if (profile.TryGet<LocalExposure>(out var localExposure)) localExposure.active = false;
                 var gi = Get<SdfDiffuseGISettings>();
                 gi.enabled.Override(true);
-                gi.surfaceCache.Override(cache);
+                gi.surfaceCache.Override(null);
+                gi.surfaceCache.overrideState = false;
                 gi.gatherMethod.Override(SdfDiffuseGatherMethod.ScreenProbeGather);
                 gi.traceMode.Override(SdfDiffuseTraceMode.Hybrid);
                 gi.realtimeOnly.Override(true);

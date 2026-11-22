@@ -79,8 +79,8 @@ Shader "Hidden/VividRP/CameraMotionVectors"
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-                float2 depthUV = ClampAndScaleUV(input.uv, _ScreenSize.zw, 0.5);
-                float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_PointClamp, depthUV, 0).x;
+                uint2 pixelCoord = uint2(input.positionCS.xy);
+                float depth = LOAD_TEXTURE2D_X_LOD(_CameraDepthTexture, pixelCoord, 0).x;
 
                 float3 positionWS = ComputeWorldSpacePosition(input.uv, depth, UNITY_MATRIX_I_VP);
                 float4 positionCSNoJitter = mul(_NonJitteredViewProjMatrix, float4(positionWS, 1.0));
@@ -88,7 +88,7 @@ Shader "Hidden/VividRP/CameraMotionVectors"
 
                 uint objectVelocity = 0u;
                 #if defined(VIVID_MESHLET_MOTION)
-                uint instanceIndex = _MotionVisibility.Load(int3(uint2(input.positionCS.xy), 0)).x - 1u;
+                uint instanceIndex = _MotionVisibility.Load(int3(pixelCoord, 0)).x - 1u;
                 if (instanceIndex < _VividLegacyInstanceMappingCount)
                 {
                     VividLegacyInstanceMappingData mapping = _VividLegacyInstanceMappingData[instanceIndex];

@@ -21,6 +21,62 @@ float _GlobalSdfVoxelSize;
 uint _GlobalSdfWriteLevel;
 uint _GlobalSdfFirstPage;
 
+float GlobalSdfSampleField(VividMeshSdfField field, float3 positionInGrid)
+{
+    if (field.pageOffset == VividMeshSdfDense)
+        return VividMeshSdfSample(field, positionInGrid);
+
+    float voxelSize = field.originAndVoxelSize.w;
+    float3 voxel = clamp(positionInGrid / voxelSize, 0.0, float3(field.dimensions - 1u));
+    uint3 counts = VividMeshSdfBrickCount(field.dimensions);
+    uint3 brick = min(uint3(voxel) / VividMeshSdfBrickCells, counts - 1u);
+    uint page = VividMeshSdfPage(field.pageOffset, brick, counts);
+    if (page != VividMeshSdfEmptyOutside)
+    {
+        if (page == VividMeshSdfEmptyInside)
+            return -VividMeshSdfBandVoxels * voxelSize;
+        uint3 start = brick * VividMeshSdfBrickCells;
+        uint3 size = min(field.dimensions - start, VividMeshSdfBrickCells + 1u);
+        return VividMeshSdfSampleBrick(field, size, page, voxel - start);
+    }
+
+    // EmptyOutside bricks omit samples beyond VividMeshSdfBandVoxels * voxelSize.
+    // Returning that small constant fills open air with sub-voxel distances in coarse
+    // clipmap levels (e.g. 0.20m < 0.25m expandSurfaceDistance in Level 2). Compute a
+    // conservative lower bound from the 3x3x3 brick neighborhood instead.
+    float brickSize = float(VividMeshSdfBrickCells);
+    float3 bMin = float3(brick) * brickSize;
+    float3 bMax = min(bMin + brickSize, float3(field.dimensions - 1u));
+    float distSq = FLT_MAX;
+    if (brick.x > 1u) { float d = voxel.x - (bMin.x - brickSize); distSq = min(distSq, d * d); }
+    if (brick.x + 2u < counts.x) { float d = (bMax.x + brickSize) - voxel.x; distSq = min(distSq, d * d); }
+    if (brick.y > 1u) { float d = voxel.y - (bMin.y - brickSize); distSq = min(distSq, d * d); }
+    if (brick.y + 2u < counts.y) { float d = (bMax.y + brickSize) - voxel.y; distSq = min(distSq, d * d); }
+    if (brick.z > 1u) { float d = voxel.z - (bMin.z - brickSize); distSq = min(distSq, d * d); }
+    if (brick.z + 2u < counts.z) { float d = (bMax.z + brickSize) - voxel.z; distSq = min(distSq, d * d); }
+
+    int3 lo = max(int3(brick) - 1, 0);
+    int3 hi = min(int3(brick) + 1, int3(counts) - 1);
+    for (int nz = lo.z; nz <= hi.z; nz++)
+    for (int ny = lo.y; ny <= hi.y; ny++)
+    for (int nx = lo.x; nx <= hi.x; nx++)
+    {
+        uint3 n = uint3(nx, ny, nz);
+        if (all(n == brick))
+            continue;
+        if (VividMeshSdfPage(field.pageOffset, n, counts) == VividMeshSdfEmptyOutside)
+            continue;
+        float3 nMin = float3(n) * brickSize;
+        float3 nMax = min(nMin + brickSize, float3(field.dimensions - 1u));
+        float3 gap = max(0.0, max(nMin - voxel, voxel - nMax));
+        distSq = min(distSq, dot(gap, gap));
+    }
+
+    if (distSq >= FLT_MAX * 0.5)
+        return FLT_MAX;
+    return sqrt(distSq + VividMeshSdfBandVoxels * VividMeshSdfBandVoxels) * voxelSize;
+}
+
 float GlobalSdfInstanceDistance(VividMeshSdfInstance instance, VividMeshSdfField field, float3 positionWS)
 {
     float4 p = float4(positionWS, 1.0);
@@ -28,7 +84,9 @@ float GlobalSdfInstanceDistance(VividMeshSdfInstance instance, VividMeshSdfField
         dot(instance.worldToLocal2, p)) - field.originAndVoxelSize.xyz;
     float3 extent = float3(field.dimensions - 1u) * field.originAndVoxelSize.w;
     float3 clamped = clamp(local, 0.0, extent);
-    float distance = VividMeshSdfSample(field, clamped);
+    float distance = GlobalSdfSampleField(field, clamped);
+    if (distance >= FLT_MAX * 0.5)
+        return FLT_MAX;
     float outsideSquared = dot(local - clamped, local - clamped);
     if (outsideSquared > 0.0)
     {
@@ -92,8 +150,6 @@ void ComposeGlobalSdf(uint3 id : SV_DispatchThreadID)
             }
 #endif
             VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
-            if (VividMeshSdfIsSubvoxelShell(field, instance, _GlobalSdfVoxelSize))
-                continue;
             float distance = GlobalSdfInstanceDistance(instance, field, position);
             surface = min(surface, distance > 0.0 ? max(distance, boxDistance) : distance);
         }

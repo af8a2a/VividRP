@@ -275,7 +275,7 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
         if (level > 1u && entry.y > t)
             segmentEnd = min(segmentEnd, entry.y);
 
-        if (traceThinShells && level != previousLevel && VividGlobalSdfSegmentHasThinShell(originWS, directionWS, t, segmentEnd, level))
+        if (!useMip && traceThinShells && level != previousLevel && VividGlobalSdfSegmentHasThinShell(originWS, directionWS, t, segmentEnd, level))
         {
             VividMeshSdfHit meshHit;
             if (VividTraceMeshSdfSceneFiltered(originWS, directionWS, t, segmentEnd,

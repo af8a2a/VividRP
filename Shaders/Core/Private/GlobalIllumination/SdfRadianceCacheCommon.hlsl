@@ -337,6 +337,7 @@ GridCardLighting EvaluateGlobalDistanceFieldHit(float3 pos, float3 normal, float
 {
     GridCardLighting result = (GridCardLighting)0;
     result.instance = 0xffffffffu;
+    if (dot(normal, direction) >= 0.0f) return result;
     float halfVoxel = 0.5f * ObjectGridVoxel(level);
     float3 samplePosition = pos + normal * halfVoxel;
     float3 pageCoord = samplePosition / (ObjectGridVoxel(level) * 7.0f);
@@ -351,7 +352,7 @@ GridCardLighting EvaluateGlobalDistanceFieldHit(float3 pos, float3 normal, float
     {
         if (objects[j] == 0xffffffffu) break;
         uint index = objects[j] & 0xffffffu;
-        float SurfaceCacheBias = 3.0f * halfVoxel;
+        float SurfaceCacheBias = 3.0f * (0.5f * _GlobalSdfLevels[min(level, VividGlobalSdfLevelCount - 1u)].w);
         if (_MeshSdfFields[_MeshSdfInstances[index].fieldIndex].mostlyTwoSided != 0u)
             SurfaceCacheBias += 0.50f;
         DiffuseSurface surface=_SdfDiffuseSurfaces[index];

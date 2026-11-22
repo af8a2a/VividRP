@@ -173,16 +173,21 @@ bool VividGlobalSdfSegmentHasThinShell(float3 origin, float3 direction, float st
 
 float3 VividGlobalSdfNormal(float3 positionWS, uint level)
 {
-    float2 offset = float2(_GlobalSdfLevels[level].w, 0.0);
-    return SafeNormalize(float3(
-        VividGlobalSdfSampleLevel(positionWS + offset.xyy, level) - VividGlobalSdfSampleLevel(positionWS - offset.xyy, level),
-        VividGlobalSdfSampleLevel(positionWS + offset.yxy, level) - VividGlobalSdfSampleLevel(positionWS - offset.yxy, level),
-        VividGlobalSdfSampleLevel(positionWS + offset.yyx, level) - VividGlobalSdfSampleLevel(positionWS - offset.yyx, level)));
+    float h = 0.5f * _GlobalSdfLevels[level].w;
+    const float3 k0 = float3( 1.0f, -1.0f, -1.0f);
+    const float3 k1 = float3(-1.0f, -1.0f,  1.0f);
+    const float3 k2 = float3(-1.0f,  1.0f, -1.0f);
+    const float3 k3 = float3( 1.0f,  1.0f,  1.0f);
+    return SafeNormalize(
+        k0 * VividGlobalSdfSampleLevel(positionWS + k0 * h, level) +
+        k1 * VividGlobalSdfSampleLevel(positionWS + k1 * h, level) +
+        k2 * VividGlobalSdfSampleLevel(positionWS + k2 * h, level) +
+        k3 * VividGlobalSdfSampleLevel(positionWS + k3 * h, level));
 }
 
 // directionWS is normalized. Distances are in world units.
 bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance, float maxDistance,
-    out VividGlobalSdfHit hit, bool computeNormal = true, bool traceThinShells = true)
+    out VividGlobalSdfHit hit, bool computeNormal = true, bool traceThinShells = true, int maxSteps = 256)
 {
     hit = (VividGlobalSdfHit)0;
     float3 entry = FLT_MAX;
@@ -211,7 +216,7 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
     VividGlobalSdfHit thinHit = (VividGlobalSdfHit)0;
     thinHit.distance = FLT_MAX;
     [loop]
-    for (int step = 0; step < 256 && t < exit.z; step++)
+    for (int step = 0; step < maxSteps && t < exit.z; step++)
     {
         uint level = 2u;
         if (t >= entry.x && t < exit.x)

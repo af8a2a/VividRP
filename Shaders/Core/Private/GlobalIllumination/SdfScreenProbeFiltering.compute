@@ -288,7 +288,7 @@ uint DitherSphereBin(uint2 tile, uint ray)
     float2 continuous = SphereRayTexel(tile, ray, seed, parent, mass) - 0.5;
     uint2 owner = GetScreenProbeTileCoord(tile);
     float2 threshold = _SdfHasScatterNoise != 0u
-        ? _SdfScatterNoise.Load(ProbeDirectionBlueNoiseCoord(owner, (_SdfDiffuseFrame & 7u) + 31u))
+        ? _SdfScatterNoise.Load(ProbeDirectionBlueNoiseCoord(owner, (_SdfDiffuseFrame & 63u) + 31u))
         : float2(DirectionalRandom(seed ^ 0x21ab8c65u), DirectionalRandom(seed ^ 0x12ed3749u));
     int2 q = int2(floor(continuous)) + int2(frac(continuous) >= threshold);
     if (q.x < 0 || q.x > 7) q = int2(clamp(q.x, 0, 7), 7 - q.y);
@@ -322,7 +322,14 @@ void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin 
             {
                 float mass = metadata.y * (float(DirectionalGatherBinCount) / ProbeRayCount());
                 float peak = Max3(sample.r, sample.g, sample.b) * mass * VividGetPreExposure();
-                sample.rgb *= min(1.0, _SdfProbeMaxRayIntensity / max(peak, 1e-8));
+                float softKnee = 0.35 * _SdfProbeMaxRayIntensity;
+                if (peak > softKnee)
+                {
+                    float excess = peak - softKnee;
+                    float headroom = max(_SdfProbeMaxRayIntensity - softKnee, 1e-4);
+                    float compressed = softKnee + headroom * (excess / (excess + headroom));
+                    sample.rgb *= compressed / max(peak, 1e-8);
+                }
             }
         }
         SharedTraceRadiance[bin] = sample;
@@ -865,12 +872,12 @@ void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadI
     float SceneDepth = GetSpatialFilterProbeDepth(Geometry);
     if (bValidProbe && SceneDepth > 0.0f)
     {
-        uint StateFrameIndexMod8 = _SdfDiffuseFrame & 7u;
+        uint StateFrameIndexMod64 = _SdfDiffuseFrame & 63u;
         float E = _SdfSpatialFilterScalarNoise.Load(
-            SpatialFilterBlueNoiseCoord(Address, StateFrameIndexMod8 + _SdfSpatialFilterPassIndex + 11u));
+            SpatialFilterBlueNoiseCoord(Address, StateFrameIndexMod64 + _SdfSpatialFilterPassIndex + 11u));
         float ScreenProbeTracesMoving = round(saturate(_SdfProbeMoving[ScreenProbeAtlasCoord]) * 255.0f) / 255.0f;
         float3 WorldPosition = Geometry.xyz;
-        float2 ProbeTexelCenter = _SdfSpatialFilterVectorNoise.Load(SpatialFilterBlueNoiseCoord(ScreenTileCoord, StateFrameIndexMod8));
+        float2 ProbeTexelCenter = _SdfSpatialFilterVectorNoise.Load(SpatialFilterBlueNoiseCoord(ScreenTileCoord, StateFrameIndexMod64));
         float2 ProbeUV = (ProbeTexelCoord + ProbeTexelCenter) / 8.0f;
         float3 WorldConeDirection = ProbeSphereDirection(ProbeUV);
         float HitDistance = GetSpatialFilterHitDistance(Address, MetadataOffset);
@@ -919,12 +926,15 @@ void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadI
         {
             TotalRadiance /= TotalWeight;
             TotalSkyVisibility /= TotalWeight;
+            // Lumen's QuantizeFloatColor, with the mantissa width of Vivid's RGBA16F atlas.
+            // Pack filtered directional sky visibility in alpha as [1, 2] (0 marks invalid/untraced bins).
+            float3 Error = asfloat(asuint(TotalRadiance * (1.0f / 1024.0f)) & ~0x007FFFFFu);
+            _SdfDirectionalFilteredOutput[Address] = float4(min(TotalRadiance + Error * E, 65504.0f), 1.0f + saturate(TotalSkyVisibility));
         }
-
-        // Lumen's QuantizeFloatColor, with the mantissa width of Vivid's RGBA16F atlas.
-        // Pack filtered directional sky visibility in alpha as [1, 2] (0 marks invalid probes).
-        float3 Error = asfloat(asuint(TotalRadiance * (1.0f / 1024.0f)) & ~0x007FFFFFu);
-        _SdfDirectionalFilteredOutput[Address] = float4(min(TotalRadiance + Error * E, 65504.0f), 1.0f + saturate(TotalSkyVisibility));
+        else
+        {
+            _SdfDirectionalFilteredOutput[Address] = 0.0f;
+        }
     }
     else
     {

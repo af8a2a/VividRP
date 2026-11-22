@@ -7,6 +7,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
 
 Texture2D<float4> _InputColor;
 Texture2D<float4> _MotionVectors;
@@ -18,6 +19,24 @@ RWTexture2D<float4> _HistoryColorWrite;
 
 float4 _TAAParams;
 float4 _Jitter;
+float _TAAUsePreExposure;
+
+float TAALuminance(float3 rgb)
+{
+    return dot(rgb, float3(0.2126, 0.7152, 0.0722));
+}
+
+float3 TonemapTAA(float3 rgb)
+{
+    float3 clamped = max(rgb, 0.0);
+    return clamped * rcp(1.0 + TAALuminance(clamped));
+}
+
+float3 InverseTonemapTAA(float3 rgb)
+{
+    float3 clamped = max(rgb, 0.0);
+    return clamped * rcp(max(1.0 - TAALuminance(clamped), 1e-4));
+}
 
 float3 RGBToYCoCg(float3 rgb)
 {
@@ -77,18 +96,43 @@ float3 ClipToAABB(float3 color, float3 aabbMin, float3 aabbMax)
 void TemporalAA(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     int2 pixelCoord = int2(dispatchThreadId.xy);
-    if (any(pixelCoord >= int2(_ScreenSize.xy)))
+    int2 screenSize = int2(_ScreenSize.xy);
+    if (any(pixelCoord >= screenSize))
         return;
 
+    int2 screenMax = screenSize - 1;
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
-    float3 currentColor = _InputColor[pixelCoord].rgb;
+    float3 currentColor = max(_InputColor[pixelCoord].rgb, 0.0);
+
+    // 3x3 closest-depth velocity dilation prevents foreground silhouettes from smearing onto disoccluded backgrounds.
+    int2 closestCoord = pixelCoord;
+    float closestDepth = _DepthTexture[pixelCoord];
+    [unroll]
+    for (int ddy = -1; ddy <= 1; ddy++)
+    {
+        [unroll]
+        for (int ddx = -1; ddx <= 1; ddx++)
+        {
+            if (ddx == 0 && ddy == 0)
+                continue;
+            int2 sampleCoord = clamp(pixelCoord + int2(ddx, ddy), 0, screenMax);
+            float sampleDepth = _DepthTexture[sampleCoord];
+#if UNITY_REVERSED_Z
+            if (sampleDepth > closestDepth)
+#else
+            if (sampleDepth < closestDepth)
+#endif
+            {
+                closestDepth = sampleDepth;
+                closestCoord = sampleCoord;
+            }
+        }
+    }
 
     float2 motionVector;
-    DecodeMotionVector(_MotionVectors[pixelCoord], motionVector);
+    DecodeMotionVector(_MotionVectors[closestCoord], motionVector);
+    // _Jitter stores unflipped camera projection offsets (m03, m13), where +Y already matches RT +V after GPU Y-flip.
     float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
-#if UNITY_UV_STARTS_AT_TOP
-    jitterDelta.y = -jitterDelta.y;
-#endif
     float2 historyUV = uv - motionVector + jitterDelta;
 
     float3 m1 = 0.0;
@@ -102,8 +146,8 @@ void TemporalAA(uint3 dispatchThreadId : SV_DispatchThreadID)
         [unroll]
         for (int dx = -1; dx <= 1; dx++)
         {
-            int2 sampleCoord = clamp(pixelCoord + int2(dx, dy), 0, int2(_ScreenSize.xy) - 1);
-            float3 sampleColor = RGBToYCoCg(_InputColor[sampleCoord].rgb);
+            int2 sampleCoord = clamp(pixelCoord + int2(dx, dy), 0, screenMax);
+            float3 sampleColor = RGBToYCoCg(TonemapTAA(_InputColor[sampleCoord].rgb));
             neighborMin = min(neighborMin, sampleColor);
             neighborMax = max(neighborMax, sampleColor);
             m1 += sampleColor;
@@ -112,38 +156,53 @@ void TemporalAA(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float3 mean = m1 * (1.0 / 9.0);
-    float3 stddev = sqrt(abs(m2 * (1.0 / 9.0) - mean * mean));
-    float3 clampMin = max(mean - 1.25 * stddev, neighborMin);
-    float3 clampMax = min(mean + 1.25 * stddev, neighborMax);
+    float3 stddev = sqrt(max(m2 * (1.0 / 9.0) - mean * mean, 0.0));
+    float3 clampMin = max(mean - 1.0 * stddev, neighborMin);
+    float3 clampMax = min(mean + 1.0 * stddev, neighborMax);
 
+    float currentPreExposure = _TAAUsePreExposure > 0.5 ? VividGetPreExposure() : 1.0;
     bool isHistoryValid = _TAAParams.w > 0.5 && all(historyUV >= 0.0) && all(historyUV <= 1.0);
 
     float3 historyColor;
     if (isHistoryValid)
+    {
         historyColor = SampleHistoryCatmullRom(_HistoryColor, historyUV, _ScreenSize.xy).rgb;
+        if (_TAAUsePreExposure > 0.5)
+        {
+            int2 histCoord = clamp(int2(historyUV * _ScreenSize.xy), 0, screenMax);
+            float prevPreExposure = _HistoryColor[histCoord].a;
+            if (prevPreExposure > 1e-4)
+                historyColor *= currentPreExposure / prevPreExposure;
+        }
+    }
     else
+    {
         historyColor = currentColor;
+    }
 
-    float3 historyYCoCg = RGBToYCoCg(historyColor);
-    historyYCoCg = ClipToAABB(historyYCoCg, clampMin, clampMax);
-    historyColor = YCoCgToRGB(historyYCoCg);
-    historyColor = max(historyColor, 0.0);
+    float3 currentTone = TonemapTAA(currentColor);
+    float3 historyToneYCoCg = RGBToYCoCg(TonemapTAA(historyColor));
+    float3 clippedToneYCoCg = ClipToAABB(historyToneYCoCg, clampMin, clampMax);
+    float clipDistance = length(clippedToneYCoCg - historyToneYCoCg);
+    float3 clippedHistoryTone = max(YCoCgToRGB(clippedToneYCoCg), 0.0);
 
     float motionLength = length(motionVector * _ScreenSize.xy);
-    float velocityWeight = exp(-motionLength * _TAAParams.y);
+    float velocityWeight = lerp(0.55, 1.0, exp(-motionLength * (_TAAParams.y * 0.08)));
+    float clipConfidence = exp(-clipDistance * 8.0);
 
-    float currentLuma = RGBToYCoCg(currentColor).x;
-    float historyLuma = historyYCoCg.x;
-    float lumaDiff = abs(currentLuma - historyLuma) / max(max(currentLuma, historyLuma), 0.2);
+    float currentLuma = RGBToYCoCg(currentTone).x;
+    float historyLuma = clippedToneYCoCg.x;
+    float lumaDiff = abs(currentLuma - historyLuma) / max(max(currentLuma, historyLuma), 0.1);
     float antiFlicker = 1.0 - saturate(lumaDiff * _TAAParams.z);
 
-    float blendFactor = _TAAParams.x * velocityWeight * antiFlicker;
+    float blendFactor = _TAAParams.x * velocityWeight * clipConfidence * antiFlicker;
     blendFactor = isHistoryValid ? blendFactor : 0.0;
 
-    float3 result = lerp(currentColor, historyColor, blendFactor);
+    float3 blendedTone = lerp(currentTone, clippedHistoryTone, blendFactor);
+    float3 result = max(InverseTonemapTAA(blendedTone), 0.0);
 
     _OutputColor[pixelCoord] = float4(result, 1.0);
-    _HistoryColorWrite[pixelCoord] = float4(result, 1.0);
+    _HistoryColorWrite[pixelCoord] = float4(result, currentPreExposure);
 }
 
 [numthreads(8, 8, 1)]

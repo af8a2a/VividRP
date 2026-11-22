@@ -49,8 +49,9 @@ namespace VividRP.Editor.Tests
             try
             {
                 Assert.That(settings.screenProbeFastUpdateNeighborhoodClamp.value, Is.False);
-                Assert.That(settings.screenProbeTemporalRejectBasedOnNormal.value, Is.False);
-                Assert.That(settings.screenProbeTemporalPlaneDisocclusion.value, Is.False);
+                Assert.That(settings.screenProbeTemporalRejectBasedOnNormal.value, Is.True);
+                Assert.That(settings.screenProbeTemporalPlaneDisocclusion.value, Is.True);
+                Assert.That(settings.screenProbeCoherentRadianceFastUpdate.value, Is.True);
                 Assert.That(settings.screenProbeDisocclusionSpatialFilter.value, Is.True);
                 Assert.That(settings.screenProbeRoughSpecular.value, Is.True);
             }
@@ -411,6 +412,134 @@ namespace VividRP.Editor.Tests
                 "Directional sky visibility must accumulate with the same temporal sample weight as radiance.");
         }
 
+        [Test]
+        public void CoherentRadianceFastUpdate_ReducesLagOnCoherentShiftWithoutDisturbingNoisyStaticNeighborhood()
+        {
+            RequireComputeAndReversedZ();
+            int center = 8 * 16 + 8;
+            var wallNormal = new Vector3(0f, 0f, -1f);
+
+            // 1. Spatially coherent radiance drop (0.9 -> 0.25 across the 3x3 neighborhood):
+            //    bit 2 (reprojectionFlags = 4) must pull output much closer to 0.25 than pure 1/11 lag (~0.84).
+            using var shiftFixture = new TemporalFixture(16, 16, useMoments: false);
+            shiftFixture.WarmupSteadyHistory(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.9f, 0.9f, 0.9f, 1f),
+                frames: 12);
+            shiftFixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.25f, 0.25f, 0.25f, 1f),
+                moving: 0.004f);
+            var shifted = shiftFixture.Step(hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false, reprojectionFlags: 4);
+            Assert.That(shifted.OutputRgba[center * 4], Is.LessThan(0.40f),
+                "Spatially coherent radiance jump must trigger coherent fast-update and soft clamping instead of 20-frame lag.");
+
+            // 2. High-variance single-frame checkerboard noise centered around history (0.5):
+            //    coherence gate must suppress fast-update so steady history remains smooth.
+            using var noisyFixture = new TemporalFixture(16, 16, useMoments: false);
+            noisyFixture.WarmupSteadyHistory(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.5f, 0.5f, 0.5f, 1f),
+                frames: 12);
+            noisyFixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (x, y) => ((x + y) & 1) == 0 ? new Color(0.9f, 0.9f, 0.9f, 1f) : new Color(0.1f, 0.1f, 0.1f, 1f),
+                moving: 0.004f);
+            var noisy = noisyFixture.Step(hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false, reprojectionFlags: 4);
+            Assert.That(noisy.OutputRgba[center * 4], Is.EqualTo(Mathf.Lerp(0.5f, 0.9f, 1f / 11f)).Within(0.02f),
+                "Noisy high-variance neighborhood centered on history must not trigger coherent fast-update.");
+        }
+
+        [Test]
+        public void RoughSpecularTemporal_ClampsParallaxGhostingWhilePreservingSkyVisibility()
+        {
+            RequireComputeAndReversedZ();
+            int center = 8 * 16 + 8;
+            var wallNormal = new Vector3(0f, 0f, -1f);
+
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.4f, 0.4f, 0.4f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(2.0f, 2.0f, 2.0f, 0.0f));
+            for (int f = 0; f < 12; f++)
+            {
+                fixture.Step(hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                    readResult: false, roughSpecularEnabled: true);
+            }
+
+            // Specular highlight moves off-surface (2.0 -> 0.2) while skyVis stays 0.0 and camera translates.
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.4f, 0.4f, 0.4f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(0.2f, 0.2f, 0.2f, 0.55f));
+            var output = fixture.Step(
+                hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                readResult: true, roughSpecularEnabled: true,
+                previousCameraPosition: new Vector4(0.5f, 0f, 0f, 1f));
+
+            Assert.That(output.RoughSpecularRgba[center * 4], Is.LessThan(0.35f),
+                "Tonemapped YCoCg neighborhood clamp + view-parallax decay must cut Rough Specular ghost trails.");
+            Assert.That(output.RoughSpecularRgba[center * 4 + 3], Is.EqualTo(0.05f).Within(0.006f),
+                "View-independent sky visibility must keep Diffuse GI's smooth accumulation weight.");
+        }
+
+        [Test]
+        public void DynamicLightingFastUpdateWindow_EngagesOnlyOnLightingChangesAndDetectsCameraMotion()
+        {
+            Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: false, lightingChanged: true), Is.Zero);
+            Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: true, lightingChanged: false), Is.Zero);
+            int frames = SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: true, lightingChanged: true);
+            Assert.That(frames, Is.EqualTo(8));
+            Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(frames, hasPreviousState: true, lightingChanged: false), Is.EqualTo(7));
+
+            var pos = new Vector4(4f, 0.5f, -7f, 1f);
+            var fwd = new Vector4(0f, 0f, 1f, 0f);
+            Assert.That(SdfDiffuseGatherPass.HasCameraMotion(pos, pos, fwd, fwd), Is.False);
+            Assert.That(SdfDiffuseGatherPass.HasCameraMotion(pos, pos + new Vector4(0.01f, 0f, 0f, 0f), fwd, fwd), Is.True);
+            Assert.That(SdfDiffuseGatherPass.HasCameraMotion(pos, pos, fwd, new Vector4(0.01f, 0f, 1f, 0f).normalized), Is.True);
+        }
+
+        [Test]
+        public void StaticCameraSubpixelBevel_RetainsHistoryUnderPlaneAndNormalRejection()
+        {
+            RequireComputeAndReversedZ();
+            int center = 8 * 16 + 8;
+            var normalA = new Vector3(0.6f, 0f, -0.8f).normalized;
+            var normalB = new Vector3(-0.6f, 0f, -0.8f).normalized; // dot(A, B) = 0.28 < 0.5
+
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            fixture.WarmupSteadyHistory(
+                (_, _) => 6.0f,
+                (_, _) => normalA,
+                (_, _) => new Color(0.85f, 0.85f, 0.85f, 1f),
+                frames: 12,
+                reprojectionFlags: 1 | 2 | 8);
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => normalB,
+                (_, _) => new Color(0.25f, 0.25f, 0.25f, 1f),
+                moving: 0.004f);
+
+            // Bit 3 (CAMERA_STATIC) with zero motion vector represents pure subpixel TAA/TSR jitter on a thin bevel.
+            var staticOut = fixture.Step(hasHistory: true, jitterDeltaUv: new Vector2(0.35f / 16f, 0f),
+                clampEnabled: false, reprojectionFlags: 1 | 2 | 8);
+            Assert.That(staticOut.NumFrames[center], Is.EqualTo(10f).Within(0.01f),
+                "Static camera subpixel jitter must retain full history on thin bevels without normal-rejection flicker.");
+            // Steady static pixels also use the extended 2.5x convergence window (1 / (1 + 25) instead of 1 / 11).
+            float expectedStaticBlend = Mathf.Lerp(0.85f, 0.25f, 1f / 26f);
+            Assert.That(staticOut.OutputRgba[center * 4], Is.EqualTo(expectedStaticBlend).Within(0.008f),
+                "Converged static camera pixels must damp residual probe flicker with the extended steady-state weight.");
+        }
+
         private static void RequireComputeAndReversedZ()
         {
             Assume.That(
@@ -634,7 +763,7 @@ namespace VividRP.Editor.Tests
 
             internal Result Step(bool hasHistory, Vector2 jitterDeltaUv, bool clampEnabled,
                 bool readResult = true, int reprojectionFlags = 0, bool disocclusionSpatialFilter = false,
-                float preExposure = 0f, bool roughSpecularEnabled = false)
+                float preExposure = 0f, bool roughSpecularEnabled = false, Vector4? previousCameraPosition = null)
             {
                 SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(
                     width, height, out var subPixel, out var shift, out var gatherMinMax);
@@ -660,6 +789,7 @@ namespace VividRP.Editor.Tests
                 shader.SetVector("_SdfProbeCameraForward", new Vector4(0f, 0f, 1f, 0f));
                 shader.SetVector("_SdfProbePreviousCameraForward", new Vector4(0f, 0f, 1f, 0f));
                 shader.SetVector("_SdfProbeCameraPosition", new Vector4(0f, 0f, 0f, 1f));
+                shader.SetVector("_SdfProbePreviousCameraPosition", previousCameraPosition ?? new Vector4(0f, 0f, 0f, 1f));
                 shader.SetVector("_SdfHistoryLightScale", Vector4.one);
                 shader.SetVector("_SdfScreenJitterDelta", new Vector4(jitterDeltaUv.x, jitterDeltaUv.y, 0f, 0f));
                 shader.SetFloat("_SdfPixelHistoryMaxAge", 10f);

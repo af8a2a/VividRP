@@ -761,7 +761,8 @@ float2 GetScreenProbeFullTileNoiseOffset(uint2 pixel, uint2 size, float3 positio
         return 0.0;
 
     // UE scene depth is in centimeters. Vivid camera depth is in meters.
-    float EffectiveJitterWidth = lerp(1.0f, .5f, saturate((eyeDepth - 5.0f) / 5.0f));
+    // Tighten stochastic probe jitter radius to avoid pulling distant probes across steep sunlit-ledge gradients.
+    float EffectiveJitterWidth = lerp(0.5f, 0.25f, saturate((eyeDepth - 5.0f) / 5.0f));
     float2 ScreenTileJitterE = _SdfInterpolationVectorNoise.Load(ProbeInterpolationBlueNoiseCoord(pixel, size));
     float2 JitterNoiseOffset = (ScreenTileJitterE * 2 - 1) * ProbeSpacing * EffectiveJitterWidth;
     float2 JitteredScreenCoord = clamp(ProbeInterpolationScreenCoord(pixel, size) + JitterNoiseOffset,
@@ -932,7 +933,7 @@ uint2 WrapScreenProbeOctahedralCell(int2 cell)
     return uint2(clamp(cell, 0, 7));
 }
 
-float4 SampleScreenProbeOctahedralRadianceAndSky(uint2 tile, float3 direction)
+float4 SampleScreenProbeOctahedralRadianceAndSky(uint2 tile, float3 direction, out bool valid)
 {
     float2 octCoord = ProbeSphereUV(direction) * 8.0f - 0.5f;
     int2 baseCell = int2(floor(octCoord));
@@ -955,7 +956,8 @@ float4 SampleScreenProbeOctahedralRadianceAndSky(uint2 tile, float3 direction)
             weightSum += w;
         }
     }
-    if (weightSum <= 1e-5f)
+    valid = weightSum > 1e-5f;
+    if (!valid)
         return 0.0f;
     return float4(radianceSum / weightSum, saturate(skyVisSum / weightSum));
 }
@@ -1007,11 +1009,8 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     float specWeightSum = 0.0f;
     if (totalWeight >= MinProbeInterpolationFallbackWeight)
     {
-        if (stochasticInterpolation)
-        {
-            SelectStochasticScreenProbe(pixel, size, totalWeight, samples);
-            interpolationWeight = 1.0f;
-        }
+        // Blend all 4 geometry-weighted probes deterministically rather than stochastically dropping
+        // 3 of 4 probes, eliminating Bernoulli speckle across steep sunlit-ledge gradients.
         [unroll]
         for (uint i = 0u; i < 4u; ++i)
         {
@@ -1023,10 +1022,14 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
                     samples.weights[i], sh, coveredWeight);
                 if (computeRoughSpecular)
                 {
-                    float4 octSample = SampleScreenProbeOctahedralRadianceAndSky(probeTile, dominantDir);
-                    specRadianceSum += samples.weights[i] * octSample.rgb;
-                    specSkyVisSum += samples.weights[i] * octSample.a;
-                    specWeightSum += samples.weights[i];
+                    bool octValid = false;
+                    float4 octSample = SampleScreenProbeOctahedralRadianceAndSky(probeTile, dominantDir, octValid);
+                    if (octValid)
+                    {
+                        specRadianceSum += samples.weights[i] * octSample.rgb;
+                        specSkyVisSum += samples.weights[i] * octSample.a;
+                        specWeightSum += samples.weights[i];
+                    }
                 }
             }
         }
@@ -1062,8 +1065,6 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
         float3 irradiance = ResolveScreenProbeIrradiance(sh, normal, contact, bentNormalAO);
         // Covered black still contributes its full share of the coverage.
         float coverage = saturate(coveredWeight / max(interpolationWeight, MinProbeInterpolationWeight));
-        if (stochasticInterpolation)
-            coverage *= saturate(totalWeight / MinProbeInterpolationWeight);
         result = float4(min(irradiance / coveredWeight, 65000.0), coverage);
     }
     if (_SdfProbeResolveRepairMode != 0u && (totalWeight < MinProbeInterpolationWeight || result.a < 0.08))
@@ -1085,10 +1086,16 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     }
     if (computeRoughSpecular)
     {
-        float shBlend = smoothstep(0.35f, 0.95f, roughness);
-        float3 roughSpecRadiance = specWeightSum > 1e-5f
-            ? lerp(specRadianceSum / specWeightSum, result.rgb, shBlend)
+        // Wide GGX lobes on rough stone/fabric (roughness >= 0.45) span more than one 8x8 octahedral cell;
+        // smoothly blend into directional SH3 evaluated along dominantDir to prevent raw 8x8 texel noise and holes.
+        float3 directionalSh = coveredWeight > 0.0f
+            ? min(ResolveScreenProbeIrradiance(sh, dominantDir, float4(0.0f, 0.0f, 0.0f, 1.0f), float4(dominantDir, 1.0f))
+                / coveredWeight, 65000.0f)
             : result.rgb;
+        float shBlend = smoothstep(0.25f, 0.55f, roughness);
+        float3 roughSpecRadiance = specWeightSum > 1e-5f
+            ? lerp(specRadianceSum / specWeightSum, directionalSh, shBlend)
+            : directionalSh;
         float skyVisibility = specWeightSum > 1e-5f ? saturate(specSkyVisSum / specWeightSum) : 0.0f;
         roughSpecular = float4(min(roughSpecRadiance, 65000.0f), skyVisibility);
     }

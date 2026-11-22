@@ -240,7 +240,7 @@ uint2 GetScreenProbeTileCoord(uint2 tile)
 float2 GetScreenProbeTexelCenter(uint2 tile, uint seed)
 {
     if (_SdfHasProbeDirectionNoise != 0u)
-        return _SdfProbeDirectionNoise.Load(ProbeDirectionBlueNoiseCoord(GetScreenProbeTileCoord(tile), _SdfDiffuseFrame & 7u));
+        return _SdfProbeDirectionNoise.Load(ProbeDirectionBlueNoiseCoord(GetScreenProbeTileCoord(tile), _SdfDiffuseFrame & 63u));
     return clamp(DirectionalTemporalSample(tile, 0u, seed), 1e-5, 1.0 - 1e-5);
 }
 

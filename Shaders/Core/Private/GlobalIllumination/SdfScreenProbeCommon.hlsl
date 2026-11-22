@@ -116,10 +116,11 @@ float _SdfProbeAnchorHistoryBlend;
 
 uint2 ProbeTileJitter(uint frame)
 {
-    // Lumen's Hammersley16(frame % 8, 8, 0), in integer pixel coordinates.
-    uint index = frame & 7u;
-    uint reversed = ((index & 1u) << 2u) | (index & 2u) | ((index & 4u) >> 2u);
-    return uint2(index, reversed) * (ProbeSpacing / 8u);
+    // 64-frame R2 low-discrepancy sequence inside the 16x16 probe tile to eliminate
+    // 8-frame (7.5 Hz) global strobe limit cycles while keeping uniform tile coverage.
+    uint index = frame & 63u;
+    float2 r2 = frac(float2(index, index) * float2(0.754877666f, 0.569840291f));
+    return min(uint2(r2 * float(ProbeSpacing)), ProbeSpacing - 1u);
 }
 
 float2 ProbeGridPosition(float2 pixel, uint2 jitter)
@@ -269,9 +270,8 @@ uint ProbeAtlasHeight(uint2 grid)
 
 uint2 AdaptiveCandidatePixel(uint2 tile, uint index)
 {
-    // GetAdaptiveSampleCoord uses Rand3DPCG16(tile, SCREEN_TEMPORAL_INDEX)
-    // and the same eight-frame index as the uniform probe lattice.
-    uint temporalIndex = _SdfDiffuseFrame & 7u;
+    // Match the 64-frame temporal index of the uniform probe lattice.
+    uint temporalIndex = _SdfDiffuseFrame & 63u;
     uint3 v = uint3(tile, temporalIndex) * 1664525u + 1013904223u;
     v.x += v.y * v.z;
     v.y += v.z * v.x;

@@ -1796,7 +1796,7 @@ void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
             prevNdc.z = hitUVz.z - VividDecodeMotionDeviceZ(encoded);
         }
         float vignette = min(HitVignette(ndc), HitVignette(prevNdc.xy));
-        float2 noiseUV = id.xy + 0.5f + (_SdfDiffuseFrame % 8u) * (float2(47, 17) * 0.695f);
+        float2 noiseUV = id.xy + 0.5f + (_SdfDiffuseFrame & 63u) * (float2(47, 17) * 0.695f);
         float noise = frac(52.9829189f * frac(dot(noiseUV, float2(0.06711056f, 0.00583715f))));
         hit = vignette >= noise;
         if (hit)

@@ -221,11 +221,14 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Clamp fast-updating Screen Probe pixel history to the 3x3 current resolved lighting neighborhood when traces hit moving geometry. Disabled by default to match UE Lumen.")]
         public BoolParameter screenProbeFastUpdateNeighborhoodClamp = new(false);
 
-        [Tooltip("Reject Screen Probe pixel temporal history when the reprojected normal differs by more than 45 degrees. Disabled by default to match UE Lumen and avoid normal-map flicker during camera motion.")]
-        public BoolParameter screenProbeTemporalRejectBasedOnNormal = new(false);
+        [Tooltip("Reject Screen Probe pixel temporal history when the reprojected normal differs by more than 60 degrees. Enabled by default to prevent cross-surface bleed behind foreground edges while tolerating normal-map variation.")]
+        public BoolParameter screenProbeTemporalRejectBasedOnNormal = new(true);
 
-        [Tooltip("Use world-space plane distance instead of linear scene depth with grazing-angle expansion for Screen Probe pixel temporal disocclusion. Disabled by default to match UE Lumen.")]
-        public BoolParameter screenProbeTemporalPlaneDisocclusion = new(false);
+        [Tooltip("Use world-space plane distance instead of linear scene depth with grazing-angle expansion for Screen Probe pixel temporal disocclusion. Enabled by default to prevent grazing-wall false disocclusion and occluder bleed.")]
+        public BoolParameter screenProbeTemporalPlaneDisocclusion = new(true);
+
+        [Tooltip("Boost fast-update response and apply tonemapped YCoCg soft clamping during dynamic directional-light or sky transitions, while remaining inactive under steady lighting to avoid static probe-tile oscillation noise.")]
+        public BoolParameter screenProbeCoherentRadianceFastUpdate = new(true);
 
         [Tooltip("Apply a lightweight geometry-aware 3x3 bilateral spatial filter on newly disoccluded Screen Probe pixels (history age < 2) to suppress single-frame stochastic probe noise during camera motion.")]
         public BoolParameter screenProbeDisocclusionSpatialFilter = new(true);

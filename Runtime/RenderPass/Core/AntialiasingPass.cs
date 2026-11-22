@@ -17,6 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int TAAParamsId = Shader.PropertyToID("_TAAParams");
         private static readonly int ScreenSizeId = Shader.PropertyToID("_ScreenSize");
         private static readonly int JitterId = Shader.PropertyToID("_Jitter");
+        private static readonly int TAAUsePreExposureId = Shader.PropertyToID("_TAAUsePreExposure");
 
         private static readonly BaseRenderFunc<TaaPassData, ComputeGraphContext> s_TaaRenderFunc =
             ExecuteTaaPass;
@@ -68,6 +69,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private TAASettings m_TaaSettings = TAASettings.Disabled;
         private Vector2 m_Jitter;
         private Vector2 m_PreviousJitter;
+        private GraphicsBuffer m_PreExposureBuffer;
 
         public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
 
@@ -124,6 +126,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResetHistory = antialiasingData != null && antialiasingData.resetHistory;
             m_Jitter = temporalData != null ? temporalData.jitter : Vector2.zero;
             m_PreviousJitter = temporalData != null ? temporalData.previousJitter : Vector2.zero;
+            m_PreExposureBuffer = m_EffectiveMode == VividAntialiasingMode.TemporalAntiAliasing
+                ? VividAutoExposureSystem.ResolvePreExposureBuffer(frameData.Get<VividExposureData>())
+                : null;
 
             UpdateOutputDescriptor(cameraData, antialiasingData);
             PrepareTaaHistory(cameraData);
@@ -231,6 +236,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TaaHistoryColorPrevious = default;
             m_TaaHistoryColorCurrent = default;
             m_HasValidTaaHistory = false;
+            m_PreExposureBuffer = null;
             m_IsPassResourceLayoutDirty = false;
         }
 
@@ -655,6 +661,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ComputeShader,
                 JitterId,
                 new Vector4(m_Jitter.x, m_Jitter.y, m_PreviousJitter.x, m_PreviousJitter.y));
+            if (m_PreExposureBuffer != null)
+            {
+                cmd.SetComputeBufferParam(
+                    m_ComputeShader,
+                    m_TaaKernel,
+                    VividAutoExposureSystem.PreExposureBufferId,
+                    m_PreExposureBuffer);
+            }
+            cmd.SetComputeFloatParam(
+                m_ComputeShader,
+                TAAUsePreExposureId,
+                m_PreExposureBuffer != null ? 1.0f : 0.0f);
 
             m_TaaHistory?.MarkWritten();
             var dispatchX = CoreUtils.DivRoundUp(m_Width, 8);

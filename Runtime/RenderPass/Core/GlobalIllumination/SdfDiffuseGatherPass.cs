@@ -128,6 +128,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FastUpdateNeighborhoodClampId = Shader.PropertyToID("_SdfFastUpdateNeighborhoodClamp");
         private static readonly int TemporalReprojectionFlagsId = Shader.PropertyToID("_SdfTemporalReprojectionFlags");
         private static readonly int ProbeCameraPositionId = Shader.PropertyToID("_SdfProbeCameraPosition");
+        private static readonly int ProbePreviousCameraPositionId = Shader.PropertyToID("_SdfProbePreviousCameraPosition");
         private static readonly int PreviousPixelDepthId = Shader.PropertyToID("_SdfDiffusePreviousPixelDepth");
         private static readonly int PixelDepthOutputId = Shader.PropertyToID("_SdfDiffusePixelDepthOutput");
         private static readonly int PreviousPixelDepthValidId = Shader.PropertyToID("_SdfPreviousPixelDepthValid");
@@ -593,6 +594,8 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool FastUpdateNeighborhoodClamp;
             internal int PixelHistoryMaxAge, ProbeAnchorMaxAge;
             internal Vector4 ProbeCameraForward;
+            internal Vector4 ProbeCameraPosition;
+            internal int DynamicLightingFastUpdateFrames;
             internal bool CorrectReceiverSelfHits;
             internal bool ScreenCardLighting;
             internal bool FullSphere, ProbeTemporal, DitherTraceDirections, RoughSpecular;
@@ -903,7 +906,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_InterpolationScalarNoise, m_InterpolationVectorNoise;
         private TextureHandle m_TemporalScalarNoise;
         private bool m_StochasticInterpolation, m_InterpolationFlipY;
-        private bool m_FastUpdateNeighborhoodClamp, m_TemporalRejectBasedOnNormal, m_TemporalPlaneDisocclusion, m_DisocclusionSpatialFilter;
+        private bool m_FastUpdateNeighborhoodClamp, m_TemporalRejectBasedOnNormal, m_TemporalPlaneDisocclusion, m_CoherentRadianceFastUpdate, m_DynamicLightingFastUpdateActive, m_TemporalCameraStatic, m_DisocclusionSpatialFilter;
         private Vector4 m_ProbeCameraPosition;
         private GraphicsBuffer m_PreExposure;
         private int m_SphereGuideKernel = -1;
@@ -1317,6 +1320,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FastUpdateNeighborhoodClamp = false;
             m_TemporalRejectBasedOnNormal = false;
             m_TemporalPlaneDisocclusion = false;
+            m_CoherentRadianceFastUpdate = false;
+            m_DynamicLightingFastUpdateActive = false;
+            m_TemporalCameraStatic = false;
             m_DisocclusionSpatialFilter = false;
             m_ProbeCameraPosition = default;
             m_InterpolationScalarNoise = m_InterpolationVectorNoise = default;
@@ -1524,8 +1530,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_ScatterNoise.IsValid())
                 PassRecorder.RegisterImportedTextureForPass(this, m_ScatterNoise);
             m_FastUpdateNeighborhoodClamp = useSettings && settings.screenProbeFastUpdateNeighborhoodClamp.value;
-            m_TemporalRejectBasedOnNormal = useSettings && settings.screenProbeTemporalRejectBasedOnNormal.value;
-            m_TemporalPlaneDisocclusion = useSettings && settings.screenProbeTemporalPlaneDisocclusion.value;
+            m_TemporalRejectBasedOnNormal = !useSettings || settings.screenProbeTemporalRejectBasedOnNormal.value;
+            m_TemporalPlaneDisocclusion = !useSettings || settings.screenProbeTemporalPlaneDisocclusion.value;
+            m_CoherentRadianceFastUpdate = !useSettings || settings.screenProbeCoherentRadianceFastUpdate.value;
             m_DisocclusionSpatialFilter = !useSettings || settings.screenProbeDisocclusionSpatialFilter.value;
             m_TemporalScalarNoise = m_DirectionalCache && pixelTemporal && BlueNoise.Instance != null
                 ? BlueNoise.Instance.ScalarAtlas : default;
@@ -1806,6 +1813,18 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_PreviousProposal, m_CurrentProposal, m_CurrentProposal.desc, out m_ProposalHistory);
                 }
             }
+            bool lightingMatches = MatchesEnvironmentLighting(m_State.SkyContentHash, m_State.SkyTextureParams, m_State.SkyTextureTint)
+                && MatchesPreviousDirectionalLighting();
+            m_State.DynamicLightingFastUpdateFrames = StepDynamicLightingFastUpdateWindow(
+                m_State.DynamicLightingFastUpdateFrames,
+                hasPreviousState: m_State.Width > 0 && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory,
+                lightingChanged: !lightingMatches);
+            m_DynamicLightingFastUpdateActive = m_State.DynamicLightingFastUpdateFrames > 0;
+            m_TemporalCameraStatic = !HasCameraMotion(
+                m_State.ProbeCameraPosition,
+                m_ProbeCameraPosition,
+                m_State.ProbeCameraForward,
+                m_ProbeCameraForward);
             m_HasHistory = probesValid && geometryValid
                 && (m_State.SceneRevision == m_Scene.Revision
                     || m_FullSphere && m_State.SceneNonMotionVersion == m_Scene.NonMotionVersion
@@ -2288,6 +2307,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ProposalHistory?.MarkWritten();
             m_State.ViewProjection = m_ViewProjection;
             m_State.ProbeCameraForward = m_ProbeCameraForward;
+            m_State.ProbeCameraPosition = m_ProbeCameraPosition;
             m_State.FastUpdateNeighborhoodClamp = m_FastUpdateNeighborhoodClamp;
             m_State.ProbeFrame = frame;
             m_State.Cache = m_Scene.SurfaceCache;
@@ -3994,11 +4014,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryGatherUvMinMaxId, gatherUvMinMax);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, HistoryCoordShiftXId, decodeShift.x);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, HistoryCoordShiftYId, decodeShift.y);
-                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryTemporalParamsId, new Vector4(0.01f, 0.70710678f, 10f, 0.9f));
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryTemporalParamsId, new Vector4(0.01f, 0.5f, 10f, 0.9f));
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, FastUpdateNeighborhoodClampId, m_FastUpdateNeighborhoodClamp ? 1 : 0);
-                int reprojectionFlags = (m_TemporalPlaneDisocclusion ? 1 : 0) | (m_TemporalRejectBasedOnNormal ? 2 : 0);
+                int reprojectionFlags = (m_TemporalPlaneDisocclusion ? 1 : 0)
+                    | (m_TemporalRejectBasedOnNormal ? 2 : 0)
+                    | (m_CoherentRadianceFastUpdate && (m_DynamicLightingFastUpdateActive || !m_TemporalCameraStatic) ? 4 : 0)
+                    | (m_TemporalCameraStatic ? 8 : 0);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, TemporalReprojectionFlagsId, reprojectionFlags);
                 cmd.SetComputeVectorParam(m_GatherTemporalCompute, ProbeCameraPositionId, m_ProbeCameraPosition);
+                Vector4 previousCameraPosition = m_State.ProbeCameraPosition.w > 0.5f
+                    ? m_State.ProbeCameraPosition : m_ProbeCameraPosition;
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, ProbePreviousCameraPositionId, previousCameraPosition);
                 bool pixelDepthValid = hasHistory && m_PixelDepthHistory != null && m_PixelDepthHistory.IsValid()
                     && m_PreviousPixelDepth.innerHandle.IsValid();
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, PreviousPixelDepthValidId, pixelDepthValid ? 1 : 0);
@@ -4175,6 +4201,36 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal static bool AllowsContinuousLightingHistory(bool fullSphere, bool preserveRelitHistory, bool matchesLighting) =>
             fullSphere || preserveRelitHistory || matchesLighting;
+
+        internal static int StepDynamicLightingFastUpdateWindow(int remainingFrames, bool hasPreviousState, bool lightingChanged)
+        {
+            if (!hasPreviousState)
+                return 0;
+            if (lightingChanged)
+                return 8;
+            return remainingFrames > 0 ? remainingFrames - 1 : 0;
+        }
+
+        internal static bool HasCameraMotion(
+            Vector4 previousCameraPosition,
+            Vector4 currentCameraPosition,
+            Vector4 previousCameraForward,
+            Vector4 currentCameraForward)
+        {
+            if (previousCameraPosition.w <= 0.5f || currentCameraPosition.w <= 0.5f)
+                return true;
+            Vector3 posDelta = new Vector3(
+                currentCameraPosition.x - previousCameraPosition.x,
+                currentCameraPosition.y - previousCameraPosition.y,
+                currentCameraPosition.z - previousCameraPosition.z);
+            if (posDelta.sqrMagnitude > 1e-8f)
+                return true;
+            Vector3 prevFwd = new Vector3(previousCameraForward.x, previousCameraForward.y, previousCameraForward.z);
+            Vector3 currFwd = new Vector3(currentCameraForward.x, currentCameraForward.y, currentCameraForward.z);
+            if (prevFwd.sqrMagnitude <= 0.5f || currFwd.sqrMagnitude <= 0.5f)
+                return true;
+            return Vector3.Dot(prevFwd, currFwd) < 0.999999f;
+        }
 
         private bool MatchesPreviousDirectionalLighting() => m_State.LightLayerMask == m_LightLayerMask
             && LightingWithinTolerance(m_State.LightPositionRange, m_State.LightColorShadow,

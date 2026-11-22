@@ -17,6 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int TAAParamsId = Shader.PropertyToID("_TAAParams");
         private static readonly int ScreenSizeId = Shader.PropertyToID("_ScreenSize");
         private static readonly int JitterId = Shader.PropertyToID("_Jitter");
+        private static readonly int TAAUsePreExposureId = Shader.PropertyToID("_TAAUsePreExposure");
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ColorInput;
@@ -47,6 +48,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector2 m_Jitter;
         private Vector2 m_PreviousJitter;
         private bool m_IsFirstFrame;
+        private GraphicsBuffer m_PreExposureBuffer;
 
         public TemporalAAPass()
         {
@@ -87,6 +89,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsFirstFrame = temporalData != null && temporalData.isFirstFrame;
             m_Jitter = temporalData != null ? temporalData.jitter : Vector2.zero;
             m_PreviousJitter = temporalData != null ? temporalData.previousJitter : Vector2.zero;
+            m_PreExposureBuffer = m_TAASettings.Enabled
+                ? VividAutoExposureSystem.ResolvePreExposureBuffer(frameData.Get<VividExposureData>())
+                : null;
 
             ResizePassOwned(m_OutputTexture, m_Width, m_Height);
             ResizePassOwned(m_HistoryColorCurrent, m_Width, m_Height);
@@ -136,6 +141,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CopyKernel = -1;
             m_HistoryColor = null;
             m_HasValidHistory = false;
+            m_PreExposureBuffer = null;
         }
 
         private void RecordPassthrough(ComputeGraphContext context)
@@ -194,6 +200,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ComputeShader,
                 JitterId,
                 new Vector4(m_Jitter.x, m_Jitter.y, m_PreviousJitter.x, m_PreviousJitter.y));
+            if (m_PreExposureBuffer != null)
+            {
+                cmd.SetComputeBufferParam(
+                    m_ComputeShader,
+                    m_TaaKernel,
+                    VividAutoExposureSystem.PreExposureBufferId,
+                    m_PreExposureBuffer);
+            }
+            cmd.SetComputeFloatParam(
+                m_ComputeShader,
+                TAAUsePreExposureId,
+                m_PreExposureBuffer != null ? 1.0f : 0.0f);
 
             int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
             int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);

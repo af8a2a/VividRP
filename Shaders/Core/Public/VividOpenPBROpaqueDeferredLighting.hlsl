@@ -109,7 +109,8 @@ VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     VividOpenPBROpaqueInputs inputs, OpenPBR_DiffuseSpecular albedo,
     VividLightingLoopContext lightLoop, float3 positionWS, float3 viewDirectionWS, float ao,
     float4 realtimeDiffuseGI, bool realtimeOpenPbrDiffuse,
-    float4 realtimeRoughSpecular = 0.0f, bool hasRealtimeRoughSpecular = false)
+    float4 realtimeRoughSpecular = 0.0f, bool hasRealtimeRoughSpecular = false,
+    float3 lumenSpecular = 0.0f, bool hasLumenSpecular = false)
 {
     VividSimpleSlabDeferredLighting result = (VividSimpleSlabDeferredLighting)0;
     // Dense ReSTIR has already integrated the directional BRDF. Its filter
@@ -133,7 +134,8 @@ VividSimpleSlabDeferredLighting VividEvaluateOpenPBROpaqueIndirect(
     // times the complete OpenPBR directional albedo. No Slab FGD/MS is applied.
     float3 radiance = VividSampleSimpleSlabEnvironment(lightLoop, positionWS,
         inputs.normalWS, reflection, inputs.specularRoughness,
-        realtimeRoughSpecular, realtimeDiffuseGI.a, hasRealtimeRoughSpecular);
+        realtimeRoughSpecular, realtimeDiffuseGI.a, hasRealtimeRoughSpecular,
+        lumenSpecular, hasLumenSpecular);
     result.indirectDiffuseLighting = (realtimeOpenPbrDiffuse ? diffuse : diffuse * albedo.diffuse) * ao;
     result.indirectSpecularLighting = radiance * albedo.specular * ao;
     result.diffuseLighting = result.indirectDiffuseLighting;

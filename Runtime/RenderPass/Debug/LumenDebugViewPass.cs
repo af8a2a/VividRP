@@ -109,8 +109,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static string ModeDescription(LumenDebugViewMode mode) => mode switch
         {
             LumenDebugViewMode.Overview => "Left to right: geometry normals, reflection view, surface cache coverage.",
-            LumenDebugViewMode.PerformanceOverview or LumenDebugViewMode.ReflectionView or
-                LumenDebugViewMode.DedicatedReflectionRays => "Unavailable: VividRP has no Lumen reflection tracing path.",
+            LumenDebugViewMode.PerformanceOverview => "Unavailable: VividRP has no Lumen performance overview mode.",
+            LumenDebugViewMode.ReflectionView => "Dedicated Lumen specular reflections (pre-exposure normalized and tone-mapped).",
+            LumenDebugViewMode.DedicatedReflectionRays => "Red: dedicated reflection rays (brighter = smoother). Green: foliage/subsurface reflection rays.",
             LumenDebugViewMode.LastUsedPages =>
                 "Screen probe card accesses. White this frame, red to blue over 8 frames, black if never recorded.",
             LumenDebugViewMode.LastUsedHighResPages =>

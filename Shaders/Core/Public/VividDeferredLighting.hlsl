@@ -32,8 +32,10 @@ Texture2D<float4> _RealtimeDiffuseGI;
 Texture2D<float4> _RealtimeBentNormal;
 Texture2D<uint> _RealtimePackedBentNormal;
 Texture2D<float4> _RealtimeRoughSpecular;
+Texture2D<float3> _RealtimeLumenReflections;
 uint _RealtimeBentNormalEnabled;
 uint _RealtimeRoughSpecularEnabled;
+uint _RealtimeLumenReflectionsEnabled;
 uint _RealtimeDiffuseGIEnabled;
 uint _RealtimeDiffuseGIOnly;
 uint _RealtimeOpenPbrDiffuse;
@@ -57,6 +59,15 @@ bool VividHasRealtimeRoughSpecular()
 #endif
 }
 
+bool VividHasRealtimeLumenReflections()
+{
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+    return _RealtimeLumenReflectionsEnabled != 0u;
+#else
+    return false;
+#endif
+}
+
 float4 LoadVividRealtimeRoughSpecular(uint2 pixelCoord)
 {
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
@@ -66,6 +77,19 @@ float4 LoadVividRealtimeRoughSpecular(uint2 pixelCoord)
         if (_RealtimeRoughSpecularEnabled == 2u)
             spec.rgb *= VividGetOneOverPreExposure();
         return float4(max(spec.rgb, 0.0f), saturate(spec.a));
+    }
+#endif
+    return 0.0f;
+}
+
+float3 LoadVividRealtimeLumenReflections(uint2 pixelCoord)
+{
+#if defined(VIVID_REALTIME_DIFFUSE_GI)
+    if (_RealtimeLumenReflectionsEnabled != 0u)
+    {
+        float3 refl = _RealtimeLumenReflections.Load(int3(pixelCoord, 0));
+        refl *= VividGetOneOverPreExposure();
+        return max(isfinite(refl) ? refl : 0.0f, 0.0f);
     }
 #endif
     return 0.0f;
@@ -236,7 +260,8 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     result = VividEvaluateOpenPBROpaqueIndirect(inputs, albedo, lightLoop,
         positionWS, viewDirectionWS, saturate(summary.ambientOcclusion),
         LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo), realtimeOpenPbrDiffuse,
-        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular());
+        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular(),
+        LoadVividRealtimeLumenReflections(pixelCoord), VividHasRealtimeLumenReflections());
     [loop]
     for (uint i = 0u; i < _DirectionalLightCount; ++i)
     {
@@ -290,7 +315,8 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
     VividSimpleSlabIndirectLighting indirectLighting = VividEvaluateSimpleSlabIndirectLighting(
         summary, slab, preLight, lightLoop, positionWS, viewDirectionWS,
         LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo),
-        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular());
+        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular(),
+        LoadVividRealtimeLumenReflections(pixelCoord), VividHasRealtimeLumenReflections());
     VividSimpleSlabDirectLighting directLighting = VividCreateEmptySimpleSlabDirectLighting();
 
     [loop]
@@ -448,14 +474,18 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
         : (1.0 - layerWeight).xxx;
     float4 realtimeRoughSpecular = LoadVividRealtimeRoughSpecular(pixelCoord);
     bool hasRealtimeRoughSpecular = VividHasRealtimeRoughSpecular();
+    float3 realtimeLumenReflections = LoadVividRealtimeLumenReflections(pixelCoord);
+    bool hasRealtimeLumenReflections = VividHasRealtimeLumenReflections();
     VividSimpleSlabIndirectLighting baseIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
         baseSummary, baseSimpleSlab, basePreLightData, lightLoop, positionWS, viewDirectionWS,
         LoadVividRealtimeDiffuseGI(pixelCoord, baseSummary.diffuseAlbedo),
-        realtimeRoughSpecular, hasRealtimeRoughSpecular);
+        realtimeRoughSpecular, hasRealtimeRoughSpecular,
+        realtimeLumenReflections, hasRealtimeLumenReflections);
     VividSimpleSlabIndirectLighting topIndirectLighting = VividEvaluateSimpleSlabIndirectLighting(
         topSummary, topSimpleSlab, topPreLightData, lightLoop, positionWS, viewDirectionWS,
         LoadVividRealtimeDiffuseGI(pixelCoord, topSummary.diffuseAlbedo),
-        realtimeRoughSpecular, hasRealtimeRoughSpecular);
+        realtimeRoughSpecular, hasRealtimeRoughSpecular,
+        realtimeLumenReflections, hasRealtimeLumenReflections);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

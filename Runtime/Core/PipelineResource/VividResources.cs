@@ -298,6 +298,12 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfRadianceCacheUpdate.compute")]
         public ComputeShader SdfRadianceCacheUpdateCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/LumenReflectionsTracing.compute")]
+        public ComputeShader LumenReflectionsTracingCompute;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/LumenReflectionsDenoiser.compute")]
+        public ComputeShader LumenReflectionsDenoiserCompute;
+
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfShortRangeAO.compute")]
         public ComputeShader SdfShortRangeAOCompute;
 

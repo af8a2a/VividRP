@@ -1,0 +1,853 @@
+#pragma use_dxc
+
+#pragma kernel InitReflectionIndirectArgsCS
+#pragma kernel ReflectionTileClassifyCS
+#pragma kernel ReflectionTileClassificationBuildListsCS
+#pragma kernel ReflectionTileClassificationBuildListsDownsampledCS SUPPORT_DOWNSAMPLE_FACTOR
+#pragma kernel ReflectionClearUnusedTraceTileDataCS
+#pragma kernel ReflectionGenerateRaysCS
+#pragma kernel ReflectionClearTracesCS
+#pragma kernel ReflectionTraceScreenTexturesCS
+#pragma kernel SetupCompactionIndirectArgsCS
+#pragma kernel ReflectionCompactTracesCS
+#pragma kernel SetupCompactedTracesIndirectArgsCS
+#pragma kernel ReflectionTraceMeshSDFsCS VIVID_SDF_SURFACE_CACHE VIVID_MESH_SDF_CARD_GRID
+#pragma kernel ReflectionTraceMeshSDFsFeedbackCS VIVID_SDF_SURFACE_CACHE VIVID_MESH_SDF_CARD_GRID VIVID_SURFACE_CACHE_FEEDBACK
+#pragma kernel ReflectionTraceVoxelsCS VIVID_SDF_SURFACE_CACHE
+#pragma kernel ReflectionTraceVoxelsFeedbackCS VIVID_SDF_SURFACE_CACHE VIVID_SURFACE_CACHE_FEEDBACK
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "SdfScreenProbeReceiver.hlsl"
+#include "SdfSurfaceCacheLighting.hlsl"
+#include "SdfRadianceCacheCommon.hlsl"
+#include "../../Public/AutoExposure.hlsl"
+#include "LumenReflectionCommon.hlsl"
+#include "LumenScreenTraceHZB.hlsl"
+
+// Tile classification & indirect args (verbatim UE5 LumenReflections.usf)
+RWStructuredBuffer<uint> _RWReflectionClearTileIndirectArgs;
+RWStructuredBuffer<uint> _RWReflectionResolveTileIndirectArgs;
+RWStructuredBuffer<uint> _RWReflectionClearUnusedTracingTileIndirectArgs;
+RWStructuredBuffer<uint> _RWReflectionTracingTileIndirectArgs;
+
+RWTexture2D<uint> _RWLumenTileBitmask;
+Texture2D<uint> _LumenTileBitmask;
+
+RWStructuredBuffer<uint> _RWReflectionClearTileData;
+RWStructuredBuffer<uint> _RWReflectionTileIndirectArgs;
+RWStructuredBuffer<uint> _RWReflectionTileData;
+
+StructuredBuffer<uint> _ReflectionClearUnusedTracingTileIndirectArgs;
+StructuredBuffer<uint> _ReflectionClearUnusedTracingTileData;
+StructuredBuffer<uint> _ReflectionTracingTileIndirectArgs;
+StructuredBuffer<uint> _ReflectionTracingTileData;
+
+uint2 _LumenTileViewportDimensions;
+uint2 _LumenResolveTileViewportDimensions;
+
+// Ray generation & trace outputs (verbatim UE5 LumenReflections.usf & LumenReflectionTracing.usf)
+RWTexture2D<float> _RWDownsampledDepth;
+RWTexture2D<float4> _RWRayBuffer;
+Texture2D<float> _DownsampledDepth;
+Texture2D<float4> _RayBuffer;
+
+RWTexture2D<float> _RWTraceHit;
+RWTexture2D<float3> _RWTraceRadiance;
+Texture2D<float> _TraceHit;
+Texture2D<float3> _TraceRadiance;
+
+// Trace compaction (verbatim UE5 LumenReflectionTracing.usf)
+RWStructuredBuffer<uint> _RWCompactedTraceTexelAllocator;
+RWStructuredBuffer<uint> _RWReflectionCompactionIndirectArgs;
+RWStructuredBuffer<uint> _RWCompactedTraceTexelData;
+RWStructuredBuffer<uint> _RWReflectionCompactTracingIndirectArgs;
+
+StructuredBuffer<uint> _CompactedTraceTexelAllocator;
+StructuredBuffer<uint> _CompactedTraceTexelData;
+
+uint _LumenCompactionThreadGroupSize;
+uint _LumenCullByDistanceFromCamera;
+float _LumenCompactionTracingEndDistanceFromCamera;
+float _LumenCompactionMaxTraceDistance;
+float _LumenMaxHierarchicalScreenTraceIterations;
+float _LumenRelativeDepthThickness;
+float _LumenHistoryDepthTestRelativeThickness;
+uint _LumenReflectionHasMeshSdfCardGrid;
+uint _LumenReflectionSkyEnabled;
+float _LumenCardTraceEndDistanceFromCamera;
+
+static const uint LumenCompactMaxDispatchWidth = 65535u;
+
+uint2 GetReflectionTracingScreenCoord(uint TileIndex, uint ThreadIndex)
+{
+    uint2 TileOffset = LumenUnpackTileCoord12bits(_ReflectionTracingTileData[TileIndex]);
+    return TileOffset * REFLECTION_THREADGROUP_SIZE_2D
+        + uint2(ThreadIndex % REFLECTION_THREADGROUP_SIZE_2D, ThreadIndex / REFLECTION_THREADGROUP_SIZE_2D);
+}
+
+uint2 GetReflectionTracingScreenCoordZOrder(uint TileIndex, uint ThreadIndex)
+{
+    uint2 TileOffset = LumenUnpackTileCoord12bits(_ReflectionTracingTileData[TileIndex]);
+    return TileOffset * REFLECTION_THREADGROUP_SIZE_2D
+        + LumenZOrder2D(ThreadIndex, 3u);
+}
+
+float3 ClampReflectionMaxRayIntensity(float3 Lighting)
+{
+    if (_LumenReflectionMaxRayIntensity > 0.0f)
+    {
+        float MaxLighting = max(Lighting.x, max(Lighting.y, Lighting.z));
+        if (MaxLighting > _LumenReflectionMaxRayIntensity)
+        {
+            Lighting *= _LumenReflectionMaxRayIntensity / MaxLighting;
+        }
+    }
+    return Lighting;
+}
+
+// -----------------------------------------------------------------------------
+// 1. InitReflectionIndirectArgsCS (UE5 LumenReflections.usf)
+// -----------------------------------------------------------------------------
+[numthreads(1, 1, 1)]
+void InitReflectionIndirectArgsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    if (all(DispatchThreadId == 0u))
+    {
+        _RWReflectionClearTileIndirectArgs[0] = 0u;
+        _RWReflectionClearTileIndirectArgs[1] = 1u;
+        _RWReflectionClearTileIndirectArgs[2] = 1u;
+
+        _RWReflectionResolveTileIndirectArgs[0] = 0u;
+        _RWReflectionResolveTileIndirectArgs[1] = 1u;
+        _RWReflectionResolveTileIndirectArgs[2] = 1u;
+
+        _RWReflectionClearUnusedTracingTileIndirectArgs[0] = 0u;
+        _RWReflectionClearUnusedTracingTileIndirectArgs[1] = 1u;
+        _RWReflectionClearUnusedTracingTileIndirectArgs[2] = 1u;
+
+        _RWReflectionTracingTileIndirectArgs[0] = 0u;
+        _RWReflectionTracingTileIndirectArgs[1] = 1u;
+        _RWReflectionTracingTileIndirectArgs[2] = 1u;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. ReflectionTileClassifyCS (builds LumenTileBitmask per 8x8 full-res tile)
+// -----------------------------------------------------------------------------
+groupshared uint SharedTileNeedsReflections;
+
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+void ReflectionTileClassifyCS(
+    uint2 GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID,
+    uint GroupIndex : SV_GroupIndex)
+{
+    if (GroupIndex == 0u)
+    {
+        SharedTileNeedsReflections = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 ScreenCoord = GroupId * REFLECTION_THREADGROUP_SIZE_2D + GroupThreadId;
+    uint2 ScreenSize = uint2(_SdfDiffuseScreenSize.xy);
+    bool bPixelNeedsReflections = false;
+    if (all(ScreenCoord < ScreenSize))
+    {
+        FLumenReflectionMaterial Mat = ReadLumenReflectionMaterial(ScreenCoord, true);
+        bPixelNeedsReflections = NeedLumenReflectionRay(Mat);
+    }
+
+    if (WaveActiveAnyTrue(bPixelNeedsReflections))
+    {
+        if (WaveIsFirstLane())
+        {
+            InterlockedOr(SharedTileNeedsReflections, LUMEN_TILE_BITMASK_REFLECTIONS);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (GroupIndex == 0u && all(GroupId < _LumenResolveTileViewportDimensions))
+    {
+        _RWLumenTileBitmask[GroupId] = SharedTileNeedsReflections;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. ReflectionTileClassificationBuildListsCS (UE5 LumenReflections.usf)
+// -----------------------------------------------------------------------------
+#if defined(SUPPORT_DOWNSAMPLE_FACTOR)
+groupshared uint SharedTileUsed[64];
+#endif
+
+[numthreads(8, 8, 1)]
+#if defined(SUPPORT_DOWNSAMPLE_FACTOR)
+void ReflectionTileClassificationBuildListsDownsampledCS(
+#else
+void ReflectionTileClassificationBuildListsCS(
+#endif
+    uint2 GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID)
+{
+    const uint ThreadIndex = GroupThreadId.y * 8u + GroupThreadId.x;
+
+#if defined(SUPPORT_DOWNSAMPLE_FACTOR)
+    SharedTileUsed[ThreadIndex] = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
+    uint TileUsed = 0u;
+    uint2 TileCoordinate = GroupId * 8u + GroupThreadId;
+
+    for (uint Y = 0u; Y < _LumenReflectionDownsampleFactorXY.y; Y++)
+    {
+        for (uint X = 0u; X < _LumenReflectionDownsampleFactorXY.x; X++)
+        {
+            uint2 ResolveTileCoordinate = TileCoordinate * _LumenReflectionDownsampleFactorXY + uint2(X, Y);
+            if (all(ResolveTileCoordinate < _LumenResolveTileViewportDimensions))
+            {
+                if ((_LumenTileBitmask[ResolveTileCoordinate] & LUMEN_TILE_BITMASK_REFLECTIONS) != 0u)
+                {
+                    TileUsed = 1u;
+                }
+            }
+        }
+    }
+
+    SharedTileUsed[ThreadIndex] = TileUsed;
+    GroupMemoryBarrierWithGroupSync();
+#endif
+
+    // ZOrder tiles to maximize screen locality after converting to 1D for compaction (UE5)
+    const uint2 ThreadOffset = LumenZOrder2D(ThreadIndex, 3u);
+    const uint2 TileCoord = GroupId * 8u + ThreadOffset;
+    const bool bIsValid = all(TileCoord < _LumenTileViewportDimensions);
+
+    if (bIsValid)
+    {
+        bool bTileUsed;
+#if defined(SUPPORT_DOWNSAMPLE_FACTOR)
+        bTileUsed = SharedTileUsed[ThreadOffset.y * 8u + ThreadOffset.x] != 0u;
+#else
+        bTileUsed = (_LumenTileBitmask[TileCoord] & LUMEN_TILE_BITMASK_REFLECTIONS) != 0u;
+#endif
+
+        // Active tiles
+        {
+            uint NumTilesInWave = WaveActiveCountBits(bTileUsed);
+            uint GlobalTileOffset = 0u;
+            if (WaveIsFirstLane() && NumTilesInWave > 0u)
+            {
+                InterlockedAdd(_RWReflectionTileIndirectArgs[0], NumTilesInWave, GlobalTileOffset);
+            }
+            GlobalTileOffset = WaveReadLaneFirst(GlobalTileOffset);
+            if (bTileUsed)
+            {
+                _RWReflectionTileData[GlobalTileOffset + WavePrefixCountBits(true)] = LumenPackTileCoord12bits(TileCoord);
+            }
+        }
+
+        // Unused tiles
+        {
+            uint NumTilesInWave = WaveActiveCountBits(!bTileUsed);
+            uint GlobalTileOffset = 0u;
+            if (WaveIsFirstLane() && NumTilesInWave > 0u)
+            {
+                InterlockedAdd(_RWReflectionClearTileIndirectArgs[0], NumTilesInWave, GlobalTileOffset);
+            }
+            GlobalTileOffset = WaveReadLaneFirst(GlobalTileOffset);
+            if (!bTileUsed)
+            {
+                _RWReflectionClearTileData[GlobalTileOffset + WavePrefixCountBits(true)] = LumenPackTileCoord12bits(TileCoord);
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. ReflectionClearUnusedTraceTileDataCS (UE5 LumenReflections.usf)
+// -----------------------------------------------------------------------------
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+void ReflectionClearUnusedTraceTileDataCS(
+    uint GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID)
+{
+    uint ReflectionTileIndex = GroupId;
+    if (ReflectionTileIndex < _ReflectionClearUnusedTracingTileIndirectArgs[0])
+    {
+        uint2 TileCoord = LumenUnpackTileCoord12bits(_ReflectionClearUnusedTracingTileData[ReflectionTileIndex]);
+        uint2 ReflectionTracingCoord = TileCoord * REFLECTION_THREADGROUP_SIZE_2D + GroupThreadId;
+        if (all(ReflectionTracingCoord < _LumenReflectionTracingViewSize))
+        {
+            _RWDownsampledDepth[ReflectionTracingCoord] = -1.0f;
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 5. ReflectionGenerateRaysCS (UE5 LumenReflections.usf)
+// -----------------------------------------------------------------------------
+float2 GenerateReflectionRandom(uint2 InReflectionTracingCoord)
+{
+    float2 E = LumenBlueNoiseVec2(InReflectionTracingCoord, _LumenReflectionRayDirectionFrameIndex);
+    E.y *= 1.0f - _LumenReflectionGGXSamplingBias;
+    return E;
+}
+
+[numthreads(REFLECTION_THREADGROUP_SIZE_1D, 1, 1)]
+void ReflectionGenerateRaysCS(
+    uint GroupId : SV_GroupID,
+    uint GroupThreadId : SV_GroupThreadID)
+{
+    uint2 ReflectionTracingCoord = GetReflectionTracingScreenCoord(GroupId, GroupThreadId);
+    bool bIsValid = all(ReflectionTracingCoord < _LumenReflectionTracingViewSize);
+
+    if (bIsValid)
+    {
+        uint2 ScreenCoord = GetScreenCoordFromReflectionTracingCoord(ReflectionTracingCoord);
+        FLumenReflectionMaterial Material = ReadLumenReflectionMaterial(ScreenCoord, true);
+
+        float DownsampledDepth = Material.SceneDepth;
+
+        if (NeedLumenReflectionRay(Material))
+        {
+            float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+            float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, Material.DeviceZ);
+            float3 CameraVector = _SdfProbeCameraPosition.w > 0.5f
+                ? normalize(WorldPosition - _SdfProbeCameraPosition.xyz)
+                : _SdfProbeCameraForward.xyz;
+            float3 V = -CameraVector;
+
+            float3 RayDirection;
+            float ConeAngle = 0.0f;
+
+            if (Material.TopLayerRoughness < 0.001f)
+            {
+                RayDirection = reflect(CameraVector, Material.WorldNormal);
+            }
+            else
+            {
+                const float2 E = GenerateReflectionRandom(ReflectionTracingCoord);
+                float3x3 TangentBasis = LumenGetTangentBasis(Material.WorldNormal);
+                float3 TangentV = mul(TangentBasis, V);
+
+                // Ensure grazing/normal-mapped V stays in upper hemisphere for VNDF sampling
+                if (TangentV.z <= 1e-4f)
+                {
+                    RayDirection = reflect(CameraVector, Material.WorldNormal);
+                    ConeAngle = 0.0f;
+                }
+                else
+                {
+                    float2 Alpha = (Material.TopLayerRoughness * Material.TopLayerRoughness).xx;
+                    float4 GGXSample = LumenImportanceSampleVisibleGGX(E, Alpha, TangentV, true);
+                    float3 WorldH = mul(GGXSample.xyz, TangentBasis);
+                    RayDirection = reflect(CameraVector, WorldH);
+                    ConeAngle = 1.0f / max(GGXSample.w, 0.0001f);
+                }
+            }
+
+            ConeAngle = max(ConeAngle, MinReflectionConeAngle);
+            _RWRayBuffer[ReflectionTracingCoord] = float4(normalize(RayDirection), ConeAngle);
+        }
+        else
+        {
+            // Store invalid ray in sign bit (UE5)
+            DownsampledDepth *= -1.0f;
+        }
+
+        _RWDownsampledDepth[ReflectionTracingCoord] = DownsampledDepth;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 6. ReflectionClearTracesCS (UE5 LumenReflectionTracing.usf)
+// -----------------------------------------------------------------------------
+[numthreads(REFLECTION_THREADGROUP_SIZE_1D, 1, 1)]
+void ReflectionClearTracesCS(
+    uint GroupId : SV_GroupID,
+    uint GroupThreadId : SV_GroupThreadID)
+{
+    uint2 ReflectionTracingCoord = GetReflectionTracingScreenCoord(GroupId, GroupThreadId);
+    if (all(ReflectionTracingCoord < _LumenReflectionTracingViewSize))
+    {
+        _RWTraceRadiance[ReflectionTracingCoord] = 0.0f;
+        _RWTraceHit[ReflectionTracingCoord] = EncodeRayDistance(0.0f, false);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7. ReflectionTraceScreenTexturesCS (UE5 LumenReflectionTracing.usf)
+// -----------------------------------------------------------------------------
+[numthreads(REFLECTION_THREADGROUP_SIZE_1D, 1, 1)]
+void ReflectionTraceScreenTexturesCS(
+    uint GroupId : SV_GroupID,
+    uint GroupThreadId : SV_GroupThreadID)
+{
+    uint2 ReflectionTracingCoord = GetReflectionTracingScreenCoord(GroupId, GroupThreadId);
+    if (all(ReflectionTracingCoord < _LumenReflectionTracingViewSize))
+    {
+        float SceneDepth = _DownsampledDepth.Load(int3(ReflectionTracingCoord, 0)).x;
+        if (SceneDepth > 0.0f)
+        {
+            uint2 ScreenCoord = GetScreenCoordFromReflectionTracingCoord(ReflectionTracingCoord);
+            float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+            float DeviceZ = _SdfDiffuseDepth.Load(int3(ScreenCoord, 0));
+            float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, DeviceZ);
+            FRayData RayData = UnpackRayData(_RayBuffer.Load(int3(ReflectionTracingCoord, 0)));
+
+            float3 RayOrigin = WorldPosition;
+
+            // Bias along the normal to avoid self-intersecting camera facing scene depth texels (UE5)
+            {
+                float2 CornerScreenUV = ScreenUV + 0.5f * _SdfDiffuseScreenSize.zw;
+                float3 CornerWorldPosition = LumenWorldPositionFromScreenUV(CornerScreenUV, DeviceZ);
+                float3 WorldNormal = VividDecodeSurfaceSummaryNormal(_SdfDiffuseGBuffer1.Load(int3(ScreenCoord, 0)).xy);
+                float NormalBias = abs(dot(CornerWorldPosition - WorldPosition, WorldNormal)) * 2.0f;
+                RayOrigin += NormalBias * WorldNormal;
+
+                float4 RayStartClip = mul(_SdfDiffuseVP, float4(RayOrigin, 1.0f));
+                if (any(RayStartClip.xy < -RayStartClip.w) || any(RayStartClip.xy > RayStartClip.w))
+                {
+                    return;
+                }
+            }
+
+            float2 HzbFactor = _SdfDiffuseScreenSize.xy / (2.0f * _SdfClosestHzbSize.xy);
+            bool bHit = false;
+            bool bUncertain = false;
+            float3 HitUVz = 0.0f;
+            float3 LastVisibleHitUVz = 0.0f;
+            float HitTileZ = 0.0f;
+
+            LumenTraceHZB(
+                rcp(_SdfClosestHzbSize.xy),
+                float4(rcp(HzbFactor), 0.0f, 0.0f),
+                RayOrigin,
+                RayData.Direction,
+                _LumenReflectionMaxTraceDistance,
+                float4(HzbFactor, rcp(HzbFactor)),
+                _LumenMaxHierarchicalScreenTraceIterations,
+                _LumenRelativeDepthThickness * _SdfDepthThicknessScale,
+                0.0f,
+                bHit,
+                bUncertain,
+                HitUVz,
+                LastVisibleHitUVz,
+                HitTileZ);
+
+            bHit = bHit && !bUncertain;
+
+            if (bHit)
+            {
+                float2 HitScreenUV = HitUVz.xy;
+                float2 HitScreenPosition = (HitScreenUV - 0.5f) / LumenNdcToUvScale();
+                float3 HitWorldPos = LumenWorldPositionFromScreenUV(HitScreenUV, HitTileZ);
+
+                float4 PrevClip = mul(_SdfDiffusePreviousVP, float4(HitWorldPos, 1.0f));
+                float3 PrevNdc = PrevClip.w > 0.0f ? PrevClip.xyz / PrevClip.w : float3(2.0f, 2.0f, 0.0f);
+                float4 EncodedVelocity = _SdfScreenMotion.SampleLevel(sampler_PointClamp, HitScreenUV, 0);
+                float2 PrevUV = PrevNdc.xy * LumenNdcToUvScale() + 0.5f;
+                if (VividHasObjectVelocity(EncodedVelocity))
+                {
+                    PrevUV = HitScreenUV - VividDecodeMotionUV(EncodedVelocity) + _SdfScreenJitterDelta;
+                    PrevNdc.xy = (PrevUV - 0.5f) / LumenNdcToUvScale();
+                    PrevNdc.z = HitTileZ - VividDecodeMotionDeviceZ(EncodedVelocity);
+                }
+
+                float Vignette = min(LumenComputeHitVignetteFromScreenPos(HitScreenPosition),
+                    LumenComputeHitVignetteFromScreenPos(PrevNdc.xy));
+                float Noise = LumenInterleavedGradientNoise(float2(ReflectionTracingCoord) + 0.5f, (float)_LumenReflectionStateFrameIndexMod8);
+
+                if (Vignette < Noise)
+                {
+                    bHit = false;
+                    HitUVz = LastVisibleHitUVz;
+                }
+
+                if (bHit)
+                {
+                    float2 HistoryDepthExposure = _SdfScreenPreviousGeometry.SampleLevel(sampler_PointClamp, PrevUV, 0);
+                    bHit = abs(HistoryDepthExposure.x - PrevNdc.z) < _LumenHistoryDepthTestRelativeThickness * _SdfDepthThicknessScale * lerp(0.5f, 2.0f, Noise);
+                    if (!bHit)
+                    {
+                        HitUVz = LastVisibleHitUVz;
+                    }
+                    else
+                    {
+                        float2 Edge = 0.5f * _SdfDiffuseScreenSize.zw;
+                        float2 ClampedPrevUV = clamp(PrevUV, Edge, 1.0f - Edge);
+                        float3 Lighting = _SdfScreenPreviousRadiance.SampleLevel(sampler_PointClamp, ClampedPrevUV, 0).rgb;
+                        float PrevPreExposure = max(HistoryDepthExposure.y, 1e-6f);
+                        // Convert previous frame pre-exposed SceneColor to current frame pre-exposed space (UE5)
+                        Lighting = max(Lighting, 0.0f) * (VividGetPreExposure() / PrevPreExposure);
+                        Lighting = ClampReflectionMaxRayIntensity(Lighting);
+                        _RWTraceRadiance[ReflectionTracingCoord] = Lighting;
+                    }
+                }
+            }
+
+            // 2.0 cm in UE5 -> 0.02 m in VividRP
+            float HitDistanceOffset = !bHit && !bUncertain ? 0.02f : 0.0f;
+            float3 FinalHitPos = LumenWorldPositionFromScreenUV(HitUVz.xy, HitUVz.z);
+            float HitDistance = min(distance(WorldPosition, FinalHitPos) + HitDistanceOffset, _LumenReflectionMaxTraceDistance);
+            _RWTraceHit[ReflectionTracingCoord] = EncodeRayDistance(HitDistance, bHit);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 8. SetupCompactionIndirectArgsCS (UE5 LumenReflectionTracing.usf)
+// -----------------------------------------------------------------------------
+[numthreads(64, 1, 1)]
+void SetupCompactionIndirectArgsCS(uint GroupThreadId : SV_GroupThreadID)
+{
+    uint NumTracingThreads = _ReflectionTracingTileIndirectArgs[0] * REFLECTION_THREADGROUP_SIZE_1D;
+    uint NumCompactionGroups = (NumTracingThreads + _LumenCompactionThreadGroupSize - 1u) / _LumenCompactionThreadGroupSize;
+    uint Width = min(NumCompactionGroups, LumenCompactMaxDispatchWidth);
+    uint Height = Width > 0u ? (NumCompactionGroups + Width - 1u) / Width : 1u;
+
+    if (GroupThreadId == 0u)
+    {
+        _RWReflectionCompactionIndirectArgs[0] = Width;
+        _RWReflectionCompactionIndirectArgs[1] = Height;
+        _RWReflectionCompactionIndirectArgs[2] = 1u;
+        _RWCompactedTraceTexelAllocator[0] = 0u;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 9. ReflectionCompactTracesCS (UE5 LumenReflectionTracing.usf, wave-ops ordered)
+// -----------------------------------------------------------------------------
+#define COMPACT_THREADGROUP_SIZE 64u
+groupshared uint SharedGlobalTraceTexelStartOffset;
+groupshared uint SharedGroupSum;
+
+[numthreads(COMPACT_THREADGROUP_SIZE, 1, 1)]
+void ReflectionCompactTracesCS(
+    uint2 GroupId : SV_GroupID,
+    uint GroupThreadId : SV_GroupThreadID)
+{
+    if (GroupThreadId == 0u)
+    {
+        SharedGroupSum = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint LinearGroupId = GroupId.y * LumenCompactMaxDispatchWidth + GroupId.x;
+    uint ReflectionTileIndex = LinearGroupId * (COMPACT_THREADGROUP_SIZE / REFLECTION_THREADGROUP_SIZE_1D)
+        + GroupThreadId / REFLECTION_THREADGROUP_SIZE_1D;
+    uint ReflectionGroupThreadId = GroupThreadId % REFLECTION_THREADGROUP_SIZE_1D;
+
+    uint TraceTexelForThisThread = 0u;
+    bool bTraceValid = false;
+
+    if (ReflectionTileIndex < _ReflectionTracingTileIndirectArgs[0])
+    {
+        uint2 ReflectionTracingCoord = GetReflectionTracingScreenCoordZOrder(ReflectionTileIndex, ReflectionGroupThreadId);
+        if (all(ReflectionTracingCoord < _LumenReflectionTracingViewSize))
+        {
+            float SceneDepth = _DownsampledDepth.Load(int3(ReflectionTracingCoord, 0)).x;
+            bool bHit;
+            float TraceHitDistance = DecodeRayDistance(_TraceHit.Load(int3(ReflectionTracingCoord, 0)).x, bHit);
+
+            if (SceneDepth > 0.0f
+                && !bHit
+                && (_LumenCullByDistanceFromCamera == 0u || SceneDepth < _LumenCompactionTracingEndDistanceFromCamera)
+                && TraceHitDistance <= _LumenCompactionMaxTraceDistance)
+            {
+                bTraceValid = true;
+                TraceTexelForThisThread = EncodeTraceTexel(ReflectionTracingCoord);
+            }
+        }
+    }
+
+    const uint LastLaneIndex = WaveGetLaneCount() - 1u;
+    const uint LaneIndex = WaveGetLaneIndex();
+    const uint OffsetInWave = WavePrefixCountBits(bTraceValid);
+    uint OffsetInGroup = 0u;
+
+    if (LaneIndex == LastLaneIndex)
+    {
+        const uint ThisWaveSum = OffsetInWave + (bTraceValid ? 1u : 0u);
+        InterlockedAdd(SharedGroupSum, ThisWaveSum, OffsetInGroup);
+    }
+    OffsetInGroup = WaveReadLaneAt(OffsetInGroup, LastLaneIndex) + OffsetInWave;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (GroupThreadId == 0u && SharedGroupSum > 0u)
+    {
+        InterlockedAdd(_RWCompactedTraceTexelAllocator[0], SharedGroupSum, SharedGlobalTraceTexelStartOffset);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (bTraceValid)
+    {
+        _RWCompactedTraceTexelData[SharedGlobalTraceTexelStartOffset + OffsetInGroup] = TraceTexelForThisThread;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 10. SetupCompactedTracesIndirectArgsCS (UE5 LumenReflectionTracing.usf)
+// -----------------------------------------------------------------------------
+[numthreads(1, 1, 1)]
+void SetupCompactedTracesIndirectArgsCS()
+{
+    uint TotalTraces = _CompactedTraceTexelAllocator[0];
+    uint NumGroups = (TotalTraces + 63u) / 64u;
+    uint Width = min(NumGroups, LumenCompactMaxDispatchWidth);
+    uint Height = Width > 0u ? (NumGroups + Width - 1u) / Width : 1u;
+
+    _RWReflectionCompactTracingIndirectArgs[0] = Width;
+    _RWReflectionCompactTracingIndirectArgs[1] = Height;
+    _RWReflectionCompactTracingIndirectArgs[2] = 1u;
+}
+
+// -----------------------------------------------------------------------------
+// 11. ReflectionTraceMeshSDFsCS (UE5 LumenReflectionTracing.usf + VividRP Mesh SDF)
+// -----------------------------------------------------------------------------
+#if defined(VIVID_SDF_SURFACE_CACHE) && defined(VIVID_MESH_SDF_CARD_GRID)
+void TraceReflectionMeshSDFs(uint2 ReflectionTracingCoord, float TraceHitDistance)
+{
+    uint2 ScreenCoord = GetScreenCoordFromReflectionTracingCoord(ReflectionTracingCoord);
+    float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+    float DeviceZ = _SdfDiffuseDepth.Load(int3(ScreenCoord, 0));
+    float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, DeviceZ);
+    float3 WorldNormal = VividDecodeSurfaceSummaryNormal(_SdfDiffuseGBuffer1.Load(int3(ScreenCoord, 0)).xy);
+    FRayData RayData = UnpackRayData(_RayBuffer.Load(int3(ReflectionTracingCoord, 0)));
+
+    float SurfaceBias = _SdfDiffuseRayBias;
+    float3 SamplePosition = WorldPosition + WorldNormal * SurfaceBias;
+    float PullbackForSurfaceExpand = max(SurfaceBias, 0.10f);
+    float StartDistance = max(TraceHitDistance - PullbackForSurfaceExpand, 0.0f);
+    float EndDistance = min(_LumenReflectionMaxTraceDistance, _LumenReflectionMaxMeshSdfTraceDistance);
+
+    if (StartDistance >= EndDistance)
+    {
+        return;
+    }
+
+    uint2 GridRange = 0u;
+    if (_LumenReflectionHasMeshSdfCardGrid != 0u && EndDistance <= _SdfMeshDetailDistance + 1e-3f)
+    {
+        GridRange = VividMeshSdfCardGridRange(VividMeshSdfCardGridList(WorldPosition));
+    }
+
+    VividMeshSdfReceiver Receiver = (VividMeshSdfReceiver)0;
+    VividMeshSdfHit Hit = (VividMeshSdfHit)0;
+    bool AdvancedReceiver = false;
+    bool Incomplete = false;
+    bool bTraced = VividTraceMeshSdfSceneNodes(
+        SamplePosition,
+        RayData.Direction,
+        StartDistance,
+        EndDistance,
+        _SdfDiffuseLayerMask,
+        0.0f,
+        false,
+        Receiver,
+        GridRange,
+        Hit,
+        AdvancedReceiver,
+        Incomplete);
+
+    float3 Lighting = 0.0f;
+    float Transparency = 1.0f;
+    float OpaqueHitDistance = EndDistance;
+
+    if (bTraced && !Incomplete && Hit.instanceIndex != 0xffffffffu)
+    {
+        DiffuseSurface Surface = _SdfDiffuseSurfaces[Hit.instanceIndex];
+        float3 HitPosition = SamplePosition + RayData.Direction * Hit.distance;
+        float3 Normal, OriginalNormal;
+        uint3 Texel;
+        float Error;
+        if (Surface.albedoAndValid.w > 0.0f
+            && VividTrySampleSdfSurface(Hit, HitPosition, Surface, Normal, OriginalNormal, Texel, Error))
+        {
+            if (VividSdfMaterialSideVisible(Surface.emission.w, OriginalNormal, -RayData.Direction))
+            {
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+                Lighting = LoadCardFinalLightingOrEmission(Surface, Texel, ReflectionTracingCoord, true);
+#else
+                Lighting = LoadCardFinalLightingOrEmission(Surface, Texel);
+#endif
+            }
+            Transparency = 0.0f;
+            OpaqueHitDistance = Hit.distance;
+        }
+        else if (dot(Hit.normalWS, RayData.Direction) < 0.0f)
+        {
+            // Geometry hit without card coverage stays opaque black rather than leaking behind it
+            Transparency = 0.0f;
+            OpaqueHitDistance = Hit.distance;
+        }
+    }
+
+    // UE5 distance fade near CardTraceEndDistanceFromCamera and MaxMeshSDFTraceDistance
+    float DistanceFromViewpoint = _SdfProbeCameraPosition.w > 0.5f
+        ? distance(_SdfProbeCameraPosition.xyz, WorldPosition)
+        : 0.0f;
+    float DistanceFade = _LumenCardTraceEndDistanceFromCamera > 0.0f
+        ? saturate(4.0f * DistanceFromViewpoint / _LumenCardTraceEndDistanceFromCamera - 3.0f)
+        : 0.0f;
+    if (_LumenReflectionUseGlobalSdf != 0u && _LumenReflectionMaxMeshSdfTraceDistance < _LumenReflectionMaxTraceDistance)
+    {
+        DistanceFade = max(DistanceFade, saturate((OpaqueHitDistance - _LumenReflectionMaxMeshSdfTraceDistance * 0.7f)
+            / max(_LumenReflectionMaxMeshSdfTraceDistance * 0.3f, 1e-4f)));
+    }
+    Transparency = lerp(Transparency, 1.0f, DistanceFade);
+
+    Lighting *= VividGetPreExposure();
+    Lighting = ClampReflectionMaxRayIntensity(Lighting);
+
+    bool bHit = Transparency < LumenInterleavedGradientNoise(float2(ReflectionTracingCoord) + 0.5f, 0.0f);
+    if (bHit)
+    {
+        _RWTraceRadiance[ReflectionTracingCoord] = Lighting;
+    }
+
+    _RWTraceHit[ReflectionTracingCoord] = EncodeRayDistance(OpaqueHitDistance, bHit);
+}
+
+[numthreads(64, 1, 1)]
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void ReflectionTraceMeshSDFsFeedbackCS(uint2 GroupId : SV_GroupID, uint GroupThreadId : SV_GroupIndex)
+#else
+void ReflectionTraceMeshSDFsCS(uint2 GroupId : SV_GroupID, uint GroupThreadId : SV_GroupIndex)
+#endif
+{
+    uint DispatchThreadId = (GroupId.y * LumenCompactMaxDispatchWidth + GroupId.x) * 64u + GroupThreadId;
+    if (DispatchThreadId < _CompactedTraceTexelAllocator[0])
+    {
+        const uint2 ReflectionTracingCoord = DecodeTraceTexel(_CompactedTraceTexelData[DispatchThreadId]);
+        bool bUnused;
+        float TraceHitDistance = DecodeRayDistance(_RWTraceHit[ReflectionTracingCoord].x, bUnused);
+        TraceReflectionMeshSDFs(ReflectionTracingCoord, TraceHitDistance);
+    }
+}
+#endif
+
+// -----------------------------------------------------------------------------
+// 12. ReflectionTraceVoxelsCS (UE5 LumenReflectionTracing.usf + Global SDF + Sky)
+// -----------------------------------------------------------------------------
+#if defined(VIVID_SDF_SURFACE_CACHE)
+uint ComputeGlobalSdfClipmapIndexForPosition(float3 PositionWS)
+{
+    [unroll]
+    for (uint level = 0u; level < VividGlobalSdfLevelCount; ++level)
+    {
+        float3 delta = abs(PositionWS - _GlobalSdfLevels[level].xyz);
+        float halfExtent = 0.5f * _GlobalSdfLevels[level].w * (float)VividGlobalSdfResolution;
+        if (all(delta < halfExtent))
+        {
+            return level;
+        }
+    }
+    return VividGlobalSdfLevelCount - 1u;
+}
+
+void TraceReflectionVoxels(uint2 ReflectionTracingCoord, float TraceHitDistance)
+{
+    uint2 ScreenCoord = GetScreenCoordFromReflectionTracingCoord(ReflectionTracingCoord);
+    float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+    float DeviceZ = _SdfDiffuseDepth.Load(int3(ScreenCoord, 0));
+    float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, DeviceZ);
+    float3 WorldNormal = VividDecodeSurfaceSummaryNormal(_SdfDiffuseGBuffer1.Load(int3(ScreenCoord, 0)).xy);
+    FRayData RayData = UnpackRayData(_RayBuffer.Load(int3(ReflectionTracingCoord, 0)));
+
+    float SurfaceBias = _SdfDiffuseRayBias;
+    float3 SamplePosition = WorldPosition + WorldNormal * SurfaceBias;
+
+    float3 Radiance = 0.0f;
+    bool bHit = false;
+    float FinalHitDistance = _LumenReflectionMaxTraceDistance;
+
+    if (_LumenReflectionUseGlobalSdf != 0u)
+    {
+        uint ClipmapForSurfaceExpand = ComputeGlobalSdfClipmapIndexForPosition(WorldPosition + TraceHitDistance * RayData.Direction);
+        // UE5: Pull back 4 clipmap voxels so SDF expansion prevents leaking through thin objects
+        float PullbackForSurfaceExpand = _GlobalSdfLevels[ClipmapForSurfaceExpand].w * 4.0f;
+        float VoxelStartDistance = max(TraceHitDistance - PullbackForSurfaceExpand, 0.0f);
+
+        VividGlobalSdfHit GlobalHit;
+        if (VoxelStartDistance < _LumenReflectionMaxTraceDistance
+            && VividTraceGlobalSdf(SamplePosition, RayData.Direction, VoxelStartDistance, _LumenReflectionMaxTraceDistance, GlobalHit))
+        {
+            bHit = true;
+            FinalHitDistance = GlobalHit.distance;
+            float CardDistance = GlobalHit.distance + 0.5f * GlobalHit.expandSurfaceAmount;
+            GridCardLighting Lighting = EvaluateGlobalDistanceFieldHit(
+                SamplePosition + RayData.Direction * CardDistance,
+                GlobalHit.normalWS,
+                RayData.Direction,
+                GlobalHit.level);
+            Radiance = Lighting.sum;
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+            if (Lighting.feedbackWeightSum > 0.0f)
+            {
+                WriteSurfaceCacheFeedback(ReflectionTracingCoord, Lighting.feedbackWeightSum, Lighting.feedbackCard, true);
+            }
+#endif
+        }
+    }
+
+    if (!bHit)
+    {
+        bool bSampledWorldCache = false;
+        if (_LumenReflectionUseWorldCache != 0u)
+        {
+            uint WorldLevel = GetWorldCoverage(WorldPosition);
+            if (WorldLevel < WorldClipmaps)
+            {
+                float3 CacheRadiance;
+                float CacheDistance;
+                if (SampleWorldCache(WorldPosition, RayData.Direction, WorldLevel, CacheRadiance, CacheDistance))
+                {
+                    Radiance = CacheRadiance;
+                    FinalHitDistance = CacheDistance;
+                    bSampledWorldCache = true;
+                }
+            }
+        }
+
+        if (!bSampledWorldCache)
+        {
+            FinalHitDistance = _LumenReflectionMaxTraceDistance;
+            if (_LumenReflectionSkyEnabled != 0u && HasSkyTexture())
+            {
+                // Verify sky escape against Mesh SDF so enclosed rooms never leak Sky IBL
+                uint SkyState = ResolveSdfSkyMiss(SamplePosition, RayData.Direction,
+                    min(TraceHitDistance, _LumenReflectionMaxTraceDistance), false, 0u, (VividMeshSdfReceiver)0);
+                if (SkyState == RaySkyVisible)
+                {
+                    Radiance = SampleSkyTexture(RayData.Direction, 0.0f);
+                }
+            }
+        }
+    }
+
+    Radiance *= VividGetPreExposure();
+    Radiance = ClampReflectionMaxRayIntensity(Radiance);
+
+    _RWTraceRadiance[ReflectionTracingCoord] = Radiance;
+    _RWTraceHit[ReflectionTracingCoord] = EncodeRayDistance(FinalHitDistance, bHit);
+}
+
+[numthreads(64, 1, 1)]
+#if defined(VIVID_SURFACE_CACHE_FEEDBACK)
+void ReflectionTraceVoxelsFeedbackCS(uint2 GroupId : SV_GroupID, uint GroupThreadId : SV_GroupIndex)
+#else
+void ReflectionTraceVoxelsCS(uint2 GroupId : SV_GroupID, uint GroupThreadId : SV_GroupIndex)
+#endif
+{
+    uint DispatchThreadId = (GroupId.y * LumenCompactMaxDispatchWidth + GroupId.x) * 64u + GroupThreadId;
+    if (DispatchThreadId < _CompactedTraceTexelAllocator[0])
+    {
+        const uint2 ReflectionTracingCoord = DecodeTraceTexel(_CompactedTraceTexelData[DispatchThreadId]);
+        bool bUnused;
+        float TraceHitDistance = DecodeRayDistance(_RWTraceHit[ReflectionTracingCoord].x, bUnused);
+        TraceReflectionVoxels(ReflectionTracingCoord, TraceHitDistance);
+    }
+}
+#endif

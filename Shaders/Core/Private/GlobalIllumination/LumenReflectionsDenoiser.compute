@@ -1,0 +1,963 @@
+#pragma use_dxc
+
+#pragma kernel LumenReflectionDenoiserClearCS
+#pragma kernel LumenReflectionResolveCS
+#pragma kernel LumenReflectionResolveSpatialCS USE_SPATIAL_RECONSTRUCTION
+#pragma kernel LumenReflectionResolveDownsampledCS DOWNSAMPLE_FACTOR_2
+#pragma kernel LumenReflectionResolveDownsampledSpatialCS DOWNSAMPLE_FACTOR_2 USE_SPATIAL_RECONSTRUCTION
+#pragma kernel LumenReflectionDenoiserTemporalCS
+#pragma kernel LumenReflectionDenoiserTemporalValidHistoryCS PERMUTATION_VALID_HISTORY
+#pragma kernel LumenReflectionDenoiserSpatialBypassCS
+#pragma kernel LumenReflectionDenoiserSpatialCS SPATIAL_FILTER
+#pragma kernel LumenDebugReflectionCS
+
+#include "SdfScreenProbeCommon.hlsl"
+#include "../../Public/AutoExposure.hlsl"
+#include "LumenReflectionCommon.hlsl"
+
+// Tile lists
+StructuredBuffer<uint> _ReflectionClearTileData;
+StructuredBuffer<uint> _ReflectionResolveTileData;
+
+// Trace inputs for Resolve
+Texture2D<float> _DownsampledDepth;
+Texture2D<float4> _RayBuffer;
+Texture2D<float3> _TraceRadiance;
+Texture2D<float> _TraceHit;
+
+// Resolve & Clear outputs
+RWTexture2D<float3> _RWResolvedSpecular;
+RWTexture2D<float> _RWResolvedSpecularDepth;
+RWTexture2D<float4> _RWSpecularAndSecondMoment;
+RWTexture2D<float> _RWNumFramesAccumulated;
+RWTexture2D<float3> _RWSpecularIndirectAccumulated;
+RWTexture2D<float> _RWSceneDepthHistory;
+RWStructuredBuffer<float> _RWPreExposureHistory;
+
+// Temporal inputs
+Texture2D<float3> _ResolvedSpecularLighting;
+Texture2D<float> _ResolvedReflectionsDepth;
+Texture2D<float4> _SpecularHistoryTexture;
+Texture2D<float> _NumFramesAccumulatedHistoryTexture;
+Texture2D<float> _SceneDepthHistory;
+StructuredBuffer<float> _PrevPreExposureHistory;
+
+// Spatial inputs
+Texture2D<float4> _SpecularLightingAndSecondMomentTexture;
+Texture2D<float> _NumFramesAccumulatedTexture;
+
+// Resolve parameters (UE5 LumenReflectionResolve.usf)
+uint _LumenNumSpatialReconstructionSamples;
+float _LumenSpatialReconstructionKernelRadius;
+float _LumenSpatialReconstructionRoughnessScale;
+float _LumenSpatialReconstructionMinWeight;
+
+// Temporal parameters (UE5 LumenReflectionDenoiserTemporal.usf)
+float4 _LumenHistoryUVMinMax;
+float4 _LumenHistoryGatherUVMinMax;
+float4 _LumenHistoryBufferSizeAndInvSize;
+float _LumenTemporalMaxFramesAccumulated;
+float _LumenTemporalNeighborhoodClampScale;
+float _LumenHistoryDistanceThreshold;
+
+// Spatial parameters (UE5 LumenReflectionDenoiserSpatial.usf)
+float _LumenSpatialFilterDepthWeightScale;
+float _LumenSpatialFilterKernelRadius;
+uint _LumenSpatialFilterNumSamples;
+
+// Debug view outputs
+Texture2D<float3> _LumenDebugReflectionTexture;
+RWTexture2D<float4> _LumenDebugReflectionOutput;
+uint _LumenDebugReflectionMode;
+float4 _LumenDebugReflectionParams; // Exposure multiplier, available, frame, overview panel flag
+
+uint2 GetReflectionClearScreenCoord(uint TileIndex, uint2 ThreadIndex)
+{
+    uint2 TileOffset = LumenUnpackTileCoord12bits(_ReflectionClearTileData[TileIndex]);
+    return TileOffset * REFLECTION_THREADGROUP_SIZE_2D + ThreadIndex;
+}
+
+uint2 GetReflectionResolveScreenCoord(uint TileIndex, uint2 ThreadIndex, out uint2 OutTileCoord)
+{
+    OutTileCoord = LumenUnpackTileCoord12bits(_ReflectionResolveTileData[TileIndex]);
+    return OutTileCoord * REFLECTION_THREADGROUP_SIZE_2D + ThreadIndex;
+}
+
+// -----------------------------------------------------------------------------
+// 1. LumenReflectionDenoiserClearCS (UE5 LumenReflectionDenoiserClear.usf)
+// -----------------------------------------------------------------------------
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+void LumenReflectionDenoiserClearCS(
+    uint GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID)
+{
+    uint2 ScreenCoord = GetReflectionClearScreenCoord(GroupId, GroupThreadId);
+    uint2 ScreenSize = uint2(_SdfDiffuseScreenSize.xy);
+
+    if (all(ScreenCoord < ScreenSize))
+    {
+        _RWResolvedSpecular[ScreenCoord] = INVALID_LIGHTING;
+        _RWSpecularAndSecondMoment[ScreenCoord] = float4(INVALID_LIGHTING, 0.0f);
+        _RWSpecularIndirectAccumulated[ScreenCoord] = 0.0f;
+        _RWNumFramesAccumulated[ScreenCoord] = 0.0f;
+        _RWSceneDepthHistory[ScreenCoord] = _SdfDiffuseDepth.Load(int3(ScreenCoord, 0));
+        if (all(ScreenCoord == 0u))
+        {
+            _RWPreExposureHistory[0] = VividGetPreExposure();
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. LumenReflectionResolveCS (UE5 LumenReflectionResolve.usf)
+// -----------------------------------------------------------------------------
+bool IsValidDownsampledCoord(int2 DownsampledScreenCoord)
+{
+    return all(DownsampledScreenCoord >= 0) && all(uint2(DownsampledScreenCoord) < _LumenReflectionTracingViewSize);
+}
+
+struct FReflectionLighting
+{
+    float3 Lighting;
+    float WeightSum;
+    float MinRayHitT;
+};
+
+FReflectionLighting InitReflectionLighting(float3 InitLighting = 0.0f)
+{
+    FReflectionLighting Out;
+    Out.Lighting = InitLighting;
+    Out.WeightSum = 0.0f;
+    Out.MinRayHitT = LUMEN_FLOAT_32_MAX;
+    return Out;
+}
+
+// Weight reflection rays by BRDF(Ray) / RayPDF (UE5 LumenReflectionResolve.usf)
+float GetReflectionSampleWeight(float3 RayDir, float RayPDF, const float3x3 TangentBasis, float3 V, float a2)
+{
+    float3 H = mul(TangentBasis, normalize(V + RayDir));
+    float SampleNDF = LumenD_GGX(a2, max(H.z, 0.0f));
+    return SampleNDF / max(RayPDF, 1e-6f);
+}
+
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+#if defined(DOWNSAMPLE_FACTOR_2)
+    #if defined(USE_SPATIAL_RECONSTRUCTION)
+void LumenReflectionResolveDownsampledSpatialCS(
+    #else
+void LumenReflectionResolveDownsampledCS(
+    #endif
+#else
+    #if defined(USE_SPATIAL_RECONSTRUCTION)
+void LumenReflectionResolveSpatialCS(
+    #else
+void LumenReflectionResolveCS(
+    #endif
+#endif
+    uint GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID)
+{
+#if defined(DOWNSAMPLE_FACTOR_2)
+    const int2 DownsampleFactor = int2(2, 2);
+#else
+    const int2 DownsampleFactor = int2(1, 1);
+#endif
+
+    uint2 TileCoord;
+    uint2 ScreenCoord = GetReflectionResolveScreenCoord(GroupId, GroupThreadId, TileCoord);
+    uint2 ScreenSize = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(ScreenCoord >= ScreenSize))
+    {
+        return;
+    }
+
+    _RWSceneDepthHistory[ScreenCoord] = _SdfDiffuseDepth.Load(int3(ScreenCoord, 0));
+    if (all(ScreenCoord == 0u))
+    {
+        _RWPreExposureHistory[0] = VividGetPreExposure();
+    }
+
+    FLumenReflectionMaterial Material = ReadLumenReflectionMaterial(ScreenCoord, true);
+
+    // Mark invalid values with INVALID_LIGHTING for history accumulation (UE5)
+    FReflectionLighting Center = InitReflectionLighting(INVALID_LIGHTING);
+
+    if (NeedLumenReflectionRay(Material))
+    {
+        uint2 ReflectionScreenCoord = ScreenCoord;
+        Center.Lighting = 0.0f;
+
+#if !defined(DOWNSAMPLE_FACTOR_2)
+        {
+            Center.Lighting = RGBToDenoiserSpace(_TraceRadiance.Load(int3(ReflectionScreenCoord, 0)));
+            Center.WeightSum = 1.0f;
+
+            bool bHit;
+            Center.MinRayHitT = DecodeRayDistance(_TraceHit.Load(int3(ReflectionScreenCoord, 0)).x, bHit);
+        }
+#else
+        {
+            int2 SampleOffsets[4];
+            SampleOffsets[0] = int2(0, 0);
+            SampleOffsets[1] = int2(1, 0);
+            SampleOffsets[2] = int2(0, 1);
+            SampleOffsets[3] = int2(1, 1);
+
+            uint2 ClampedCoord = max(ScreenCoord, uint2(1u, 1u));
+            uint2 DownsampledScreenCoord00 = (ClampedCoord - 1u) / uint2(DownsampleFactor);
+            float2 DownsampledGatherUV = (float2(DownsampledScreenCoord00) + 1.0f) * _LumenReflectionTracingBufferInvSize;
+
+            int2 ScreenCoordOffset = int2(ClampedCoord) - int2(DownsampledScreenCoord00) * DownsampleFactor;
+            int2 ToSample00 = int2(GetScreenTileJitter(DownsampledScreenCoord00 + uint2(SampleOffsets[0]))) + SampleOffsets[0] * DownsampleFactor - ScreenCoordOffset;
+            int2 ToSample10 = int2(GetScreenTileJitter(DownsampledScreenCoord00 + uint2(SampleOffsets[1]))) + SampleOffsets[1] * DownsampleFactor - ScreenCoordOffset;
+            int2 ToSample01 = int2(GetScreenTileJitter(DownsampledScreenCoord00 + uint2(SampleOffsets[2]))) + SampleOffsets[2] * DownsampleFactor - ScreenCoordOffset;
+            int2 ToSample11 = int2(GetScreenTileJitter(DownsampledScreenCoord00 + uint2(SampleOffsets[3]))) + SampleOffsets[3] * DownsampleFactor - ScreenCoordOffset;
+
+            float4 UpsampleWeights;
+            UpsampleWeights.x = (2.0f - abs(ToSample00.x)) * (2.0f - abs(ToSample00.y));
+            UpsampleWeights.y = (2.0f - abs(ToSample10.x)) * (2.0f - abs(ToSample10.y));
+            UpsampleWeights.z = (2.0f - abs(ToSample01.x)) * (2.0f - abs(ToSample01.y));
+            UpsampleWeights.w = (2.0f - abs(ToSample11.x)) * (2.0f - abs(ToSample11.y));
+
+            float4 UpsampleDepth4 = _DownsampledDepth.GatherRed(sampler_PointClamp, DownsampledGatherUV).wzxy;
+            float4 DepthWeights = float4(
+                UpsampleDepth4.x > 0.0f ? 1.0f : 0.0f,
+                UpsampleDepth4.y > 0.0f ? 1.0f : 0.0f,
+                UpsampleDepth4.z > 0.0f ? 1.0f : 0.0f,
+                UpsampleDepth4.w > 0.0f ? 1.0f : 0.0f);
+            UpsampleWeights *= DepthWeights;
+
+            UpsampleWeights.x = IsValidDownsampledCoord(int2(DownsampledScreenCoord00) + SampleOffsets[0]) ? UpsampleWeights.x : 0.0f;
+            UpsampleWeights.y = IsValidDownsampledCoord(int2(DownsampledScreenCoord00) + SampleOffsets[1]) ? UpsampleWeights.y : 0.0f;
+            UpsampleWeights.z = IsValidDownsampledCoord(int2(DownsampledScreenCoord00) + SampleOffsets[2]) ? UpsampleWeights.z : 0.0f;
+            UpsampleWeights.w = IsValidDownsampledCoord(int2(DownsampledScreenCoord00) + SampleOffsets[3]) ? UpsampleWeights.w : 0.0f;
+
+            if (any(UpsampleWeights > 0.01f))
+            {
+                float Epsilon = 0.001f;
+                UpsampleWeights /= max(dot(UpsampleWeights, 1.0f), Epsilon);
+
+                float3 SampleRadiance[4];
+                [unroll]
+                for (uint i = 0u; i < 4u; ++i)
+                {
+                    if (UpsampleWeights[i] > 0.0f)
+                    {
+                        uint2 Coord = uint2(int2(DownsampledScreenCoord00) + SampleOffsets[i]);
+                        SampleRadiance[i] = RGBToDenoiserSpace(_TraceRadiance.Load(int3(Coord, 0)));
+                    }
+                    else
+                    {
+                        SampleRadiance[i] = 0.0f;
+                    }
+                }
+
+                Center.Lighting = SampleRadiance[0] * UpsampleWeights.x
+                    + SampleRadiance[1] * UpsampleWeights.y
+                    + SampleRadiance[2] * UpsampleWeights.z
+                    + SampleRadiance[3] * UpsampleWeights.w;
+
+                const float MaxUpsampleWeight = max(max(max(UpsampleWeights.x, UpsampleWeights.y), UpsampleWeights.z), UpsampleWeights.w);
+                if (MaxUpsampleWeight == UpsampleWeights.x)
+                    ReflectionScreenCoord = uint2(int2(DownsampledScreenCoord00) + SampleOffsets[0]);
+                else if (MaxUpsampleWeight == UpsampleWeights.y)
+                    ReflectionScreenCoord = uint2(int2(DownsampledScreenCoord00) + SampleOffsets[1]);
+                else if (MaxUpsampleWeight == UpsampleWeights.z)
+                    ReflectionScreenCoord = uint2(int2(DownsampledScreenCoord00) + SampleOffsets[2]);
+                else
+                    ReflectionScreenCoord = uint2(int2(DownsampledScreenCoord00) + SampleOffsets[3]);
+
+                bool bHit;
+                Center.MinRayHitT = DecodeRayDistance(_TraceHit.Load(int3(ReflectionScreenCoord, 0)).x, bHit);
+                Center.WeightSum = 1.0f;
+            }
+            else
+            {
+                // Fallback to nearest tracing coord if jittered 2x2 neighborhood had no valid rays
+                ReflectionScreenCoord = min(ScreenCoord / uint2(DownsampleFactor), _LumenReflectionTracingViewSize - 1u);
+                if (_DownsampledDepth.Load(int3(ReflectionScreenCoord, 0)).x > 0.0f)
+                {
+                    Center.Lighting = RGBToDenoiserSpace(_TraceRadiance.Load(int3(ReflectionScreenCoord, 0)));
+                    bool bHit;
+                    Center.MinRayHitT = DecodeRayDistance(_TraceHit.Load(int3(ReflectionScreenCoord, 0)).x, bHit);
+                    Center.WeightSum = 1.0f;
+                }
+            }
+        }
+#endif
+
+#if defined(USE_SPATIAL_RECONSTRUCTION)
+        {
+            const float AvgDownsampleFactor = (DownsampleFactor.x + DownsampleFactor.y) * 0.5f;
+            const float MaxDownsampleFactor = max(DownsampleFactor.x, DownsampleFactor.y);
+
+            float KernelRadiusInPixels = 0.0f;
+            if (Material.TopLayerRoughness > 0.05f)
+            {
+                KernelRadiusInPixels = AvgDownsampleFactor * _LumenSpatialReconstructionKernelRadius * saturate(Material.TopLayerRoughness * 8.0f);
+            }
+
+            // Skip reconstruction on mirror reflections (UE5)
+            if (KernelRadiusInPixels > MaxDownsampleFactor && Center.WeightSum > 0.0f)
+            {
+                uint2 RandomSeed = LumenRand3DPCG16(int3(ScreenCoord, _LumenReflectionStateFrameIndexMod8)).xy;
+
+                const float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+                const float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, Material.DeviceZ);
+                const float3 V = _SdfProbeCameraPosition.w > 0.5f
+                    ? normalize(_SdfProbeCameraPosition.xyz - WorldPosition)
+                    : -_SdfProbeCameraForward.xyz;
+                const float3x3 TangentBasis = LumenGetTangentBasis(Material.WorldNormal);
+
+                const float EffectiveRoughness = clamp(Material.TopLayerRoughness * _LumenSpatialReconstructionRoughnessScale, 0.0f, 1.0f);
+                const float Alpha = EffectiveRoughness * EffectiveRoughness;
+                const float a2 = Alpha * Alpha;
+
+                const float2 KernelMajorAxis = float2(KernelRadiusInPixels, 0.0f);
+                const float2 KernelMinorAxis = float2(0.0f, KernelRadiusInPixels);
+
+                const float CenterRayHitT = Center.MinRayHitT;
+
+                // Re-weight center sample (UE5)
+                {
+                    FRayData CenterRayData = UnpackRayData(_RayBuffer.Load(int3(ReflectionScreenCoord, 0)));
+                    float CenterSampleWeight = GetReflectionSampleWeight(CenterRayData.Direction, CenterRayData.PDF, TangentBasis, V, a2);
+                    CenterSampleWeight = max(CenterSampleWeight, 0.001f);
+                    Center.Lighting *= CenterSampleWeight;
+                    Center.WeightSum = CenterSampleWeight;
+                }
+
+                FReflectionLighting Neighbor = InitReflectionLighting();
+
+                for (uint NeighborIndex = 0u; NeighborIndex < _LumenNumSpatialReconstructionSamples; ++NeighborIndex)
+                {
+                    float2 NeighborOffsetInRect = LumenHammersley16(NeighborIndex, _LumenNumSpatialReconstructionSamples, RandomSeed);
+                    float2 NeighborOffset = LumenUniformSampleDiskConcentric(NeighborOffsetInRect);
+                    NeighborOffset = NeighborOffset.x * KernelMajorAxis + NeighborOffset.y * KernelMinorAxis;
+                    int2 NeighborScreenCoord = (int2)(float2(ScreenCoord) + NeighborOffset + 0.5f);
+
+                    int2 NeighborTracingCoord = NeighborScreenCoord / DownsampleFactor;
+                    if (IsValidDownsampledCoord(NeighborTracingCoord))
+                    {
+                        float NeighborSceneDepth = _DownsampledDepth.Load(int3(NeighborTracingCoord, 0)).x;
+                        if (NeighborSceneDepth > 0.0f)
+                        {
+                            uint2 NeighborFullCoord = GetScreenCoordFromReflectionTracingCoord(uint2(NeighborTracingCoord));
+                            float2 NeighborScreenUV = (float2(NeighborFullCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+                            float NeighborDeviceZ = _SdfDiffuseDepth.Load(int3(NeighborFullCoord, 0));
+                            float3 NeighborWorldPosition = LumenWorldPositionFromScreenUV(NeighborScreenUV, NeighborDeviceZ);
+                            FRayData RayData = UnpackRayData(_RayBuffer.Load(int3(NeighborTracingCoord, 0)));
+
+                            bool bHit;
+                            float TraceHitDistance = DecodeRayDistance(_TraceHit.Load(int3(NeighborTracingCoord, 0)).x, bHit);
+
+                            // Clamp to center distance - preserves contacts and prevents bias toward background (UE5)
+                            TraceHitDistance = min(TraceHitDistance, CenterRayHitT);
+
+                            float3 NeighborHitPosition = NeighborWorldPosition + RayData.Direction * TraceHitDistance;
+                            float DistanceToNeighborHit = length(NeighborHitPosition - WorldPosition);
+                            float3 DirectionToNeighborHit = RayData.Direction;
+                            if (DistanceToNeighborHit > 0.0f)
+                            {
+                                DirectionToNeighborHit = (NeighborHitPosition - WorldPosition) / DistanceToNeighborHit;
+                            }
+
+                            const float SampleWeight = GetReflectionSampleWeight(DirectionToNeighborHit, RayData.PDF, TangentBasis, V, a2);
+                            if (SampleWeight > 1e-6f)
+                            {
+                                float3 SampleRadiance = RGBToDenoiserSpace(_TraceRadiance.Load(int3(NeighborTracingCoord, 0)));
+                                Neighbor.Lighting += SampleRadiance * SampleWeight;
+                                Neighbor.WeightSum += SampleWeight;
+                                Center.MinRayHitT = min(Center.MinRayHitT, TraceHitDistance);
+                            }
+                        }
+                    }
+                }
+
+                const float RelativeSpatialReconstructionMinWeight = _LumenSpatialReconstructionMinWeight * Center.WeightSum;
+                if (Neighbor.WeightSum > 1e-6f && RelativeSpatialReconstructionMinWeight > Neighbor.WeightSum)
+                {
+                    Neighbor.Lighting = (Neighbor.Lighting / Neighbor.WeightSum) * RelativeSpatialReconstructionMinWeight;
+                    Neighbor.WeightSum = RelativeSpatialReconstructionMinWeight;
+                }
+
+                Center.Lighting += Neighbor.Lighting;
+                Center.WeightSum += Neighbor.WeightSum;
+            }
+        }
+#endif
+
+        if (Center.WeightSum > 1e-6f)
+        {
+            Center.Lighting = Center.Lighting / Center.WeightSum;
+        }
+        Center.Lighting = DenoiserSpaceToRGB(Center.Lighting);
+    }
+
+    _RWResolvedSpecular[ScreenCoord] = Center.Lighting;
+    _RWResolvedSpecularDepth[ScreenCoord] = Center.MinRayHitT;
+}
+
+// -----------------------------------------------------------------------------
+// 3. LumenReflectionDenoiserTemporalCS (UE5 LumenReflectionDenoiserTemporal.usf)
+// -----------------------------------------------------------------------------
+struct FNeighborhood
+{
+    float3 Center;
+    float3 Extent;
+};
+
+#define SHARED_TILE_BORDER 2
+#define SHARED_TILE_SIZE (8 + 2 * SHARED_TILE_BORDER)
+groupshared float3 SharedResolvedSpecularYCoCg[SHARED_TILE_SIZE][SHARED_TILE_SIZE];
+
+FNeighborhood GetReflectionNeighborhood(uint2 LocalCoord, float3 CenterSample)
+{
+    CenterSample = LumenRGBToYCoCg(CenterSample);
+
+    float WeightSum = 1.0f;
+    float3 SampleSum = CenterSample;
+    float3 SampleSqSum = CenterSample * CenterSample;
+
+    const int KernelSize = 2;
+    for (int NeighborOffsetY = -KernelSize; NeighborOffsetY <= KernelSize; ++NeighborOffsetY)
+    {
+        for (int NeighborOffsetX = -KernelSize; NeighborOffsetX <= KernelSize; ++NeighborOffsetX)
+        {
+            const bool bCenter = NeighborOffsetX == 0 && NeighborOffsetY == 0;
+            const bool bCorner = abs(NeighborOffsetX) == KernelSize && abs(NeighborOffsetY) == KernelSize;
+
+            if (!bCenter && !bCorner)
+            {
+                float3 NeighborSample = SharedResolvedSpecularYCoCg[SHARED_TILE_BORDER + LocalCoord.x + NeighborOffsetX][SHARED_TILE_BORDER + LocalCoord.y + NeighborOffsetY];
+                if (IsLightingValid(NeighborSample))
+                {
+                    SampleSum += NeighborSample;
+                    SampleSqSum += NeighborSample * NeighborSample;
+                    WeightSum += 1.0f;
+                }
+            }
+        }
+    }
+
+    float3 M1 = SampleSum / WeightSum;
+    float3 M2 = SampleSqSum / WeightSum;
+    float3 Variance = max(M2 - M1 * M1, 0.0f);
+    float3 StdDev = sqrt(Variance);
+
+    FNeighborhood Neighborhood;
+    Neighborhood.Center = M1;
+    Neighborhood.Extent = _LumenTemporalNeighborhoodClampScale * StdDev;
+    return Neighborhood;
+}
+
+struct FLightingHistory
+{
+    bool bValid;
+    float2 ScreenUV;
+    float2 GatherUV;
+    float4 GatherWeights;
+    float3 Specular;
+    float SpecularSecondMoment;
+};
+
+FLightingHistory GetReflectionLightingHistory(
+    float2 ScreenUV,
+    float DeviceZ,
+    float SceneDepth,
+    float ReflectionHitDistance,
+    float4 EncodedVelocity,
+    bool bFromReflectHit,
+    float3 WorldPosition,
+    float3 SceneWorldNormal,
+    float Noise,
+    float PrevPreExposureCorrection)
+{
+    FLightingHistory History;
+    History.bValid = false;
+    History.Specular = 0.0f;
+    History.SpecularSecondMoment = 0.0f;
+    History.ScreenUV = 0.0f;
+    History.GatherUV = 0.0f;
+    History.GatherWeights = 0.0f;
+
+    // Static reprojection of either virtual reflection hit point or surface point (UE5 LumenPosition.ush)
+    float3 ReprojectWorldPos = WorldPosition;
+    if (bFromReflectHit)
+    {
+        float ClampedHitDistance = clamp(ReflectionHitDistance, 0.0f, _LumenReflectionMaxTraceDistance);
+        if (_SdfProbeCameraPosition.w > 0.5f)
+        {
+            float VirtualScale = (SceneDepth + ClampedHitDistance) / max(SceneDepth, 1e-5f);
+            ReprojectWorldPos = _SdfProbeCameraPosition.xyz + (WorldPosition - _SdfProbeCameraPosition.xyz) * VirtualScale;
+        }
+        else
+        {
+            ReprojectWorldPos = WorldPosition + _SdfProbeCameraForward.xyz * ClampedHitDistance;
+        }
+    }
+
+    float4 PrevClip = mul(_SdfDiffusePreviousVP, float4(ReprojectWorldPos, 1.0f));
+    if (PrevClip.w <= 1e-6f)
+    {
+        return History;
+    }
+
+    float3 PrevNdc = PrevClip.xyz / PrevClip.w;
+    float2 HistoryScreenUV = PrevNdc.xy * LumenNdcToUvScale() + 0.5f;
+    float ReprojectedDeviceZ = PrevNdc.z;
+
+    // Account for dynamic object motion (UE5 LumenPosition.ush lines 75-79)
+    if (VividHasObjectVelocity(EncodedVelocity))
+    {
+        float2 DynamicSurfacePrevUV = ScreenUV - VividDecodeMotionUV(EncodedVelocity) + _SdfScreenJitterDelta;
+        float DynamicSurfacePrevZ = DeviceZ - VividDecodeMotionDeviceZ(EncodedVelocity);
+        if (bFromReflectHit)
+        {
+            float4 RefPrevClip = mul(_SdfDiffusePreviousVP, float4(WorldPosition, 1.0f));
+            if (RefPrevClip.w > 1e-6f)
+            {
+                float3 RefPrevNdc = RefPrevClip.xyz / RefPrevClip.w;
+                float2 StaticSurfacePrevUV = RefPrevNdc.xy * LumenNdcToUvScale() + 0.5f;
+                HistoryScreenUV += DynamicSurfacePrevUV - StaticSurfacePrevUV;
+                ReprojectedDeviceZ += DynamicSurfacePrevZ - RefPrevNdc.z;
+            }
+        }
+        else
+        {
+            HistoryScreenUV = DynamicSurfacePrevUV;
+            ReprojectedDeviceZ = DynamicSurfacePrevZ;
+        }
+    }
+
+    History.ScreenUV = HistoryScreenUV;
+    History.bValid = all(HistoryScreenUV >= _LumenHistoryUVMinMax.xy) && all(HistoryScreenUV <= _LumenHistoryUVMinMax.zw);
+
+    if (History.bValid)
+    {
+        HistoryScreenUV = clamp(HistoryScreenUV, _LumenHistoryGatherUVMinMax.xy, _LumenHistoryGatherUVMinMax.zw);
+        uint2 HistoryScreenCoord = (uint2)floor(HistoryScreenUV * _LumenHistoryBufferSizeAndInvSize.xy - 0.5f);
+        float2 HistoryBilinearWeights = frac(HistoryScreenUV * _LumenHistoryBufferSizeAndInvSize.xy - 0.5f);
+
+        float2 HistoryGatherUV = (float2(HistoryScreenCoord) + 1.0f) * _LumenHistoryBufferSizeAndInvSize.zw;
+
+        float4 HistoryWeights = float4(
+            (1.0f - HistoryBilinearWeights.y) * (1.0f - HistoryBilinearWeights.x),
+            (1.0f - HistoryBilinearWeights.y) * HistoryBilinearWeights.x,
+            HistoryBilinearWeights.y * (1.0f - HistoryBilinearWeights.x),
+            HistoryBilinearWeights.y * HistoryBilinearWeights.x);
+
+        float4 HistorySampleSceneDepth4 = _SceneDepthHistory.GatherRed(sampler_PointClamp, HistoryGatherUV).wzxy;
+        HistorySampleSceneDepth4.x = LumenReflectionEyeDepth(HistorySampleSceneDepth4.x);
+        HistorySampleSceneDepth4.y = LumenReflectionEyeDepth(HistorySampleSceneDepth4.y);
+        HistorySampleSceneDepth4.z = LumenReflectionEyeDepth(HistorySampleSceneDepth4.z);
+        HistorySampleSceneDepth4.w = LumenReflectionEyeDepth(HistorySampleSceneDepth4.w);
+
+        float ReprojectedSceneDepth = LumenReflectionEyeDepth(ReprojectedDeviceZ);
+        float DisocclusionDistanceThreshold = _LumenHistoryDistanceThreshold * lerp(0.5f, 1.5f, Noise);
+
+        if (!bFromReflectHit)
+        {
+            const float3 V = _SdfProbeCameraPosition.w > 0.5f
+                ? normalize(_SdfProbeCameraPosition.xyz - WorldPosition)
+                : -_SdfProbeCameraForward.xyz;
+            DisocclusionDistanceThreshold /= clamp(saturate(dot(V, SceneWorldNormal)), 0.1f, 1.0f);
+
+            const float4 DistanceToHistoryValue = abs(HistorySampleSceneDepth4 - ReprojectedSceneDepth);
+            float4 DepthWeights = float4(
+                DistanceToHistoryValue.x >= ReprojectedSceneDepth * DisocclusionDistanceThreshold ? 0.0f : 1.0f,
+                DistanceToHistoryValue.y >= ReprojectedSceneDepth * DisocclusionDistanceThreshold ? 0.0f : 1.0f,
+                DistanceToHistoryValue.z >= ReprojectedSceneDepth * DisocclusionDistanceThreshold ? 0.0f : 1.0f,
+                DistanceToHistoryValue.w >= ReprojectedSceneDepth * DisocclusionDistanceThreshold ? 0.0f : 1.0f);
+            HistoryWeights *= DepthWeights;
+        }
+
+        History.bValid = any(HistoryWeights > 0.01f);
+        if (History.bValid)
+        {
+            float4 R4 = _SpecularHistoryTexture.GatherRed(sampler_PointClamp, HistoryGatherUV).wzxy;
+            float4 G4 = _SpecularHistoryTexture.GatherGreen(sampler_PointClamp, HistoryGatherUV).wzxy;
+            float4 B4 = _SpecularHistoryTexture.GatherBlue(sampler_PointClamp, HistoryGatherUV).wzxy;
+            float4 A4 = _SpecularHistoryTexture.GatherAlpha(sampler_PointClamp, HistoryGatherUV).wzxy;
+
+            float4 SpecularHistory00 = RGBAToDenoiserSpace(float4(R4.x, G4.x, B4.x, A4.x));
+            float4 SpecularHistory10 = RGBAToDenoiserSpace(float4(R4.y, G4.y, B4.y, A4.y));
+            float4 SpecularHistory01 = RGBAToDenoiserSpace(float4(R4.z, G4.z, B4.z, A4.z));
+            float4 SpecularHistory11 = RGBAToDenoiserSpace(float4(R4.w, G4.w, B4.w, A4.w));
+
+            HistoryWeights.x = IsLightingValid(SpecularHistory00.xyz) ? HistoryWeights.x : 0.0f;
+            HistoryWeights.y = IsLightingValid(SpecularHistory10.xyz) ? HistoryWeights.y : 0.0f;
+            HistoryWeights.z = IsLightingValid(SpecularHistory01.xyz) ? HistoryWeights.z : 0.0f;
+            HistoryWeights.w = IsLightingValid(SpecularHistory11.xyz) ? HistoryWeights.w : 0.0f;
+
+            History.bValid = any(HistoryWeights > 0.01f);
+            if (History.bValid)
+            {
+                float4 SpecularAndSecondMomentHistory = 0.0f;
+                SpecularAndSecondMomentHistory += SpecularHistory00 * HistoryWeights.x;
+                SpecularAndSecondMomentHistory += SpecularHistory10 * HistoryWeights.y;
+                SpecularAndSecondMomentHistory += SpecularHistory01 * HistoryWeights.z;
+                SpecularAndSecondMomentHistory += SpecularHistory11 * HistoryWeights.w;
+                SpecularAndSecondMomentHistory = SpecularAndSecondMomentHistory / dot(HistoryWeights, 1.0f);
+
+                // Correct specular and its second moment for the current frame exposure (UE5)
+                SpecularAndSecondMomentHistory.xyz *= PrevPreExposureCorrection;
+                SpecularAndSecondMomentHistory.w *= PrevPreExposureCorrection * PrevPreExposureCorrection;
+
+                History.GatherUV = HistoryGatherUV;
+                History.GatherWeights = HistoryWeights;
+                History.Specular = SpecularAndSecondMomentHistory.xyz;
+                History.SpecularSecondMoment = SpecularAndSecondMomentHistory.w;
+            }
+        }
+    }
+
+    return History;
+}
+
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+#if defined(PERMUTATION_VALID_HISTORY)
+void LumenReflectionDenoiserTemporalValidHistoryCS(
+#else
+void LumenReflectionDenoiserTemporalCS(
+#endif
+    uint GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID)
+{
+    uint2 TileCoord;
+    const uint2 ScreenCoord = GetReflectionResolveScreenCoord(GroupId, GroupThreadId, TileCoord);
+    const uint2 ScreenSize = uint2(_SdfDiffuseScreenSize.xy);
+
+    // Load resolved specular neighborhood into shared memory (UE5)
+    for (uint SharedCoordY = GroupThreadId.y; SharedCoordY < SHARED_TILE_SIZE; SharedCoordY += REFLECTION_THREADGROUP_SIZE_2D)
+    {
+        for (uint SharedCoordX = GroupThreadId.x; SharedCoordX < SHARED_TILE_SIZE; SharedCoordX += REFLECTION_THREADGROUP_SIZE_2D)
+        {
+            int2 ResolvedSpecularCoord = int2(TileCoord * REFLECTION_THREADGROUP_SIZE_2D) + int2(SharedCoordX, SharedCoordY) - SHARED_TILE_BORDER;
+
+            float3 SpecularLightingYCoCg = INVALID_LIGHTING;
+            const bool bCorner = (SharedCoordX == 0u || SharedCoordX + 1u == SHARED_TILE_SIZE) && (SharedCoordY == 0u || SharedCoordY + 1u == SHARED_TILE_SIZE);
+            if (!bCorner && all(ResolvedSpecularCoord >= 0) && all(uint2(ResolvedSpecularCoord) < ScreenSize))
+            {
+                float3 Sample = RGBToDenoiserSpace(_ResolvedSpecularLighting.Load(int3(ResolvedSpecularCoord, 0)).xyz);
+                if (IsLightingValid(Sample))
+                {
+                    SpecularLightingYCoCg = LumenRGBToYCoCg(Sample);
+                }
+            }
+
+            SharedResolvedSpecularYCoCg[SharedCoordX][SharedCoordY] = SpecularLightingYCoCg;
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (all(ScreenCoord < ScreenSize))
+    {
+        float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+        const FLumenReflectionMaterial Material = ReadLumenReflectionMaterial(ScreenCoord, false);
+
+        float3 SpecularLighting = SharedResolvedSpecularYCoCg[GroupThreadId.x + SHARED_TILE_BORDER][GroupThreadId.y + SHARED_TILE_BORDER];
+        float SpecularSecondMoment = 0.0f;
+        if (IsLightingValid(SpecularLighting))
+        {
+            SpecularLighting = LumenYCoCgToRGB(SpecularLighting);
+            float L = Luminance(SpecularLighting);
+            SpecularSecondMoment = L * L;
+        }
+
+        float NumFramesAccumulated = 0.0f;
+        float MaxFramesAccumulated = _LumenTemporalMaxFramesAccumulated;
+
+#if defined(PERMUTATION_VALID_HISTORY)
+        if (IsLightingValid(SpecularLighting))
+        {
+            float4 EncodedVelocity = _SdfScreenMotion.Load(int3(ScreenCoord, 0));
+            float ReflectionHitDistance = _ResolvedReflectionsDepth.Load(int3(ScreenCoord, 0)).x;
+            float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, Material.DeviceZ);
+            const float Noise = LumenInterleavedGradientNoise(float2(ScreenCoord), (float)_LumenReflectionStateFrameIndexMod8);
+            float PrevPreExposure = max(_PrevPreExposureHistory[0], 1e-6f);
+            float PrevPreExposureCorrection = VividGetPreExposure() / PrevPreExposure;
+
+            bool bPreferredHistoryFailed = false;
+            FLightingHistory LightingHistory;
+            LightingHistory.bValid = false;
+            LightingHistory.Specular = 0.0f;
+            LightingHistory.SpecularSecondMoment = 0.0f;
+            LightingHistory.ScreenUV = 0.0f;
+            LightingHistory.GatherUV = 0.0f;
+            LightingHistory.GatherWeights = 0.0f;
+
+            // Select preferred history based on GGX lobe dominant direction (UE5)
+            float SpecularDominantDirFactor = GetSpecularDominantDirFactor(Material.TopLayerRoughness);
+
+            if (SpecularDominantDirFactor >= 0.5f)
+            {
+                LightingHistory = GetReflectionLightingHistory(
+                    ScreenUV, Material.DeviceZ, Material.SceneDepth, ReflectionHitDistance,
+                    EncodedVelocity, true, WorldPosition, Material.WorldNormal, Noise, PrevPreExposureCorrection);
+
+                if (!LightingHistory.bValid)
+                {
+                    bPreferredHistoryFailed = true;
+                }
+            }
+
+            if (!LightingHistory.bValid)
+            {
+                LightingHistory = GetReflectionLightingHistory(
+                    ScreenUV, Material.DeviceZ, Material.SceneDepth, 0.0f,
+                    EncodedVelocity, false, WorldPosition, Material.WorldNormal, Noise, PrevPreExposureCorrection);
+            }
+
+            // Speedup accumulation for full screen mirror reflections (UE5)
+            if (all(_LumenReflectionDownsampleFactorXY == 1u))
+            {
+                MaxFramesAccumulated = lerp(2.0f, MaxFramesAccumulated, saturate(Material.TopLayerRoughness / 0.05f));
+            }
+
+            if (LightingHistory.bValid)
+            {
+                float4 HistoryFrames4 = _NumFramesAccumulatedHistoryTexture.GatherRed(sampler_PointClamp, LightingHistory.GatherUV).wzxy;
+                float NumFramesAccumulatedHistory = UnpackNumFramesAccumulated(dot(HistoryFrames4, LightingHistory.GatherWeights));
+                NumFramesAccumulated = NumFramesAccumulatedHistory / dot(LightingHistory.GatherWeights, 1.0f);
+
+                float Confidence = 1.0f;
+
+                bool bReconstructedSample = false;
+                if (_LumenReflectionDownsampleFactorXY.x > 1u)
+                {
+                    uint2 TracingPixelSize = uint2(2u, _LumenReflectionDownsampleFactorXY.y > 1u ? 2u : 1u);
+                    if (any(ScreenCoord % TracingPixelSize != uint2(GetScreenTileJitter(ScreenCoord / TracingPixelSize))))
+                    {
+                        bReconstructedSample = true;
+                    }
+                }
+
+                // Clamp history to current neighborhood in YCoCg space (UE5)
+                {
+                    float3 HistoryLighting = LumenRGBToYCoCg(LightingHistory.Specular);
+                    FNeighborhood SpecularNeighborhood = GetReflectionNeighborhood(GroupThreadId, SpecularLighting);
+
+                    if (bReconstructedSample)
+                    {
+                        SpecularNeighborhood.Extent *= 2.0f;
+                    }
+
+                    float3 ClampedHistoryLighting = clamp(
+                        HistoryLighting,
+                        SpecularNeighborhood.Center - SpecularNeighborhood.Extent,
+                        SpecularNeighborhood.Center + SpecularNeighborhood.Extent);
+
+                    float NormalizedDistanceToNeighborhood = length(abs(ClampedHistoryLighting - HistoryLighting) / max(SpecularNeighborhood.Extent, 0.1f));
+                    Confidence *= saturate(1.0f - NormalizedDistanceToNeighborhood);
+
+                    LightingHistory.Specular = LumenYCoCgToRGB(ClampedHistoryLighting);
+                }
+
+                if (bPreferredHistoryFailed)
+                {
+                    Confidence = 0.0f;
+                }
+
+                Confidence = 0.75f * Confidence + 0.25f;
+
+                NumFramesAccumulated = min(NumFramesAccumulated * Confidence + 1.0f, MaxFramesAccumulated);
+
+                float Alpha = 1.0f / (NumFramesAccumulated + (bReconstructedSample ? 4.0f : 0.0f));
+                SpecularLighting = lerp(LightingHistory.Specular, SpecularLighting, Alpha);
+                SpecularSecondMoment = lerp(LightingHistory.SpecularSecondMoment, SpecularSecondMoment, Alpha);
+            }
+        }
+#endif
+
+        SpecularLighting = max(LumenMakeFinite(SpecularLighting), 0.0f);
+        SpecularSecondMoment = max(LumenMakeFinite(SpecularSecondMoment), 0.0f);
+
+        _RWSpecularAndSecondMoment[ScreenCoord] = float4(DenoiserSpaceToRGB(SpecularLighting), SpecularSecondMoment);
+        _RWNumFramesAccumulated[ScreenCoord] = PackNumFramesAccumulated(NumFramesAccumulated);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. LumenReflectionDenoiserSpatialCS (UE5 LumenReflectionDenoiserSpatial.usf)
+// -----------------------------------------------------------------------------
+float3 LumenTonemapLighting(float3 Lighting, float DisocclusionFactor)
+{
+    return Lighting / (1.0f + DisocclusionFactor * Luminance(Lighting));
+}
+
+float3 LumenInverseTonemapLighting(float3 TonemappedLighting, float DisocclusionFactor)
+{
+    return TonemappedLighting / max(1.0f - DisocclusionFactor * Luminance(TonemappedLighting), 1e-4f);
+}
+
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+#if defined(SPATIAL_FILTER)
+void LumenReflectionDenoiserSpatialCS(
+#else
+void LumenReflectionDenoiserSpatialBypassCS(
+#endif
+    uint GroupId : SV_GroupID,
+    uint2 GroupThreadId : SV_GroupThreadID)
+{
+    uint2 TileCoord;
+    const uint2 ScreenCoord = GetReflectionResolveScreenCoord(GroupId, GroupThreadId, TileCoord);
+    const uint2 ScreenSize = uint2(_SdfDiffuseScreenSize.xy);
+    if (any(ScreenCoord >= ScreenSize))
+    {
+        return;
+    }
+
+    float4 CenterSpecularLightingAndSecondMoment = RGBAToDenoiserSpace(_SpecularLightingAndSecondMomentTexture.Load(int3(ScreenCoord, 0)));
+    if (IsLightingValid(CenterSpecularLightingAndSecondMoment.xyz))
+    {
+        float CenterLuma = Luminance(CenterSpecularLightingAndSecondMoment.xyz);
+        float CenterSpecularStdDev = sqrt(max(CenterSpecularLightingAndSecondMoment.w - CenterLuma * CenterLuma, 0.0f));
+
+        const FLumenReflectionMaterial Material = ReadLumenReflectionMaterial(ScreenCoord, true);
+        float DisocclusionFactor = 0.0f;
+
+        float NumFramesAccumulated = UnpackNumFramesAccumulated(_NumFramesAccumulatedTexture.Load(int3(ScreenCoord, 0)).x);
+        const float MaxFramesAccumulated = GetMaxFramesAccumulated(_LumenTemporalMaxFramesAccumulated, Material.TopLayerRoughness);
+        if (MaxFramesAccumulated > 1.0f)
+        {
+            DisocclusionFactor = NumFramesAccumulated > 1.0f ? 0.0f : 1.0f;
+        }
+
+        float3 SpecularLightingSum = LumenTonemapLighting(CenterSpecularLightingAndSecondMoment.xyz, DisocclusionFactor);
+        float SpecularLightingWeightSum = 1.0f;
+
+#if defined(SPATIAL_FILTER)
+        float KernelRadiusInPixels = _LumenSpatialFilterKernelRadius * saturate(Material.TopLayerRoughness * 8.0f);
+        uint NumSamples = _LumenSpatialFilterNumSamples;
+
+        uint2 RandomSeed = LumenRand3DPCG16(int3(ScreenCoord, _LumenReflectionStateFrameIndexMod8)).xy;
+
+        float2 ScreenUV = (float2(ScreenCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+        float3 WorldPosition = LumenWorldPositionFromScreenUV(ScreenUV, Material.DeviceZ);
+        float4 ScenePlane = float4(Material.WorldNormal, dot(WorldPosition, Material.WorldNormal));
+
+        bool bFilterSpecular = CenterSpecularStdDev / max(CenterLuma, 0.1f) > 0.5f || DisocclusionFactor > 0.0f;
+
+        if (KernelRadiusInPixels > 1.0f && bFilterSpecular)
+        {
+            const float LobeHalfAngle = GetSpecularLobeHalfAngle(Material.TopLayerRoughness) * lerp(1.0f, 2.0f, DisocclusionFactor);
+
+            for (uint NeighborIndex = 0u; NeighborIndex < NumSamples; ++NeighborIndex)
+            {
+                float2 NeighborOffsetInRect = LumenHammersley16(NeighborIndex, NumSamples, RandomSeed);
+                float2 NeighborOffset = LumenUniformSampleDiskConcentric(NeighborOffsetInRect) * KernelRadiusInPixels;
+                int2 NeighborCoord = (int2)(float2(ScreenCoord) + NeighborOffset);
+
+                if (all(NeighborCoord >= 0) && all(uint2(NeighborCoord) < ScreenSize))
+                {
+                    const float2 NeighborScreenUV = (float2(NeighborCoord) + 0.5f) * _SdfDiffuseScreenSize.zw;
+                    const FLumenReflectionMaterial NeighborMaterial = ReadLumenReflectionMaterial(uint2(NeighborCoord), true);
+
+                    if (NeighborMaterial.bIsValid)
+                    {
+                        // Depth weight (UE5)
+                        const float3 NeighborWorldPosition = LumenWorldPositionFromScreenUV(NeighborScreenUV, NeighborMaterial.DeviceZ);
+                        float PlaneDistance = abs(dot(float4(NeighborWorldPosition, -1.0f), ScenePlane));
+                        float RelativeDepthDifference = PlaneDistance / max(Material.SceneDepth, 1e-4f);
+                        float DepthWeight = exp2(-_LumenSpatialFilterDepthWeightScale * (RelativeDepthDifference * RelativeDepthDifference));
+
+                        // Normal weight (UE5)
+                        float AngleBetweenNormals = LumenAcosFast(saturate(dot(ScenePlane.xyz, NeighborMaterial.WorldNormal)));
+                        float NormalWeight = 1.0f - saturate(AngleBetweenNormals / (LobeHalfAngle + 0.01f));
+
+                        float3 NeighborSpecularLighting = RGBToDenoiserSpace(_SpecularLightingAndSecondMomentTexture.Load(int3(NeighborCoord, 0)).xyz);
+                        if (IsLightingValid(NeighborSpecularLighting))
+                        {
+                            float LuminanceDelta = abs(CenterLuma - Luminance(NeighborSpecularLighting));
+                            float LuminanceWeight = exp2(-LuminanceDelta / max(CenterSpecularStdDev, 0.001f));
+                            LuminanceWeight = lerp(LuminanceWeight, 1.0f, DisocclusionFactor);
+
+                            const float SpecularNeighborWeight = DepthWeight * NormalWeight * LuminanceWeight;
+                            SpecularLightingSum += LumenTonemapLighting(NeighborSpecularLighting, DisocclusionFactor) * SpecularNeighborWeight;
+                            SpecularLightingWeightSum += SpecularNeighborWeight;
+                        }
+                    }
+                }
+            }
+        }
+#endif
+
+        float3 SpecularLighting = LumenInverseTonemapLighting(SpecularLightingSum / SpecularLightingWeightSum, DisocclusionFactor);
+        _RWSpecularIndirectAccumulated[ScreenCoord] = max(LumenMakeFinite(DenoiserSpaceToRGB(SpecularLighting)), 0.0f);
+    }
+    else
+    {
+        _RWSpecularIndirectAccumulated[ScreenCoord] = 0.0f;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 5. LumenDebugReflectionCS (Modes 4 ReflectionView & 7 DedicatedReflectionRays)
+// -----------------------------------------------------------------------------
+[numthreads(REFLECTION_THREADGROUP_SIZE_2D, REFLECTION_THREADGROUP_SIZE_2D, 1)]
+void LumenDebugReflectionCS(uint2 Pixel : SV_DispatchThreadID)
+{
+    uint2 OutSize;
+    _LumenDebugReflectionOutput.GetDimensions(OutSize.x, OutSize.y);
+    if (any(Pixel >= OutSize))
+    {
+        return;
+    }
+
+    // Overview mode (Mode 1) writes only the middle third [OutSize.x/3 .. 2*OutSize.x/3)
+    bool bOverview = _LumenDebugReflectionParams.w > 0.5f;
+    float2 UV;
+    if (bOverview)
+    {
+        uint PanelWidth = OutSize.x / 3u;
+        if (Pixel.x < PanelWidth || Pixel.x >= PanelWidth * 2u)
+        {
+            return;
+        }
+        UV = float2((float(Pixel.x - PanelWidth) + 0.5f) / float(PanelWidth), (float(Pixel.y) + 0.5f) / float(OutSize.y));
+    }
+    else
+    {
+        UV = (float2(Pixel) + 0.5f) / float2(OutSize);
+    }
+
+    uint2 ScreenSize = uint2(_SdfDiffuseScreenSize.xy);
+    uint2 ScreenCoord = min(uint2(UV * float2(ScreenSize)), ScreenSize - 1u);
+    FLumenReflectionMaterial Material = ReadLumenReflectionMaterial(ScreenCoord, true);
+
+    float3 Color = 0.0f;
+    if (_LumenDebugReflectionMode == 7u)
+    {
+        // Verbatim UE5 LumenVisualize.ush::VISUALIZE_MODE_DEDICATED_REFLECTION_RAYS
+        if (!Material.bIsValid)
+        {
+            float3 WorldPos = LumenWorldPositionFromScreenUV(UV, UNITY_RAW_FAR_CLIP_VALUE);
+            float3 ViewDir = _SdfProbeCameraPosition.w > 0.5f
+                ? normalize(WorldPos - _SdfProbeCameraPosition.xyz)
+                : _SdfProbeCameraForward.xyz;
+            float3 Sky = HasSkyTexture() ? SampleSkyTexture(ViewDir, 0.0f) : 0.0f;
+            float3 ExposedSky = max(Sky, 0.0f) * _LumenDebugReflectionParams.x;
+            Color = ExposedSky / (1.0f + ExposedSky);
+        }
+        else
+        {
+            Color = Luminance(sqrt(max(Material.DiffuseAlbedo, 0.0f))).xxx;
+            if (NeedLumenReflectionRay(Material))
+            {
+                Color = Material.bHasBackfaceDiffuse ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+                Color *= (1.0f - Material.TopLayerRoughness) * 0.8f + 0.2f;
+            }
+        }
+    }
+    else
+    {
+        // Mode 4 (ReflectionView) & Overview middle panel
+        float3 Radiance = _LumenDebugReflectionTexture.Load(int3(ScreenCoord, 0)) * VividGetOneOverPreExposure();
+        float3 Exposed = max(Radiance, 0.0f) * _LumenDebugReflectionParams.x;
+        Color = Exposed / (1.0f + Exposed);
+    }
+
+    _LumenDebugReflectionOutput[Pixel] = float4(Color, 1.0f);
+}

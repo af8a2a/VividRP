@@ -123,6 +123,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/GlobalSdf.compute
     ResourceObject: {fileID: 7200000, guid: d3871ab5d7dd97943af74cafa95fcccd, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/LumenReflectionsDenoiser.compute
+    ResourceObject: {fileID: 7200000, guid: 4d82935157fd2034f816e4fb99ea2dbe, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/LumenReflectionsTracing.compute
+    ResourceObject: {fileID: 7200000, guid: efa7bed7447d5a747a7dc35e66d0e6f7, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/RaytracingGBuffer.raytrace
     ResourceObject: {fileID: 4807578003741378534, guid: e7308e3e8d216f743b2ae2cb7762fc72, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathTracingDLSSRayReconstructionResolve.compute

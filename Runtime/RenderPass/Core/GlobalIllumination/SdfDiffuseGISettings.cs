@@ -236,6 +236,73 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Integrate occluded directional Rough Specular and Sky Visibility from Screen Probe octahedral radiance (UE Lumen RoughSpecularIndirect) to replace unoccluded Sky IBL indoors.")]
         public BoolParameter screenProbeRoughSpecular = new(true);
 
+        [Header("Lumen Specular Reflections")]
+        [Tooltip("Enable UE5 Lumen dedicated specular reflections (Software SDF: Screen Trace + Mesh SDF + Global SDF + Native Temporal/Spatial Denoiser).")]
+        public BoolParameter lumenReflections = new(true);
+
+        [Tooltip("Downsample factor for reflection ray tracing (1 = full resolution, 2 = 2×2 half resolution with 4-rooks jitter and upsample).")]
+        public ClampedIntParameter lumenReflectionDownsampleFactor = new(1, 1, 2);
+
+        [Tooltip("Max perceptual roughness for which Lumen traces dedicated reflection rays (UE5 default 0.4). Rougher surfaces transition smoothly to Rough Specular.")]
+        public ClampedFloatParameter lumenReflectionMaxRoughnessToTrace = new(0.4f, 0.0f, 1.0f);
+
+        [Tooltip("Max perceptual roughness for foliage/subsurface pixels to trace dedicated reflection rays (UE5 default 0.2).")]
+        public ClampedFloatParameter lumenReflectionMaxRoughnessToTraceForFoliage = new(0.2f, 0.0f, 1.0f);
+
+        [Tooltip("Roughness transition width over which dedicated reflections fade into Rough Specular (UE5 default 0.1).")]
+        public ClampedFloatParameter lumenReflectionRoughnessFadeLength = new(0.1f, 0.001f, 1.0f);
+
+        [Tooltip("Global roughness smooth-bias applied to Lumen Reflections (0 = physically based, >0 biases smooth materials toward mirror).")]
+        public ClampedFloatParameter lumenReflectionSmoothBias = new(0.0f, 0.0f, 1.0f);
+
+        [Tooltip("Bias VNDF GGX sampling away from the tail to reduce fireflies (UE5 default 0.1).")]
+        public ClampedFloatParameter lumenReflectionGGXSamplingBias = new(0.1f, 0.0f, 0.99f);
+
+        [Tooltip("Maximum pre-exposed ray radiance intensity clamp for reflection rays (UE5 default 40, 0 disables).")]
+        public MinFloatParameter lumenReflectionMaxRayIntensity = new(40.0f, 0.0f);
+
+        [Tooltip("Enable HZB screen-space tracing against previous SceneColor before falling back to Mesh SDF / Global SDF.")]
+        public BoolParameter lumenReflectionScreenTraces = new(true);
+
+        [Tooltip("Enable near-field Mesh SDF + Surface Cache tracing for reflection rays that miss screen space.")]
+        public BoolParameter lumenReflectionMeshSdfTraces = new(true);
+
+        [Tooltip("Enable UE5 screen-space BRDF reweighting spatial reconstruction in the resolve pass.")]
+        public BoolParameter lumenReflectionScreenSpaceReconstruction = new(true);
+
+        [Tooltip("Number of neighbor rays sampled during BRDF reweighting spatial reconstruction (UE5 default 5).")]
+        public ClampedIntParameter lumenReflectionReconstructionSamples = new(5, 1, 16);
+
+        [Tooltip("Kernel radius in pixels for screen-space BRDF spatial reconstruction (UE5 default 8).")]
+        public ClampedFloatParameter lumenReflectionReconstructionKernelRadius = new(8.0f, 1.0f, 32.0f);
+
+        [Tooltip("Enable UE5 native Lumen Reflection temporal denoiser (virtual hit-point reprojection + YCoCg variance clamp).")]
+        public BoolParameter lumenReflectionTemporalFilter = new(true);
+
+        [Tooltip("Maximum accumulated frames in the reflection temporal denoiser (UE5 default 12; mirror surfaces automatically converge faster).")]
+        public ClampedFloatParameter lumenReflectionTemporalMaxFramesAccumulated = new(12.0f, 1.0f, 32.0f);
+
+        [Tooltip("YCoCg neighborhood variance clamp scale (UE5 default 1.0). Higher reduces noise, lower reduces ghosting.")]
+        public ClampedFloatParameter lumenReflectionTemporalNeighborhoodClampScale = new(1.0f, 0.25f, 4.0f);
+
+        [Tooltip("Relative depth disocclusion threshold for surface reprojection (UE5 default 0.03).")]
+        public ClampedFloatParameter lumenReflectionTemporalDistanceThreshold = new(0.03f, 0.001f, 0.2f);
+
+        [Tooltip("Tonemap range in pre-exposed space during reflection denoising (UE5 default 10, 0 disables).")]
+        public MinFloatParameter lumenReflectionDenoiserTonemapRange = new(10.0f, 0.0f);
+
+        [Tooltip("Enable UE5 variance-guided bilateral spatial filter after temporal accumulation.")]
+        public BoolParameter lumenReflectionBilateralFilter = new(true);
+
+        [Tooltip("Kernel radius in pixels for the bilateral spatial filter (UE5 default 8).")]
+        public ClampedFloatParameter lumenReflectionBilateralFilterKernelRadius = new(8.0f, 1.0f, 32.0f);
+
+        [Tooltip("Number of bilateral filter samples (UE5 default 4).")]
+        public ClampedIntParameter lumenReflectionBilateralFilterNumSamples = new(4, 0, 16);
+
+        [Tooltip("Depth plane weight scale for the bilateral spatial filter (UE5 default 10000).")]
+        public MinFloatParameter lumenReflectionBilateralFilterDepthWeightScale = new(10000.0f, 1.0f);
+
         [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
         public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);
 

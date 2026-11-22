@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-VividRP 是一个面向新世代 Unity 的实验性可编程渲染管线（Scriptable Render Pipeline, SRP）包。它以**可视化、数据驱动的 RenderGraph 工作流**为核心，并在此基础上探索延迟渲染、GPU Driven、Bindless、光线追踪（DXR）、参考路径追踪、Mesh/Global SDF（有向距离场）、Meshlet APV 光照烘焙、体积雾、虚拟纹理（VT/SVT）、虚拟阴影图（VSM）和时域超分辨率等高端渲染技术。
+VividRP 是一个面向新世代 Unity 的实验性可编程渲染管线（Scriptable Render Pipeline, SRP）包。它以**可视化、数据驱动的 RenderGraph 工作流**为核心，并在此基础上探索延迟渲染、GPU Driven、Bindless、基于 Mesh/Global SDF 与 Surface Cache 的实时全局光照（Screen Probe Gather GI 与 UE5 Lumen 架构高光反射）、光线追踪（DXR）、参考路径追踪、Meshlet APV 光照烘焙、体积雾、虚拟纹理（VT/SVT）、虚拟阴影图（VSM）和时域超分辨率等高端渲染技术。
 
 > [!IMPORTANT]
 > - **Unity 版本基线**：当前开发与验证基线为 Unity `7000.0.0a16`（提交 `0745a91df592`，详见 [Unity 7000.0.0a16 兼容性说明](Documentation~/Unity7000a16Upgrade.md)）。
@@ -10,6 +10,18 @@ VividRP 是一个面向新世代 Unity 的实验性可编程渲染管线（Scrip
 > - **推荐运行环境**：Windows + DirectX 12。Bindless、GPU Driven 16-bit 算术及光线追踪工作流均依赖 DX12 / DXR 与 Shader Model 6.2+ 能力。
 > - **开发状态**：VividRP 正在积极迭代中。部分子系统为实验性实现，不承诺跨平台、生产就绪或向后兼容。
 > - **权威参考**：本仓库不再与旧版 [VividRP](https://github.com/af8a2a/VividRP) 功能清单一一对应；请以当前源码、本文档和 [`Documentation~`](Documentation~/README.md) 为准。
+
+---
+
+## 实时全局光照效果展示（Sponza）
+
+以下画面全部采集自 Sponza 正午实时场景（GPU Driven Meshlet + Mesh/Global SDF + Surface Cache 多跳 Radiosity + Screen Probe Gather Diffuse GI + Lumen Specular Reflections，1920×1080 实时渲染，无离线光照贴图）：
+
+| 二层廊柱多跳色彩溢色（Final Lit） | 同视角实时 Diffuse GI 分量（Screen Probe Gather） |
+| :---: | :---: |
+| ![Sponza 二层廊柱实时 GI 色彩溢色](Documentation~/Image/Sponza_GI_Colonnade.jpg) | ![Sponza 同视角实时 Diffuse GI 分量](Documentation~/Image/Sponza_GI_DiffuseOnly.jpg) |
+| **中庭漫反射反弹与旗帜金饰高光反射** | **双拱廊拱顶间接光反弹与阴影过渡** |
+| ![Sponza 中庭漫反射与高光反射](Documentation~/Image/Sponza_GI_Atrium.jpg) | ![Sponza 双拱廊间接光反弹](Documentation~/Image/Sponza_GI_VaultedArches.jpg) |
 
 ---
 
@@ -54,6 +66,7 @@ Pass 通过字段上的 `[RenderGraphResource]` 特性自动生成图端口。�
 | 领域 | 核心模块与特性 |
 | --- | --- |
 | **基础渲染** | Pre-Depth、GBuffer、延迟光照（支持 SimpleSlab 与 OpenPBR 原生材质路径）、Motion Vector、HZB、通用物体绘制、Color Pyramid |
+| **实时全局光照与高光反射** | • **Surface Cache 与多跳 Radiosity**：自动化 Mesh Card 分配、动态光/天光重照、渐进多跳 Radiosity 累积与采样反馈<br>• **Screen Probe Gather Diffuse GI**：Full-Sphere 屏幕探针采集、HZB 屏幕追踪 + Mesh SDF + Global SDF + Far Radiance Cache + Occluded Sky 混合追踪、重要性采样引导、Adaptive Probe、像素级时域稳定与空间滤波、Rough Specular 输出<br>• **Lumen Specular Reflections（UE5 移植）**：首期 Software SDF 追踪后端（Tile 分类、VNDF GGX + STBN 光线生成、HZB Screen Trace、Wave/ZOrder2D 压缩、Mesh/Global SDF + Surface Cache）+ UE5 原生 Lumen Reflection Denoiser（BRDF 空间重建 Resolve、虚像命中点重投影时间滤波、方差引导双边滤波），支持 `Overview` / `ReflectionView` / `DedicatedReflectionRays` 调试视图（二期 HWRT 路线见 [LumenReflectionMigration.md](Documentation~/LumenReflectionMigration.md)） |
 | **阴影与光照** | • **阴影**：CSM / PCSS、虚拟阴影图（VSM，含静态/动态双池缓存与 SMRT 自适应射线）、方向光 DXR 阴影 + SIGMA 降噪<br>• **Meshlet APV**：支持静态 MeshletRenderer 参与原生 Adaptive Probe Volumes 烘焙（`MeshletAPVBaking`），支持自动代理几何生成、无损还原与 Meta Pass 投影矩阵修正<br>• **光照与反射**：簇状光照（Clustered Lighting）、LTC 面光源、反射探针图集（支持 Proxy Box 与影响域可视化 Gizmo）、ReGIR、天空与大气散射（Physically Based Sky / HDRI Sky） |
 | **材质与着色** | • **内置着色器**：`StandardLit`（支持 Metallic / Smoothness / AO Remap Range）、`SimpleLit`、`SimpleForward`、`StandardLayeredLit`<br>• **现代 HLSL 探索**：在 `UberPost.shader` 中开展 **HLSL 2021** 语言标准试点（`#pragma hlsl_version 2021`）并完成 DXC 全变体验证<br>• **BSDF 合约**：`SimpleSlabV1`（单层/双层实时能量补偿 BSDF）与 `OpenPBROpaqueV1`（原生 OpenPBR 1.1 延迟管线合约）<br>• **迁移工具**：包含 URP Lit 与 HDRP Lit 材质转换工具 |
 | **GPU Driven** | • **几何与裁剪**：基于 meshoptimizer 的 Cluster LOD 生成、16B 共享组表、保守 FP16 实例/Meshlet 视锥裁剪、法线锥裁剪、双阶段 HZB 遮挡剔除、Visibility Buffer 渲染<br>• **有向距离场 (SDF)**：<br>&nbsp;&nbsp;– **Mesh SDF**：离线网格 SDF 烘焙（`VividMeshSdfBaker`）、`.meshsdf` 资产与 Importer、砖块化显存管理（`VividMeshSdfBricks`）、GPU 场景管理（`VividMeshSdfGpuScene`）及可视化/追踪调试 Pass（`MeshSdfVizDebugPass`、`MeshSdfTraceDebugPass`）<br>&nbsp;&nbsp;– **Global SDF**：多级分级裁剪图（Clipmap）体系（`VividGlobalSdfClipmap`）、分级区域更新与合成 Compute Shader（`GlobalSdfClipmapPass`）、GPU-Driven 帧级集成（`VividGlobalSdfFrameData`）与光线步进求交调试（`GlobalSdfTraceDebugPass`）<br>• **场景表示**：`PrimitiveScene`（Author Handle + Camera Burst 粗剔除 `DrawSet`）<br>• **地形系统**：`VividTerrain`（Unity Terrain 无损复制转换、分块锁边界 Meshlet 烘焙、多级 LOD、最多 8 层材质与 Control Map 混合） |
@@ -209,7 +222,8 @@ Packages/VividRP/
 - [VividTerrain 分块 Meshlet 烘焙与多级 LOD](Documentation~/VividTerrainBaking.md)
 - [A/B 验证报告：主视图层级遍历](Documentation~/GPUDrivenMainTraversalAB.md) / [Cluster 生成质量](Documentation~/GPUDrivenGenerationQualityAB.md)
 
-### 阴影、光照与 APV
+### 阴影、光照、实时 GI 与 APV
+- [UE5 Lumen 高光反射移植进度与 HWRT 迁移文档](Documentation~/LumenReflectionMigration.md)
 - [Meshlet APV 烘焙与验证说明](Documentation~/MeshletAPVBaking.md)
 - [Sponza 正午画面基准与调优记录](Documentation~/SponzaNoonLook.md)
 - [VirtualShadowMap 代码与目录布局](Documentation~/VirtualShadowMapCodeLayout.md)

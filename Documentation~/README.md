@@ -61,6 +61,7 @@
 | [SMRTAdaptiveRays.md](SMRTAdaptiveRays.md) | `VSMShadowResolveAdaptive` 生产自适应射线退出策略：首条射线全亮退出、双射线全暗退出、缺页投票保护与历史失效规则 |
 | [SMRTReceiverPreparation.md](SMRTReceiverPreparation.md) | SMRT 接收面法线、投影参数、随机相位与起始纹素坐标在射线循环外的准备与跨层复用 |
 | [SMRTCostDiagnostics.md](SMRTCostDiagnostics.md) | `smrt-cost` 诊断工具用法、32 项逐像素源码级工作量计数器、R16_SFloat 重放一致性校验与性能测量注意事项 |
+| [LumenReflectionMigration.md](LumenReflectionMigration.md) | UE5 Lumen 高光反射一期移植进度（Software SDF + 原生降噪器）、材质系统重构耦合边界、Deviation Log 及后续 HWRT 演进路线图 |
 
 ### 5. 光线追踪、路径追踪与毛发
 

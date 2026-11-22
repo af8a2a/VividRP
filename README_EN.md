@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-generation Unity. It centers on a **visual, data-driven RenderGraph workflow** and explores high-end rendering systems including deferred rendering, GPU Driven, Bindless, Ray Tracing (DXR), reference path tracing, Mesh/Global SDF (Signed Distance Fields), Meshlet APV light baking, volumetrics, virtual texturing (VT/SVT), virtual shadow maps (VSM), and temporal upscaling.
+VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-generation Unity. It centers on a **visual, data-driven RenderGraph workflow** and explores high-end rendering systems including deferred rendering, GPU Driven, Bindless, Mesh/Global SDF & Surface Cache real-time global illumination (Screen Probe Gather Diffuse GI & UE5-based Lumen Specular Reflections), Ray Tracing (DXR), reference path tracing, Meshlet APV light baking, volumetrics, virtual texturing (VT/SVT), virtual shadow maps (VSM), and temporal upscaling.
 
 > [!IMPORTANT]
 > - **Unity Baseline**: The current development and verification baseline is Unity `7000.0.0a16` (revision `0745a91df592`; see [Unity 7000.0.0a16 Compatibility](Documentation~/Unity7000a16Upgrade.md)).
@@ -10,6 +10,18 @@ VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-gen
 > - **Recommended Platform**: Windows + DirectX 12. Bindless, GPU Driven 16-bit arithmetic, and Ray Tracing workflows require DX12 / DXR and Shader Model 6.2+ capabilities.
 > - **Development Status**: VividRP is under active development. Several subsystems are experimental and are not guaranteed to be cross-platform, production-ready, or backward-compatible.
 > - **Source of Truth**: This repository no longer maps one-to-one to the legacy [VividRP](https://github.com/af8a2a/VividRP) feature list. Treat the current source, this README, and [`Documentation~`](Documentation~/README.md) as the source of truth.
+
+---
+
+## Real-Time Global Illumination Showcase (Sponza)
+
+All frames below are captured live in the Sponza Noon scene at 1920×1080 with GPU Driven Meshlets, Mesh/Global SDF, Surface Cache multi-bounce radiosity, Screen Probe Gather Diffuse GI, and Lumen Specular Reflections (no baked lightmaps):
+
+| Upper Colonnade Multi-Bounce Color Bleeding (Final Lit) | Isolated Real-Time Diffuse GI (Screen Probe Gather) |
+| :---: | :---: |
+| ![Sponza Upper Colonnade Real-Time GI](Documentation~/Image/Sponza_GI_Colonnade.jpg) | ![Sponza Isolated Real-Time Diffuse GI](Documentation~/Image/Sponza_GI_DiffuseOnly.jpg) |
+| **Atrium Indirect Bounce & Gilded Curtain Specular Reflections** | **Vaulted Arches Indirect Ceiling Bounce & Shadow Contrast** |
+| ![Sponza Atrium Real-Time GI and Reflections](Documentation~/Image/Sponza_GI_Atrium.jpg) | ![Sponza Vaulted Arches Indirect Bounce](Documentation~/Image/Sponza_GI_VaultedArches.jpg) |
 
 ---
 
@@ -54,6 +66,7 @@ The modules below are implemented in the current package (availability depends o
 | Area | Key Systems & Features |
 | --- | --- |
 | **Core Rendering** | Pre-depth, GBuffer, deferred lighting (with native SimpleSlab and OpenPBR material paths), motion vectors, HZB, general object drawing, and color pyramids |
+| **Real-Time GI & Specular Reflections** | • **Surface Cache & Multi-Bounce Radiosity**: Automatic mesh card allocation, dynamic direct/sky relighting, progressive multi-bounce radiosity accumulation, and feedback<br>• **Screen Probe Gather Diffuse GI**: Full-sphere screen probe gathering, hybrid HZB screen trace + Mesh SDF + Global SDF + Far Radiance Cache + Occluded Sky tracing, importance sampling guides, adaptive probes, pixel-level temporal/spatial filtering, and Rough Specular<br>• **Lumen Specular Reflections (UE5 Port)**: Phase-1 Software SDF tracing backend (tile classification, VNDF GGX + STBN ray gen, HZB screen trace, wave/ZOrder2D compaction, Mesh/Global SDF + Surface Cache) + native UE5 Lumen Reflection Denoiser (BRDF spatial reconstruction resolve, virtual hit-point temporal accumulation, variance-guided bilateral spatial filter), with `Overview` / `ReflectionView` / `DedicatedReflectionRays` debug views (see [LumenReflectionMigration.md](Documentation~/LumenReflectionMigration.md) for the upcoming HWRT roadmap) |
 | **Shadows & Lighting** | • **Shadows**: CSM / PCSS, Virtual Shadow Maps (VSM, with dual static/dynamic page pools and SMRT adaptive ray exit), directional DXR shadows with SIGMA denoising<br>• **Meshlet APV**: Native Adaptive Probe Volumes baking with static `MeshletRenderer` geometry (`MeshletAPVBaking`), including proxy geometry lifecycle management and Meta-pass UV-space projection matrix fix<br>• **Lighting & Reflections**: Clustered lighting, LTC area lights, reflection-probe atlas (with proxy box & influence volume gizmo visualization), ReGIR, sky and atmospheric scattering (Physically Based Sky / HDRI Sky) |
 | **Materials & Shading** | • **Built-in Shaders**: `StandardLit` (with Metallic / Smoothness / AO PBR remap ranges), `SimpleLit`, `SimpleForward`, and `StandardLayeredLit`<br>• **Modern HLSL**: Piloted **HLSL 2021** language standards (`#pragma hlsl_version 2021`) in `UberPost.shader` with full DXC variant verification<br>• **BSDF Contracts**: `SimpleSlabV1` (single/dual-layer energy-compensated real-time BSDF) and `OpenPBROpaqueV1` (native OpenPBR 1.1 deferred contract)<br>• **Migration Tools**: URP Lit and HDRP Lit material converters |
 | **GPU Driven** | • **Geometry & Culling**: meshoptimizer-based Cluster LOD generation, 16B shared group table, conservative FP16 instance/meshlet frustum culling, normal-cone culling, two-stage HZB occlusion culling, Visibility Buffer rendering<br>• **Signed Distance Fields (SDF)**:<br>&nbsp;&nbsp;– **Mesh SDF**: Offline mesh SDF baking (`VividMeshSdfBaker`), `.meshsdf` asset and importer, bricked storage management (`VividMeshSdfBricks`), GPU scene management (`VividMeshSdfGpuScene`), and visualization/ray-march tracing passes (`MeshSdfVizDebugPass`, `MeshSdfTraceDebugPass`)<br>&nbsp;&nbsp;– **Global SDF**: Cascaded 3D Clipmaps (`VividGlobalSdfClipmap`), regional update and composition compute shaders (`GlobalSdfClipmapPass`), GPU-driven frame integration (`VividGlobalSdfFrameData`), and ray-march trace debug pass (`GlobalSdfTraceDebugPass`)<br>• **Scene Representation**: `PrimitiveScene` (Author Handle + Camera Burst coarse culling `DrawSet`)<br>• **Terrain**: `VividTerrain` (non-destructive Unity Terrain duplication/conversion, border-locked chunked meshlet baking, multi-level LODs, up to 8 terrain layers with control-map blending) |
@@ -209,7 +222,8 @@ See **[Documentation~/README.md](Documentation~/README.md)** for the full catego
 - [VividTerrain Chunked Meshlet Baking & Multi-Level LOD](Documentation~/VividTerrainBaking.md)
 - [A/B Validation Reports: Main-View Traversal](Documentation~/GPUDrivenMainTraversalAB.md) / [Cluster Generation Quality](Documentation~/GPUDrivenGenerationQualityAB.md)
 
-### Shadows, Lighting & APV
+### Shadows, Lighting, Real-Time GI & APV
+- [UE5 Lumen Specular Reflections Migration & HWRT Roadmap](Documentation~/LumenReflectionMigration.md)
 - [Meshlet APV Bake Validation](Documentation~/MeshletAPVBaking.md)
 - [Sponza Noon Lighting Benchmark](Documentation~/SponzaNoonLook.md)
 - [VirtualShadowMap Code & Directory Layout](Documentation~/VirtualShadowMapCodeLayout.md)

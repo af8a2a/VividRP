@@ -39,11 +39,11 @@ float3 EvaluateSdfProbeIrradiance(SdfProbeIrradiance sh, float3 normal)
 // cosine-convolved band. The packed constant also carries the band-2 Z term.
 float3 EvaluateSHIrradiance(float3 Direction, float AO, SdfProbeIrradiance SH)
 {
-    float CosA = sqrt(saturate(1.0f - AO));
-    float SinA = sqrt(saturate(1.0f - CosA * CosA));
-    float Z0 = SinA * SinA;
-    float Z1 = (1.0f - CosA * CosA * CosA);
-    float Z2 = SinA * SinA * (1.0f + 3.0f * CosA * CosA);
+    float CosA2 = saturate(1.0f - AO);
+    float CosA = sqrt(CosA2);
+    float Z0 = 1.0f - CosA2;
+    float Z1 = 1.0f - CosA2 * CosA;
+    float Z2 = Z0 * (1.0f + 3.0f * CosA2);
 
     float3 Constant = float3(SH.r0.w, SH.g0.w, SH.b0.w);
     float3 Band0 = Constant + float3(SH.r1.z, SH.g1.z, SH.b1.z) / 3.0f;

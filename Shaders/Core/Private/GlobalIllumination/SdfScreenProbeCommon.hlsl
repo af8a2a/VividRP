@@ -171,24 +171,35 @@ float4 RoundSdfAnchorHistory(float4 value)
     return (_SdfGatherHistoryDiagnostics & 32u) != 0u ? value : RoundSdfHistory(value);
 }
 
-bool LoadReceiver(uint2 pixel, out float3 position, out float3 normal)
+bool LoadReceiverWithRoughness(uint2 pixel, out float3 position, out float3 normal, out float roughness)
 {
-    float depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
-    float4 rt1 = _SdfDiffuseGBuffer1.Load(int3(pixel, 0));
-    uint surfaceClass = VividGetDeferredExportClass(
-        VividDecodeDeferredExportHeader(_SdfDiffuseGBuffer0.Load(int3(pixel, 0)).a));
     position = 0.0;
     normal = 0.0;
-    if (depth == UNITY_RAW_FAR_CLIP_VALUE || !VividIsSurfaceSummaryGBufferABIValid(rt1.a)
-        || (surfaceClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
-            && surfaceClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
-            && surfaceClass != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE))
+    roughness = 1.0;
+    float depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
+    if (depth == UNITY_RAW_FAR_CLIP_VALUE)
+        return false;
+    float4 rt1 = _SdfDiffuseGBuffer1.Load(int3(pixel, 0));
+    if (!VividIsSurfaceSummaryGBufferABIValid(rt1.a))
+        return false;
+    uint surfaceClass = VividGetDeferredExportClass(
+        VividDecodeDeferredExportHeader(_SdfDiffuseGBuffer0.Load(int3(pixel, 0)).a));
+    if (surfaceClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
+        && surfaceClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
+        && surfaceClass != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
         return false;
 
     float2 uv = (float2(pixel) + 0.5) * _SdfDiffuseScreenSize.zw;
     position = ComputeWorldSpacePosition(uv, depth, _SdfDiffuseInverseVP);
     normal = VividDecodeSurfaceSummaryNormal(rt1.xy);
+    roughness = saturate(rt1.z);
     return true;
+}
+
+bool LoadReceiver(uint2 pixel, out float3 position, out float3 normal)
+{
+    float unusedRoughness;
+    return LoadReceiverWithRoughness(pixel, position, normal, unusedRoughness);
 }
 
 float PackProbeNormal(float3 normal)

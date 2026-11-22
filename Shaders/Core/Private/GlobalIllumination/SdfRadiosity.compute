@@ -287,8 +287,9 @@ void TraceRadiosityFeedbackRaysCS(uint2 group : SV_GroupID, uint lane : SV_Group
             ^ _SdfRadiositySeed ^ (_SdfDiffuseFrame * 0x9e3779b9u));
         ray.direction = CosineRayDirection(address % RadiosityRays, RadiosityRays, seed, GetLocalFrame(probe.normal.xyz));
         VividGlobalSdfHit hit;
+        float traceLimit = max(_SdfDiffuseMaxDistance, _SdfDiffuseSkyTraceDistance);
         if (VividTraceGlobalSdf(RadiosityRayOrigin(probe, ray.direction), ray.direction,
-            RadiositySurfaceBias, _SdfDiffuseMaxDistance, hit, true, false))
+            RadiositySurfaceBias, traceLimit, hit, true, false, 96))
         {
             ray.distance = hit.distance + 0.5f * hit.expandSurfaceAmount;
             ray.normal = hit.normalWS;
@@ -318,10 +319,11 @@ void ResolveRadiosityFeedbackRaysCS(uint2 group : SV_GroupID, uint lane : SV_Gro
             GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(position, ray.normal, ray.direction, ray.level);
             radiance = lighting.sum;
         }
-        else if (HasSkyTexture()
-            && ResolveSdfSkyMiss(RadiosityRayOrigin(probe, ray.direction), ray.direction,
-                0.0f, false, 0u, (VividMeshSdfReceiver)0) == RaySkyVisible)
+        else if (HasSkyTexture())
         {
+            // TraceRadiosityFeedbackRaysCS already traced Global SDF (including composited thin shells)
+            // up to max(_SdfDiffuseMaxDistance, _SdfDiffuseSkyTraceDistance). Resolve sky directly without
+            // compiling an un-gridded Mesh SDF BVH re-trace into the card shading pass.
             radiance = SampleSkyTexture(ray.direction, 0.0f);
         }
     }

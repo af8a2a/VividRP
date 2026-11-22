@@ -11,6 +11,8 @@
 #pragma kernel UpdateWorldProbes VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE
 #pragma kernel UpdateWorldProbesWithSky VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_SDF_WORLD_SKY
 #pragma kernel FilterWorldProbeRadiance VIVID_SDF_WORLD
+#pragma kernel UpdateWorldProbesGlobal VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_WORLD_GLOBAL_SDF_ONLY
+#pragma kernel UpdateWorldProbesGlobalWithSky VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_SDF_WORLD_SKY VIVID_WORLD_GLOBAL_SDF_ONLY
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
@@ -240,7 +242,13 @@ void BuildWorldProbeDispatchArgs(uint3 id : SV_DispatchThreadID)
 
 #if defined(VIVID_SDF_FAR_UPDATE)
 [numthreads(8,8,1)]
-#if defined(VIVID_SDF_WORLD_SKY)
+#if defined(VIVID_WORLD_GLOBAL_SDF_ONLY)
+    #if defined(VIVID_SDF_WORLD_SKY)
+void UpdateWorldProbesGlobalWithSky(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+    #else
+void UpdateWorldProbesGlobal(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+    #endif
+#elif defined(VIVID_SDF_WORLD_SKY)
 void UpdateWorldProbesWithSky(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
 #else
 void UpdateWorldProbes(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)

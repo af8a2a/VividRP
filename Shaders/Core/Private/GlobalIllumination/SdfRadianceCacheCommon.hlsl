@@ -403,6 +403,23 @@ float4 TraceFarProbe(float3 origin, float3 direction, float start, out uint inst
 #else
     float end = _SdfFarTraceDistance - _SdfDiffuseMaxDistance;
 #endif
+#if defined(VIVID_WORLD_GLOBAL_SDF_ONLY)
+    VividGlobalSdfHit global;
+    float traceLimit = max(end, _SdfDiffuseSkyTraceDistance);
+    if (VividTraceGlobalSdf(origin, direction, start, traceLimit, global, true, false, 96))
+    {
+        float cardDistance = global.distance + 0.5f * global.expandSurfaceAmount;
+        GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(origin + direction * cardDistance,
+            global.normalWS, direction, global.level);
+        instance = lighting.instance + 1u;
+        return float4(lighting.sum, max(global.distance, 0.001f));
+    }
+    #if defined(VIVID_SDF_WORLD_SKY)
+        return float4(SampleSkyTexture(direction, 0.0), end);
+    #else
+        return float4(0.0f, 0.0f, 0.0f, end);
+    #endif
+#else
 #if defined(VIVID_SDF_WORLD)
     if (_SdfUseGlobalClipmap == 2u)
     {
@@ -449,6 +466,7 @@ float4 TraceFarProbe(float3 origin, float3 direction, float start, out uint inst
     float3 radiance = LoadSdfSurfaceRadiance(originalNormal, direction, surface, texel);
     instance = hit.instanceIndex + 1u;
     return float4(clamp(radiance, 0.0, 65000.0), hit.distance);
+#endif
 }
 
 #endif

@@ -373,6 +373,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_WorldArgsKernel, m_WorldFilterKernel;
         private Vector4 m_FarWindowParameter;
         private int m_WorldClearKernel, m_WorldMarkKernel, m_WorldSelectKernel, m_WorldUpdateKernel, m_WorldSkyKernel;
+        private int m_WorldGlobalUpdateKernel = -1, m_WorldGlobalSkyKernel = -1;
         private static readonly CameraHistoryId FarHitIdsHistoryId = CameraHistoryId.Create("SdfFarRadianceHitIds");
         private static readonly CameraHistoryBufferDescriptor FarHitIdsDescriptor = new(FarProbeCount * FarDirectionCount,
             sizeof(uint), GraphicsBuffer.Target.Structured);
@@ -1145,6 +1146,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_WorldFilterKernel = m_FarCompute.FindKernel("FilterWorldProbeRadiance");
                 m_WorldUpdateKernel = m_FarCompute.FindKernel("UpdateWorldProbes");
                 m_WorldSkyKernel = m_FarCompute.FindKernel("UpdateWorldProbesWithSky");
+                m_WorldGlobalUpdateKernel = HasKernel(m_FarCompute, "UpdateWorldProbesGlobal")
+                    ? m_FarCompute.FindKernel("UpdateWorldProbesGlobal") : -1;
+                m_WorldGlobalSkyKernel = HasKernel(m_FarCompute, "UpdateWorldProbesGlobalWithSky")
+                    ? m_FarCompute.FindKernel("UpdateWorldProbesGlobalWithSky") : -1;
             }
             if (SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
                 && HasKernel(m_NearOcclusionCompute, "ApplySdfNearOcclusion"))
@@ -3627,7 +3632,13 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 using var scope = new ProfilingScope(cmd, FarCacheSampler);
                 bool worldSky = m_FullSphere && m_SkyTexture.IsValid() && m_SkyTextureParams.w > 0.5f;
-                int kernel = m_FullSphere ? (worldSky ? m_WorldSkyKernel : m_WorldUpdateKernel) : m_FarKernel;
+                bool useWorldGlobal = m_FullSphere && m_GlobalClipmap?.Recorded == true
+                    && (worldSky ? m_WorldGlobalSkyKernel >= 0 : m_WorldGlobalUpdateKernel >= 0);
+                int kernel = m_FullSphere
+                    ? (useWorldGlobal
+                        ? (worldSky ? m_WorldGlobalSkyKernel : m_WorldGlobalUpdateKernel)
+                        : (worldSky ? m_WorldSkyKernel : m_WorldUpdateKernel))
+                    : m_FarKernel;
                 BindSdfTraceConstants(cmd, m_FarCompute);
                 BindSunLighting(cmd, m_FarCompute);
                 if (m_FullSphere)

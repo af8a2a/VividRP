@@ -318,8 +318,12 @@ void ResolveRadiosityFeedbackRaysCS(uint2 group : SV_GroupID, uint lane : SV_Gro
             GridCardLighting lighting = EvaluateGlobalDistanceFieldHit(position, ray.normal, ray.direction, ray.level);
             radiance = lighting.sum;
         }
-        else if (HasSkyTexture())
+        else if (HasSkyTexture()
+            && ResolveSdfSkyMiss(RadiosityRayOrigin(probe, ray.direction), ray.direction,
+                0.0f, false, 0u, (VividMeshSdfReceiver)0) == RaySkyVisible)
+        {
             radiance = SampleSkyTexture(ray.direction, 0.0f);
+        }
     }
     _SdfRadiosityFeedbackRadianceWrite[address] = clamp(radiance, 0.0f, 65000.0f);
 }

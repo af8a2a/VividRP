@@ -949,7 +949,7 @@ float4 SampleScreenProbeOctahedralRadianceAndSky(uint2 tile, float3 direction, o
         float w = bw.x * bw.y;
         uint2 cell = WrapScreenProbeOctahedralCell(baseCell + offset);
         float4 tap = _SdfDirectionalFiltered.Load(int3(tile * 8u + cell, 0));
-        if (tap.a > 0.0f)
+        if (tap.a >= 1.0f)
         {
             radianceSum += tap.rgb * w;
             skyVisSum += saturate(tap.a - 1.0f) * w;

@@ -407,7 +407,9 @@ float4 TraceFarProbe(float3 origin, float3 direction, float start, out uint inst
             return float4(lighting.sum, max(global.distance, 0.001f));
         }
         #if defined(VIVID_SDF_WORLD_SKY)
-            return float4(SampleSkyTexture(direction, 0.0), end);
+            if (ResolveSdfSkyMiss(origin, direction, start, false, 0u, (VividMeshSdfReceiver)0) == RaySkyVisible)
+                return float4(SampleSkyTexture(direction, 0.0), end);
+            return float4(0.0f, 0.0f, 0.0f, end);
         #else
             return float4(0,0,0,end);
         #endif

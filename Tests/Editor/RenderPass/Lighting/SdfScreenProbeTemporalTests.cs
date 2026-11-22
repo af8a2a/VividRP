@@ -433,8 +433,10 @@ namespace VividRP.Editor.Tests
                 (_, _) => new Color(0.25f, 0.25f, 0.25f, 1f),
                 moving: 0.004f);
             var shifted = shiftFixture.Step(hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false, reprojectionFlags: 4);
-            Assert.That(shifted.OutputRgba[center * 4], Is.LessThan(0.40f),
-                "Spatially coherent radiance jump must trigger coherent fast-update and soft clamping instead of 20-frame lag.");
+            Assert.That(shifted.OutputRgba[center * 4], Is.LessThan(0.76f),
+                "Spatially coherent radiance jump must accelerate temporal convergence smoothly without 3x3 hard-clamping blotches.");
+            Assert.That(shifted.NumFrames[center], Is.LessThan(5.0f),
+                "Spatially coherent radiance jump must shorten effective temporal history window.");
 
             // 2. High-variance single-frame checkerboard noise centered around history (0.5):
             //    coherence gate must suppress fast-update so steady history remains smooth.

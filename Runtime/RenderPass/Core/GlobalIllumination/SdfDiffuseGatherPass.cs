@@ -76,6 +76,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SpatialFilterScalarNoiseId = Shader.PropertyToID("_SdfSpatialFilterScalarNoise");
         private static readonly int SpatialFilterVectorNoiseId = Shader.PropertyToID("_SdfSpatialFilterVectorNoise");
         private static readonly int SpatialFilterPassIndexId = Shader.PropertyToID("_SdfSpatialFilterPassIndex");
+        private static readonly int SpatialFilterWideModeId = Shader.PropertyToID("_SdfSpatialFilterWideMode");
         private static readonly int ResolvedMovingOutputId = Shader.PropertyToID("_SdfResolvedMovingOutput");
         private static readonly int ResolvedMovingId = Shader.PropertyToID("_SdfResolvedMoving");
         private static readonly int MotionFrameId = Shader.PropertyToID("_SdfMotionFrame");
@@ -4014,11 +4015,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryGatherUvMinMaxId, gatherUvMinMax);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, HistoryCoordShiftXId, decodeShift.x);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, HistoryCoordShiftYId, decodeShift.y);
-                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryTemporalParamsId, new Vector4(0.01f, 0.5f, 10f, 0.9f));
+                cmd.SetComputeVectorParam(m_GatherTemporalCompute, HistoryTemporalParamsId, new Vector4(0.01f, 0.35f, 10f, 0.9f));
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, FastUpdateNeighborhoodClampId, m_FastUpdateNeighborhoodClamp ? 1 : 0);
                 int reprojectionFlags = (m_TemporalPlaneDisocclusion ? 1 : 0)
                     | (m_TemporalRejectBasedOnNormal ? 2 : 0)
-                    | (m_CoherentRadianceFastUpdate && (m_DynamicLightingFastUpdateActive || !m_TemporalCameraStatic) ? 4 : 0)
+                    | (m_CoherentRadianceFastUpdate && m_DynamicLightingFastUpdateActive ? 4 : 0)
                     | (m_TemporalCameraStatic ? 8 : 0);
                 cmd.SetComputeIntParam(m_GatherTemporalCompute, TemporalReprojectionFlagsId, reprojectionFlags);
                 cmd.SetComputeVectorParam(m_GatherTemporalCompute, ProbeCameraPositionId, m_ProbeCameraPosition);
@@ -4363,6 +4364,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(shader, kernel, ProbeMovingId, m_ProbeMoving.innerHandle);
                     cmd.SetComputeTextureParam(shader, kernel, SpatialFilterScalarNoiseId, m_SpatialFilterScalarNoise);
                     cmd.SetComputeTextureParam(shader, kernel, SpatialFilterVectorNoiseId, m_SpatialFilterVectorNoise);
+                    cmd.SetComputeIntParam(shader, SpatialFilterWideModeId,
+                        (m_DynamicLightingFastUpdateActive || !m_TemporalCameraStatic) ? 1 : 0);
                     cmd.SetComputeFloatParam(shader, SkyTraceDistanceId,
                         Mathf.Max(m_SkyTraceDistance, Mathf.Max(m_TraceDistance, m_FarDistance)));
                     cmd.SetComputeFloatParam(shader, FarDistanceId, m_FarDistance);

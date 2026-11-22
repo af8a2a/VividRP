@@ -280,6 +280,7 @@ Texture2D<float> _SdfProbeMoving;
 uint _SdfHasScatterNoise;
 uint _SdfDitherTraceDirections;
 uint _SdfSpatialFilterPassIndex;
+uint _SdfSpatialFilterWideMode;
 
 uint DitherSphereBin(uint2 tile, uint ray)
 {
@@ -833,8 +834,8 @@ void GatherNeighborRadiance(
                     float3 NeighborHitPosition = NeighborWorldPosition + WorldConeDirection * NeighborRadianceDepth;
                     float3 ToNeighborHit = NeighborHitPosition - WorldPosition;
                     float NeighborAngle = acosFast(dot(ToNeighborHit, WorldConeDirection) / length(ToNeighborHit));
-                    const float SpatialFilterMaxRadianceHitAngle = 10.0f * PI / 180.0f;
-                    AngleWeight = 1.0f - saturate(NeighborAngle / SpatialFilterMaxRadianceHitAngle);
+                    float maxHitAngle = _SdfSpatialFilterWideMode != 0u ? (25.0f * PI / 180.0f) : (10.0f * PI / 180.0f);
+                    AngleWeight = 1.0f - saturate(NeighborAngle / maxHitAngle);
                 }
 
                 float Weight = PositionWeight * AngleWeight;
@@ -905,8 +906,8 @@ void ScreenProbeFilterGatherTracesCS(uint3 DispatchThreadId : SV_DispatchThreadI
                 MetadataOffset, TotalRadiance, TotalSkyVisibility, TotalWeight);
         }
 
-        // Increase spatial filtering when temporal filter will be reduced.
-        if (ScreenProbeTracesMoving > .01f)
+        // Increase spatial filtering when temporal filter will be reduced (object motion, camera motion, or dynamic lighting).
+        if (ScreenProbeTracesMoving > .01f || _SdfSpatialFilterWideMode != 0u)
         {
             const int2 MovingOffsets[8] =
             {

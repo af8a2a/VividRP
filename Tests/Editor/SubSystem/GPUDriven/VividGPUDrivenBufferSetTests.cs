@@ -115,6 +115,16 @@ namespace VividRP.Editor.Tests
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.PreviousLocalToWorld1), 96);
             AssertFieldOffset<VividMeshSdfGpuScene.Instance>(nameof(VividMeshSdfGpuScene.Instance.PreviousLocalToWorld2), 112);
 
+            Assert.That(typeof(VividMeshSdfGpuScene.TraceInstance).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.TraceInstance>(), Is.EqualTo(64));
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.WorldToLocal0), 0);
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.WorldToLocal1), 16);
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.WorldToLocal2), 32);
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.FieldIndex), 48);
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.LayerMask), 52);
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.EntityIdLow), 56);
+            AssertFieldOffset<VividMeshSdfGpuScene.TraceInstance>(nameof(VividMeshSdfGpuScene.TraceInstance.EntityIdHigh), 60);
+
             Assert.That(typeof(VividMeshSdfGpuScene.Node).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividMeshSdfGpuScene.Node>(), Is.EqualTo(48));
             AssertFieldOffset<VividMeshSdfGpuScene.Node>(nameof(VividMeshSdfGpuScene.Node.Min), 0);

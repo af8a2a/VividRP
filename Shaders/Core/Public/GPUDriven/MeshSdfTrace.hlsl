@@ -28,6 +28,14 @@ struct VividMeshSdfInstance
     float4 previousLocalToWorld0, previousLocalToWorld1, previousLocalToWorld2;
 };
 
+struct VividMeshSdfTraceData
+{
+    float4 worldToLocal0, worldToLocal1, worldToLocal2;
+    uint fieldIndex;
+    uint layerMask;
+    uint2 entityId;
+};
+
 struct VividMeshSdfNode
 {
     float3 boundsMin;
@@ -62,14 +70,15 @@ Texture3D<float> _MeshSdfBrickAtlas;
 float4 _MeshSdfBrickAtlasSize; // Reciprocal texture dimensions and bricks per row, zero for the packed fallback.
 StructuredBuffer<VividMeshSdfField> _MeshSdfFields;
 StructuredBuffer<VividMeshSdfInstance> _MeshSdfInstances;
+StructuredBuffer<VividMeshSdfTraceData> _MeshSdfTraceInstances;
 StructuredBuffer<VividMeshSdfNode> _MeshSdfNodes;
 StructuredBuffer<uint> _MeshSdfLeafInstances;
 uint _MeshSdfNodeCount;
 
 #if defined(VIVID_MESH_SDF_CARD_GRID) || defined(VIVID_BUILD_MESH_SDF_CARD_GRID)
 // Keep the dimensions and entry stride in sync with SdfDiffuseGatherPass.
-static const uint3 MeshSdfCardGridSize = uint3(16u, 12u, 16u);
-static const uint MeshSdfCardGridCapacity = 64u;
+static const uint3 MeshSdfCardGridSize = uint3(16u, 12u, 32u);
+static const uint MeshSdfCardGridCapacity = 96u;
 static const uint MeshSdfCardGridUnavailable = 0xffffffffu;
 float4 _MeshSdfCardGridParameters; // log2 near depth, log2 depth range, expanded trace reach, unused
 
@@ -119,6 +128,28 @@ static const uint VividMeshSdfDense = 0xffffffffu;
 static const uint VividMeshSdfEmptyOutside = 0xffffffffu;
 static const uint VividMeshSdfEmptyInside = 0xfffffffeu;
 static const float VividMeshSdfBandVoxels = 2.0;
+
+float3 VividMeshSdfSafeInvDir(float3 direction)
+{
+    const float eps = 1e-8f;
+    float3 safeDir = float3(
+        abs(direction.x) > eps ? direction.x : (direction.x >= 0.0f ? eps : -eps),
+        abs(direction.y) > eps ? direction.y : (direction.y >= 0.0f ? eps : -eps),
+        abs(direction.z) > eps ? direction.z : (direction.z >= 0.0f ? eps : -eps));
+    return rcp(safeDir);
+}
+
+bool VividMeshSdfClipRayFast(float3 invDir, float3 negOriginInvDir, float3 boundsMin, float3 boundsMax,
+    inout float tMin, inout float tMax)
+{
+    float3 t0 = boundsMin * invDir + negOriginInvDir;
+    float3 t1 = boundsMax * invDir + negOriginInvDir;
+    float3 tNear = min(t0, t1);
+    float3 tFar = max(t0, t1);
+    tMin = max(tMin, max(tNear.x, max(tNear.y, tNear.z)));
+    tMax = min(tMax, min(tFar.x, min(tFar.y, tFar.z)));
+    return tMin <= tMax;
+}
 
 bool VividMeshSdfClipRay(float3 origin, float3 direction, float3 boundsMin, float3 boundsMax,
     inout float tMin, inout float tMax)
@@ -342,15 +373,15 @@ bool VividMeshSdfTraceBricks(VividMeshSdfField field, float3 entry, float3 direc
     return false;
 }
 
-bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfInstance instance, float3 originWS,
-    float3 directionWS, float minDistance, float maxDistance, out float distance, out float3 positionInGrid,
-    out bool exhausted)
+bool VividMeshSdfTraceInstanceTransform(VividMeshSdfField field, float4 worldToLocal0, float4 worldToLocal1,
+    float4 worldToLocal2, float3 originWS, float3 directionWS, float minDistance, float maxDistance,
+    out float distance, out float3 positionInGrid, out bool exhausted)
 {
     float4 origin = float4(originWS, 1.0);
-    float3 localOrigin = float3(dot(instance.worldToLocal0, origin), dot(instance.worldToLocal1, origin),
-        dot(instance.worldToLocal2, origin)) - field.originAndVoxelSize.xyz;
-    float3 localDirection = float3(dot(instance.worldToLocal0.xyz, directionWS),
-        dot(instance.worldToLocal1.xyz, directionWS), dot(instance.worldToLocal2.xyz, directionWS));
+    float3 localOrigin = float3(dot(worldToLocal0, origin), dot(worldToLocal1, origin),
+        dot(worldToLocal2, origin)) - field.originAndVoxelSize.xyz;
+    float3 localDirection = float3(dot(worldToLocal0.xyz, directionWS),
+        dot(worldToLocal1.xyz, directionWS), dot(worldToLocal2.xyz, directionWS));
     // March in local units and convert back to the original ray parameter, including under non-uniform scale.
     float localUnitsPerWorldUnit = length(localDirection);
     localDirection /= localUnitsPerWorldUnit;
@@ -361,7 +392,8 @@ bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfInstance ins
     distance = maxDistance;
     positionInGrid = 0.0;
     exhausted = false;
-    if (!VividMeshSdfClipRay(localOrigin, localDirection, 0.0, extent, t, tExit))
+    float3 localInvDir = VividMeshSdfSafeInvDir(localDirection);
+    if (!VividMeshSdfClipRayFast(localInvDir, -localOrigin * localInvDir, 0.0, extent, t, tExit))
         return false;
 
     if (field.pageOffset != VividMeshSdfDense)
@@ -392,6 +424,22 @@ bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfInstance ins
     return false;
 }
 
+bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfTraceData instance, float3 originWS,
+    float3 directionWS, float minDistance, float maxDistance, out float distance, out float3 positionInGrid,
+    out bool exhausted)
+{
+    return VividMeshSdfTraceInstanceTransform(field, instance.worldToLocal0, instance.worldToLocal1,
+        instance.worldToLocal2, originWS, directionWS, minDistance, maxDistance, distance, positionInGrid, exhausted);
+}
+
+bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfInstance instance, float3 originWS,
+    float3 directionWS, float minDistance, float maxDistance, out float distance, out float3 positionInGrid,
+    out bool exhausted)
+{
+    return VividMeshSdfTraceInstanceTransform(field, instance.worldToLocal0, instance.worldToLocal1,
+        instance.worldToLocal2, originWS, directionWS, minDistance, maxDistance, distance, positionInGrid, exhausted);
+}
+
 bool VividMeshSdfTraceInstance(VividMeshSdfField field, VividMeshSdfInstance instance, float3 originWS,
     float3 directionWS, float minDistance, float maxDistance, out float distance, out float3 positionInGrid)
 {
@@ -406,7 +454,7 @@ bool VividMeshSdfIsSubvoxelShell(VividMeshSdfField field, VividMeshSdfInstance i
 }
 
 #if defined(VIVID_SDF_RECEIVER)
-bool VividMeshSdfTryAdvanceReceiver(VividMeshSdfField field, VividMeshSdfInstance instance,
+bool VividMeshSdfTryAdvanceReceiver(VividMeshSdfField field, VividMeshSdfTraceData instance,
     VividMeshSdfReceiver receiver, float3 originWS, float3 directionWS, float3 hitGrid,
     float distance, float maxDistance, out float nextDistance)
 {
@@ -464,6 +512,8 @@ bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minD
     hit.distance = maxDistance;
     hit.instanceIndex = 0xffffffffu;
     float3 hitPosition = 0.0;
+    float3 invDir = VividMeshSdfSafeInvDir(directionWS);
+    float3 negOriginInvDir = -originWS * invDir;
 
     uint nodeIndex = 0u;
     uint nodeEnd = _MeshSdfNodeCount;
@@ -488,7 +538,7 @@ bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minD
         float entry = minDistance;
         float exit = hit.distance;
         if ((node.layerMask & layerMask) == 0u
-            || !VividMeshSdfClipRay(originWS, directionWS, node.boundsMin, node.boundsMax, entry, exit))
+            || !VividMeshSdfClipRayFast(invDir, negOriginInvDir, node.boundsMin, node.boundsMax, entry, exit))
         {
 #if defined(VIVID_MESH_SDF_CARD_GRID)
             nodeIndex = useGrid ? nodeIndex + 1u : node.escapeIndex;
@@ -502,12 +552,12 @@ bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minD
         for (uint i = 0u; i < node.leafCount; i++)
         {
             uint instanceIndex = _MeshSdfLeafInstances[node.firstLeaf + i];
-            VividMeshSdfInstance instance = _MeshSdfInstances[instanceIndex];
+            VividMeshSdfTraceData instance = _MeshSdfTraceInstances[instanceIndex];
             if ((instance.layerMask & layerMask) == 0u)
                 continue;
 
             VividMeshSdfField field = _MeshSdfFields[instance.fieldIndex];
-            if (shellVoxelSize > 0.0 && !VividMeshSdfIsSubvoxelShell(field, instance, shellVoxelSize))
+            if (shellVoxelSize > 0.0 && !VividMeshSdfIsSubvoxelShell(field, _MeshSdfInstances[instanceIndex], shellVoxelSize))
                 continue;
             float distance;
             float3 positionInGrid;
@@ -544,7 +594,7 @@ bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minD
     if (hit.instanceIndex == 0xffffffffu)
         return false;
 
-    VividMeshSdfInstance hitInstance = _MeshSdfInstances[hit.instanceIndex];
+    VividMeshSdfTraceData hitInstance = _MeshSdfTraceInstances[hit.instanceIndex];
     VividMeshSdfField hitField = _MeshSdfFields[hitInstance.fieldIndex];
     float3 gradient = VividMeshSdfGradient(hitField, hitPosition);
     hit.normalLS = SafeNormalize(gradient);

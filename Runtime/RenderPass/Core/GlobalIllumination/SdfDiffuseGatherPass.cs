@@ -303,7 +303,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int MeshCardGridParametersId = Shader.PropertyToID("_MeshSdfCardGridParameters");
         private static readonly ProfilingSampler MeshCardGridSampler = new("Build Mesh SDF CardGrid");
         // Must match MeshSdfCardGridSize and MeshSdfCardGridCapacity in MeshSdfTrace.hlsl.
-        private const int MeshCardGridX = 16, MeshCardGridY = 12, MeshCardGridZ = 16, MeshCardGridStride = 65;
+        private const int MeshCardGridX = 16, MeshCardGridY = 12, MeshCardGridZ = 32, MeshCardGridStride = 97;
         [RenderGraphResource(Name = "Mesh SDF CardGrid", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphBuffer m_MeshCardGrid = RenderGraphBuffer.CreateStructured("Mesh SDF CardGrid", sizeof(uint));
@@ -2953,9 +2953,32 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = m_TraceCompute;
             var view = cameraData.GetViewMatrix();
             var projection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
-            float logNear = Mathf.Log(Mathf.Max(0.001f, cameraData.camera.nearClipPlane), 2f);
-            float logDepthRange = Mathf.Log(cameraData.camera.farClipPlane, 2f) - logNear;
-            m_MeshCardGridParams = new Vector4(logNear, logDepthRange, m_MeshDetailDistance + m_Bias, 0f);
+            float padding = m_MeshDetailDistance + m_Bias;
+            float camNear = Mathf.Max(0.05f, cameraData.camera.nearClipPlane);
+            float camFar = Mathf.Max(camNear * 1.25f, cameraData.camera.farClipPlane);
+            float gridNear = camNear;
+            float gridFar = camFar;
+            if (m_Scene.NodeCount > 0)
+            {
+                var root = m_Scene.BvhNodes[0];
+                float minDepth = float.PositiveInfinity;
+                float maxDepth = float.NegativeInfinity;
+                for (int c = 0; c < 8; c++)
+                {
+                    var corner = new Vector3(
+                        (c & 1) == 0 ? root.Min.x : root.Max.x,
+                        (c & 2) == 0 ? root.Min.y : root.Max.y,
+                        (c & 4) == 0 ? root.Min.z : root.Max.z);
+                    float depth = -view.MultiplyPoint3x4(corner).z;
+                    if (depth < minDepth) minDepth = depth;
+                    if (depth > maxDepth) maxDepth = depth;
+                }
+                gridNear = Mathf.Clamp(minDepth - padding, camNear, camFar);
+                gridFar = Mathf.Clamp(maxDepth + padding, Mathf.Min(camFar, gridNear * 1.25f), camFar);
+            }
+            float logNear = Mathf.Log(gridNear, 2f);
+            float logDepthRange = Mathf.Max(1e-4f, Mathf.Log(gridFar, 2f) - logNear);
+            m_MeshCardGridParams = new Vector4(logNear, logDepthRange, padding, 0f);
             m_MeshCardGridView = view;
             m_MeshCardGridProjection = projection;
             m_MeshCardGridRecorded = true;

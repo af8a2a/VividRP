@@ -21,6 +21,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private static readonly int BrickAtlasSizeId = Shader.PropertyToID("_MeshSdfBrickAtlasSize");
         private static readonly int FieldsId = Shader.PropertyToID("_MeshSdfFields");
         private static readonly int InstancesId = Shader.PropertyToID("_MeshSdfInstances");
+        private static readonly int TraceInstancesId = Shader.PropertyToID("_MeshSdfTraceInstances");
         private static readonly int NodesId = Shader.PropertyToID("_MeshSdfNodes");
         private static readonly int LeafInstancesId = Shader.PropertyToID("_MeshSdfLeafInstances");
         private static readonly int NodeCountId = Shader.PropertyToID("_MeshSdfNodeCount");
@@ -44,6 +45,13 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             public float DistanceScale;
             public uint MotionFrame, Padding1, Padding2;
             public Vector4 PreviousLocalToWorld0, PreviousLocalToWorld1, PreviousLocalToWorld2;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct TraceInstance
+        {
+            public Vector4 WorldToLocal0, WorldToLocal1, WorldToLocal2;
+            public uint FieldIndex, LayerMask, EntityIdLow, EntityIdHigh;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -80,7 +88,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
         private static readonly int CullId = Shader.PropertyToID("_Cull");
 
-        private const int MaxLeafInstances = 4;
+        private const int MaxLeafInstances = 1;
+        private const int SahBinCount = 8;
+
+        private struct SahBin
+        {
+            public Bounds Bounds;
+            public int Count;
+        }
         private const VividMeshletRendererFlags VisibleFlags = VividMeshletRendererFlags.ActiveInHierarchy
             | VividMeshletRendererFlags.Enabled | VividMeshletRendererFlags.SourceRendererEnabled;
 
@@ -154,10 +169,14 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private readonly List<Field> m_FieldUpload = new();
         private readonly List<uint> m_BrickPages = new();
         private readonly List<Instance> m_InstanceUpload = new();
+        private readonly List<TraceInstance> m_TraceInstanceUpload = new();
         private readonly List<Leaf> m_Leaves = new();
         private readonly List<Node> m_Nodes = new();
         private readonly List<int> m_LeafSlotsByInstance = new();
         private readonly List<uint> m_LeafInstanceUpload = new();
+        private readonly SahBin[] m_SahBins = new SahBin[SahBinCount];
+        private readonly Bounds[] m_SahRightBounds = new Bounds[SahBinCount];
+        private readonly int[] m_SahRightCounts = new int[SahBinCount];
 
         private GraphicsBuffer m_Voxels;
         private Texture3D m_BrickAtlas;
@@ -166,6 +185,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         private Vector4 m_BrickAtlasSize;
         private GraphicsBuffer m_FieldBuffer;
         private GraphicsBuffer m_InstanceBuffer;
+        private GraphicsBuffer m_TraceInstanceBuffer;
         private GraphicsBuffer m_NodeBuffer;
         private GraphicsBuffer m_LeafInstanceBuffer;
         private GraphicsBuffer m_DiffuseSurfaceBuffer;
@@ -252,6 +272,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             cmd.SetComputeVectorParam(shader, BrickAtlasSizeId, m_BrickAtlasSize);
             cmd.SetComputeBufferParam(shader, kernel, FieldsId, m_FieldBuffer);
             cmd.SetComputeBufferParam(shader, kernel, InstancesId, m_InstanceBuffer);
+            cmd.SetComputeBufferParam(shader, kernel, TraceInstancesId, m_TraceInstanceBuffer);
             cmd.SetComputeBufferParam(shader, kernel, LeafInstancesId, m_LeafInstanceBuffer);
             BindBvhNodes(cmd, shader, kernel);
         }
@@ -422,6 +443,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 
             UpdateInstancesAndBvh(rebuildBvh, motionFrame);
             Upload(ref m_InstanceBuffer, m_InstanceUpload, "Mesh SDF Instances");
+            Upload(ref m_TraceInstanceBuffer, m_TraceInstanceUpload, "Mesh SDF Trace Instances");
             Upload(ref m_NodeBuffer, m_Nodes, "Mesh SDF BVH");
             (m_Fields, m_NextFields) = (m_NextFields, m_Fields);
             (m_Instances, m_NextInstances) = (m_NextInstances, m_Instances);
@@ -827,13 +849,33 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                     EntityIdHigh = (uint)(source.EntityId >> 32),
                     DistanceScale = CalculateDistanceScale(source.WorldToLocal),
                 };
+                var traceInstance = new TraceInstance
+                {
+                    WorldToLocal0 = instance.WorldToLocal0,
+                    WorldToLocal1 = instance.WorldToLocal1,
+                    WorldToLocal2 = instance.WorldToLocal2,
+                    FieldIndex = instance.FieldIndex,
+                    LayerMask = instance.LayerMask,
+                    EntityIdLow = instance.EntityIdLow,
+                    EntityIdHigh = instance.EntityIdHigh,
+                };
                 if (i < m_InstanceUpload.Count)
+                {
                     m_InstanceUpload[i] = instance;
+                    m_TraceInstanceUpload[i] = traceInstance;
+                }
                 else
+                {
                     m_InstanceUpload.Add(instance);
+                    m_TraceInstanceUpload.Add(traceInstance);
+                }
             }
             if (m_InstanceUpload.Count > m_NextInstances.Count)
-                m_InstanceUpload.RemoveRange(m_NextInstances.Count, m_InstanceUpload.Count - m_NextInstances.Count);
+            {
+                int removeCount = m_InstanceUpload.Count - m_NextInstances.Count;
+                m_InstanceUpload.RemoveRange(m_NextInstances.Count, removeCount);
+                m_TraceInstanceUpload.RemoveRange(m_NextInstances.Count, removeCount);
+            }
 
             if (rebuildBvh)
             {
@@ -864,6 +906,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             return 1f / Mathf.Sqrt(maxStretchSquared);
         }
 
+        private static float SurfaceArea(Bounds bounds)
+        {
+            var size = bounds.size;
+            return size.x * size.y + size.y * size.z + size.z * size.x;
+        }
+
         private void BuildNode(int start, int count)
         {
             var bounds = m_Leaves[start].Bounds;
@@ -881,10 +929,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             bool isLeaf = count <= MaxLeafInstances;
             if (!isLeaf)
             {
-                var size = centers.size;
-                int axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
-                m_Leaves.Sort(start, count, s_LeafComparers[axis]);
-                int leftCount = count / 2;
+                int leftCount = PartitionSah(start, count, centers);
                 BuildNode(start, leftCount);
                 BuildNode(start + leftCount, count - leftCount);
             }
@@ -898,6 +943,103 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
                 LeafCount = isLeaf ? (uint)count : 0u,
                 LayerMask = layerMask,
             };
+        }
+
+        private int PartitionSah(int start, int count, Bounds centers)
+        {
+            var extent = centers.size;
+            int bestAxis = -1;
+            float bestSplit = 0f;
+            float bestCost = float.PositiveInfinity;
+
+            for (int axis = 0; axis < 3; axis++)
+            {
+                float axisExtent = extent[axis];
+                if (axisExtent <= 1e-5f)
+                    continue;
+
+                for (int b = 0; b < SahBinCount; b++)
+                    m_SahBins[b] = default;
+
+                float minCenter = centers.min[axis];
+                float scale = SahBinCount / axisExtent;
+                for (int i = start; i < start + count; i++)
+                {
+                    var leafBounds = m_Leaves[i].Bounds;
+                    int bin = Mathf.Clamp((int)((leafBounds.center[axis] - minCenter) * scale), 0, SahBinCount - 1);
+                    if (m_SahBins[bin].Count == 0)
+                        m_SahBins[bin].Bounds = leafBounds;
+                    else
+                        m_SahBins[bin].Bounds.Encapsulate(leafBounds);
+                    m_SahBins[bin].Count++;
+                }
+
+                Bounds rightBounds = default;
+                int rightCount = 0;
+                for (int b = SahBinCount - 1; b > 0; b--)
+                {
+                    if (m_SahBins[b].Count > 0)
+                    {
+                        if (rightCount == 0)
+                            rightBounds = m_SahBins[b].Bounds;
+                        else
+                            rightBounds.Encapsulate(m_SahBins[b].Bounds);
+                        rightCount += m_SahBins[b].Count;
+                    }
+                    m_SahRightBounds[b] = rightBounds;
+                    m_SahRightCounts[b] = rightCount;
+                }
+
+                Bounds leftBounds = default;
+                int leftCount = 0;
+                for (int b = 0; b < SahBinCount - 1; b++)
+                {
+                    if (m_SahBins[b].Count > 0)
+                    {
+                        if (leftCount == 0)
+                            leftBounds = m_SahBins[b].Bounds;
+                        else
+                            leftBounds.Encapsulate(m_SahBins[b].Bounds);
+                        leftCount += m_SahBins[b].Count;
+                    }
+                    int rc = m_SahRightCounts[b + 1];
+                    if (leftCount == 0 || rc == 0)
+                        continue;
+
+                    float cost = leftCount * SurfaceArea(leftBounds) + rc * SurfaceArea(m_SahRightBounds[b + 1]);
+                    if (cost < bestCost)
+                    {
+                        bestCost = cost;
+                        bestAxis = axis;
+                        bestSplit = minCenter + (b + 1) * (axisExtent / SahBinCount);
+                    }
+                }
+            }
+
+            if (bestAxis >= 0)
+            {
+                int i = start;
+                int j = start + count - 1;
+                while (i <= j)
+                {
+                    if (m_Leaves[i].Bounds.center[bestAxis] < bestSplit)
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        (m_Leaves[i], m_Leaves[j]) = (m_Leaves[j], m_Leaves[i]);
+                        j--;
+                    }
+                }
+                int splitCount = i - start;
+                if (splitCount > 0 && splitCount < count)
+                    return splitCount;
+            }
+
+            int fallbackAxis = extent.x >= extent.y && extent.x >= extent.z ? 0 : extent.y >= extent.z ? 1 : 2;
+            m_Leaves.Sort(start, count, s_LeafComparers[fallbackAxis]);
+            return count / 2;
         }
 
         private void RefitBvh()
@@ -972,6 +1114,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_Voxels?.Dispose();
             m_FieldBuffer?.Dispose();
             m_InstanceBuffer?.Dispose();
+            m_TraceInstanceBuffer?.Dispose();
             m_NodeBuffer?.Dispose();
             m_LeafInstanceBuffer?.Dispose();
             m_DiffuseSurfaceBuffer?.Dispose();
@@ -994,7 +1137,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             HasEmissiveSurfaces = false;
             m_EmissionMaximum = m_PreviousEmissionMaximum = Vector4.zero;
             m_LinearEmissionChange = false;
-            m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_NodeBuffer = m_LeafInstanceBuffer = null;
+            m_Voxels = m_FieldBuffer = m_InstanceBuffer = m_TraceInstanceBuffer = m_NodeBuffer = m_LeafInstanceBuffer = null;
             NodeCount = 0;
             m_FieldIndices.Clear();
             m_Fields.Clear();

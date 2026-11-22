@@ -80,49 +80,57 @@ int2 WorldWrapTexel(int2 xy)
     return xy;
 }
 
+bool SampleWorldCacheCorner(float3 position, float3 direction, uint level, int3 lower, float3 alpha,
+    uint cornerIndex, uint slot, inout float4 accum)
+{
+    int3 corner = WorldCorner(cornerIndex);
+    int3 coord = lower + corner;
+    float cellSize = WorldCellSize(level);
+    float3 probe = float3(WorldOrigin(level)) * cellSize - 0.5f * cellSize + (float3(coord) + 0.5f) * cellSize;
+    float3 offset = position - probe;
+    float radius = 1.5f * WorldProbeTMin(level);
+    float a = dot(direction, direction), b = 2.0f * dot(direction, offset), c = dot(offset, offset) - radius * radius;
+    float discriminant = b * b - 4.0f * a * c;
+    float t = -1.0f;
+    [flatten] if (discriminant >= 0.0f) t = (-b + sqrt(discriminant)) / (2.0f * a);
+    float3 reprojected = (position + direction * t) - probe;
+    float correction = t * t / (radius * dot(reprojected, direction));
+    float2 uv = ProbeSphereUV(reprojected) * WorldResolution;
+    uint2 pointXY = min(uint2(uv), WorldResolution - 1u);
+    float depth = _SdfFarRadiance.Load(int3(WorldTexelAddress(slot, pointXY), 0)).w;
+    if (depth <= 0.0f) return false;
+    int2 base = int2(floor(uv - 0.5f));
+    float2 f = frac(uv - 0.5f);
+    float3 color = 0.0f;
+    [unroll] for (uint j = 0u; j < 4u; ++j)
+    {
+        int2 d = int2(j & 1u, j >> 1u);
+        float2 weight = lerp(1.0f - f, f, float2(d));
+        if (weight.x * weight.y == 0.0f) continue;
+        float4 tap = _SdfFarRadiance.Load(int3(WorldTexelAddress(slot, WorldWrapTexel(base + d)), 0));
+        if (tap.w <= 0.0f) return false;
+        color += (weight.x * weight.y) * tap.rgb;
+    }
+    float3 cornerAlpha = lerp(1.0f - alpha, alpha, float3(corner));
+    accum += (cornerAlpha.x * cornerAlpha.y * cornerAlpha.z) * float4(color * correction, depth);
+    return true;
+}
+
 bool SampleWorldCache(float3 position, float3 direction, uint level, out float3 radiance, out float hitDistance)
 {
     float3 grid = GetRadianceProbeCoordFloat(position, level) - 0.5f;
     int3 lower = int3(floor(grid));
     float3 alpha = frac(grid);
-    float radius = 1.5f * WorldProbeTMin(level);
-    float4 samples[8];
+    float4 result = 0.0;
     radiance = 0.0;
     hitDistance = 0.0;
     [loop] for (uint i = 0u; i < 8u; ++i)
     {
         int3 coord = lower + WorldCorner(i);
-        uint slot = uint(_SdfFarRadiance.Load(int3(WorldIndirection(WorldCellIndex(coord,level)), 0)).x) - 1u;
-        float cellSize = WorldCellSize(level);
-        float3 probe = float3(WorldOrigin(level)) * cellSize - 0.5f * cellSize + (float3(coord) + 0.5f) * cellSize;
-        float3 offset = position - probe;
-        float a = dot(direction, direction), b = 2.0f * dot(direction, offset), c = dot(offset, offset) - radius * radius;
-        float discriminant = b*b - 4.0f*a*c;
-        float t = -1.0f;
-        [flatten] if (discriminant >= 0.0f) t = (-b + sqrt(discriminant)) / (2.0f*a);
-        float3 reprojected = (position + direction * t) - probe;
-        float correction = t * t / (radius * dot(reprojected, direction));
-        float2 uv = ProbeSphereUV(reprojected) * WorldResolution;
-        uint2 pointXY = min(uint2(uv), WorldResolution - 1u);
-        float depth = _SdfFarRadiance.Load(int3(WorldTexelAddress(slot, pointXY), 0)).w;
-        if (depth <= 0.0f) return false;
-        int2 base = int2(floor(uv - 0.5f));
-        float2 f = frac(uv - 0.5f);
-        float3 color = 0.0f;
-        [unroll] for (uint j = 0u; j < 4u; ++j)
-        {
-            int2 d = int2(j & 1u, j >> 1u);
-            float2 weight = lerp(1.0f - f, f, float2(d));
-            if (weight.x * weight.y == 0.0f) continue;
-            float4 tap = _SdfFarRadiance.Load(int3(WorldTexelAddress(slot, WorldWrapTexel(base + d)), 0));
-            if (tap.w <= 0.0f) return false;
-            color += (weight.x * weight.y) * tap.rgb;
-        }
-        samples[i] = float4(color * correction, depth);
+        uint slot = uint(_SdfFarRadiance.Load(int3(WorldIndirection(WorldCellIndex(coord, level)), 0)).x) - 1u;
+        if (!SampleWorldCacheCorner(position, direction, level, lower, alpha, i, slot, result))
+            return false;
     }
-    float4 y0 = lerp(lerp(samples[0], samples[4], alpha.z), lerp(samples[2], samples[6], alpha.z), alpha.y);
-    float4 y1 = lerp(lerp(samples[1], samples[5], alpha.z), lerp(samples[3], samples[7], alpha.z), alpha.y);
-    float4 result = lerp(y0, y1, alpha.x);
     radiance = result.rgb;
     hitDistance = result.w;
     return true;

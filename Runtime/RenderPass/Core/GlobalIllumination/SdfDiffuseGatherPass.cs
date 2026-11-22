@@ -59,6 +59,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
 #if UNITY_EDITOR
         internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
+        internal static bool EditorSkipEmptyCompactMeshIntervals = true;
         internal static System.Action<ComputePassContext, Texture, Texture, Texture, Texture> EditorLinearCapture;
         internal static bool EditorRecordProbeAnchorDiagnostics;
         internal static int EditorRadiositySeed;
@@ -311,7 +312,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler CompactFinalizeSampler = new("Finalize Probe Gather");
         [RenderGraphResource(Name = "Compact Probe Receivers", Access = AccessFlags.ReadWrite)]
         [TransientResource]
-        private readonly RenderGraphBuffer m_CompactProbes = RenderGraphBuffer.CreateStructured("Compact Probe Receivers", 48);
+        private readonly RenderGraphBuffer m_CompactProbes = RenderGraphBuffer.CreateStructured("Compact Probe Receivers", 80);
         [RenderGraphResource(Name = "Compact Probe Contributions", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphBuffer m_CompactContributions = RenderGraphBuffer.CreateStructured("Compact Probe Contributions", 24);
@@ -346,6 +347,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static RenderGraphBuffer CreateCompactDispatchArgs(string name) => RenderGraphBuffer.CreateStructured(name, 3, sizeof(uint),
             GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
         private readonly int[] m_CompactScreenKernels = new int[2];
+        private readonly int[] m_CompactScreenSkipEmptyKernels = new int[2];
         private readonly int[] m_CompactMeshKernels = new int[2];
         private readonly int[] m_CompactResolveGlobalKernels = new int[2];
         private readonly int[] m_FeedbackTraceKernels = new int[2];
@@ -1280,6 +1282,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MeshCardGridKernel = FindOptionalKernel("BuildMeshSdfCardGridCS");
             m_CompactScreenKernels[0] = FindOptionalKernel("CompactScreenProbeTracesCS");
             m_CompactScreenKernels[1] = FindOptionalKernel("CompactScreenProbeTracesWithReceiverCS");
+            m_CompactScreenSkipEmptyKernels[0] = FindOptionalKernel("CompactScreenProbeSkipEmptyMeshCS");
+            m_CompactScreenSkipEmptyKernels[1] = FindOptionalKernel("CompactScreenProbeSkipEmptyMeshWithReceiverCS");
             m_CompactMeshKernels[0] = FindOptionalKernel("TraceMeshSdfCompactedCS");
             m_CompactMeshKernels[1] = FindOptionalKernel("TraceMeshSdfReceiverCompactedCS");
             m_CompactGlobalKernel = FindOptionalKernel("TraceGlobalSdfCompactedCS");
@@ -2958,7 +2962,15 @@ namespace VividRP.Runtime.RenderPass.Core
             TextureHandle placement, bool useScreenRays, int receiverVariant, int mesh, int groupsX, int groupsY)
         {
             var shader = m_TraceCompute;
-            int classify = m_CompactScreenKernels[receiverVariant];
+            bool skipEmptyMesh = m_CompactScreenSkipEmptyKernels[receiverVariant] >= 0;
+#if UNITY_EDITOR
+            skipEmptyMesh = skipEmptyMesh && EditorSkipEmptyCompactMeshIntervals;
+#endif
+            int classify = skipEmptyMesh
+                ? m_CompactScreenSkipEmptyKernels[receiverVariant]
+                : m_CompactScreenKernels[receiverVariant];
+            if (skipEmptyMesh)
+                cmd.SetComputeBufferParam(shader, classify, CompactGlobalRaysId, m_CompactGlobalRays.innerHandle);
             int global = m_CompactGlobalKernel;
             int resolveGlobal = (m_LumenDebugView.HasSurfaceCacheFeedback
                 ? m_FeedbackCompactResolveKernels : m_CompactResolveGlobalKernels)[receiverVariant];
@@ -2974,7 +2986,6 @@ namespace VividRP.Runtime.RenderPass.Core
             if (receiverVariant != 0)
             {
                 BindTraceReceiver(cmd, classify);
-                BindTraceReceiver(cmd, resolveGlobal);
                 m_Scene.Bind(cmd, shader, classify);
             }
             cmd.SetComputeTextureParam(shader, classify, PlacementId, placement);

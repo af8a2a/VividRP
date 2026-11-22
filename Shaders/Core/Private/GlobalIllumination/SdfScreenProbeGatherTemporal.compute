@@ -39,45 +39,76 @@ uint PackSharedShortRangeAO(half4 BentNormalAndAO)
     return PackScreenBentNormal(BentNormal);
 }
 
-// StochasticLightingTileClassification.usf, 2x2 triangle/depth/normal footprint.
-int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal,
-    out bool bValidReconstruction, out half4 OutFilteredAO)
+groupshared uint SharedBentPackedAO[64];
+groupshared float4 SharedBentPosAndDepth[36];
+groupshared float3 SharedBentNormal[36];
+
+void PreloadShortRangeAOTile(uint3 group, uint lane, int2 screenSize, out int2 reconBase, out int2 aoBase)
+{
+    int2 lastHalf = (screenSize - 1) / 2;
+    int2 groupMinScreen = int2(
+        int(group.x * 8u),
+        _SdfBentFlipY != 0u ? (screenSize.y - 1 - int(group.y * 8u + 7u)) : int(group.y * 8u));
+    reconBase = int2(floor((float2(groupMinScreen) - 1.0f) * 0.5f));
+    aoBase = reconBase - 1;
+
+    int2 aoCell = clamp(aoBase + int2(int(lane & 7u), int(lane >> 3u)), 0, lastHalf);
+    SharedBentPackedAO[lane] = _SdfLumenBentNormal.Load(int3(aoCell, 0));
+
+    if (lane < 36u)
+    {
+        int2 reconCell = reconBase + int2(int(lane % 6u), int(lane / 6u));
+        float3 pos = 0.0f;
+        float3 nrm = 0.0f;
+        float depth = 0.0f;
+        if (all(reconCell >= 0) && all(reconCell <= lastHalf))
+        {
+            uint2 receiverPixel = BentDownsampledReceiver(reconCell);
+            if (LoadReceiver(receiverPixel, pos, nrm))
+                depth = dot(float4(pos, 1.0f), _SdfProbeCameraForward);
+        }
+        SharedBentPosAndDepth[lane] = float4(pos, depth);
+        SharedBentNormal[lane] = nrm;
+    }
+}
+
+// StochasticLightingTileClassification.usf, 2x2 triangle/depth/normal footprint backed by groupshared LDS.
+int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal, int2 reconBase, int2 aoBase,
+    out bool bValidReconstruction, out half4 OutFilteredAO, out half4 OutStochasticAO)
 {
     int2 ScreenCoord = int2(BentScreenPixel(Pixel));
     int2 DownsampledCoord00 = int2(floor((float2(ScreenCoord) + 0.5f) / 2.0f - 0.5f));
     int2 Last = (int2(_SdfDiffuseScreenSize.xy) - 1) / 2;
     float4 UpsampleWeights = 0;
-    float4 CornerDepths = 0;
-    float3 CornerPositions[4];
-    float3 CornerNormals[4];
-    int2 CornerCells[4];
     float SceneDepth = dot(float4(Position, 1.0), _SdfProbeCameraForward);
+    float4 ScenePlane = float4(Normal, dot(Position, Normal));
+    float Depth00 = 0.0f;
     [unroll]
     for (uint Index = 0u; Index < 4u; ++Index)
     {
         int2 Cell = DownsampledCoord00 + int2(Index & 1u, Index >> 1u);
-        CornerCells[Index] = clamp(Cell, 0, Last);
-        int2 SampleScreenOffset = Cell * 2 + GetDownsampleJitter2x2(Cell) - ScreenCoord;
-        uint2 ReceiverPixel = BentDownsampledReceiver(Cell);
-        if (LoadReceiver(ReceiverPixel, CornerPositions[Index], CornerNormals[Index]))
-            CornerDepths[Index] = dot(float4(CornerPositions[Index], 1.0), _SdfProbeCameraForward);
-        if (all(Cell >= 0) && all(Cell <= Last))
-            UpsampleWeights[Index] = (2.0f - abs(SampleScreenOffset.x)) * (2.0f - abs(SampleScreenOffset.y));
-    }
-
-    // UE Position01 uses its own depth for XY and the 00 depth for the view Z component.
-    CornerPositions[2] += _SdfProbeCameraForward.xyz * (CornerDepths.x - CornerDepths.z);
-    float4 ScenePlane = float4(Normal, dot(Position, Normal));
-    [unroll]
-    for (uint Corner = 0u; Corner < 4u; ++Corner)
-    {
-        float PlaneDistance = abs(dot(float4(CornerPositions[Corner], -1), ScenePlane));
-        float RelativeDepthDifference = PlaneDistance / SceneDepth;
-        float DepthWeight = CornerDepths[Corner] > 0.0f
-            ? exp2(-5000.0f * (RelativeDepthDifference * RelativeDepthDifference)) : 0.0f;
-        float NormalWeight = 1.0f - saturate(VividBentNormalAcosFast(saturate(dot(CornerNormals[Corner], Normal))));
-        UpsampleWeights[Corner] *= DepthWeight;
-        UpsampleWeights[Corner] *= NormalWeight * NormalWeight;
+        int2 rel = Cell - reconBase;
+        uint reconIdx = uint(rel.y * 6 + rel.x);
+        float4 posDepth = SharedBentPosAndDepth[reconIdx];
+        float3 cornerPos = posDepth.xyz;
+        float cornerDepth = posDepth.w;
+        if (Index == 0u)
+            Depth00 = cornerDepth;
+        // UE Position01 uses its own depth for XY and the 00 depth for the view Z component.
+        if (Index == 2u)
+            cornerPos += _SdfProbeCameraForward.xyz * (Depth00 - cornerDepth);
+        float weight = 0.0f;
+        if (all(Cell >= 0) && all(Cell <= Last) && cornerDepth > 0.0f)
+        {
+            int2 SampleScreenOffset = Cell * 2 + GetDownsampleJitter2x2(Cell) - ScreenCoord;
+            float spatialW = (2.0f - abs(SampleScreenOffset.x)) * (2.0f - abs(SampleScreenOffset.y));
+            float PlaneDistance = abs(dot(float4(cornerPos, -1.0f), ScenePlane));
+            float RelativeDepthDifference = PlaneDistance / SceneDepth;
+            float DepthWeight = exp2(-5000.0f * (RelativeDepthDifference * RelativeDepthDifference));
+            float NormalWeight = 1.0f - saturate(VividBentNormalAcosFast(saturate(dot(SharedBentNormal[reconIdx], Normal))));
+            weight = spatialW * DepthWeight * NormalWeight * NormalWeight;
+        }
+        UpsampleWeights[Index] = weight;
     }
 
     float WeightSum = dot(UpsampleWeights, 1.0f);
@@ -89,7 +120,11 @@ int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal,
         for (uint Corner = 0u; Corner < 4u; ++Corner)
         {
             if (UpsampleWeights[Corner] > 1e-4f)
-                FilteredSum += half(UpsampleWeights[Corner]) * UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(CornerCells[Corner], 0)));
+            {
+                int2 aoRel = DownsampledCoord00 + int2(Corner & 1u, Corner >> 1u) - aoBase;
+                uint aoIdx = uint(aoRel.y * 8 + aoRel.x);
+                FilteredSum += half(UpsampleWeights[Corner]) * UnpackSharedShortRangeAO(SharedBentPackedAO[aoIdx]);
+            }
         }
         OutFilteredAO = FilteredSum / half(WeightSum);
         half Len = sqrt(dot(OutFilteredAO.xyz, OutFilteredAO.xyz));
@@ -112,15 +147,17 @@ int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal,
     PreSum /= max(PreSum.w, 0.00001f);
     int2 StochasticBilinearOffset = RandomScalar <= PreSum.x ? int2(0, 0)
         : RandomScalar <= PreSum.y ? int2(1, 0) : RandomScalar <= PreSum.z ? int2(0, 1) : int2(1, 1);
-    return clamp((ScreenCoord - 1) / 2 + StochasticBilinearOffset, 0, Last);
+    int2 sampleCoord = clamp((ScreenCoord - 1) / 2 + StochasticBilinearOffset, 0, Last);
+    int2 sampleRel = clamp(sampleCoord - aoBase, 0, 7);
+    OutStochasticAO = UnpackSharedShortRangeAO(SharedBentPackedAO[uint(sampleRel.y * 8 + sampleRel.x)]);
+    return sampleCoord;
 }
 
-half4 ClampShortRangeAOHistory(uint2 Pixel, int2 SampleCoord, half4 CenterShortRangeAO, half4 HistoryShortRangeAO, half SigmaScale)
+half4 ClampShortRangeAOHistory(uint2 Pixel, int2 SampleCoord, int2 aoBase, half4 CenterShortRangeAO, half4 HistoryShortRangeAO, half SigmaScale)
 {
     // The reference tile has a one-cell border around its 4x4 downsampled interior.
     int2 TileMin = int2(BentScreenPixel(Pixel) / 8u) * 4 - 1;
     int2 SharedCoord = SampleCoord - TileMin;
-    int2 Last = (int2(_SdfDiffuseScreenSize.xy) - 1) / 2;
     half4 AOSum = CenterShortRangeAO;
     half4 AOSqSum = CenterShortRangeAO * CenterShortRangeAO;
     half WeightSum = 1.0;
@@ -133,8 +170,8 @@ half4 ClampShortRangeAOHistory(uint2 Pixel, int2 SampleCoord, half4 CenterShortR
             int2 NeighborSharedCoord = SharedCoord + int2(X, Y);
             if ((X != 0 || Y != 0) && all(NeighborSharedCoord >= 0) && all(NeighborSharedCoord < 6))
             {
-                int2 LoadCoord = clamp(TileMin + NeighborSharedCoord, 0, Last);
-                half4 NeighborAO = UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(LoadCoord, 0)));
+                int2 rel = clamp(TileMin + NeighborSharedCoord - aoBase, 0, 7);
+                half4 NeighborAO = UnpackSharedShortRangeAO(SharedBentPackedAO[uint(rel.y * 8 + rel.x)]);
                 AOSum += NeighborAO;
                 AOSqSum += NeighborAO * NeighborAO;
                 WeightSum += 1.0;
@@ -724,15 +761,53 @@ float3 ApplyCoherentRadianceFastUpdate(
     return HistoryPreExposed;
 }
 
+groupshared uint2 SharedRoughSpecYCoCg[100];
+
+uint2 PackRoughSpecYCoCg(float3 ycocg, bool valid)
+{
+    return uint2(
+        f32tof16(ycocg.x) | (f32tof16(ycocg.y) << 16u),
+        f32tof16(ycocg.z) | (valid ? (1u << 16u) : 0u));
+}
+
+bool UnpackRoughSpecYCoCg(uint2 packed, out float3 ycocg)
+{
+    ycocg = float3(
+        f16tof32(packed.x & 0xffffu),
+        f16tof32(packed.x >> 16u),
+        f16tof32(packed.y & 0xffffu));
+    return (packed.y >> 16u) != 0u;
+}
+
+void PreloadRoughSpecularTile(uint3 group, uint lane, int2 maxScreenCoord, float preExposure)
+{
+    int2 tileBase = int2(group.xy * 8u) - 1;
+    [unroll]
+    for (uint passIdx = 0u; passIdx < 2u; ++passIdx)
+    {
+        uint idx = lane + passIdx * 64u;
+        if (idx < 100u)
+        {
+            int2 tap = clamp(tileBase + int2(int(idx % 10u), int(idx / 10u)), int2(0, 0), maxScreenCoord);
+            float validAlpha = _SdfDiffuseCurrentResolved.Load(int3(tap, 0)).w;
+            bool valid = validAlpha > 0.0f;
+            float3 ycocg = 0.0f;
+            if (valid)
+            {
+                float3 tapSpec = _SdfCurrentRoughSpecular.Load(int3(tap, 0)).rgb * preExposure;
+                ycocg = SdfHistoryYCoCg(TonemapSdfHistory(tapSpec));
+            }
+            SharedRoughSpecYCoCg[idx] = PackRoughSpecYCoCg(ycocg, valid);
+        }
+    }
+}
+
 // Tonemapped YCoCg 3x3 variance clamp for view-dependent Rough Specular history (LumenReflectionDenoiserTemporal style).
-// Applies full clamping under view-parallax motion or coherent radiance shifts while avoiding single-frame
-// probe-grid clamping artifacts on steady surfaces.
+// Reads all 8 neighbors from groupshared LDS to cut per-pixel texture fetches by ~10x.
 float3 ClampRoughSpecularHistory(
-    uint2 ScreenCoord,
-    uint2 MaxScreenCoord,
+    uint2 LocalCoord,
     float3 CurrentPreExposed,
     float3 HistoryPreExposed,
-    float PreExposure,
     float SigmaScale,
     float ParallaxAmount)
 {
@@ -743,15 +818,14 @@ float3 ClampRoughSpecularHistory(
     float3 neighborMax = centerYCoCg;
     float count = 1.0f;
 
+    int2 sharedCenter = int2(LocalCoord) + 1;
     [unroll]
     for (uint i = 0u; i < 8u; ++i)
     {
-        int2 tap = clamp(int2(ScreenCoord) + kScreenProbeOffsets3x3[i], int2(0, 0), int2(MaxScreenCoord));
-        float4 lighting = _SdfDiffuseCurrentResolved.Load(int3(tap, 0));
-        if (lighting.w > 0.0f)
+        int2 sharedTap = sharedCenter + kScreenProbeOffsets3x3[i];
+        float3 sampleYCoCg;
+        if (UnpackRoughSpecYCoCg(SharedRoughSpecYCoCg[uint(sharedTap.y * 10 + sharedTap.x)], sampleYCoCg))
         {
-            float3 tapSpec = _SdfCurrentRoughSpecular.Load(int3(tap, 0)).rgb * PreExposure;
-            float3 sampleYCoCg = SdfHistoryYCoCg(TonemapSdfHistory(tapSpec));
             sum += sampleYCoCg;
             sumSq += sampleYCoCg * sampleYCoCg;
             neighborMin = min(neighborMin, sampleYCoCg);
@@ -919,7 +993,11 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
 
     float2 motion;
     DecodeMotionVector(packedMotion, motion);
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+    const bool fullSphere = true;
+#else
     bool fullSphere = _SdfScreenProbeFullSphere != 0u;
+#endif
     float2 previousPixel = float2(pixel) + (_SdfScreenJitterDelta - motion) * _SdfDiffuseScreenSize.xy;
     float2 previousUv = (previousPixel + 0.5) * _SdfDiffuseScreenSize.zw;
     if (fullSphere ? (any(previousUv < 0.0) || any(previousUv > 1.0)) : (any(previousUv < 0.0) || any(previousUv >= 1.0)))
@@ -988,6 +1066,9 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     float geometryWeight = 0.0;
     float coveredWeight = 0.0;
 
+    bool applyNormalReject = rejectBasedOnNormal && !staticSubpixelOnly;
+    bool needPackedGeometry = !fullSphere || _SdfPreviousPixelDepthValid == 0u || applyNormalReject;
+
     [unroll]
     for (uint i = 0u; i < 4u; ++i)
     {
@@ -995,10 +1076,10 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
         int2 tap = lower + offset;
         float2 bilinear = lerp(1.0 - fraction, fraction, float2(offset));
         float weight = bilinear.x * bilinear.y;
-        if (any(tap < 0) || any(tap >= size) || (!fullSphere && weight <= 0.0))
+        if (any(tap < 0) || any(tap >= size) || weight <= (fullSphere ? 0.01f : 0.0f))
             continue;
 
-        uint packed = _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0));
+        uint packed = needPackedGeometry ? _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0)) : 0u;
         float depth = _SdfPreviousPixelDepthValid != 0u
             ? _SdfDiffusePreviousPixelDepth.Load(int3(tap, 0))
             : f16tof32(packed & 65535u);
@@ -1007,7 +1088,7 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
 
         float2 tapUv = (float2(tap) + 0.5) * _SdfDiffuseScreenSize.zw;
         float3 samplePosition = ComputeWorldSpacePosition(tapUv, depth, _SdfScreenPreviousInverseVP);
-        float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+        float4 sample;
         if (fullSphere)
         {
             // StochasticLightingTileClassification.usf:
@@ -1028,15 +1109,17 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
             {
                 depthWeight = linearDepthDelta >= lumenDisocclusionThreshold ? 0.0f : 1.0f;
             }
-            bool applyNormalReject = rejectBasedOnNormal && !staticSubpixelOnly;
             float normalWeight = !applyNormalReject || dot(UnpackProbeNormal(float(packed >> 16u)), normal) >= normalCosThreshold ? 1.0f : 0.0f;
-            float validLighting = sample.a > 0.0f ? 1.0f : 0.0f;
-            if (weight * depthWeight * normalWeight * validLighting <= 0.01f)
+            if (weight * depthWeight * normalWeight <= 0.01f)
+                continue;
+            sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+            if (sample.a <= 0.0f)
                 continue;
             geometryWeight += weight;
         }
         else
         {
+            sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
             float3 expectedTap = ComputeWorldSpacePosition(tapUv, expectedDepth, _SdfScreenPreviousInverseVP);
             bool depthMismatch = distance(samplePosition, expectedTap) > depthTolerance;
             bool planeMismatch = abs(dot(samplePosition - expectedReceiver, normal)) > planeTolerance;
@@ -1151,19 +1234,30 @@ float ScreenProbeCurrentSampleWeight(bool bLightingIsValid, float NewNumFramesAc
 
 [numthreads(8, 8, 1)]
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS) && defined(VIVID_SDF_SCREEN_PROBE_AO)
-void ScreenProbeTemporalReprojectionWithMomentsAndAOCS(uint3 id : SV_DispatchThreadID)
+void ScreenProbeTemporalReprojectionWithMomentsAndAOCS(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 localId : SV_GroupThreadID, uint lane : SV_GroupIndex)
 #elif defined(VIVID_SDF_SCREEN_PROBE_AO)
-void ScreenProbeTemporalReprojectionWithAOCS(uint3 id : SV_DispatchThreadID)
+void ScreenProbeTemporalReprojectionWithAOCS(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 localId : SV_GroupThreadID, uint lane : SV_GroupIndex)
 #elif defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
-void ScreenProbeTemporalReprojectionWithMomentsCS(uint3 id : SV_DispatchThreadID)
+void ScreenProbeTemporalReprojectionWithMomentsCS(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 localId : SV_GroupThreadID, uint lane : SV_GroupIndex)
 #else
-void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
+void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 localId : SV_GroupThreadID, uint lane : SV_GroupIndex)
 #endif
 {
-    if (any(id.xy >= uint2(_SdfDiffuseScreenSize.xy)))
+    int2 screenSize = int2(_SdfDiffuseScreenSize.xy);
+    int2 maxScreenCoord = screenSize - 1;
+    float currentPreExposure = _SdfPreExposureHistoryEnabled != 0u ? VividGetPreExposure() : 1.0f;
+
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+    int2 reconBase, aoBase;
+    PreloadShortRangeAOTile(group, lane, screenSize, reconBase, aoBase);
+#endif
+    if (_SdfRoughSpecularEnabled != 0u)
+        PreloadRoughSpecularTile(group, lane, maxScreenCoord, currentPreExposure);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (any(id.xy >= uint2(screenSize)))
         return;
 
-    float currentPreExposure = _SdfPreExposureHistoryEnabled != 0u ? VividGetPreExposure() : 1.0f;
     float prevPreExposure = (_SdfPreExposureHistoryEnabled != 0u && _SdfPreviousPreExposureValid != 0u)
         ? max(_SdfPreviousPreExposure.Load(int3(0, 0, 0)), 1e-4f)
         : currentPreExposure;
@@ -1179,7 +1273,11 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     // Depth from an unresolved or unlit foreground still occludes history.
     uint geometry = f32tof16(depth) | (receiver ? uint(PackProbeNormal(normal)) << 16u : 0u);
     bool hasLighting = receiver && result.a > 0.0;
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+    const bool fullSphere = true;
+#else
     bool fullSphere = _SdfScreenProbeFullSphere != 0u;
+#endif
     float moving = receiver ? _SdfResolvedMoving.Load(int3(id.xy, 0)) : 0.0;
     float invFractionMoving = _SdfHistoryTemporalParams.z > 0.0f ? _SdfHistoryTemporalParams.z : 10.0f;
     float maxFastUpdateAmount = _SdfHistoryTemporalParams.w > 0.0f ? _SdfHistoryTemporalParams.w : 0.9f;
@@ -1195,10 +1293,10 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     int2 SampleCoord = 0;
     if (receiver)
     {
-        SampleCoord = ReconstructShortRangeAO(id.xy, position, normal, bValidReconstruction, FilteredShortRangeAO);
-        OutShortRangeAO = bValidReconstruction
-            ? UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(SampleCoord, 0)))
-            : FilteredShortRangeAO;
+        half4 StochasticShortRangeAO;
+        SampleCoord = ReconstructShortRangeAO(id.xy, position, normal, reconBase, aoBase,
+            bValidReconstruction, FilteredShortRangeAO, StochasticShortRangeAO);
+        OutShortRangeAO = bValidReconstruction ? StochasticShortRangeAO : FilteredShortRangeAO;
     }
 #endif
     // LumenScreenProbeGatherTemporal.usf: bValidReconstruction only gates ShortRangeAO,
@@ -1235,6 +1333,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     }
 
     float4 currentRoughSpec = _SdfRoughSpecularEnabled != 0u ? _SdfCurrentRoughSpecular.Load(int3(id.xy, 0)) : 0.0f;
+    [branch]
     if (_SdfDisocclusionSpatialFilter != 0u && fullSphere && receiver && (numFramesAccumulated < 4.0f || !hasLighting))
     {
         float4 filteredRoughSpec = currentRoughSpec;
@@ -1257,7 +1356,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     float3 blendedPreExposed = min(currentPreExposed, 65000.0);
     float currentWeight = 1.0f;
     bool steadyStaticPixel = false;
-    uint2 maxScreenCoord = uint2(_SdfDiffuseScreenSize.xy) - 1u;
+    uint2 maxScreenCoordU = uint2(maxScreenCoord);
 
     bool effectiveLightingValid = bLightingIsValid;
     if (historyAccepted)
@@ -1267,21 +1366,23 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         float coherentBoost = 0.0f;
         if (fullSphere)
         {
+            [branch]
             if (_SdfFastUpdateNeighborhoodClamp != 0u && fastUpdate > 0.0f)
             {
                 rectified = ClampScreenProbeHistory(
                     id.xy,
                     uint2(0u, 0u),
-                    maxScreenCoord,
+                    maxScreenCoordU,
                     currentPreExposed,
                     historyLighting,
                     currentPreExposure);
             }
+            [branch]
             if ((_SdfTemporalReprojectionFlags & 4u) != 0u)
             {
                 rectified = ApplyCoherentRadianceFastUpdate(
                     id.xy,
-                    maxScreenCoord,
+                    maxScreenCoordU,
                     position,
                     normal,
                     currentPreExposed,
@@ -1361,11 +1462,9 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
                 specPriorFrames = min(specPriorFrames * 2.0f, 24.0f);
             float sigmaScale = lerp(1.5f, 2.25f, roughness);
             float3 clampedRoughSpecHistory = ClampRoughSpecularHistory(
-                id.xy,
-                maxScreenCoord,
+                localId.xy,
                 currentRoughSpecPreExposed,
                 history.roughSpecular,
-                currentPreExposure,
                 sigmaScale,
                 parallaxAmount);
             float roughSpecWeight = ScreenProbeCurrentSampleWeight(effectiveLightingValid, specPriorFrames);
@@ -1380,7 +1479,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     if (historyRead && _SdfBentHistoryValid != 0u)
     {
-        float FastUpdateModeAmount = saturate(_SdfResolvedMoving.Load(int3(id.xy, 0)) * invFractionMoving);
+        float FastUpdateModeAmount = saturate(moving * invFractionMoving);
         FastUpdateModeAmount = saturate(min((FastUpdateModeAmount - .2f) / .8f, maxFastUpdateAmount));
         FastUpdateModeAmount = max(FastUpdateModeAmount, min(history.fastUpdate, maxFastUpdateAmount));
         float NewNumFramesAccumulated = min(history.age, (1.0f - FastUpdateModeAmount) * _SdfPixelHistoryMaxAge);
@@ -1388,7 +1487,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         if (steadyStaticPixel)
             NewNumFramesAccumulated = min(NewNumFramesAccumulated * 2.5f, 32.0f);
         half4 aoSample = bValidReconstruction ? OutShortRangeAO : FilteredShortRangeAO;
-        half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, aoSample, history.shortRangeAO, aoClampSigma);
+        half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, aoBase, aoSample, history.shortRangeAO, aoClampSigma);
         float Alpha = ScreenProbeCurrentSampleWeight(effectiveLightingValid && bValidReconstruction, NewNumFramesAccumulated);
         OutShortRangeAO = lerp(HistoryShortRangeAO, aoSample, half(Alpha));
     }

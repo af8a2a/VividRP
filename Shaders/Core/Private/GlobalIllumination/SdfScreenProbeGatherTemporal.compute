@@ -40,7 +40,8 @@ uint PackSharedShortRangeAO(half4 BentNormalAndAO)
 }
 
 // StochasticLightingTileClassification.usf, 2x2 triangle/depth/normal footprint.
-int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal, out bool bValidReconstruction)
+int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal,
+    out bool bValidReconstruction, out half4 OutFilteredAO)
 {
     int2 ScreenCoord = int2(BentScreenPixel(Pixel));
     int2 DownsampledCoord00 = int2(floor((float2(ScreenCoord) + 0.5f) / 2.0f - 0.5f));
@@ -49,11 +50,13 @@ int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal, out bo
     float4 CornerDepths = 0;
     float3 CornerPositions[4];
     float3 CornerNormals[4];
+    int2 CornerCells[4];
     float SceneDepth = dot(float4(Position, 1.0), _SdfProbeCameraForward);
     [unroll]
     for (uint Index = 0u; Index < 4u; ++Index)
     {
         int2 Cell = DownsampledCoord00 + int2(Index & 1u, Index >> 1u);
+        CornerCells[Index] = clamp(Cell, 0, Last);
         int2 SampleScreenOffset = Cell * 2 + GetDownsampleJitter2x2(Cell) - ScreenCoord;
         uint2 ReceiverPixel = BentDownsampledReceiver(Cell);
         if (LoadReceiver(ReceiverPixel, CornerPositions[Index], CornerNormals[Index]))
@@ -77,6 +80,27 @@ int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal, out bo
         UpsampleWeights[Corner] *= NormalWeight * NormalWeight;
     }
 
+    float WeightSum = dot(UpsampleWeights, 1.0f);
+    bValidReconstruction = WeightSum >= 0.01f;
+    if (bValidReconstruction)
+    {
+        half4 FilteredSum = 0;
+        [unroll]
+        for (uint Corner = 0u; Corner < 4u; ++Corner)
+        {
+            if (UpsampleWeights[Corner] > 1e-4f)
+                FilteredSum += half(UpsampleWeights[Corner]) * UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(CornerCells[Corner], 0)));
+        }
+        OutFilteredAO = FilteredSum / half(WeightSum);
+        half Len = sqrt(dot(OutFilteredAO.xyz, OutFilteredAO.xyz));
+        OutFilteredAO.xyz = Len > half(1e-4) ? OutFilteredAO.xyz / Len : half3(Normal);
+    }
+    else
+    {
+        // Avoid borrowing an unrelated dark corner cell when all 4 half-res taps fail geometry checks.
+        OutFilteredAO = half4(half3(Normal), half(1.0));
+    }
+
     uint3 WrappedCoordinate = uint3(ScreenCoord, _SdfDiffuseFrame) & uint3(127u, 127u, 63u);
     uint3 TextureCoordinate = uint3(WrappedCoordinate.x, 8191u - (WrappedCoordinate.z * 128u + WrappedCoordinate.y), 0);
     float RandomScalar = _SdfBentScalarNoise.Load(TextureCoordinate);
@@ -88,7 +112,6 @@ int2 ReconstructShortRangeAO(uint2 Pixel, float3 Position, float3 Normal, out bo
     PreSum /= max(PreSum.w, 0.00001f);
     int2 StochasticBilinearOffset = RandomScalar <= PreSum.x ? int2(0, 0)
         : RandomScalar <= PreSum.y ? int2(1, 0) : RandomScalar <= PreSum.z ? int2(0, 1) : int2(1, 1);
-    bValidReconstruction = dot(UpsampleWeights, 1.0f) >= 0.01f;
     return clamp((ScreenCoord - 1) / 2 + StochasticBilinearOffset, 0, Last);
 }
 
@@ -759,9 +782,9 @@ float3 ClampRoughSpecularHistory(
     return lerp(HistoryPreExposed, clampedRgb, clampStrength);
 }
 
-// Multi-ring geometry-aware bilateral filter executed only for freshly disoccluded / low-age
-// pixels (numFramesAccumulated < 4) to suppress single-frame stochastic probe jitter and blotches
-// without bleeding across depth or normal discontinuities.
+// Dense 5x5 geometry-aware bilateral filter executed for freshly disoccluded / low-age pixels
+// (numFramesAccumulated < 4) or uncovered silhouette pixels to suppress single-frame stochastic
+// probe jitter, seams, and black holes without bleeding across depth or normal discontinuities.
 float4 FilterDisoccludedScreenProbeLighting(uint2 pixel, float3 position, float3 normal, float4 current,
     bool filterRoughSpec, inout float4 currentRoughSpec)
 {
@@ -772,29 +795,37 @@ float4 FilterDisoccludedScreenProbeLighting(uint2 pixel, float3 position, float3
         : -_SdfProbeCameraForward.xyz;
     float grazingScale = clamp(saturate(dot(viewDir, normal)), 0.15f, 1.0f);
     float depthFalloff = 2500.0f * grazingScale * grazingScale;
+    float planeFalloff = 6000.0f * grazingScale * grazingScale;
 
-    float3 coveredSum = current.rgb * current.a;
-    float coverageSum = current.a;
-    float4 specSum = filterRoughSpec ? currentRoughSpec : 0.0f;
-    float weightSum = 1.0f;
+    float centerWeight = current.a > 0.0f ? 1.0f : 0.0f;
+    float3 coveredSum = current.rgb * current.a * centerWeight;
+    float coverageSum = current.a * centerWeight;
+    float4 specSum = filterRoughSpec ? currentRoughSpec * centerWeight : 0.0f;
+    float weightSum = centerWeight;
 
-    const int2 offsets[16] =
+    // Dense 5x5 (24-neighbor) footprint with balanced even/odd parity weights (5.2 == 5.2)
+    // so coplanar checkerboard stochastic noise averages cleanly without spatial holes.
+    const int2 offsets[24] =
     {
         int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1),
         int2(-1, -1), int2(1, -1), int2(-1, 1), int2(1, 1),
-        int2(-3, 0), int2(3, 0), int2(0, -3), int2(0, 3),
+        int2(-2, 0), int2(2, 0), int2(0, -2), int2(0, 2),
+        int2(-2, -1), int2(-2, 1), int2(2, -1), int2(2, 1),
+        int2(-1, -2), int2(1, -2), int2(-1, 2), int2(1, 2),
         int2(-2, -2), int2(2, -2), int2(-2, 2), int2(2, 2)
     };
-    const float spatialWeights[16] =
+    const float spatialWeights[24] =
     {
         0.75f, 0.75f, 0.75f, 0.75f,
         0.50f, 0.50f, 0.50f, 0.50f,
         0.35f, 0.35f, 0.35f, 0.35f,
-        0.35f, 0.35f, 0.35f, 0.35f
+        0.275f, 0.275f, 0.275f, 0.275f,
+        0.275f, 0.275f, 0.275f, 0.275f,
+        0.20f, 0.20f, 0.20f, 0.20f
     };
 
     [loop]
-    for (uint i = 0u; i < 16u; ++i)
+    for (uint i = 0u; i < 24u; ++i)
     {
         int2 tap = int2(pixel) + offsets[i];
         if (any(tap < 0) || any(tap >= size))
@@ -810,8 +841,8 @@ float4 FilterDisoccludedScreenProbeLighting(uint2 pixel, float3 position, float3
         float relativeDepth = abs(tapEyeDepth - eyeDepth) / eyeDepth;
         float depthWeight = exp2(-depthFalloff * relativeDepth * relativeDepth);
         float relativePlane = abs(dot(tapPosition - position, normal)) / eyeDepth;
-        float planeWeight = exp2(-10000.0f * relativePlane * relativePlane);
-        float normalWeight = saturate((dot(normal, tapNormal) - 0.85f) / 0.15f);
+        float planeWeight = exp2(-planeFalloff * relativePlane * relativePlane);
+        float normalWeight = saturate((dot(normal, tapNormal) - 0.55f) / 0.35f);
         float weight = spatialWeights[i] * depthWeight * planeWeight * normalWeight;
         if (weight <= 1e-4f)
             continue;
@@ -823,7 +854,10 @@ float4 FilterDisoccludedScreenProbeLighting(uint2 pixel, float3 position, float3
         weightSum += weight;
     }
 
-    float invWeightSum = rcp(max(weightSum, 1e-5f));
+    if (weightSum <= 1e-5f)
+        return current;
+
+    float invWeightSum = rcp(weightSum);
     float filteredCoverage = coverageSum * invWeightSum;
     float3 filteredRgb = coveredSum / max(coverageSum, 1e-5f);
     if (filterRoughSpec)
@@ -943,7 +977,8 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
         ? SafeNormalize(_SdfProbeCameraPosition.xyz - position)
         : -_SdfProbeCameraForward.xyz;
     float grazingNdotV = clamp(saturate(dot(viewDir, normal)), 0.1f, 1.0f);
-    float baseThreshold = distanceThreshold * lerp(0.5f, 1.5f, randomScalar);
+    // Keep threshold blue-noise dithering narrow (0.85..1.15) to avoid salt-and-pepper false history drops on continuous walls.
+    float baseThreshold = distanceThreshold * lerp(0.85f, 1.15f, randomScalar);
     float linearDepthDisocclusionThreshold = (baseThreshold / grazingNdotV) * reprojectedSceneDepth;
     float lumenDisocclusionThreshold = usePlaneDisocclusion
         ? max(baseThreshold, 0.015f) * reprojectedSceneDepth
@@ -984,7 +1019,9 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
             if (usePlaneDisocclusion)
             {
                 float planeDistance = abs(dot(float4(samplePosition, -1.0f), prevScenePlane));
-                bool depthDisoccluded = !staticSubpixelOnly && linearDepthDelta >= linearDepthDisocclusionThreshold;
+                // Rely primarily on plane distance for coplanar sloped walls, using a wide 3x linear-depth
+                // safety guard only for large foreground occluder jumps to prevent salt-and-pepper drops.
+                bool depthDisoccluded = !staticSubpixelOnly && linearDepthDelta >= linearDepthDisocclusionThreshold * 3.0f;
                 depthWeight = (planeDistance >= lumenDisocclusionThreshold || depthDisoccluded) ? 0.0f : 1.0f;
             }
             else
@@ -1154,11 +1191,14 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     bool bValidReconstruction = true;
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     half4 OutShortRangeAO = half4(0.0, 1.0, 0.0, 1.0);
+    half4 FilteredShortRangeAO = half4(0.0, 1.0, 0.0, 1.0);
     int2 SampleCoord = 0;
     if (receiver)
     {
-        SampleCoord = ReconstructShortRangeAO(id.xy, position, normal, bValidReconstruction);
-        OutShortRangeAO = UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(SampleCoord, 0)));
+        SampleCoord = ReconstructShortRangeAO(id.xy, position, normal, bValidReconstruction, FilteredShortRangeAO);
+        OutShortRangeAO = bValidReconstruction
+            ? UnpackSharedShortRangeAO(_SdfLumenBentNormal.Load(int3(SampleCoord, 0)))
+            : FilteredShortRangeAO;
     }
 #endif
     // LumenScreenProbeGatherTemporal.usf: bValidReconstruction only gates ShortRangeAO,
@@ -1195,13 +1235,16 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
     }
 
     float4 currentRoughSpec = _SdfRoughSpecularEnabled != 0u ? _SdfCurrentRoughSpecular.Load(int3(id.xy, 0)) : 0.0f;
-    if (_SdfDisocclusionSpatialFilter != 0u && fullSphere && hasLighting && numFramesAccumulated < 4.0f)
+    if (_SdfDisocclusionSpatialFilter != 0u && fullSphere && receiver && (numFramesAccumulated < 4.0f || !hasLighting))
     {
         float4 filteredRoughSpec = currentRoughSpec;
         float4 filtered = FilterDisoccludedScreenProbeLighting(
             id.xy, position, normal, result, _SdfRoughSpecularEnabled != 0u, filteredRoughSpec);
-        float spatialBlend = saturate(1.0f - 0.25f * numFramesAccumulated);
+        float spatialBlend = hasLighting ? saturate(1.0f - 0.25f * numFramesAccumulated) : 1.0f;
         result = lerp(result, filtered, spatialBlend);
+        hasLighting = result.a > 0.0f;
+        if (hasLighting)
+            age = max(age, 1.0f);
         if (_SdfRoughSpecularEnabled != 0u)
             currentRoughSpec = lerp(currentRoughSpec, filteredRoughSpec, spatialBlend);
     }
@@ -1341,12 +1384,18 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID)
         FastUpdateModeAmount = saturate(min((FastUpdateModeAmount - .2f) / .8f, maxFastUpdateAmount));
         FastUpdateModeAmount = max(FastUpdateModeAmount, min(history.fastUpdate, maxFastUpdateAmount));
         float NewNumFramesAccumulated = min(history.age, (1.0f - FastUpdateModeAmount) * _SdfPixelHistoryMaxAge);
-        half aoClampSigma = steadyStaticPixel ? half(2.0) : half(1.0);
+        half aoClampSigma = steadyStaticPixel ? half(2.0) : half(1.75);
         if (steadyStaticPixel)
             NewNumFramesAccumulated = min(NewNumFramesAccumulated * 2.5f, 32.0f);
-        half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, OutShortRangeAO, history.shortRangeAO, aoClampSigma);
+        half4 aoSample = bValidReconstruction ? OutShortRangeAO : FilteredShortRangeAO;
+        half4 HistoryShortRangeAO = ClampShortRangeAOHistory(id.xy, SampleCoord, aoSample, history.shortRangeAO, aoClampSigma);
         float Alpha = ScreenProbeCurrentSampleWeight(effectiveLightingValid && bValidReconstruction, NewNumFramesAccumulated);
-        OutShortRangeAO = lerp(HistoryShortRangeAO, OutShortRangeAO, half(Alpha));
+        OutShortRangeAO = lerp(HistoryShortRangeAO, aoSample, half(Alpha));
+    }
+    else if (receiver)
+    {
+        // Freshly disoccluded pixels use the 4-tap geometry-weighted average instead of 1-tap stochastic noise.
+        OutShortRangeAO = FilteredShortRangeAO;
     }
 #endif
 

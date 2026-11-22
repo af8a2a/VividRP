@@ -542,6 +542,78 @@ namespace VividRP.Editor.Tests
                 "Converged static camera pixels must damp residual probe flicker with the extended steady-state weight.");
         }
 
+        [Test]
+        public void DisocclusionSpatialFilter_FillsUncoveredZeroCoverageHoleFromCoplanarNeighbors()
+        {
+            RequireComputeAndReversedZ();
+            var wallNormal = new Vector3(0f, 0f, -1f);
+            var sideNormal = new Vector3(1f, 0f, 0f);
+
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            fixture.SetCurrentFrame(
+                (u, _) => u * 16f < 6f ? 3.0f : 8.0f,
+                (x, _) => x < 6 ? sideNormal : wallNormal,
+                (x, y) =>
+                {
+                    if (x < 6)
+                        return new Color(10.0f, 10.0f, 10.0f, 1f);
+                    // Uncovered black hole (alpha = 0) at (7, 8) adjacent to valid coplanar wall pixels (0.6).
+                    if (x == 7 && y == 8)
+                        return new Color(0.0f, 0.0f, 0.0f, 0f);
+                    return new Color(0.6f, 0.6f, 0.6f, 1f);
+                },
+                moving: 0.004f);
+
+            var output = fixture.Step(
+                hasHistory: false, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                disocclusionSpatialFilter: true);
+
+            int holePixel = 8 * 16 + 7;
+            Assert.That(output.OutputRgba[holePixel * 4], Is.EqualTo(0.6f).Within(0.02f),
+                "Uncovered zero-coverage disoccluded pixel must be filled from valid coplanar neighbors without foreground bleed.");
+            Assert.That(output.OutputRgba[holePixel * 4 + 3], Is.GreaterThan(0.9f),
+                "Filled hole pixel must emit valid positive coverage.");
+        }
+
+        [Test]
+        public void SlopedWallMotion_RetainsHistoryUnderPlaneDisocclusionWithoutLinearDepthDrops()
+        {
+            RequireComputeAndReversedZ();
+            // Moderately sloped wall (N.V ~ 0.45): 1-pixel motion changes linear depth by ~2.5%
+            // (> 1% raw distanceThreshold, < 3x grazing-expanded guard) while plane distance == 0.
+            var slopedNormal = new Vector3(0.89f, 0f, -0.455f).normalized;
+            var planeAnchor = new Vector3(0f, 0f, 8f);
+
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            fixture.WarmupSteadyHistory(
+                (u, v) => fixture.IntersectPlaneWorldZ(u, v, planeAnchor, slopedNormal),
+                (_, _) => slopedNormal,
+                (_, _) => new Color(0.8f, 0.6f, 0.4f, 1f),
+                frames: 12,
+                reprojectionFlags: 1 | 2);
+
+            var jitterDeltaUv = new Vector2(0.45f / 16f, -0.35f / 16f);
+            fixture.SetCurrentFrame(
+                (u, v) => fixture.IntersectPlaneWorldZ(u, v, planeAnchor, slopedNormal),
+                (_, _) => slopedNormal,
+                (_, _) => new Color(0.2f, 0.2f, 0.2f, 1f),
+                moving: 0.004f,
+                currentJitterUv: -jitterDeltaUv);
+
+            var output = fixture.Step(hasHistory: true, jitterDeltaUv: jitterDeltaUv, clampEnabled: false,
+                reprojectionFlags: 1 | 2);
+
+            for (int y = 4; y < 12; y++)
+            {
+                for (int x = 4; x < 12; x++)
+                {
+                    int idx = y * 16 + x;
+                    Assert.That(output.NumFrames[idx], Is.EqualTo(10f).Within(0.01f),
+                        $"Moving sloped wall pixel ({x},{y}) must retain full history without salt-and-pepper drops.");
+                }
+            }
+        }
+
         private static void RequireComputeAndReversedZ()
         {
             Assume.That(

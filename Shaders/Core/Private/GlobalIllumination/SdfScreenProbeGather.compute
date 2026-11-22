@@ -976,7 +976,8 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     ScreenProbeInterpolation samples = CalculateScreenProbeInterpolation(pixel, size, grid,
         interpolationPixel, position, normal, eyeDepth, stochasticInterpolation);
     float totalWeight = dot(samples.weights, 1.0);
-    if (!stochasticInterpolation && totalWeight < MinProbeInterpolationWeight && any(interpolationPixel != float2(pixel)))
+    if (totalWeight < MinProbeInterpolationWeight
+        && (stochasticInterpolation || any(interpolationPixel != float2(pixel))))
     {
         ScreenProbeInterpolation unjittered = CalculateScreenProbeInterpolation(pixel, size, grid,
             float2(pixel), position, normal, eyeDepth, false);
@@ -991,6 +992,36 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     SdfProbeIrradiance sh = (SdfProbeIrradiance)0;
     uint2 stride = uint2(grid.x, 0u);
     float interpolationWeight = totalWeight;
+    bool usedCurvatureFallback = false;
+    if (totalWeight < MinProbeInterpolationFallbackWeight)
+    {
+        // High-curvature columns and grazing arch silhouettes can drop below 1e-4 under exp2(-200 * plane / depth).
+        // Fall back to a relaxed 3D distance + normal weight across the surrounding unjittered probes so
+        // freshly disoccluded edges never emit pure black holes, while keeping moving = 0 (invalid integration).
+        float fallbackTotal = 0.0f;
+        float4 fallbackWeights = 0.0f;
+        [unroll]
+        for (uint i = 0u; i < 4u; ++i)
+        {
+            uint2 probeTile = uint2(samples.tileX[i], samples.tileY[i]);
+            float4 geometry = _SdfDiffuseGeometry[probeTile];
+            if (geometry.w < 0.0f)
+                continue;
+            float3 probeNormal = UnpackProbeNormal(geometry.w);
+            float dist = length(geometry.xyz - position);
+            float distWeight = exp2(-16.0f * dist / eyeDepth);
+            float normalWeight = max(0.05f, saturate(dot(normal, probeNormal)));
+            float w = distWeight * normalWeight;
+            fallbackWeights[i] = w;
+            fallbackTotal += w;
+        }
+        if (fallbackTotal > 1e-6f)
+        {
+            samples.weights = fallbackWeights;
+            interpolationWeight = fallbackTotal;
+            usedCurvatureFallback = true;
+        }
+    }
     bool computeRoughSpecular = _SdfWriteRoughSpecular != 0u && _SdfScreenProbeFullSphere != 0u;
     float roughness = computeRoughSpecular ? saturate(_SdfDiffuseGBuffer1.Load(int3(pixel, 0)).z) : 1.0f;
     float3 dominantDir = normal;
@@ -1007,7 +1038,7 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     float3 specRadianceSum = 0.0f;
     float specSkyVisSum = 0.0f;
     float specWeightSum = 0.0f;
-    if (totalWeight >= MinProbeInterpolationFallbackWeight)
+    if (totalWeight >= MinProbeInterpolationFallbackWeight || usedCurvatureFallback)
     {
         // Blend all 4 geometry-weighted probes deterministically rather than stochastically dropping
         // 3 of 4 probes, eliminating Bernoulli speckle across steep sunlit-ledge gradients.
@@ -1039,7 +1070,7 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     {
         // Lumen's LightIsMoving uses zero to mark an invalid integration.
         // A covered fallback may still supply RGB without making the sample valid.
-        moving = totalWeight >= MinProbeInterpolationWeight && coveredWeight > 0.0
+        moving = !usedCurvatureFallback && totalWeight >= MinProbeInterpolationWeight && coveredWeight > 0.0
             ? max(moving, 0.004f) : 0.0f;
     }
     if (coveredWeight <= 0.0 && _SdfProbeResolveRepairMode == 0u)
@@ -1064,7 +1095,10 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     {
         float3 irradiance = ResolveScreenProbeIrradiance(sh, normal, contact, bentNormalAO);
         // Covered black still contributes its full share of the coverage.
-        float coverage = saturate(coveredWeight / max(interpolationWeight, MinProbeInterpolationWeight));
+        float coverageDenom = usedCurvatureFallback
+            ? max(interpolationWeight, 1e-5)
+            : max(interpolationWeight, MinProbeInterpolationWeight);
+        float coverage = saturate(coveredWeight / coverageDenom);
         result = float4(min(irradiance / coveredWeight, 65000.0), coverage);
     }
     if (_SdfProbeResolveRepairMode != 0u && (totalWeight < MinProbeInterpolationWeight || result.a < 0.08))

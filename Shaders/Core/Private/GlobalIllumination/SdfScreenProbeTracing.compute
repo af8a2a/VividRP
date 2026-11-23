@@ -845,7 +845,9 @@ ProbeRaySample TraceProbeRay(uint2 tile, uint ray, uint seed, uint2 screenSize,
     float3 worldRadiance = 0.0;
     float worldDistance = 0.0;
     float fullLimit = _SdfScreenProbeFullSphere != 0u ? max(_SdfFarTraceDistance, _SdfDiffuseMaxDistance) : _SdfDiffuseMaxDistance;
-    float3 cachePosition = _SdfLumenScreenTrace != 0u ? position : origin;
+    // Match MarkWorldProbeDemand's normal-biased query coordinate so walls near clipmap cell boundaries
+    // never check or sample an unrequested cell behind the wall.
+    float3 cachePosition = origin;
     bool traced;
     // A missing directional texel retries the same traversal out to the far limit.
     // Keep one traversal body in the shader for both ranges.
@@ -925,7 +927,7 @@ void TraceProbe(uint3 id)
 
     float3x3 basis = DiffuseProbeFrame(normal);
     float3 origin = position + normal * _SdfDiffuseRayBias;
-    uint worldLevel = GetWorldCoverage(_SdfLumenScreenTrace != 0u ? position : origin);
+    uint worldLevel = GetWorldCoverage(origin);
     #if !defined(VIVID_SDF_SCREEN_ONLY)
         VividMeshSdfReceiver receiver = (VividMeshSdfReceiver)0;
     #endif
@@ -1191,10 +1193,12 @@ void CompactScreenProbeTracesCS(uint2 tile : SV_GroupID, uint ray : SV_GroupInde
             probe.worldLevel = WorldClipmaps;
             if (_SdfScreenProbeFullSphere != 0u && _SdfFarTraceDistance > 0.0)
             {
-                uint level = GetRadianceProbeClipmap(probe.position, 0.0f);
+                // Match MarkWorldProbeDemand's normal-biased coordinate to prevent cell-boundary eviction thrashing.
+                float3 worldCachePos = probe.position + probe.normal * _SdfDiffuseRayBias;
+                uint level = GetRadianceProbeClipmap(worldCachePos, 0.0f);
                 if (level < WorldClipmaps && _SdfFarTraceDistance > WorldNearDistance(level))
                 {
-                    float3 grid = GetRadianceProbeCoordFloat(probe.position, level) - 0.5f;
+                    float3 grid = GetRadianceProbeCoordFloat(worldCachePos, level) - 0.5f;
                     int3 lower = int3(floor(grid));
                     bool validWorld = true;
                     [unroll] for (uint c = 0u; c < 8u; ++c)
@@ -1248,9 +1252,10 @@ void CompactScreenProbeTracesCS(uint2 tile : SV_GroupID, uint ray : SV_GroupInde
             ProbeRaySample worldResult = SampleCompactRay(tile, ray, SharedCompactProbe.normal);
             float4 worldSample = 0.0;
             bool worldValid = true;
+            float3 worldCachePos = SharedCompactProbe.position + SharedCompactProbe.normal * _SdfDiffuseRayBias;
             [loop] for (uint c = 0u; c < 8u; ++c)
             {
-                if (!SampleWorldCacheCorner(SharedCompactProbe.position, worldResult.direction, SharedCompactProbe.worldLevel,
+                if (!SampleWorldCacheCorner(worldCachePos, worldResult.direction, SharedCompactProbe.worldLevel,
                     SharedWorldLower, SharedWorldAlpha, c, SharedWorldSlots[c], worldSample))
                 {
                     worldValid = false;
@@ -1420,7 +1425,7 @@ void TraceGlobalSdfCompactedCS(uint2 group : SV_GroupID, uint lane : SV_GroupInd
     {
         traced = TraceProbeGlobal(origin, result.direction, max(screenStart, detailEnd), limit, hit);
         if (!useWorld || attempt != 0u || traced) break;
-        if (SampleWorldCache(probe.position, result.direction, probe.worldLevel, worldRadiance, worldDistance)) break;
+        if (SampleWorldCache(origin, result.direction, probe.worldLevel, worldRadiance, worldDistance)) break;
 
         // The serial path repeats Mesh SDF first. Reuse its miss only if the interval is identical.
         float fullDetailEnd = min(fullLimit, _SdfMeshDetailDistance);
@@ -1916,7 +1921,8 @@ void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
     float4 startClip = mul(_SdfDiffuseVP, float4(origin, 1.0));
     if (any(startClip.xy < -startClip.w) || any(startClip.xy > startClip.w)) return;
 
-    uint level = GetWorldCoverage(position);
+    // Match MarkWorldProbeDemand's normal-biased query position so ScreenTrace and WorldCache share identical coverage.
+    uint level = GetWorldCoverage(position + normal * _SdfDiffuseRayBias);
     float maxDistance = max(_SdfDiffuseMaxDistance, _SdfFarTraceDistance);
     float traceDistance = level < WorldClipmaps ? min(maxDistance, WorldNearDistance(level)) : maxDistance;
     float thicknessScale = 1.0;

@@ -69,9 +69,10 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
         float worldDistance;
         float2 offsetInTexel = GetScreenProbeTexelCenter(tile, ProbeSeed(tile));
         float3 worldDirection = ProbeSphereDirection((float2(coord) + offsetInTexel) / 8.0);
-        uint worldLevel = _SdfDirectionalWorldGuide != 0u && valid ? GetWorldCoverage(position) : WorldClipmaps;
+        float3 worldCachePos = position + normal * _SdfDiffuseRayBias;
+        uint worldLevel = _SdfDirectionalWorldGuide != 0u && valid ? GetWorldCoverage(worldCachePos) : WorldClipmaps;
         if (worldLevel < WorldClipmaps
-            && SampleWorldCache(position, worldDirection, worldLevel, worldLight, worldDistance))
+            && SampleWorldCache(worldCachePos, worldDirection, worldLevel, worldLight, worldDistance))
             lighting += (1.0 - count * 0.25) * dot(worldLight, float3(0.2126, 0.7152, 0.0722));
         else
             lighting = 1.0;

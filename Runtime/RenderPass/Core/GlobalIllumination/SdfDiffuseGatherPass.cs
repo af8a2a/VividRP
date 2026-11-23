@@ -4423,6 +4423,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, DirectionalPreviousId,
                 hasHistory ? m_PreviousDirectionalFiltered.innerHandle : black);
             bool worldGuide = m_DirectionalHierarchicalGuide && m_FarAtlas.IsValid() && (m_FullSphere || m_FarHitIds.IsValid());
+            cmd.SetComputeFloatParam(m_ImportanceSamplingCompute, RayBiasId, m_Bias);
             cmd.SetComputeFloatParam(m_ImportanceSamplingCompute, FarDistanceId, worldGuide ? m_FarDistance : 0f);
             if (worldGuide)
                 cmd.SetComputeVectorParam(m_ImportanceSamplingCompute, FarWindowId,

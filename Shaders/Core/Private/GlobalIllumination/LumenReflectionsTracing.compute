@@ -797,12 +797,12 @@ void TraceReflectionVoxels(uint2 ReflectionTracingCoord, float TraceHitDistance)
         bool bSampledWorldCache = false;
         if (_LumenReflectionUseWorldCache != 0u)
         {
-            uint WorldLevel = GetWorldCoverage(WorldPosition);
+            uint WorldLevel = GetWorldCoverage(SamplePosition);
             if (WorldLevel < WorldClipmaps)
             {
                 float3 CacheRadiance;
                 float CacheDistance;
-                if (SampleWorldCache(WorldPosition, RayData.Direction, WorldLevel, CacheRadiance, CacheDistance))
+                if (SampleWorldCache(SamplePosition, RayData.Direction, WorldLevel, CacheRadiance, CacheDistance))
                 {
                     Radiance = CacheRadiance;
                     FinalHitDistance = CacheDistance;

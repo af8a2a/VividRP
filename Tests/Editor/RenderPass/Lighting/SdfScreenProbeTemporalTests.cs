@@ -565,7 +565,7 @@ namespace VividRP.Editor.Tests
                 "Dynamic lighting flag must not hard-clamp rough specular history to single-frame probe dropouts.");
 
             // Sustained new lighting over 10 frames must still converge smoothly without excessive lag.
-            TemporalOutput sustained = oneFrame;
+            var sustained = oneFrame;
             for (int f = 0; f < 10; f++)
             {
                 sustained = fixture.Step(

@@ -495,6 +495,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RoughSpecularTemporal_StaticCameraSuppressesProbeFlickerBoiling()
+        {
+            RequireComputeAndReversedZ();
+            int center = 8 * 16 + 8;
+            var wallNormal = new Vector3(0f, 0f, -1f);
+
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.4f, 0.4f, 0.4f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(2.0f, 2.0f, 2.0f, 0.0f));
+            for (int f = 0; f < 12; f++)
+            {
+                fixture.Step(hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                    readResult: false, reprojectionFlags: 8, roughSpecularEnabled: true);
+            }
+
+            // Simulate a single-frame 16x16 Screen Probe jitter drop across the entire 3x3 pixel neighborhood
+            // under a static camera and static lighting (bit 3 = CAMERA_STATIC, bit 2 = 0, parallax = 0).
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.4f, 0.4f, 0.4f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(0.15f, 0.15f, 0.15f, 0.0f));
+            var output = fixture.Step(
+                hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                readResult: true, reprojectionFlags: 8, roughSpecularEnabled: true);
+
+            Assert.That(output.RoughSpecularRgba[center * 4], Is.GreaterThan(1.80f),
+                "Static camera rough specular history must not collapse on probe-wide single-frame flicker.");
+        }
+
+        [Test]
         public void DynamicLightingFastUpdateWindow_EngagesOnlyOnLightingChangesAndDetectsCameraMotion()
         {
             Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: false, lightingChanged: true), Is.Zero);

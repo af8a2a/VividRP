@@ -809,7 +809,8 @@ float3 ClampRoughSpecularHistory(
     float3 CurrentPreExposed,
     float3 HistoryPreExposed,
     float SigmaScale,
-    float ParallaxAmount)
+    float ParallaxAmount,
+    float CoherentClampGate)
 {
     float3 centerYCoCg = SdfHistoryYCoCg(TonemapSdfHistory(CurrentPreExposed));
     float3 sum = centerYCoCg;
@@ -839,12 +840,16 @@ float3 ClampRoughSpecularHistory(
     float3 stddev = sqrt(max(sumSq * invCount - mean * mean, 0.0f));
     float3 historyYCoCg = SdfHistoryYCoCg(TonemapSdfHistory(HistoryPreExposed));
 
-    float3 softExtent = max(stddev * (SigmaScale + 0.5f), float3(0.04f, 0.025f, 0.025f) + 0.06f * mean.x);
-    float3 excess = max(0.0f, abs(historyYCoCg - mean) - softExtent);
-    float relExcess = Max3(excess.x, excess.y, excess.z) / max(0.05f, max(mean.x, historyYCoCg.x));
-    float neighborhoodNoise = stddev.x / max(mean.x, 0.05f);
-    float coherence = 1.0f - smoothstep(0.20f, 0.50f, neighborhoodNoise);
-    float coherentShift = smoothstep(0.15f, 0.50f, relExcess) * coherence;
+    float coherentShift = 0.0f;
+    if (CoherentClampGate > 0.0f)
+    {
+        float3 softExtent = max(stddev * (SigmaScale + 0.5f), float3(0.04f, 0.025f, 0.025f) + 0.06f * mean.x);
+        float3 excess = max(0.0f, abs(historyYCoCg - mean) - softExtent);
+        float relExcess = Max3(excess.x, excess.y, excess.z) / max(0.05f, max(mean.x, historyYCoCg.x));
+        float neighborhoodNoise = stddev.x / max(mean.x, 0.05f);
+        float coherence = 1.0f - smoothstep(0.20f, 0.50f, neighborhoodNoise);
+        coherentShift = smoothstep(0.15f, 0.50f, relExcess) * coherence * CoherentClampGate;
+    }
     float clampStrength = max(ParallaxAmount, coherentShift);
     if (clampStrength <= 0.0f)
         return HistoryPreExposed;
@@ -1460,13 +1465,25 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
             }
             if (steadyStaticPixel)
                 specPriorFrames = min(specPriorFrames * 2.0f, 24.0f);
-            float sigmaScale = lerp(1.5f, 2.25f, roughness);
-            float3 clampedRoughSpecHistory = ClampRoughSpecularHistory(
-                localId.xy,
-                currentRoughSpecPreExposed,
-                history.roughSpecular,
-                sigmaScale,
-                parallaxAmount);
+            // Only engage 3x3 coherent-shift clamping on dynamic lighting changes, moving lighting, or real view parallax;
+            // on static cameras, 16x16 Screen Probe jitter shifts all 9 pixels in a 3x3 neighborhood together and would
+            // otherwise reset 24-frame rough specular history on single-probe flicker (causing boiling on curved props).
+            float coherentClampGate = (((_SdfTemporalReprojectionFlags & 4u) != 0u) || fastUpdate > 0.0f)
+                ? 1.0f
+                : smoothstep(0.02f, 0.12f, parallaxAmount);
+            float3 clampedRoughSpecHistory = history.roughSpecular;
+            [branch]
+            if (parallaxAmount > 0.0f || coherentClampGate > 0.0f)
+            {
+                float sigmaScale = lerp(1.5f, 2.25f, roughness);
+                clampedRoughSpecHistory = ClampRoughSpecularHistory(
+                    localId.xy,
+                    currentRoughSpecPreExposed,
+                    history.roughSpecular,
+                    sigmaScale,
+                    parallaxAmount,
+                    coherentClampGate);
+            }
             float roughSpecWeight = ScreenProbeCurrentSampleWeight(effectiveLightingValid, specPriorFrames);
             blendedRoughSpecPreExposed = lerp(clampedRoughSpecHistory, currentRoughSpecPreExposed, roughSpecWeight);
             // Sky visibility is geometric occlusion (view-independent), so accumulate with Diffuse GI weight.

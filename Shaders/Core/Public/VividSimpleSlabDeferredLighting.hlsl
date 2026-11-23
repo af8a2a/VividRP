@@ -69,12 +69,15 @@ float3 VividSampleSimpleSlabEnvironment(VividLightingLoopContext lightLoop,
 {
     float3 radiance = VividSampleSkyIBL(directionWS, perceptualRoughness);
     float lumenFadeAlpha = 0.0f;
+    // Only fall back to unoccluded Sky IBL when GI coverage actually approaches zero;
+    // linearly lerping Sky IBL on small coverage dips (e.g. 0.95..0.99) leaks bright noon sky into shadowed indoor metals.
+    float roughSpecCoverage = smoothstep(0.0f, 0.10f, realtimeGiCoverage);
     if (useLumenSpecular)
     {
         float effectiveRoughness = ApplyLumenReflectionSmoothBias(perceptualRoughness);
         lumenFadeAlpha = LumenCombineReflectionsAlpha(effectiveRoughness, false);
         float3 baseEnv = (useRealtimeRoughSpecular && realtimeGiCoverage > 0.0f)
-            ? lerp(radiance, realtimeRoughSpecular.rgb, saturate(realtimeGiCoverage))
+            ? lerp(radiance, realtimeRoughSpecular.rgb, roughSpecCoverage)
             : radiance;
         if (lumenFadeAlpha > 0.0f)
         {
@@ -89,7 +92,7 @@ float3 VividSampleSimpleSlabEnvironment(VividLightingLoopContext lightLoop,
     {
         float sharpSkyWeight = (1.0f - smoothstep(0.10f, 0.40f, perceptualRoughness)) * saturate(realtimeRoughSpecular.a);
         float3 occludedEnvironment = lerp(realtimeRoughSpecular.rgb, radiance, sharpSkyWeight);
-        radiance = lerp(radiance, occludedEnvironment, saturate(realtimeGiCoverage));
+        radiance = lerp(radiance, occludedEnvironment, roughSpecCoverage);
     }
     float probeRemain = 1.0f - lumenFadeAlpha;
     float3 weightedProbeRadiance;

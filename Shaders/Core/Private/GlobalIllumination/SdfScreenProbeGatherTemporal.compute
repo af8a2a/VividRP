@@ -1437,9 +1437,16 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
             && numFramesAccumulated >= _SdfPixelHistoryMaxAge * 0.9f;
         float diffusePriorFrames = steadyStaticPixel ? min(numFramesAccumulated * 2.5f, 32.0f) : numFramesAccumulated;
         currentWeight = ScreenProbeCurrentSampleWeight(effectiveLightingValid, diffusePriorFrames);
-        float3 coveredPreExposed = lerp(rectified * history.coverage, currentPreExposed * result.a, currentWeight);
-        result.a = lerp(history.coverage, result.a, currentWeight);
-        blendedPreExposed = min(coveredPreExposed / max(result.a, 1e-5), 65000.0);
+        float currentCoverage = result.a;
+        float3 coveredPreExposed = lerp(rectified * history.coverage, currentPreExposed * currentCoverage, currentWeight);
+        float rawBlendedCoverage = lerp(history.coverage, currentCoverage, currentWeight);
+        float blendedCoverage = rawBlendedCoverage;
+        // Prevent 8-bit PackScreenProbePixelHistory quantization from stalling recovery below 1.0
+        // when steady-state currentWeight * (1 - history.coverage) < 0.5 / 255.
+        if (currentCoverage >= 1.0f - (0.5f / 255.0f) && blendedCoverage > history.coverage && blendedCoverage < 1.0f)
+            blendedCoverage = min(1.0f, max(blendedCoverage, history.coverage + (1.0f / 255.0f)));
+        result.a = blendedCoverage;
+        blendedPreExposed = min(coveredPreExposed / max(rawBlendedCoverage, 1e-5), 65000.0);
     }
 
     if (_SdfRoughSpecularEnabled != 0u)

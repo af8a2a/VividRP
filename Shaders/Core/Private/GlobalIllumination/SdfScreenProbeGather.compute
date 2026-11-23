@@ -1117,7 +1117,11 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     {
         float3 irradiance = ResolveScreenProbeIrradiance(sh, normal, contact, bentNormalAO);
         // Covered black still contributes its full share of the coverage.
-        float coverageDenom = usedCurvatureFallback
+        // Normalize by actual interpolationWeight whenever full-sphere probes or curvature fallback supply
+        // valid covered radiance; validity (totalWeight >= MinProbeInterpolationWeight) is tracked separately
+        // via moving (LightIsMoving). Clamping coverageDenom up to MinProbeInterpolationWeight in the
+        // [0.0001, 0.01) band creates a non-monotonic coverage cliff on curved surfaces as probe jitter moves.
+        float coverageDenom = (usedCurvatureFallback || _SdfScreenProbeFullSphere != 0u)
             ? max(interpolationWeight, 1e-5)
             : max(interpolationWeight, MinProbeInterpolationWeight);
         float coverage = saturate(coveredWeight / coverageDenom);

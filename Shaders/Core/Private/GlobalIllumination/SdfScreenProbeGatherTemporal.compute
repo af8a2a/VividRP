@@ -1472,15 +1472,16 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
             }
             if (steadyStaticPixel)
                 specPriorFrames = min(specPriorFrames * 2.0f, 24.0f);
-            // Only engage 3x3 coherent-shift clamping on dynamic lighting changes, moving lighting, or real view parallax;
-            // on static cameras, 16x16 Screen Probe jitter shifts all 9 pixels in a 3x3 neighborhood together and would
-            // otherwise reset 24-frame rough specular history on single-probe flicker (causing boiling on curved props).
-            float coherentClampGate = (((_SdfTemporalReprojectionFlags & 4u) != 0u) || fastUpdate > 0.0f)
-                ? 1.0f
-                : smoothstep(0.02f, 0.12f, parallaxAmount);
+            else if ((_SdfTemporalReprojectionFlags & 4u) != 0u)
+                specPriorFrames = min(specPriorFrames, lerp(4.0f, 8.0f, roughness));
+            // Only engage 3x3 neighborhood clamping on real view parallax (where reflections move across surfaces).
+            // Under dynamic lighting changes on a static camera, 16x16 Screen Probe jitter shifts all 9 pixels in a
+            // 3x3 neighborhood together; hard-clamping history to a single-frame box turns curved metallic props into
+            // violent single-frame flicker. Lighting responsiveness is instead driven smoothly via specPriorFrames.
+            float coherentClampGate = smoothstep(0.02f, 0.12f, parallaxAmount);
             float3 clampedRoughSpecHistory = history.roughSpecular;
             [branch]
-            if (parallaxAmount > 0.0f || coherentClampGate > 0.0f)
+            if (parallaxAmount > 0.0f)
             {
                 float sigmaScale = lerp(1.5f, 2.25f, roughness);
                 clampedRoughSpecHistory = ClampRoughSpecularHistory(

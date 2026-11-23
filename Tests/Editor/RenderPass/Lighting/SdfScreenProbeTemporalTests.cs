@@ -531,6 +531,52 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RoughSpecularTemporal_DynamicLightingChangeSmoothlyConvergesWithoutProbeCollapse()
+        {
+            RequireComputeAndReversedZ();
+            int center = 8 * 16 + 8;
+            var wallNormal = new Vector3(0f, 0f, -1f);
+
+            using var fixture = new TemporalFixture(16, 16, useMoments: false);
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.4f, 0.4f, 0.4f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(2.0f, 2.0f, 2.0f, 0.0f));
+            for (int f = 0; f < 12; f++)
+            {
+                fixture.Step(hasHistory: f > 0, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                    readResult: false, reprojectionFlags: 8, roughSpecularEnabled: true);
+            }
+
+            // During dynamic lighting changes (bit 2 = 4) on a static camera (bit 3 = 8, parallax = 0),
+            // a single-frame 16x16 probe-wide dropout must NOT hard-clamp history to 0.15 in one frame.
+            fixture.SetCurrentFrame(
+                (_, _) => 6.0f,
+                (_, _) => wallNormal,
+                (_, _) => new Color(0.4f, 0.4f, 0.4f, 1f),
+                moving: 0.004f,
+                roughSpecularAtPixel: (_, _) => new Color(0.15f, 0.15f, 0.15f, 0.0f));
+            var oneFrame = fixture.Step(
+                hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                readResult: true, reprojectionFlags: 4 | 8, roughSpecularEnabled: true);
+            Assert.That(oneFrame.RoughSpecularRgba[center * 4], Is.GreaterThan(1.50f),
+                "Dynamic lighting flag must not hard-clamp rough specular history to single-frame probe dropouts.");
+
+            // Sustained new lighting over 10 frames must still converge smoothly without excessive lag.
+            TemporalOutput sustained = oneFrame;
+            for (int f = 0; f < 10; f++)
+            {
+                sustained = fixture.Step(
+                    hasHistory: true, jitterDeltaUv: Vector2.zero, clampEnabled: false,
+                    readResult: f == 9, reprojectionFlags: 4 | 8, roughSpecularEnabled: true);
+            }
+            Assert.That(sustained.RoughSpecularRgba[center * 4], Is.LessThan(0.65f),
+                "Dynamic lighting rough specular must still converge promptly over sustained lighting changes.");
+        }
+
+        [Test]
         public void DynamicLightingFastUpdateWindow_EngagesOnlyOnLightingChangesAndDetectsCameraMotion()
         {
             Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: false, lightingChanged: true), Is.Zero);

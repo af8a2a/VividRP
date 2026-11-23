@@ -180,6 +180,18 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Refine a hierarchy of octahedral directions. Use Far Radiance Cache, when enabled, if screen probe history is unavailable.")]
         public BoolParameter screenProbeHierarchicalGuide = new(false);
 
+        [Tooltip("Concentrate Screen Probe rays onto high-variance, high-contribution directions via multi-level structured importance sampling and cull unneeded back-facing rays on converged probes.")]
+        public BoolParameter screenProbeAdaptiveRayBudget = new(true);
+
+        [Tooltip("Maximum structured importance sampling subdivision depth for full-sphere Screen Probes (1 = up to 4×, 2 = up to 16× on high-variance peaks).")]
+        public ClampedIntParameter screenProbeImportanceSubdivisionLevels = new(2, 1, 2);
+
+        [Tooltip("Weight of directional radiance standard deviation (temporal + octahedral angular) added to mean radiance in the Screen Probe importance PDF.")]
+        public ClampedFloatParameter screenProbeImportanceVarianceWeight = new(1.0f, 0.0f, 4.0f);
+
+        [Tooltip("Minimum active ray budget fraction (relative to 64 rays/probe) for converged low-variance probes. Active front-facing cells are always preserved.")]
+        public ClampedFloatParameter screenProbeMinAdaptiveRayFraction = new(0.5f, 0.25f, 1.0f);
+
         [Tooltip("Trace one additional probe per tile with weak geometric support. Enabled by default with Screen Probe Gather.")]
         public BoolParameter adaptiveScreenProbes = new(false);
 

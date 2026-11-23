@@ -4,10 +4,16 @@
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfRadianceCacheCommon.hlsl"
 #include "SdfDiffuseDirectionalCache.hlsl"
+#include "../../Public/AutoExposure.hlsl"
 
 uint _SdfDirectionalWorldGuide;
 uint _SdfDirectionalHasHistory;
 uint _SdfDirectionalHasProposalHistory;
+uint _SdfImportanceAdaptiveBudget;
+uint _SdfImportanceMaxLevel;
+float _SdfImportanceVarianceWeight;
+float _SdfImportanceMinRayFraction;
+uint _SdfImportanceBudgetFlags;
 Texture2D<float4> _SdfDirectionalProposalHistory;
 Texture2D<float4> _SdfDirectionalPrevious;
 
@@ -16,9 +22,19 @@ RWTexture2D<float4> _SdfDirectionalGuideOutput;
 bool FindDirectionalWorldProbe(float3 position, float3 normal, out int3 cell);
 float DirectionalWorldImportance(int3 cell, float3 offset, float3 direction);
 groupshared float4 SphereReceiverNormals[64];
+groupshared float SphereLighting[64];
 groupshared float SphereLuminanceSum[64];
 groupshared float SphereScore[64];
 groupshared uint SphereSorted[64];
+groupshared float4 SphereProbeStats[64];
+groupshared uint4 SphereSubdivisionPlan;
+
+uint WrapSphereBin(int2 q)
+{
+    if (q.x < 0 || q.x > 7) q = int2(clamp(q.x, 0, 7), 7 - q.y);
+    if (q.y < 0 || q.y > 7) q = int2(7 - q.x, clamp(q.y, 0, 7));
+    return uint(q.x + (q.y << 3));
+}
 
 [numthreads(8, 8, 1)]
 void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
@@ -41,6 +57,7 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
     SphereReceiverNormals[lane] = supported ? float4(sampleNormal, 1.0) : 0.0;
     float3 direction = ProbeSphereDirection((float2(lane & 7u, lane >> 3u) + 0.5) / 8.0);
     float lighting = 0.0;
+    float lightingSq = 0.0;
     float count = 0.0;
     if (valid && _SdfDirectionalHasHistory != 0u)
     {
@@ -57,12 +74,16 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
                 if (g.w < 0.0 || exp2(-10000.0 * plane * plane) <= 0.1)
                     continue;
                 float3 L = _SdfDirectionalPrevious.Load(int3(ProbeTraceAddress(neighbor, lane), 0)).rgb;
-                lighting += max(dot(L * _SdfHistoryLightScale.rgb, float3(0.2126, 0.7152, 0.0722)), 0.0);
+                float lum = max(dot(L * _SdfHistoryLightScale.rgb, float3(0.2126, 0.7152, 0.0722)), 0.0);
+                lighting += lum;
+                lightingSq += lum * lum;
                 count++;
             }
         }
     }
+    float historyCount = count;
     lighting /= max(count, 1.0);
+    float temporalVar = count >= 2.0 ? max(lightingSq / count - lighting * lighting, 0.0) : 0.0;
     if (count < 4.0)
     {
         float3 worldLight;
@@ -73,20 +94,29 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
         uint worldLevel = _SdfDirectionalWorldGuide != 0u && valid ? GetWorldCoverage(worldCachePos) : WorldClipmaps;
         if (worldLevel < WorldClipmaps
             && SampleWorldCache(worldCachePos, worldDirection, worldLevel, worldLight, worldDistance))
-            lighting += (1.0 - count * 0.25) * dot(worldLight, float3(0.2126, 0.7152, 0.0722));
+            lighting += (1.0 - count * 0.25) * max(dot(worldLight, float3(0.2126, 0.7152, 0.0722)), 0.0);
         else
             lighting = 1.0;
     }
-    SphereLuminanceSum[lane] = lighting;
+    SphereLighting[lane] = lighting;
     GroupMemoryBarrierWithGroupSync();
-    [unroll]
-    for (uint step = 32u; step > 0u; step >>= 1u)
+
+    // Estimate self-gated angular edge contrast across the four equal-area octahedral neighbors
+    // plus temporal cross-probe variance. Bounding angular contrast by local radiance prevents
+    // zero-radiance shadow bins from stealing rays away from bright light sources.
+    bool adaptive = _SdfImportanceAdaptiveBudget != 0u;
+    float angularStd = 0.0;
+    if (adaptive)
     {
-        if (lane < step)
-            SphereLuminanceSum[lane] += SphereLuminanceSum[lane + step];
-        GroupMemoryBarrierWithGroupSync();
+        float d0 = SphereLighting[WrapSphereBin(int2(coord) + int2(-1, 0))] - lighting;
+        float d1 = SphereLighting[WrapSphereBin(int2(coord) + int2(1, 0))] - lighting;
+        float d2 = SphereLighting[WrapSphereBin(int2(coord) + int2(0, -1))] - lighting;
+        float d3 = SphereLighting[WrapSphereBin(int2(coord) + int2(0, 1))] - lighting;
+        angularStd = min(sqrt(0.25 * (d0 * d0 + d1 * d1 + d2 * d2 + d3 * d3)), lighting);
     }
-    float probability = lighting / max(SphereLuminanceSum[0], 0.0001);
+    float stdDev = sqrt(temporalVar + angularStd * angularStd);
+    float importance = adaptive ? (lighting + _SdfImportanceVarianceWeight * stdDev) : lighting;
+
     // SH projection is linear. Average the diffuse transfer of the supported material normals.
     float brdf = 0.0, normalCount = 0.0;
     [loop]
@@ -98,8 +128,25 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
         normalCount += material.w;
     }
     brdf = max(brdf / max(normalCount, 1.0), 0.0);
+    bool activeCell = brdf >= 0.1;
+
+    SphereLuminanceSum[lane] = importance;
+    SphereProbeStats[lane] = activeCell
+        ? float4(1.0, lighting, lighting * lighting + temporalVar, historyCount) : 0.0;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint step = 32u; step > 0u; step >>= 1u)
+    {
+        if (lane < step)
+        {
+            SphereLuminanceSum[lane] += SphereLuminanceSum[lane + step];
+            SphereProbeStats[lane] += SphereProbeStats[lane + step];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float probability = importance / max(SphereLuminanceSum[0], 0.0001);
     float score = brdf * (64.0 * probability);
-    score = brdf >= 0.1 ? max(score, 0.1) : score;
+    score = activeCell ? max(score, 0.1) : score;
     SphereScore[lane] = score;
     GroupMemoryBarrierWithGroupSync();
     uint rank = 0u;
@@ -108,15 +155,104 @@ void PrepareSphereDirectionalGuide(uint3 group : SV_GroupID, uint lane : SV_Grou
         rank += SphereScore[i] < score || (SphereScore[i] == score && i > lane);
     SphereSorted[rank] = lane;
     GroupMemoryBarrierWithGroupSync();
-    uint code = lane;
-    uint packet = rank < 48u ? rank / 3u : 63u - rank;
-    if (valid && packet < 16u && SphereScore[SphereSorted[3u * packet + 2u]] < 0.1)
+
+    if (lane == 0u)
     {
-        uint parent = SphereSorted[63u - packet];
-        uint child = rank < 48u ? 2u + rank % 3u : 1u;
-        code = parent | (child << 6u);
+        uint culledCount = 0u;
+        while (culledCount < 64u && SphereScore[SphereSorted[culledCount]] < 0.1)
+            culledCount++;
+        uint activeCount = 64u - culledCount;
+        uint maxPackets = culledCount / 3u;
+        float probeImportance = 1.0;
+        uint budgetPackets = min(maxPackets, 16u);
+        if (adaptive)
+        {
+            float4 stats = SphereProbeStats[0];
+            float actN = max(stats.x, 1.0);
+            float meanLum = stats.y / actN;
+            float meanVar = max(stats.z / actN - meanLum * meanLum, 0.0);
+            float probeStd = sqrt(meanVar);
+            float probeCV = probeStd / max(meanLum, 0.001);
+            float preExpStd = probeStd * VividGetPreExposure();
+            float avgHistoryCount = stats.w / actN;
+            float energyFactor = smoothstep(0.12, 0.90, preExpStd);
+            float contrastFactor = smoothstep(1.6, 3.0, probeCV);
+            probeImportance = saturate(max(energyFactor, 0.85 * contrastFactor));
+            if (_SdfDirectionalHasHistory == 0u || avgHistoryCount < 3.0)
+                probeImportance = 1.0;
+            else if ((_SdfImportanceBudgetFlags & 1u) != 0u)
+                probeImportance = max(probeImportance, 0.75);
+
+            float minFrac = clamp(_SdfImportanceMinRayFraction, 0.25, 1.0);
+            float targetRays = lerp(64.0 * minFrac, 64.0, probeImportance);
+            uint desiredExtra = targetRays > float(activeCount) ? uint(floor(targetRays - float(activeCount))) : 0u;
+            budgetPackets = min(maxPackets, desiredExtra / 3u);
+        }
+
+        // Greedy two-pointer merge between sorted Level-0 scores and Level-1 scores (0.25 * parent),
+        // matching UE5 Lumen's SubdivideRaysSerialReference priority while staying strictly unbiased.
+        uint p1 = 0u;
+        uint p2 = 0u;
+        uint maxLevel = (adaptive && _SdfImportanceMaxLevel >= 2u) ? 2u : 1u;
+        [loop]
+        for (uint step = 0u; step < budgetPackets; ++step)
+        {
+            float scoreL0 = p1 < activeCount ? SphereScore[SphereSorted[63u - p1]] : -1.0;
+            float scoreL1 = (maxLevel >= 2u && (p2 >> 2u) < p1)
+                ? (0.25 * SphereScore[SphereSorted[63u - (p2 >> 2u)]]) : -1.0;
+            if (scoreL0 < 0.0 && scoreL1 < 0.0)
+                break;
+            if (scoreL1 > scoreL0)
+                p2++;
+            else
+                p1++;
+        }
+        SphereSubdivisionPlan = uint4(culledCount, p1, p2, asuint(valid ? probeImportance : 0.0));
     }
-    _SdfDirectionalGuideOutput[ProbeTraceAddress(tile, lane)] = float4(code, probability, score, 0.0);
+    GroupMemoryBarrierWithGroupSync();
+
+    uint culledCount = SphereSubdivisionPlan.x;
+    uint p1 = SphereSubdivisionPlan.y;
+    uint p2 = SphereSubdivisionPlan.z;
+    float probeImportance = asfloat(SphereSubdivisionPlan.w);
+    uint code = lane;
+    if (valid)
+    {
+        if (rank >= 64u - p1)
+        {
+            uint k = 63u - rank;
+            uint parent = SphereSorted[63u - k];
+            uint l1Idx = k << 2u;
+            code = l1Idx < p2
+                ? PackSphereRayCode(parent, 2u, PackSphereLevel2Sub(0u, 0u))
+                : PackSphereRayCode(parent, 1u, 0u);
+        }
+        else if (rank < 3u * p1)
+        {
+            uint k = rank / 3u;
+            uint c1 = 1u + (rank % 3u);
+            uint parent = SphereSorted[63u - k];
+            uint l1Idx = (k << 2u) + c1;
+            code = l1Idx < p2
+                ? PackSphereRayCode(parent, 2u, PackSphereLevel2Sub(c1, 0u))
+                : PackSphereRayCode(parent, 1u, c1);
+        }
+        else if (rank < 3u * (p1 + p2))
+        {
+            uint local = rank - 3u * p1;
+            uint l1Idx = local / 3u;
+            uint c2 = 1u + (local % 3u);
+            uint k = l1Idx >> 2u;
+            uint c1 = l1Idx & 3u;
+            uint parent = SphereSorted[63u - k];
+            code = PackSphereRayCode(parent, 2u, PackSphereLevel2Sub(c1, c2));
+        }
+        else if (rank < culledCount && adaptive)
+        {
+            code = SphereRayCulled;
+        }
+    }
+    _SdfDirectionalGuideOutput[ProbeTraceAddress(tile, lane)] = float4(code, probability, score, probeImportance);
 }
 
 uint PackDirectionalOctRect(uint4 rect)

@@ -180,6 +180,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DirectionalHasHistoryId = Shader.PropertyToID("_SdfDirectionalHasHistory");
         private static readonly int DirectionalGuideId = Shader.PropertyToID("_SdfDirectionalGuide");
         private static readonly int DirectionalGuideOutputId = Shader.PropertyToID("_SdfDirectionalGuideOutput");
+        private static readonly int ImportanceAdaptiveBudgetId = Shader.PropertyToID("_SdfImportanceAdaptiveBudget");
+        private static readonly int ImportanceMaxLevelId = Shader.PropertyToID("_SdfImportanceMaxLevel");
+        private static readonly int ImportanceVarianceWeightId = Shader.PropertyToID("_SdfImportanceVarianceWeight");
+        private static readonly int ImportanceMinRayFractionId = Shader.PropertyToID("_SdfImportanceMinRayFraction");
+        private static readonly int ImportanceBudgetFlagsId = Shader.PropertyToID("_SdfImportanceBudgetFlags");
         private static readonly int ProposalHistoryTextureId = Shader.PropertyToID("_SdfDirectionalProposalHistory");
         private static readonly int HasProposalHistoryId = Shader.PropertyToID("_SdfDirectionalHasProposalHistory");
         private static readonly int DirectionalRaysId = Shader.PropertyToID("_SdfDirectionalRays");
@@ -921,6 +926,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_AnchorStatisticsHistoryValid;
         private bool m_DirectionalCache, m_DirectionalGuide, m_DirectionalHistoryValid, m_DirectionalGuideHistoryValid;
         private bool m_DirectionalHierarchicalGuide, m_FullSphere, m_ProbeTemporal, m_DitherTraceDirections;
+        private bool m_AdaptiveRayBudget;
+        private int m_ImportanceMaxLevel;
+        private float m_ImportanceVarianceWeight, m_ImportanceMinRayFraction;
         private float m_MaxRayIntensity;
         private TextureHandle m_ProbeDirectionNoise, m_ScatterNoise;
         private TextureHandle m_SpatialFilterScalarNoise, m_SpatialFilterVectorNoise;
@@ -1615,6 +1623,10 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             m_DirectionalGuide = m_DirectionalCache && (m_FullSphere ? m_SphereGuideKernel : m_DirectionalGuideKernel) >= 0 && settings.screenProbeSamplingGuide.value;
             m_DirectionalHierarchicalGuide = m_DirectionalGuide && (m_FullSphere || settings.screenProbeHierarchicalGuide.value);
+            m_AdaptiveRayBudget = m_FullSphere && m_DirectionalGuide && settings.screenProbeAdaptiveRayBudget.value;
+            m_ImportanceMaxLevel = settings.screenProbeImportanceSubdivisionLevels.value;
+            m_ImportanceVarianceWeight = settings.screenProbeImportanceVarianceWeight.value;
+            m_ImportanceMinRayFraction = settings.screenProbeMinAdaptiveRayFraction.value;
 #if UNITY_EDITOR
             m_FrozenGuideActive = !m_FullSphere && m_DirectionalGuide && EditorTraceCapture != null
                 && (EditorGatherHistoryDiagnostics & 8388608) != 0;
@@ -4436,6 +4448,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(m_ImportanceSamplingCompute, DirectionalHasMotionId, motion ? 1 : 0);
                 cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, MotionId, motion ? m_ScreenMotion.innerHandle : black);
                 cmd.SetComputeVectorParam(m_ImportanceSamplingCompute, JitterDeltaId, new Vector4(m_ScreenJitterDelta.x, m_ScreenJitterDelta.y, 0f, 0f));
+                cmd.SetComputeIntParam(m_ImportanceSamplingCompute, ImportanceAdaptiveBudgetId, m_AdaptiveRayBudget ? 1 : 0);
+                cmd.SetComputeIntParam(m_ImportanceSamplingCompute, ImportanceMaxLevelId, m_ImportanceMaxLevel);
+                cmd.SetComputeFloatParam(m_ImportanceSamplingCompute, ImportanceVarianceWeightId, m_ImportanceVarianceWeight);
+                cmd.SetComputeFloatParam(m_ImportanceSamplingCompute, ImportanceMinRayFractionId, m_ImportanceMinRayFraction);
+                int budgetFlags = (m_DynamicLightingFastUpdateActive || !m_TemporalCameraStatic) ? 1 : 0;
+                cmd.SetComputeIntParam(m_ImportanceSamplingCompute, ImportanceBudgetFlagsId, budgetFlags);
+                if (m_PreExposure != null)
+                    cmd.SetComputeBufferParam(m_ImportanceSamplingCompute, kernel, VividAutoExposureSystem.PreExposureBufferId, m_PreExposure);
                 cmd.SetComputeTextureParam(m_ImportanceSamplingCompute, kernel, DirectionalGuideOutputId, m_DirectionalGuideTexture.innerHandle);
                 cmd.DispatchCompute(m_ImportanceSamplingCompute, kernel, m_ProbeWidth, m_AtlasHeight, 1);
                 return;

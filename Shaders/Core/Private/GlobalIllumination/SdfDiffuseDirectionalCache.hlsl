@@ -244,16 +244,96 @@ float2 GetScreenProbeTexelCenter(uint2 tile, uint seed)
     return clamp(DirectionalTemporalSample(tile, 0u, seed), 1e-5, 1.0 - 1e-5);
 }
 
+// Multi-level Screen Probe ray code stored as an exact FP16 integer in [0, 2047]:
+//   [0,    63]   -> Level 0 (8x8,   1x):  bin = code,           subIndex = 0,              invPdf = 1.0
+//   [64,   319]  -> Level 1 (16x16, 4x):  bin = (code-64)&63,   subIndex = (code-64)>>6,   invPdf = 0.25
+//   [320,  1343] -> Level 2 (32x32, 16x): bin = (code-320)&63,  subIndex = (code-320)>>6,  invPdf = 0.0625
+//   2047         -> Culled ray (skipped in tracing and compositing)
+static const uint SphereRayLevel1Base = 64u;
+static const uint SphereRayLevel2Base = 320u;
+static const uint SphereRayCulled = 2047u;
+
+uint PackSphereLevel2Sub(uint level1Child, uint level2Child)
+{
+    uint subX = ((level1Child & 1u) << 1u) | (level2Child & 1u);
+    uint subY = ((level1Child >> 1u) << 1u) | (level2Child >> 1u);
+    return subX | (subY << 2u);
+}
+
+uint PackSphereRayCode(uint bin, uint level, uint subIndex)
+{
+    bin &= 63u;
+    if (level == 0u)
+        return bin;
+    if (level == 1u)
+        return SphereRayLevel1Base + (((subIndex & 3u) << 6u) | bin);
+    return SphereRayLevel2Base + (((subIndex & 15u) << 6u) | bin);
+}
+
+bool UnpackSphereRayCode(uint code, out uint bin, out uint level, out uint subIndex)
+{
+    if (code >= SphereRayCulled)
+    {
+        bin = 0u;
+        level = 0u;
+        subIndex = 0u;
+        return false;
+    }
+    if (code < SphereRayLevel1Base)
+    {
+        bin = code;
+        level = 0u;
+        subIndex = 0u;
+        return true;
+    }
+    if (code < SphereRayLevel2Base)
+    {
+        uint idx = code - SphereRayLevel1Base;
+        bin = idx & 63u;
+        level = 1u;
+        subIndex = idx >> 6u;
+        return true;
+    }
+    uint idx = code - SphereRayLevel2Base;
+    bin = idx & 63u;
+    level = 2u;
+    subIndex = idx >> 6u;
+    return true;
+}
+
+bool IsSphereRayCulled(uint2 tile, uint ray)
+{
+    if (_SdfScreenProbeFullSphere == 0u || _SdfDirectionalGuideEnabled == 0u)
+        return false;
+    uint code = uint(round(_SdfDirectionalGuide.Load(int3(ProbeTraceAddress(tile, ray), 0)).x));
+    return code >= SphereRayCulled;
+}
+
 float2 SphereRayTexel(uint2 tile, uint ray, uint seed, out uint bin, out float inverseRelativePdf)
 {
     uint code = _SdfDirectionalGuideEnabled != 0u
-        ? uint(_SdfDirectionalGuide.Load(int3(ProbeTraceAddress(tile, ray), 0)).x) : ray;
-    bin = code & 63u;
-    uint child = code >> 6u;
+        ? uint(round(_SdfDirectionalGuide.Load(int3(ProbeTraceAddress(tile, ray), 0)).x)) : ray;
+    uint level, subIndex;
+    if (!UnpackSphereRayCode(code, bin, level, subIndex))
+    {
+        inverseRelativePdf = 0.0;
+        return 0.0;
+    }
     float2 offset = GetScreenProbeTexelCenter(tile, seed);
-    if (child != 0u)
-        offset = 0.5 * (offset + float2((child - 1u) & 1u, (child - 1u) >> 1u));
-    inverseRelativePdf = child == 0u ? 1.0 : 0.25;
+    if (level == 1u)
+    {
+        offset = 0.5 * (offset + float2(subIndex & 1u, subIndex >> 1u));
+        inverseRelativePdf = 0.25;
+    }
+    else if (level == 2u)
+    {
+        offset = 0.25 * (offset + float2(subIndex & 3u, subIndex >> 2u));
+        inverseRelativePdf = 0.0625;
+    }
+    else
+    {
+        inverseRelativePdf = 1.0;
+    }
     return float2(bin & 7u, bin >> 3u) + offset;
 }
 

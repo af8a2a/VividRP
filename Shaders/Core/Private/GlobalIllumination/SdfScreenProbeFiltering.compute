@@ -306,9 +306,9 @@ void ScreenProbeCompositeTracesWithScatterCS(uint3 group : SV_GroupID, uint bin 
     if (bin < ProbeRayCount())
     {
         float4 sample = 0.0;
-        float4 metadata = 0.0;
+        float4 metadata = float4(SphereRayCulled, 0.0, 0.0, 0.0);
         float4 plane = 0.0;
-        if (geometry.w >= 0.0)
+        if (geometry.w >= 0.0 && !IsSphereRayCulled(tile, bin))
         {
             uint2 address = DirectionalAddress(tile, bin);
             sample = _SdfDirectionalRays.Load(int3(address, 0));

@@ -1,3 +1,4 @@
+#pragma use_dxc
 #pragma kernel ResolveSdfDiffuseGI
 #pragma kernel ScreenProbeIntegrateCS VIVID_SDF_PROBE_IRRADIANCE
 #pragma kernel ResolveSdfRestirOpenPBR VIVID_SDF_RESTIR_OPENPBR
@@ -28,6 +29,7 @@ RWTexture2D<float> _SdfResolvedMovingOutput;
 RWTexture2D<float4> _SdfRoughSpecularOutput;
 float4 _SdfProbeCameraPosition;
 uint _SdfWriteRoughSpecular;
+float _SdfRoughSpecMinRoughness;
 #endif
 
 // 0: baked fallback is available, 1: same-surface repair, 2: also trace screen radiance.
@@ -1035,32 +1037,18 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
         }
     }
     bool computeRoughSpecular = _SdfWriteRoughSpecular != 0u && _SdfScreenProbeFullSphere != 0u;
+    // Skip octahedral + directional SH rough specular evaluation when dedicated Lumen Reflections
+    // fully own the specular lobe (LumenCombineReflectionsAlpha == 1.0, roughness <= _SdfRoughSpecMinRoughness).
+    bool needRoughSpecularEval = computeRoughSpecular && roughness > _SdfRoughSpecMinRoughness;
     // Above roughness 0.55, shBlend == 1.0 (pure directional SH3) and sharpSkyWeight == 0.0 in deferred lighting,
     // so skipping the 16-tap octahedral fetches on rough surfaces is bit-equivalent for final shading.
-    bool sampleOctahedral = computeRoughSpecular && roughness < 0.55f;
-    float3 dominantDir = normal;
-    if (computeRoughSpecular && roughness < 0.999f)
+    bool sampleOctahedral = needRoughSpecularEval && roughness < 0.55f;
+    bool validInterpolation = totalWeight >= MinProbeInterpolationFallbackWeight || usedCurvatureFallback;
+    // Skip dead bilateral corners whose exp2(-200 * plane / depth) underflows below 1e-4 of totalWeight.
+    float minCornerWeight = usedCurvatureFallback ? 0.0f : totalWeight * 1e-4f;
+    if (validInterpolation)
     {
-        float3 viewDir = _SdfProbeCameraPosition.w > 0.5f
-            ? SafeNormalize(_SdfProbeCameraPosition.xyz - position)
-            : -_SdfProbeCameraForward.xyz;
-        float3 reflDir = reflect(-viewDir, normal);
-        float smoothness = saturate(1.0f - roughness);
-        float lerpFactor = smoothness * (sqrt(smoothness) + roughness);
-        dominantDir = SafeNormalize(lerp(normal, reflDir, lerpFactor));
-    }
-    uint2 octCells[4] = { uint2(0u, 0u), uint2(0u, 0u), uint2(0u, 0u), uint2(0u, 0u) };
-    float4 octWeights = 0.0f;
-    [branch]
-    if (sampleOctahedral)
-        PrepareScreenProbeOctahedralLookup(dominantDir, octCells, octWeights);
-    float3 specRadianceSum = 0.0f;
-    float specSkyVisSum = 0.0f;
-    float specWeightSum = 0.0f;
-    if (totalWeight >= MinProbeInterpolationFallbackWeight || usedCurvatureFallback)
-    {
-        // Skip dead bilateral corners whose exp2(-200 * plane / depth) underflows below 1e-4 of totalWeight.
-        float minCornerWeight = usedCurvatureFallback ? 0.0f : totalWeight * 1e-4f;
+        // Loop 1: Accumulate SH3 irradiance + moving weight without octahedral lookup registers live.
         // Blend all 4 geometry-weighted probes deterministically rather than stochastically dropping
         // 3 of 4 probes, eliminating Bernoulli speckle across steep sunlit-ledge gradients.
         [unroll]
@@ -1072,18 +1060,6 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
                 moving += samples.weights[i] * _SdfProbeMoving.Load(int3(probeTile, 0));
                 AccumulateScreenProbeIrradiance(probeTile, stride,
                     samples.weights[i], sh, coveredWeight);
-                [branch]
-                if (sampleOctahedral)
-                {
-                    bool octValid = false;
-                    float4 octSample = SampleScreenProbeOctahedralRadianceAndSky(probeTile, octCells, octWeights, octValid);
-                    if (octValid)
-                    {
-                        specRadianceSum += samples.weights[i] * octSample.rgb;
-                        specSkyVisSum += samples.weights[i] * octSample.a;
-                        specWeightSum += samples.weights[i];
-                    }
-                }
             }
         }
         moving /= interpolationWeight;
@@ -1146,17 +1122,63 @@ float4 IntegrateScreenProbeIrradiance(uint2 pixel, uint2 size, float3 position, 
     }
     if (computeRoughSpecular)
     {
-        // Wide GGX lobes on rough stone/fabric (roughness >= 0.45) span more than one 8x8 octahedral cell;
-        // smoothly blend into directional SH3 evaluated along dominantDir to prevent raw 8x8 texel noise and holes.
-        float3 directionalSh = coveredWeight > 0.0f
-            ? min(max(0.0f, EvaluateSdfProbeIrradiance(sh, dominantDir)) / coveredWeight, 65000.0f)
-            : result.rgb;
-        float shBlend = smoothstep(0.25f, 0.55f, roughness);
-        float3 roughSpecRadiance = specWeightSum > 1e-5f
-            ? lerp(specRadianceSum / specWeightSum, directionalSh, shBlend)
-            : directionalSh;
-        float skyVisibility = specWeightSum > 1e-5f ? saturate(specSkyVisSum / specWeightSum) : 0.0f;
-        roughSpecular = float4(min(roughSpecRadiance, 65000.0f), skyVisibility);
+        if (!needRoughSpecularEval)
+        {
+            // Dedicated Lumen Reflections have alpha == 1.0 here; write smooth diffuse fallback
+            // so neighboring temporal clamp pixels across the roughness border never see black.
+            roughSpecular = float4(result.rgb, 0.0f);
+        }
+        else
+        {
+            float3 dominantDir = normal;
+            if (roughness < 0.999f)
+            {
+                float3 viewDir = _SdfProbeCameraPosition.w > 0.5f
+                    ? SafeNormalize(_SdfProbeCameraPosition.xyz - position)
+                    : -_SdfProbeCameraForward.xyz;
+                float3 reflDir = reflect(-viewDir, normal);
+                float smoothness = saturate(1.0f - roughness);
+                float lerpFactor = smoothness * (sqrt(smoothness) + roughness);
+                dominantDir = SafeNormalize(lerp(normal, reflDir, lerpFactor));
+            }
+            float3 specRadianceSum = 0.0f;
+            float specSkyVisSum = 0.0f;
+            float specWeightSum = 0.0f;
+            [branch]
+            if (sampleOctahedral && validInterpolation)
+            {
+                uint2 octCells[4];
+                float4 octWeights;
+                PrepareScreenProbeOctahedralLookup(dominantDir, octCells, octWeights);
+                [unroll]
+                for (uint i = 0u; i < 4u; ++i)
+                {
+                    if (samples.weights[i] > minCornerWeight)
+                    {
+                        uint2 probeTile = uint2(samples.tileX[i], samples.tileY[i]);
+                        bool octValid = false;
+                        float4 octSample = SampleScreenProbeOctahedralRadianceAndSky(probeTile, octCells, octWeights, octValid);
+                        if (octValid)
+                        {
+                            specRadianceSum += samples.weights[i] * octSample.rgb;
+                            specSkyVisSum += samples.weights[i] * octSample.a;
+                            specWeightSum += samples.weights[i];
+                        }
+                    }
+                }
+            }
+            // Wide GGX lobes on rough stone/fabric (roughness >= 0.45) span more than one 8x8 octahedral cell;
+            // smoothly blend into directional SH3 evaluated along dominantDir to prevent raw 8x8 texel noise and holes.
+            float3 directionalSh = coveredWeight > 0.0f
+                ? min(max(0.0f, EvaluateSdfProbeIrradiance(sh, dominantDir)) / coveredWeight, 65000.0f)
+                : result.rgb;
+            float shBlend = smoothstep(0.25f, 0.55f, roughness);
+            float3 roughSpecRadiance = specWeightSum > 1e-5f
+                ? lerp(specRadianceSum / specWeightSum, directionalSh, shBlend)
+                : directionalSh;
+            float skyVisibility = specWeightSum > 1e-5f ? saturate(specSkyVisSum / specWeightSum) : 0.0f;
+            roughSpecular = float4(min(roughSpecRadiance, 65000.0f), skyVisibility);
+        }
     }
     return result;
 }
@@ -1170,11 +1192,18 @@ void ScreenProbeIntegrateCS(uint3 id : SV_DispatchThreadID)
 
     float3 position, normal;
     float roughness;
-    float4 lighting = 0.0;
-    float4 roughSpecular = 0.0;
-    float moving = 0.0;
-    if (LoadReceiverWithRoughness(id.xy, position, normal, roughness))
-        lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal, roughness, moving, roughSpecular);
+    if (!LoadReceiverWithRoughness(id.xy, position, normal, roughness))
+    {
+        _SdfResolvedMovingOutput[id.xy] = 0.0f;
+        _SdfDiffuseOutput[id.xy] = 0.0f;
+        if (_SdfWriteRoughSpecular != 0u)
+            _SdfRoughSpecularOutput[id.xy] = 0.0f;
+        return;
+    }
+
+    float4 roughSpecular = 0.0f;
+    float moving = 0.0f;
+    float4 lighting = IntegrateScreenProbeIrradiance(id.xy, size, position, normal, roughness, moving, roughSpecular);
     _SdfResolvedMovingOutput[id.xy] = moving;
     _SdfDiffuseOutput[id.xy] = lighting;
     if (_SdfWriteRoughSpecular != 0u)

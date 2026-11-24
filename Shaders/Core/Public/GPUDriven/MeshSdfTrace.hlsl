@@ -212,7 +212,12 @@ float VividMeshSdfSampleBrick(VividMeshSdfField field, uint3 dimensions, uint pa
         return VividMeshSdfSampleBlock(dimensions, field.wordOffset + page, voxel);
 
     uint across = (uint)_MeshSdfBrickAtlasSize.w;
-    uint3 tile = uint3(page % across, page / across % across, page / (across * across));
+    uint acrossSq = across * across;
+    uint sliceIdx = page / acrossSq;
+    uint rem = page - sliceIdx * acrossSq;
+    uint rowIdx = rem / across;
+    uint colIdx = rem - rowIdx * across;
+    uint3 tile = uint3(colIdx, rowIdx, sliceIdx);
     float3 coord = float3(tile * (VividMeshSdfBrickCells + 1u))
         + clamp(voxel, 0.0, float3(dimensions - 1u)) + 0.5;
     return _MeshSdfBrickAtlas.SampleLevel(sampler_LinearClamp, coord * _MeshSdfBrickAtlasSize.xyz, 0.0);
@@ -284,7 +289,11 @@ bool VividMeshSdfTraceBricks(VividMeshSdfField field, float3 entry, float3 direc
     float sampleT = 0.0;
     int samples = 0;
     float voxelSize = field.originAndVoxelSize.w;
+    float invVoxelSize = rcp(voxelSize);
     bool hardwareBrick = _MeshSdfBrickAtlasSize.w > 0.0;
+    uint atlasAcross = (uint)_MeshSdfBrickAtlasSize.w;
+    uint atlasAcrossSq = atlasAcross * atlasAcross;
+    float3 invAtlasSize = _MeshSdfBrickAtlasSize.xyz;
 #if defined(VIVID_DIFFUSE_MESH_SDF_TRACE)
     int maxSteps = hardwareBrick ? 48 : 192;
 #else
@@ -308,55 +317,96 @@ bool VividMeshSdfTraceBricks(VividMeshSdfField field, float3 entry, float3 direc
         {
             uint3 start = uint3(brick) * VividMeshSdfBrickCells;
             uint3 size = min(field.dimensions - start, VividMeshSdfBrickCells + 1u);
-            [loop]
-            while (sampleT <= brickExit)
+            if (hardwareBrick)
             {
-                if (samples++ >= maxSteps)
+                // Hoist tile coordinate integer divisions and UV scale out of the sphere-trace inner loop.
+                uint sliceIdx = page / atlasAcrossSq;
+                uint rem = page - sliceIdx * atlasAcrossSq;
+                uint rowIdx = rem / atlasAcross;
+                uint colIdx = rem - rowIdx * atlasAcross;
+                float3 tileOrigin = float3(uint3(colIdx, rowIdx, sliceIdx) * (VividMeshSdfBrickCells + 1u)) + 0.5f;
+                float3 brickMax = float3(size - 1u);
+                float3 brickEntry = entry - float3(start);
+                [loop]
+                while (sampleT <= brickExit)
                 {
-                    exhausted = true;
-                    return false;
-                }
-                float3 voxel = entry + sampleT * direction - start;
-                float signedDistance = VividMeshSdfSampleBrick(field, size, page, voxel);
-                float distanceInVoxels = abs(signedDistance) / voxelSize;
-#if defined(VIVID_DIFFUSE_MESH_SDF_TRACE)
-                float hitThreshold = clamp(0.075f + 0.015f * sampleT, 0.075f, 0.25f);
-#else
-                float hitThreshold = 0.075f;
-#endif
-                if (distanceInVoxels <= hitThreshold)
-                {
-                    hitT = sampleT;
-                    return true;
-                }
-                // Unit steps can cross the trilinear zero set. Retain an exit hit
-                // for shell receivers and recover the crossing within the bracket.
-                if (hardwareBrick && hasPrevious && (signedDistance < 0.0f) != (previousSignedDistance < 0.0f))
-                {
-#if defined(VIVID_DIFFUSE_MESH_SDF_TRACE)
-                    float denom = previousSignedDistance - signedDistance;
-                    float fracT = abs(denom) > 1e-6f ? saturate(previousSignedDistance / denom) : 0.5f;
-                    hitT = lerp(previousT, sampleT, fracT);
-                    return true;
-#else
-                    float a = previousT, b = sampleT;
-                    [loop] for (int refine = 0; refine < 5; ++refine)
+                    if (samples++ >= maxSteps)
                     {
-                        float middle = 0.5f * (a + b);
-                        float value = VividMeshSdfSample(field, (entry + middle * direction) * voxelSize);
-                        if ((value < 0.0f) == (previousSignedDistance < 0.0f))
-                            a = middle;
-                        else
-                            b = middle;
+                        exhausted = true;
+                        return false;
                     }
-                    hitT = 0.5f * (a + b);
-                    return true;
+                    float3 voxel = clamp(brickEntry + sampleT * direction, 0.0f, brickMax);
+                    float signedDistance = _MeshSdfBrickAtlas.SampleLevel(
+                        sampler_LinearClamp, (tileOrigin + voxel) * invAtlasSize, 0.0f);
+                    float distanceInVoxels = abs(signedDistance) * invVoxelSize;
+#if defined(VIVID_DIFFUSE_MESH_SDF_TRACE)
+                    float hitThreshold = clamp(0.075f + 0.015f * sampleT, 0.075f, 0.25f);
+#else
+                    float hitThreshold = 0.075f;
 #endif
+                    if (distanceInVoxels <= hitThreshold)
+                    {
+                        hitT = sampleT;
+                        return true;
+                    }
+                    // Unit steps can cross the trilinear zero set. Retain an exit hit
+                    // for shell receivers and recover the crossing within the bracket.
+                    if (hasPrevious && (signedDistance < 0.0f) != (previousSignedDistance < 0.0f))
+                    {
+#if defined(VIVID_DIFFUSE_MESH_SDF_TRACE)
+                        float denom = previousSignedDistance - signedDistance;
+                        float fracT = abs(denom) > 1e-6f ? saturate(previousSignedDistance / denom) : 0.5f;
+                        hitT = lerp(previousT, sampleT, fracT);
+                        return true;
+#else
+                        float a = previousT, b = sampleT;
+                        [loop] for (int refine = 0; refine < 5; ++refine)
+                        {
+                            float middle = 0.5f * (a + b);
+                            float value = VividMeshSdfSample(field, (entry + middle * direction) * voxelSize);
+                            if ((value < 0.0f) == (previousSignedDistance < 0.0f))
+                                a = middle;
+                            else
+                                b = middle;
+                        }
+                        hitT = 0.5f * (a + b);
+                        return true;
+#endif
+                    }
+                    hasPrevious = true;
+                    previousT = sampleT;
+                    previousSignedDistance = signedDistance;
+                    sampleT += distanceInVoxels;
                 }
-                hasPrevious = true;
-                previousT = sampleT;
-                previousSignedDistance = signedDistance;
-                sampleT += distanceInVoxels * stepFactor;
+            }
+            else
+            {
+                [loop]
+                while (sampleT <= brickExit)
+                {
+                    if (samples++ >= maxSteps)
+                    {
+                        exhausted = true;
+                        return false;
+                    }
+                    float3 voxel = entry + sampleT * direction - start;
+                    float signedDistance = VividMeshSdfSampleBlock(size, field.wordOffset + page, voxel);
+                    float distanceInVoxels = abs(signedDistance) * invVoxelSize;
+#if defined(VIVID_DIFFUSE_MESH_SDF_TRACE)
+                    float hitThreshold = clamp(0.075f + 0.015f * sampleT, 0.075f, 0.25f);
+#else
+                    float hitThreshold = 0.075f;
+#endif
+                    if (distanceInVoxels <= hitThreshold)
+                    {
+                        hitT = sampleT;
+                        return true;
+                    }
+                    hasPrevious = true;
+                    previousT = sampleT;
+                    previousSignedDistance = signedDistance;
+                    sampleT += distanceInVoxels * stepFactor;
+                }
             }
         }
         else
@@ -384,10 +434,12 @@ bool VividMeshSdfTraceInstanceTransform(VividMeshSdfField field, float4 worldToL
         dot(worldToLocal1.xyz, directionWS), dot(worldToLocal2.xyz, directionWS));
     // March in local units and convert back to the original ray parameter, including under non-uniform scale.
     float localUnitsPerWorldUnit = length(localDirection);
-    localDirection /= localUnitsPerWorldUnit;
+    float invLocalUnitsPerWorldUnit = rcp(localUnitsPerWorldUnit);
+    localDirection *= invLocalUnitsPerWorldUnit;
     float t = minDistance * localUnitsPerWorldUnit;
     float tExit = maxDistance * localUnitsPerWorldUnit;
     float voxelSize = field.originAndVoxelSize.w;
+    float invVoxelSize = rcp(voxelSize);
     float3 extent = float3(field.dimensions - 1u) * voxelSize;
     distance = maxDistance;
     positionInGrid = 0.0;
@@ -399,11 +451,11 @@ bool VividMeshSdfTraceInstanceTransform(VividMeshSdfField field, float4 worldToL
     if (field.pageOffset != VividMeshSdfDense)
     {
         // Rebase at the grid entry so a distant ray still takes steps in small voxel-space coordinates.
-        float3 entry = clamp((localOrigin + t * localDirection) / voxelSize, 0.0, float3(field.dimensions - 1u));
+        float3 entry = clamp((localOrigin + t * localDirection) * invVoxelSize, 0.0, float3(field.dimensions - 1u));
         float hitT;
-        if (!VividMeshSdfTraceBricks(field, entry, localDirection, (tExit - t) / voxelSize, hitT, exhausted))
+        if (!VividMeshSdfTraceBricks(field, entry, localDirection, (tExit - t) * invVoxelSize, hitT, exhausted))
             return false;
-        distance = (t + hitT * voxelSize) / localUnitsPerWorldUnit;
+        distance = (t + hitT * voxelSize) * invLocalUnitsPerWorldUnit;
         positionInGrid = (entry + hitT * localDirection) * voxelSize;
         return true;
     }
@@ -551,6 +603,8 @@ bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minD
         [loop]
         for (uint i = 0u; i < node.leafCount; i++)
         {
+            if (hit.distance < entry)
+                break;
             uint instanceIndex = _MeshSdfLeafInstances[node.firstLeaf + i];
             VividMeshSdfTraceData instance = _MeshSdfTraceInstances[instanceIndex];
             if ((instance.layerMask & layerMask) == 0u)
@@ -562,7 +616,8 @@ bool VividTraceMeshSdfSceneNodes(float3 originWS, float3 directionWS, float minD
             float distance;
             float3 positionInGrid;
             bool exhausted;
-            bool traced = VividMeshSdfTraceInstance(field, instance, originWS, directionWS, minDistance, hit.distance,
+            float leafMax = min(exit, hit.distance);
+            bool traced = VividMeshSdfTraceInstance(field, instance, originWS, directionWS, entry, leafMax,
                 distance, positionInGrid, exhausted);
             incomplete = incomplete || exhausted;
             if (!traced)

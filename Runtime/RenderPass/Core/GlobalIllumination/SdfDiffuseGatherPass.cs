@@ -148,6 +148,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PreviousPreExposureValidId = Shader.PropertyToID("_SdfPreviousPreExposureValid");
         private static readonly int DisocclusionSpatialFilterId = Shader.PropertyToID("_SdfDisocclusionSpatialFilter");
         private static readonly int WriteRoughSpecularId = Shader.PropertyToID("_SdfWriteRoughSpecular");
+        private static readonly int RoughSpecMinRoughnessId = Shader.PropertyToID("_SdfRoughSpecMinRoughness");
         private static readonly int RoughSpecularOutputId = Shader.PropertyToID("_SdfRoughSpecularOutput");
         private static readonly int CurrentRoughSpecularId = Shader.PropertyToID("_SdfCurrentRoughSpecular");
         private static readonly int PreviousRoughSpecularId = Shader.PropertyToID("_SdfPreviousRoughSpecular");
@@ -3953,6 +3954,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, DirectionalFilteredId, m_CurrentDirectionalFiltered.innerHandle);
                 cmd.SetComputeVectorParam(m_GatherCompute, ProbeCameraPositionId, m_ProbeCameraPosition);
                 cmd.SetComputeIntParam(m_GatherCompute, WriteRoughSpecularId, m_RoughSpecular ? 1 : 0);
+                float roughSpecMinRoughness = 0f;
+                if (m_LumenReflections.Prepared)
+                {
+                    var combine = m_LumenReflections.CombineParameters;
+                    float fadeLength = combine.z > 0f ? 1f / combine.z : 0f;
+                    roughSpecMinRoughness = Mathf.Max(0f, combine.x - fadeLength);
+                }
+                cmd.SetComputeFloatParam(m_GatherCompute, RoughSpecMinRoughnessId, roughSpecMinRoughness);
                 cmd.SetComputeTextureParam(m_GatherCompute, kernel, RoughSpecularOutputId,
                     m_RoughSpecular && !writeRawRoughSpec ? m_CurrentRoughSpecular.innerHandle : m_RawRoughSpecular.innerHandle);
                 bool jitter = pixelTemporal || m_StochasticInterpolation;

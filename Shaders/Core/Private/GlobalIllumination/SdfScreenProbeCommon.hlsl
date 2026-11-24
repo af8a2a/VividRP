@@ -171,12 +171,12 @@ float4 RoundSdfAnchorHistory(float4 value)
     return (_SdfGatherHistoryDiagnostics & 32u) != 0u ? value : RoundSdfHistory(value);
 }
 
-bool LoadReceiverWithRoughness(uint2 pixel, out float3 position, out float3 normal, out float roughness)
+bool LoadReceiverWithDepthAndRoughness(uint2 pixel, out float depth, out float3 position, out float3 normal, out float roughness)
 {
     position = 0.0;
     normal = 0.0;
     roughness = 1.0;
-    float depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
+    depth = _SdfDiffuseDepth.Load(int3(pixel, 0));
     if (depth == UNITY_RAW_FAR_CLIP_VALUE)
         return false;
     float4 rt1 = _SdfDiffuseGBuffer1.Load(int3(pixel, 0));
@@ -194,6 +194,12 @@ bool LoadReceiverWithRoughness(uint2 pixel, out float3 position, out float3 norm
     normal = VividDecodeSurfaceSummaryNormal(rt1.xy);
     roughness = saturate(rt1.z);
     return true;
+}
+
+bool LoadReceiverWithRoughness(uint2 pixel, out float3 position, out float3 normal, out float roughness)
+{
+    float unusedDepth;
+    return LoadReceiverWithDepthAndRoughness(pixel, unusedDepth, position, normal, roughness);
 }
 
 bool LoadReceiver(uint2 pixel, out float3 position, out float3 normal)

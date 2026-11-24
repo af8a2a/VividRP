@@ -438,6 +438,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HzbStartMipId = Shader.PropertyToID("_SdfHzbStartMip");
         private static readonly int ClipToPrevClipId = Shader.PropertyToID("_SdfClipToPrevClip");
         private static readonly int DepthThicknessScaleId = Shader.PropertyToID("_SdfDepthThicknessScale");
+        private static readonly int ScreenTraceMinOccupancyId = Shader.PropertyToID("_SdfScreenTraceMinOccupancy");
         private static readonly int ScreenRadianceId = Shader.PropertyToID("_SdfScreenPreviousRadiance");
         private static readonly int ScreenRadianceValidId = Shader.PropertyToID("_SdfScreenPreviousRadianceValid");
         private static readonly int ScreenGeometryId = Shader.PropertyToID("_SdfScreenPreviousGeometry");
@@ -4297,6 +4298,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeBufferParam(m_TraceCompute, kernel, VividAutoExposureSystem.PreExposureBufferId, m_PreExposure);
                 cmd.SetComputeMatrixParam(m_TraceCompute, ClipToPrevClipId, m_ClipToPrevClip);
                 cmd.SetComputeFloatParam(m_TraceCompute, DepthThicknessScaleId, m_DepthThicknessScale);
+                // Matches UE 5.7.4 GLumenScreenProbeGatherScreenTracesMinimumOccupancy default (0);
+                // non-zero occupancy early-out increases Mesh/Global SDF fallback rays on Sponza.
+                cmd.SetComputeIntParam(m_TraceCompute, ScreenTraceMinOccupancyId, 0);
             }
             cmd.SetComputeTextureParam(m_TraceCompute, kernel, FarRadianceId, m_FarAtlas.IsValid() ? m_FarAtlas : black);
             BindReceiver(cmd, m_TraceCompute, kernel);

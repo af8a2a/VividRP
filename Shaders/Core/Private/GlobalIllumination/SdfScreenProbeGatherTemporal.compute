@@ -1,3 +1,4 @@
+#pragma use_dxc
 #pragma kernel TemporalSdfDiffuseGI
 #pragma kernel ScreenProbeTemporalReprojectionCS VIVID_SDF_SCREEN_PROBE_TEMPORAL
 #pragma kernel ScreenProbeTemporalReprojectionWithMomentsCS VIVID_SDF_SCREEN_PROBE_TEMPORAL VIVID_SDF_SCREEN_PROBE_MOMENTS
@@ -1074,58 +1075,203 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
     bool applyNormalReject = rejectBasedOnNormal && !staticSubpixelOnly;
     bool needPackedGeometry = !fullSphere || _SdfPreviousPixelDepthValid == 0u || applyNormalReject;
 
-    [unroll]
-    for (uint i = 0u; i < 4u; ++i)
+    // Precompute algebraic world-position stepping across the 2x2 history footprint to replace
+    // 4 full 4x4 matrix multiplies with 1 base multiply + 3 vector FMAs.
+    float2 uv00 = (float2(lower) + 0.5f) * _SdfDiffuseScreenSize.zw;
+    float4 cs00 = ComputeClipSpacePosition(uv00, 0.0f);
+    float4 cs10 = ComputeClipSpacePosition(uv00 + float2(_SdfDiffuseScreenSize.z, 0.0f), 0.0f);
+    float4 cs01 = ComputeClipSpacePosition(uv00 + float2(0.0f, _SdfDiffuseScreenSize.w), 0.0f);
+    float4 wsBase = mul(_SdfScreenPreviousInverseVP, cs00);
+    float4 wsDx = float4(_SdfScreenPreviousInverseVP[0][0], _SdfScreenPreviousInverseVP[1][0],
+                         _SdfScreenPreviousInverseVP[2][0], _SdfScreenPreviousInverseVP[3][0]) * (cs10.x - cs00.x);
+    float4 wsDy = float4(_SdfScreenPreviousInverseVP[0][1], _SdfScreenPreviousInverseVP[1][1],
+                         _SdfScreenPreviousInverseVP[2][1], _SdfScreenPreviousInverseVP[3][1]) * (cs01.y - cs00.y);
+    float4 wsDz = float4(_SdfScreenPreviousInverseVP[0][2], _SdfScreenPreviousInverseVP[1][2],
+                         _SdfScreenPreviousInverseVP[2][2], _SdfScreenPreviousInverseVP[3][2]);
+
+    float2 invFrac = 1.0f - fraction;
+    float4 bilinearWeights = float4(
+        invFrac.x * invFrac.y,
+        fraction.x * invFrac.y,
+        invFrac.x * fraction.y,
+        fraction.x * fraction.y);
+
+    if (fullSphere)
     {
-        int2 offset = int2(i & 1u, i >> 1u);
-        int2 tap = lower + offset;
-        float2 bilinear = lerp(1.0 - fraction, fraction, float2(offset));
-        float weight = bilinear.x * bilinear.y;
-        if (any(tap < 0) || any(tap >= size) || weight <= (fullSphere ? 0.01f : 0.0f))
-            continue;
+        bool4 inBounds4 = bool4(
+            lower.x >= 0 && lower.y >= 0 && lower.x < size.x && lower.y < size.y,
+            lower.x + 1 >= 0 && lower.y >= 0 && lower.x + 1 < size.x && lower.y < size.y,
+            lower.x >= 0 && lower.y + 1 >= 0 && lower.x < size.x && lower.y + 1 < size.y,
+            lower.x + 1 >= 0 && lower.y + 1 >= 0 && lower.x + 1 < size.x && lower.y + 1 < size.y);
+        float4 activeWeights = float4(
+            (inBounds4.x && bilinearWeights.x > 0.01f) ? bilinearWeights.x : 0.0f,
+            (inBounds4.y && bilinearWeights.y > 0.01f) ? bilinearWeights.y : 0.0f,
+            (inBounds4.z && bilinearWeights.z > 0.01f) ? bilinearWeights.z : 0.0f,
+            (inBounds4.w && bilinearWeights.w > 0.01f) ? bilinearWeights.w : 0.0f);
 
-        uint packed = needPackedGeometry ? _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0)) : 0u;
-        float depth = _SdfPreviousPixelDepthValid != 0u
-            ? _SdfDiffusePreviousPixelDepth.Load(int3(tap, 0))
-            : f16tof32(packed & 65535u);
-        if (depth <= 0.0)
-            continue;
+        bool allInBounds = all(inBounds4);
+        uint activeCount = (activeWeights.x > 0.0f ? 1u : 0u) + (activeWeights.y > 0.0f ? 1u : 0u)
+            + (activeWeights.z > 0.0f ? 1u : 0u) + (activeWeights.w > 0.0f ? 1u : 0u);
+        if (activeCount == 0u)
+            return false;
 
-        float2 tapUv = (float2(tap) + 0.5) * _SdfDiffuseScreenSize.zw;
-        float3 samplePosition = ComputeWorldSpacePosition(tapUv, depth, _SdfScreenPreviousInverseVP);
-        float4 sample;
-        if (fullSphere)
+        bool useGather = allInBounds && activeCount > 1u;
+        float2 gatherUv = (float2(lower) + 1.0f) * _SdfDiffuseScreenSize.zw;
+
+        uint4 packed4 = 0u;
+        float4 depth4 = 0.0f;
+        if (useGather)
         {
-            // StochasticLightingTileClassification.usf:
-            // Default PLANE_DISOCCLUSION_WEIGHTS == 0 (linear depth + grazing expansion) and
-            // HISTORY_REJECT_BASED_ON_NORMAL == 0, with SetHistorySampleValidity(LumenHistoryWeights > 0.01).
+            if (needPackedGeometry)
+                packed4 = _SdfDiffusePreviousPixelGeometry.GatherRed(sampler_PointClamp, gatherUv).wzxy;
+            depth4 = _SdfPreviousPixelDepthValid != 0u
+                ? _SdfDiffusePreviousPixelDepth.GatherRed(sampler_PointClamp, gatherUv).wzxy
+                : float4(f16tof32(packed4.x & 65535u), f16tof32(packed4.y & 65535u),
+                         f16tof32(packed4.z & 65535u), f16tof32(packed4.w & 65535u));
+        }
+
+        // Stage 1: Evaluate depth/plane/normal validity across active taps before fetching lighting channels.
+        float4 validW = 0.0f;
+        [unroll]
+        for (uint i = 0u; i < 4u; ++i)
+        {
+            float weight = activeWeights[i];
+            if (weight <= 0.0f)
+                continue;
+            int2 offset = int2(i & 1u, i >> 1u);
+            int2 tap = lower + offset;
+            uint packed = useGather ? packed4[i] : (needPackedGeometry ? _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0)) : 0u);
+            float depth = useGather ? depth4[i]
+                : (_SdfPreviousPixelDepthValid != 0u ? _SdfDiffusePreviousPixelDepth.Load(int3(tap, 0)) : f16tof32(packed & 65535u));
+            if (depth <= 0.0f)
+                continue;
+
+            float4 hws = wsBase + float(offset.x) * wsDx + float(offset.y) * wsDy + depth * wsDz;
+            float3 samplePosition = hws.xyz * rcp(hws.w);
             float historySampleSceneDepth = max(dot(float4(samplePosition, 1.0f), prevForward), 1e-4f);
             float linearDepthDelta = abs(historySampleSceneDepth - reprojectedSceneDepth);
-            float depthWeight;
+            bool depthRejected;
             if (usePlaneDisocclusion)
             {
                 float planeDistance = abs(dot(float4(samplePosition, -1.0f), prevScenePlane));
-                // Rely primarily on plane distance for coplanar sloped walls, using a wide 3x linear-depth
-                // safety guard only for large foreground occluder jumps to prevent salt-and-pepper drops.
                 bool depthDisoccluded = !staticSubpixelOnly && linearDepthDelta >= linearDepthDisocclusionThreshold * 3.0f;
-                depthWeight = (planeDistance >= lumenDisocclusionThreshold || depthDisoccluded) ? 0.0f : 1.0f;
+                depthRejected = planeDistance >= lumenDisocclusionThreshold || depthDisoccluded;
             }
             else
             {
-                depthWeight = linearDepthDelta >= lumenDisocclusionThreshold ? 0.0f : 1.0f;
+                depthRejected = linearDepthDelta >= lumenDisocclusionThreshold;
             }
-            float normalWeight = !applyNormalReject || dot(UnpackProbeNormal(float(packed >> 16u)), normal) >= normalCosThreshold ? 1.0f : 0.0f;
-            if (weight * depthWeight * normalWeight <= 0.01f)
+            if (depthRejected)
                 continue;
-            sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+            if (applyNormalReject && dot(UnpackProbeNormal(float(packed >> 16u)), normal) < normalCosThreshold)
+                continue;
+            validW[i] = weight;
+        }
+
+        uint validCount = (validW.x > 0.0f ? 1u : 0u) + (validW.y > 0.0f ? 1u : 0u)
+            + (validW.z > 0.0f ? 1u : 0u) + (validW.w > 0.0f ? 1u : 0u);
+        if (validCount == 0u)
+            return false;
+
+        // Stage 2: Batch single-channel history fetches with hardware GatherRed when 2+ taps are valid.
+        bool gatherChannels = allInBounds && validCount > 1u;
+        float4 fastUpdate4 = gatherChannels ? _SdfPreviousFastUpdate.GatherRed(sampler_PointClamp, gatherUv).wzxy : 0.0f;
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+        uint4 bent4 = (gatherChannels && _SdfBentHistoryValid != 0u)
+            ? _SdfBentPrevious.GatherRed(sampler_PointClamp, gatherUv).wzxy : 0u;
+#endif
+        float3 lightScale = historyExposureScale * _SdfHistoryLightScale.rgb;
+        [unroll]
+        for (uint i = 0u; i < 4u; ++i)
+        {
+            float weight = validW[i];
+            if (weight <= 0.0f)
+                continue;
+            int2 tap = lower + int2(i & 1u, i >> 1u);
+            float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
             if (sample.a <= 0.0f)
                 continue;
             geometryWeight += weight;
+
+#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
+            float3 unscaledRgb = sample.rgb;
+#endif
+            sample.rgb *= lightScale;
+            float2 ageAndCoverage = UnpackScreenProbePixelHistory(sample.a);
+            float covered = weight * ageAndCoverage.y;
+#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
+            if (_SdfScreenProbeMomentsHistoryValid != 0u)
+            {
+                float4 moments = _SdfScreenProbePreviousMoments.Load(int3(tap, 0));
+                if (moments.w > 0.0 && moments.z >= 1.0)
+                {
+                    float invPrevPreExposure = historyExposureScale * invCurrentPreExposure;
+                    float3 oldLighting = DecodeScreenProbeCoveredHistory(unscaledRgb, ageAndCoverage.y)
+                        * (invPrevPreExposure / max(ageAndCoverage.y, 1e-5));
+                    float3 newLighting = DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y)
+                        * (invCurrentPreExposure / max(ageAndCoverage.y, 1e-5));
+                    float oldY = RestirLuminance(oldLighting), newY = RestirLuminance(newLighting);
+                    float mean = moments.x + log2((1.0 + newY) / (1.0 + oldY));
+                    float radianceScale = oldY > 1e-5 ? newY / oldY : RestirLuminance(_SdfHistoryLightScale.rgb);
+                    float jacobian = radianceScale * (1.0 + oldY) / (1.0 + newY);
+                    float variance = max(0.0, moments.y) * jacobian * jacobian;
+                    float combinedWeight = history.momentCoverage + covered;
+                    float momentFraction = covered / max(combinedWeight, 1e-5);
+                    float delta = mean - history.logMean;
+                    history.logMean += momentFraction * delta;
+                    history.logVariance += covered * variance + history.momentCoverage * momentFraction * delta * delta;
+                    history.momentAge += covered * moments.z;
+                    history.momentCoverage += covered;
+                }
+            }
+#endif
+            history.coveredLighting += weight * DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y);
+            float packedFast = gatherChannels ? fastUpdate4[i] : _SdfPreviousFastUpdate.Load(int3(tap, 0));
+            float fastUpdate, numFramesAccumulated;
+            UnpackFastUpdateModeAmountAndNumFramesAccumulated(packedFast, fastUpdate, numFramesAccumulated);
+            history.age += weight * (numFramesAccumulated + 1.0f);
+            history.fastUpdate += weight * fastUpdate;
+            history.footprint += weight;
+            if (_SdfRoughSpecularEnabled != 0u && _SdfPreviousRoughSpecularValid != 0u)
+            {
+                float4 prevSpec = _SdfPreviousRoughSpecular.Load(int3(tap, 0));
+                prevSpec.rgb *= lightScale;
+                history.roughSpecular += weight * prevSpec.rgb;
+                history.skyVisibility += weight * prevSpec.a;
+            }
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+            if (_SdfBentHistoryValid != 0u)
+            {
+                uint packedBent = gatherChannels ? bent4[i] : _SdfBentPrevious.Load(int3(tap, 0));
+                history.shortRangeAO += half(weight) * UnpackSharedShortRangeAO(packedBent);
+            }
+#endif
+            coveredWeight += covered;
         }
-        else
+    }
+    else
+    {
+        [unroll]
+        for (uint i = 0u; i < 4u; ++i)
         {
-            sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
-            float3 expectedTap = ComputeWorldSpacePosition(tapUv, expectedDepth, _SdfScreenPreviousInverseVP);
+            int2 offset = int2(i & 1u, i >> 1u);
+            int2 tap = lower + offset;
+            float weight = bilinearWeights[i];
+            if (any(tap < 0) || any(tap >= size) || weight <= 0.0f)
+                continue;
+
+            uint packed = _SdfDiffusePreviousPixelGeometry.Load(int3(tap, 0));
+            float depth = _SdfPreviousPixelDepthValid != 0u
+                ? _SdfDiffusePreviousPixelDepth.Load(int3(tap, 0))
+                : f16tof32(packed & 65535u);
+            if (depth <= 0.0)
+                continue;
+
+            float4 hws = wsBase + float(offset.x) * wsDx + float(offset.y) * wsDy + depth * wsDz;
+            float3 samplePosition = hws.xyz * rcp(hws.w);
+            float4 sample = _SdfDiffusePreviousPixelLighting.Load(int3(tap, 0));
+            float4 hExp = wsBase + float(offset.x) * wsDx + float(offset.y) * wsDy + expectedDepth * wsDz;
+            float3 expectedTap = hExp.xyz * rcp(hExp.w);
             bool depthMismatch = distance(samplePosition, expectedTap) > depthTolerance;
             bool planeMismatch = abs(dot(samplePosition - expectedReceiver, normal)) > planeTolerance;
             if (depth > expectedDepth && depthMismatch && planeMismatch)
@@ -1135,61 +1281,59 @@ bool ReadScreenProbeTemporalHistory(uint2 pixel, float3 position, float3 normal,
             geometryWeight += weight;
             if (sample.a <= 0.0)
                 continue;
-        }
 
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
-        float3 unscaledRgb = sample.rgb;
+            float3 unscaledRgb = sample.rgb;
 #endif
-        sample.rgb *= historyExposureScale * _SdfHistoryLightScale.rgb;
-
-        float2 ageAndCoverage = UnpackScreenProbePixelHistory(sample.a);
-        float covered = weight * ageAndCoverage.y;
+            sample.rgb *= historyExposureScale * _SdfHistoryLightScale.rgb;
+            float2 ageAndCoverage = UnpackScreenProbePixelHistory(sample.a);
+            float covered = weight * ageAndCoverage.y;
 #if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
-        if (_SdfScreenProbeMomentsHistoryValid != 0u)
-        {
-            float4 moments = _SdfScreenProbePreviousMoments.Load(int3(tap, 0));
-            if (moments.w > 0.0 && moments.z >= 1.0)
+            if (_SdfScreenProbeMomentsHistoryValid != 0u)
             {
-                float invPrevPreExposure = historyExposureScale * invCurrentPreExposure;
-                float3 oldLighting = DecodeScreenProbeCoveredHistory(unscaledRgb, ageAndCoverage.y)
-                    * (invPrevPreExposure / max(ageAndCoverage.y, 1e-5));
-                float3 newLighting = DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y)
-                    * (invCurrentPreExposure / max(ageAndCoverage.y, 1e-5));
-                float oldY = RestirLuminance(oldLighting), newY = RestirLuminance(newLighting);
-                float mean = moments.x + log2((1.0 + newY) / (1.0 + oldY));
-                // A covered black history still needs a unit Jacobian under unchanged lighting.
-                float radianceScale = oldY > 1e-5 ? newY / oldY : RestirLuminance(_SdfHistoryLightScale.rgb);
-                float jacobian = radianceScale * (1.0 + oldY) / (1.0 + newY);
-                float variance = max(0.0, moments.y) * jacobian * jacobian;
-                float combinedWeight = history.momentCoverage + covered;
-                float momentFraction = covered / max(combinedWeight, 1e-5);
-                float delta = mean - history.logMean;
-                history.logMean += momentFraction * delta;
-                history.logVariance += covered * variance + history.momentCoverage * momentFraction * delta * delta;
-                history.momentAge += covered * moments.z;
-                history.momentCoverage += covered;
+                float4 moments = _SdfScreenProbePreviousMoments.Load(int3(tap, 0));
+                if (moments.w > 0.0 && moments.z >= 1.0)
+                {
+                    float invPrevPreExposure = historyExposureScale * invCurrentPreExposure;
+                    float3 oldLighting = DecodeScreenProbeCoveredHistory(unscaledRgb, ageAndCoverage.y)
+                        * (invPrevPreExposure / max(ageAndCoverage.y, 1e-5));
+                    float3 newLighting = DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y)
+                        * (invCurrentPreExposure / max(ageAndCoverage.y, 1e-5));
+                    float oldY = RestirLuminance(oldLighting), newY = RestirLuminance(newLighting);
+                    float mean = moments.x + log2((1.0 + newY) / (1.0 + oldY));
+                    float radianceScale = oldY > 1e-5 ? newY / oldY : RestirLuminance(_SdfHistoryLightScale.rgb);
+                    float jacobian = radianceScale * (1.0 + oldY) / (1.0 + newY);
+                    float variance = max(0.0, moments.y) * jacobian * jacobian;
+                    float combinedWeight = history.momentCoverage + covered;
+                    float momentFraction = covered / max(combinedWeight, 1e-5);
+                    float delta = mean - history.logMean;
+                    history.logMean += momentFraction * delta;
+                    history.logVariance += covered * variance + history.momentCoverage * momentFraction * delta * delta;
+                    history.momentAge += covered * moments.z;
+                    history.momentCoverage += covered;
+                }
             }
-        }
 #endif
-        history.coveredLighting += weight * DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y);
-        float fastUpdate, numFramesAccumulated;
-        UnpackFastUpdateModeAmountAndNumFramesAccumulated(_SdfPreviousFastUpdate.Load(int3(tap, 0)),
-            fastUpdate, numFramesAccumulated);
-        history.age += weight * (numFramesAccumulated + 1.0f);
-        history.fastUpdate += weight * fastUpdate;
-        history.footprint += weight;
-        if (_SdfRoughSpecularEnabled != 0u && _SdfPreviousRoughSpecularValid != 0u)
-        {
-            float4 prevSpec = _SdfPreviousRoughSpecular.Load(int3(tap, 0));
-            prevSpec.rgb *= historyExposureScale * _SdfHistoryLightScale.rgb;
-            history.roughSpecular += weight * prevSpec.rgb;
-            history.skyVisibility += weight * prevSpec.a;
-        }
+            history.coveredLighting += weight * DecodeScreenProbeCoveredHistory(sample.rgb, ageAndCoverage.y);
+            float fastUpdate, numFramesAccumulated;
+            UnpackFastUpdateModeAmountAndNumFramesAccumulated(_SdfPreviousFastUpdate.Load(int3(tap, 0)),
+                fastUpdate, numFramesAccumulated);
+            history.age += weight * (numFramesAccumulated + 1.0f);
+            history.fastUpdate += weight * fastUpdate;
+            history.footprint += weight;
+            if (_SdfRoughSpecularEnabled != 0u && _SdfPreviousRoughSpecularValid != 0u)
+            {
+                float4 prevSpec = _SdfPreviousRoughSpecular.Load(int3(tap, 0));
+                prevSpec.rgb *= historyExposureScale * _SdfHistoryLightScale.rgb;
+                history.roughSpecular += weight * prevSpec.rgb;
+                history.skyVisibility += weight * prevSpec.a;
+            }
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
-        if (_SdfBentHistoryValid != 0u)
-            history.shortRangeAO += half(weight) * UnpackSharedShortRangeAO(_SdfBentPrevious.Load(int3(tap, 0)));
+            if (_SdfBentHistoryValid != 0u)
+                history.shortRangeAO += half(weight) * UnpackSharedShortRangeAO(_SdfBentPrevious.Load(int3(tap, 0)));
 #endif
-        coveredWeight += covered;
+            coveredWeight += covered;
+        }
     }
 
     if (fullSphere)
@@ -1256,7 +1400,16 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
     int2 reconBase, aoBase;
     PreloadShortRangeAOTile(group, lane, screenSize, reconBase, aoBase);
 #endif
-    if (_SdfRoughSpecularEnabled != 0u)
+    // Only preload the 10x10 rough-specular neighborhood when view translation can produce
+    // non-zero parallax clamping; static cameras skip 200 RGBA16F loads + 100 tonemaps per tile.
+    float3 camDelta = _SdfProbeCameraPosition.xyz - _SdfProbePreviousCameraPosition.xyz;
+    bool needRoughSpecClamp = _SdfRoughSpecularEnabled != 0u
+        && _SdfDiffuseHasHistory != 0u
+        && _SdfPreviousRoughSpecularValid != 0u
+        && _SdfProbeCameraPosition.w > 0.5f
+        && _SdfProbePreviousCameraPosition.w > 0.5f
+        && dot(camDelta, camDelta) > 1e-10f;
+    if (needRoughSpecClamp)
         PreloadRoughSpecularTile(group, lane, maxScreenCoord, currentPreExposure);
     GroupMemoryBarrierWithGroupSync();
 
@@ -1271,12 +1424,32 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
     if (_SdfPreExposureHistoryEnabled != 0u && all(id.xy == 0u))
         _SdfCurrentPreExposureOutput[uint2(0u, 0u)] = currentPreExposure;
 
-    float4 result = _SdfDiffuseCurrentResolved.Load(int3(id.xy, 0));
-    float depth = _SdfDiffuseDepth.Load(int3(id.xy, 0));
+    float depth, roughness;
     float3 position, normal;
-    bool receiver = LoadReceiver(id.xy, position, normal);
+    bool receiver = LoadReceiverWithDepthAndRoughness(id.xy, depth, position, normal, roughness);
+    if (!receiver)
+    {
+        // Fast sky/background exit: skip ShortRangeAO reconstruction, history reprojection, and lighting math.
+#if defined(VIVID_SDF_SCREEN_PROBE_AO)
+        _SdfBentOutput[id.xy] = PackSharedShortRangeAO(half4(0.0, 1.0, 0.0, 1.0));
+#endif
+        _SdfDiffusePixelGeometryOutput[id.xy] = f32tof16(depth);
+        _SdfDiffusePixelDepthOutput[id.xy] = depth;
+        _SdfFastUpdateOutput[id.xy] = 0.0f;
+#if defined(VIVID_SDF_SCREEN_PROBE_MOMENTS)
+        _SdfScreenProbeMomentsOutput[id.xy] = 0.0f;
+#endif
+        if (_SdfRoughSpecularEnabled != 0u)
+            _SdfRoughSpecularHistoryOutput[id.xy] = 0.0f;
+        float skyAlpha = PackScreenProbePixelHistory(0.0f, 0.0f, ScreenProbeNoHistory);
+        _SdfDiffusePixelLightingOutput[id.xy] = float4(0.0f, 0.0f, 0.0f, skyAlpha);
+        _SdfDiffuseOutput[id.xy] = 0.0f;
+        return;
+    }
+
+    float4 result = _SdfDiffuseCurrentResolved.Load(int3(id.xy, 0));
     // Depth from an unresolved or unlit foreground still occludes history.
-    uint geometry = f32tof16(depth) | (receiver ? uint(PackProbeNormal(normal)) << 16u : 0u);
+    uint geometry = f32tof16(depth) | (uint(PackProbeNormal(normal)) << 16u);
     bool hasLighting = receiver && result.a > 0.0;
 #if defined(VIVID_SDF_SCREEN_PROBE_AO)
     const bool fullSphere = true;
@@ -1456,11 +1629,10 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
         float blendedSkyVis = currentRoughSpec.a;
         if (historyAccepted && _SdfPreviousRoughSpecularValid != 0u)
         {
-            float roughness = saturate(_SdfDiffuseGBuffer1.Load(int3(id.xy, 0)).b);
             float roughSpecMaxAge = lerp(4.0f, _SdfPixelHistoryMaxAge, roughness);
             float specPriorFrames = min(numFramesAccumulated, roughSpecMaxAge);
             float parallaxAmount = 0.0f;
-            if (_SdfProbeCameraPosition.w > 0.5f && _SdfProbePreviousCameraPosition.w > 0.5f)
+            if (needRoughSpecClamp)
             {
                 float3 currV = SafeNormalize(_SdfProbeCameraPosition.xyz - position);
                 float3 prevV = SafeNormalize(_SdfProbePreviousCameraPosition.xyz - position);
@@ -1481,7 +1653,7 @@ void ScreenProbeTemporalReprojectionCS(uint3 id : SV_DispatchThreadID, uint3 gro
             float coherentClampGate = smoothstep(0.02f, 0.12f, parallaxAmount);
             float3 clampedRoughSpecHistory = history.roughSpecular;
             [branch]
-            if (parallaxAmount > 0.0f)
+            if (needRoughSpecClamp && parallaxAmount > 0.0f)
             {
                 float sigmaScale = lerp(1.5f, 2.25f, roughness);
                 clampedRoughSpecHistory = ClampRoughSpecularHistory(

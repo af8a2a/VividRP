@@ -7,7 +7,8 @@
 #pragma kernel ReflectionClearUnusedTraceTileDataCS
 #pragma kernel ReflectionGenerateRaysCS
 #pragma kernel ReflectionClearTracesCS
-#pragma kernel ReflectionTraceScreenTexturesCS
+#pragma kernel ReflectionTraceScreenTexturesCS VIVID_LUMEN_REFL_SCREEN
+#pragma require wavebasic waveballot : VIVID_LUMEN_REFL_SCREEN
 #pragma kernel SetupCompactionIndirectArgsCS
 #pragma kernel ReflectionCompactTracesCS
 #pragma kernel SetupCompactedTracesIndirectArgsCS
@@ -72,6 +73,7 @@ float _LumenCompactionMaxTraceDistance;
 float _LumenMaxHierarchicalScreenTraceIterations;
 float _LumenRelativeDepthThickness;
 float _LumenHistoryDepthTestRelativeThickness;
+uint _SdfScreenTraceMinOccupancy;
 uint _LumenReflectionHasMeshSdfCardGrid;
 uint _LumenReflectionSkyEnabled;
 float _LumenCardTraceEndDistanceFromCamera;
@@ -432,7 +434,8 @@ void ReflectionTraceScreenTexturesCS(
                 bUncertain,
                 HitUVz,
                 LastVisibleHitUVz,
-                HitTileZ);
+                HitTileZ,
+                _SdfScreenTraceMinOccupancy);
 
             bHit = bHit && !bUncertain;
 

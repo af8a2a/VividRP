@@ -174,6 +174,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PreviousViewProjectionId = Shader.PropertyToID("_SdfDiffusePreviousVP");
         private static readonly int JitterDeltaId = Shader.PropertyToID("_SdfScreenJitterDelta");
         private static readonly int DepthThicknessScaleId = Shader.PropertyToID("_SdfDepthThicknessScale");
+        private static readonly int ScreenTraceMinOccupancyId = Shader.PropertyToID("_SdfScreenTraceMinOccupancy");
         private static readonly int ClosestHzbId = Shader.PropertyToID("_SdfClosestHzb");
         private static readonly int ClosestHzbSizeId = Shader.PropertyToID("_SdfClosestHzbSize");
         private static readonly int MeshCardGridId = Shader.PropertyToID("_MeshSdfCardGrid");
@@ -726,6 +727,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     owner.BindScreenHistoryForReflections(cmd, m_TracingCompute, m_TraceScreenKernel, black);
                     cmd.SetComputeVectorParam(m_TracingCompute, ClosestHzbSizeId, closestHzbSize);
                     cmd.SetComputeFloatParam(m_TracingCompute, DepthThicknessScaleId, depthThicknessScale);
+                    // Matches UE 5.7.4 LumenReflectionTracing default (0) to avoid extra SDF fallback traces.
+                    cmd.SetComputeIntParam(m_TracingCompute, ScreenTraceMinOccupancyId, 0);
                     cmd.SetComputeFloatParam(m_TracingCompute, MaxHierarchicalScreenTraceIterationsId, MaxHierarchicalScreenTraceIterations);
                     cmd.SetComputeFloatParam(m_TracingCompute, RelativeDepthThicknessId, RelativeDepthThickness);
                     cmd.SetComputeFloatParam(m_TracingCompute, HistoryDepthTestRelativeThicknessId, HistoryDepthTestRelativeThickness);

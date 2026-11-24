@@ -60,7 +60,8 @@ void LumenTraceHZB(
     inout bool bUncertain,
     inout float3 OutScreenUV,
     inout float3 OutLastVisibleScreenUV,
-    inout float OutHitTileZ)
+    inout float OutHitTileZ,
+    uint MinimumTracingThreadOccupancy = 0u)
 {
     float3 RayStartScreenUV;
     {
@@ -124,7 +125,13 @@ void LumenTraceHZB(
     bUncertain = false;
     OutHitTileZ = 0.0f;
 
-    while (MipLevel >= BaseMipLevel && NumIterations < MaxIterations && CurrentIntersectionTime < 1.0f)
+    while (MipLevel >= BaseMipLevel
+        && NumIterations < MaxIterations
+        && CurrentIntersectionTime < 1.0f
+#if defined(VIVID_LUMEN_REFL_SCREEN) && defined(UNITY_COMPILER_DXC)
+        && (MinimumTracingThreadOccupancy == 0u || WaveActiveCountBits(true) > MinimumTracingThreadOccupancy)
+#endif
+        )
     {
         float2 CurrentMipTexelSize = exp2(MipLevel) * InHZBBaseTexelSize;
         float2 CurrentMipResolution = 1.0f / CurrentMipTexelSize;

@@ -21,6 +21,7 @@
 #pragma kernel CaptureScreenProbeSceneColor VIVID_CAPTURE_SCENE_COLOR
 #pragma kernel TraceLumenScreenRays VIVID_LUMEN_SCREEN
 #pragma kernel TraceLumenScreenRaysWithSdf VIVID_LUMEN_SCREEN VIVID_SDF_RECEIVER
+#pragma require wavebasic waveballot : VIVID_LUMEN_SCREEN
 #pragma kernel TraceDiffuseScreenRays
 #pragma kernel TraceReceiverDiffuseScreenRays VIVID_SDF_RECEIVER
 #pragma kernel GatherScreenDiffuseProbes VIVID_SDF_SCREEN_ONLY
@@ -1663,6 +1664,7 @@ void BuildScreenProbeClosestHZB(uint3 id : SV_DispatchThreadID, uint lane : SV_G
 Texture2D<float> _SdfClosestHzb;
 float4x4 _SdfClipToPrevClip;
 float _SdfDepthThicknessScale;
+uint _SdfScreenTraceMinOccupancy;
 
 float2 ScreenNdcToUvScale()
 {
@@ -1792,11 +1794,13 @@ void TraceHZB(
     bUncertain = false;
     OutHitTileZ = 0;
 
-    // Stackless HZB traversal
+    // Stackless HZB traversal (UE 5.7.4 HZBTracing.ush::TraceHZB with TERMINATE_ON_LOW_OCCUPANCY).
     while (MipLevel >= BaseMipLevel
         && NumIterations < MaxIterations
         && CurrentIntersectionTime < 1.0f
-
+#if defined(UNITY_COMPILER_DXC)
+        && (MinimumTracingThreadOccupancy == 0u || WaveActiveCountBits(true) > MinimumTracingThreadOccupancy)
+#endif
         )
     {
         float2 CurrentMipTexelSize = exp2(MipLevel) * InHZBBaseTexelSize;
@@ -1953,7 +1957,7 @@ void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
     float hitTileZ = 0.0;
     TraceHZB(rcp(_SdfClosestHzbSize.xy), float4(rcp(hzbFactor), 0, 0), origin, direction,
         traceDistance, float4(hzbFactor, rcp(hzbFactor)), 50, 0.02 * _SdfDepthThicknessScale * thicknessScale,
-        0, 0, hit, uncertain, hitUVz, lastVisible, hitTileZ);
+        0, _SdfScreenTraceMinOccupancy, hit, uncertain, hitUVz, lastVisible, hitTileZ);
     hit = hit && !uncertain;
     float3 hitPosition = ComputeWorldSpacePosition(hitUVz.xy, hitUVz.z, _SdfDiffuseInverseVP);
     float hitDistance = min(distance(position, hitPosition) + (!hit && !uncertain ? 0.02 : 0.0), maxDistance);

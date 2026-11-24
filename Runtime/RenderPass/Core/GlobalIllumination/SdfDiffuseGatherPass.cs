@@ -649,7 +649,10 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool FinalLightingHasIndirect;
             internal int FinalLightingInputOrder, FinalLightingReadyCards;
             internal int FinalLightingUpdateCursor;
-            internal (uint Revision, int LayerMask, float Bias, Vector4 Light, Vector4 Color) FinalLightingDirectInputs;
+            internal bool HadDirectLighting;
+            internal ulong SampledLocalLightHash;
+            internal uint SampledLocalLightMode;
+            internal (uint Revision, int LayerMask, float Bias, Vector4 Light, Vector4 Color, ulong LocalLightHash, uint LocalLightMode) FinalLightingDirectInputs;
             internal CardLightingPriority FinalLightingPriority;
             internal int RadiosityTargetOrders, RadiosityOrder, RadiosityCursor, GatherRadiosityOrder;
             internal int RadiositySamples, RadiositySeed;
@@ -905,11 +908,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private CameraHistoryTexture m_CardDirectHistory, m_CardFinalHistory;
         private TextureHandle m_CardDirectAtlas, m_CardFinalAtlas;
         private Vector4 m_FinalLightingLayout;
-        private int m_CardDirectLightingKernel = -1, m_CardFinalLightingKernel = -1;
+        private int m_CardDirectLightingKernel = -1, m_CardSampledDirectLightingKernel = -1, m_CardFinalLightingKernel = -1;
+        private readonly SdfSurfaceCacheSampledLighting m_SampledCardLighting = new();
         private int m_FinalLightingReadyCards, m_FinalLightingNewCards;
         private int m_FinalLightingPreviousReadyCards;
         private int m_FinalLightingUpdateFirst;
-        private (uint Revision, int LayerMask, float Bias, Vector4 Light, Vector4 Color) m_FinalLightingDirectInputs;
+        private (uint Revision, int LayerMask, float Bias, Vector4 Light, Vector4 Color, ulong LocalLightHash, uint LocalLightMode) m_FinalLightingDirectInputs;
+        private bool UseSampledCardDirectLighting => m_SampledCardLighting.HasLocalLights && m_CardSampledDirectLightingKernel >= 0;
         private int m_FinalLightingDirtyFirst, m_FinalLightingDirtyEnd, m_FinalLightingInputOrder;
         private ComputeShader m_RadiosityCompute;
         private ComputeShader m_FarCompute;
@@ -1083,6 +1088,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarCompute = resources?.SdfRadianceCacheUpdateCompute;
             m_NearOcclusionCompute = resources?.SdfShortRangeAOCompute;
             m_LumenReflections.Initialize(resources);
+            m_SampledCardLighting.Initialize(resources);
             if (m_TraceCompute == null || !SystemInfo.supportsComputeShaders
                 || !SystemInfo.IsFormatSupported(ProbeFormat, GraphicsFormatUsage.LoadStore)
                 || !SystemInfo.IsFormatSupported(GeometryFormat, GraphicsFormatUsage.LoadStore)
@@ -1269,6 +1275,8 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_CardDirectLightingKernel = m_CardLightingCompute.FindKernel("UpdateSdfCardDirectLighting");
                 m_CardFinalLightingKernel = m_CardLightingCompute.FindKernel("CombineSdfCardFinalLighting");
+                if (HasKernel(m_CardLightingCompute, "UpdateSdfCardSampledDirectLighting"))
+                    m_CardSampledDirectLightingKernel = m_CardLightingCompute.FindKernel("UpdateSdfCardSampledDirectLighting");
             }
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_SFloat, GraphicsFormatUsage.LoadStore)
@@ -1742,6 +1750,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     float.IsFinite(settings.meshSdfDetailDistance.value) ? settings.meshSdfDetailDistance.value : 2f,
                     0.1f, m_TraceDistance);
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
+            m_SampledCardLighting.PrepareLightState(frameData);
             ReadLight(camera);
             bool farConfigured = useSettings && settings.farRadianceCache.value && m_UseSdf && cache != null
                 && m_FarKernel >= 0 && !m_OffscreenOnly && (!m_RestirGather || m_RestirPixelIntegration)
@@ -1772,7 +1781,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     settings.surfaceCacheCardsPerFrame.value, settings.surfaceCacheFullUpdateCardLimit.value);
             }
             if (m_UseSdf && cache != null && m_CardFinalLightingKernel >= 0)
+            {
                 PrepareFinalLighting(camera, cache);
+                if (UseSampledCardDirectLighting && m_CardFinalAtlas.IsValid() && m_CardDirectAtlas.IsValid() && m_FinalLightingNewCards > 0)
+                    m_SampledCardLighting.PrepareGpuResources(this, camera, m_State.Frame);
+            }
             m_LumenDebugView.Prepare(this, frameData, camera, m_Width, m_Height, debugMode,
                 m_CardFinalAtlas.IsValid() ? (int)m_FinalLightingLayout.w : 0,
                 m_FinalLightingPreviousReadyCards == 0 || !ReferenceEquals(m_State.Cache, cache));
@@ -2508,6 +2521,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_State.FarWindow = m_FarWindow;
             m_State.LightPositionRange = m_LightPositionRange;
             m_State.LightColorShadow = m_LightColorShadow;
+            m_State.HadDirectLighting = m_LightPositionRange.w != 0f || UseSampledCardDirectLighting;
+            m_State.SampledLocalLightHash = m_SampledCardLighting.LightStateHash;
+            m_State.SampledLocalLightMode = m_SampledCardLighting.ModeKey;
         }
 
         public override void Dispose()
@@ -2536,7 +2552,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
             m_ScreenTraceKernel = m_ScreenReceiverTraceKernel = m_ScreenGatherKernel = -1;
             m_LumenTraceKernel = m_LumenReceiverKernel = m_ClosestHzbKernel = m_SceneColorKernel = -1;
-            m_CardDirectLightingKernel = m_CardFinalLightingKernel = -1;
+            m_SampledCardLighting.Dispose();
+            m_CardDirectLightingKernel = m_CardSampledDirectLightingKernel = m_CardFinalLightingKernel = -1;
             m_RadiosityKernel = -1;
             m_RadiosityAccumulationKernel = m_RadiosityPublishKernel = -1;
             m_RadiosityPublishCardsKernel = m_RadiosityClearKernel = -1;
@@ -3186,21 +3203,22 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CardLightingDesc.Resize(width, height);
             var descriptor = CameraHistoryRenderGraphBridge.CreateDescriptor(m_CardLightingDesc.desc);
             m_CardFinalHistory = history.GetOrCreateTexture(CardFinalLightingHistoryId, 1, descriptor);
-            bool hasDirect = m_LightPositionRange.w != 0f;
+            bool hasDirect = m_LightPositionRange.w != 0f || UseSampledCardDirectLighting;
             if (hasDirect)
                 m_CardDirectHistory = history.GetOrCreateTexture(CardDirectLightingHistoryId, 1, descriptor);
             bool stable = ReferenceEquals(m_State.Cache, cache)
                 && m_State.RadiosityLayoutVersion == m_Scene.RadiosityLayoutVersion
                 && m_State.FinalLightingCardVersion == cache.CardVersion
                 && m_State.FinalLightingReadyCards > 0 && m_State.FinalLightingPriority != null
-                && (!hasDirect || m_State.LightPositionRange.w != 0f)
+                && (!hasDirect || m_State.HadDirectLighting)
                 && m_CardFinalHistory.IsValid(0) && (!hasDirect || m_CardDirectHistory.IsValid(0));
             m_FinalLightingReadyCards = stable ? Mathf.Min(m_State.FinalLightingReadyCards, cards) : 0;
             m_FinalLightingPreviousReadyCards = m_FinalLightingReadyCards;
             m_FinalLightingDirectInputs = m_State.FinalLightingDirectInputs;
             m_FinalLightingUpdateFirst = stable ? Mathf.Min(m_State.FinalLightingUpdateCursor, cards) : 0;
-            var inputs = (m_Scene.Revision, m_LightLayerMask, m_Bias, m_LightPositionRange, m_LightColorShadow);
-            bool directRemoved = !hasDirect && m_State.LightPositionRange.w != 0f;
+            var inputs = (m_Scene.Revision, m_LightLayerMask, m_Bias, m_LightPositionRange, m_LightColorShadow,
+                m_SampledCardLighting.LightStateHash, m_SampledCardLighting.ModeKey);
+            bool directRemoved = !hasDirect && m_State.HadDirectLighting;
             if (!stable || directRemoved || (m_FinalLightingUpdateFirst == cards && !inputs.Equals(m_FinalLightingDirectInputs)))
             {
                 m_FinalLightingUpdateFirst = 0;
@@ -3278,11 +3296,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             if (m_FinalLightingNewCards > 0)
             {
+                bool useSampled = UseSampledCardDirectLighting;
+                if (useSampled)
+                    m_SampledCardLighting.RecordBuild(cmd);
+
                 using var scope = new ProfilingScope(cmd, CardDirectLightingSampler);
                 BindSdfTraceConstants(cmd, m_CardLightingCompute);
                 BindSunLighting(cmd, m_CardLightingCompute);
-                int kernel = m_CardDirectLightingKernel;
+                int kernel = useSampled ? m_CardSampledDirectLightingKernel : m_CardDirectLightingKernel;
                 BindCardLightingWork(cmd, kernel, m_CardDirectAtlas, cache, m_FinalLightingUpdateFirst);
+                if (useSampled)
+                {
+                    BindSegmentedTracing(cmd, m_CardLightingCompute, kernel, m_UseSdf && m_GlobalClipmap?.Recorded == true);
+                    m_SampledCardLighting.BindForCardDirectLighting(cmd, m_CardLightingCompute, kernel, m_State.Frame);
+                }
                 DispatchCardLighting(cmd, kernel, m_FinalLightingNewCards);
             }
             m_CardDirectHistory.MarkWritten();
@@ -4405,7 +4432,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool MatchesPreviousDirectionalLighting() => m_State.LightLayerMask == m_LightLayerMask
             && LightingWithinTolerance(m_State.LightPositionRange, m_State.LightColorShadow,
-                m_LightPositionRange, m_LightColorShadow, m_LightingTolerance);
+                m_LightPositionRange, m_LightColorShadow, m_LightingTolerance)
+            && m_State.SampledLocalLightHash == m_SampledCardLighting.LightStateHash
+            && m_State.SampledLocalLightMode == m_SampledCardLighting.ModeKey;
 
         private bool HasCurrentScreenLighting()
         {
@@ -4827,7 +4856,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var sun = RenderSettings.sun;
             bool useSun = sun != null && sun.isActiveAndEnabled && sun.type == LightType.Directional
                 && sun.lightmapBakeType != LightmapBakeType.Baked && (sun.cullingMask & m_LayerMask) != 0;
-            var source = useSun ? sun : database.FindBrightestPointLight(m_LayerMask);
+            var source = useSun ? sun : UseSampledCardDirectLighting ? null : database.FindBrightestPointLight(m_LayerMask);
             if (source == null)
                 return;
 

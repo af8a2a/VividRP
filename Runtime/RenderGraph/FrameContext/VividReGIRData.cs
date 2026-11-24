@@ -39,6 +39,10 @@ namespace VividRP.Runtime
         public uint renderingLayerMask;
         public float cosBarnDoorAngle;
         public float barnDoorLength;
+        public float shadowStrength;
+        public float rangeAttenuationScale;
+        public float rangeAttenuationBias;
+        public float indirectMultiplier;
 
         internal static int Stride => Marshal.SizeOf<VividReGIRLightData>();
     }

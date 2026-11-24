@@ -293,7 +293,7 @@ namespace VividRP.Runtime
 
         internal void CompleteSceneLightPrepare()
         {
-            if (!m_SceneLightKickRan)
+            if (!m_SceneLightKickRan || !Application.isPlaying)
                 BuildSceneLightSnapshotAndSchedulePrepare(false);
 
             CompleteScheduledSceneLightPrepare(true);

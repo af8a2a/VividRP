@@ -27,9 +27,9 @@ namespace VividRP.Runtime
         private const string PrepareLightPdfKernelName = "ReGIRPrepareLightPdf";
         private const string ReduceLightPdfKernelName = "ReGIRReduceLightPdf";
         private const string PresampleLocalLightsKernelName = "ReGIRPresampleLocalLights";
-        private const int ThreadGroupSize = 256;
-        private const int PdfReduceThreadGroupSize = 8;
-        private const int PresampledLightEntryStride = sizeof(uint) * 4;
+        internal const int ThreadGroupSize = 256;
+        internal const int PdfReduceThreadGroupSize = 8;
+        internal const int PresampledLightEntryStride = sizeof(uint) * 4;
         private const float Pi = Mathf.PI;
 
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
@@ -378,7 +378,7 @@ namespace VividRP.Runtime
             return Mathf.Max(1, totalCells);
         }
 
-        private static int ComputeSlotCount(int cellCount, int lightsPerCell)
+        internal static int ComputeSlotCount(int cellCount, int lightsPerCell)
         {
             var slotCount = (long)Mathf.Max(cellCount, 1)
                 * Mathf.Max(lightsPerCell, 1);
@@ -410,14 +410,14 @@ namespace VividRP.Runtime
             return NormalizeSourceSamplingMode(m_SourceSamplingMode) == VividReGIRSourceSamplingMode.PowerRIS;
         }
 
-        private static float ResolveCellSize(VividReGIRMode mode)
+        internal static float ResolveCellSize(VividReGIRMode mode)
         {
             return mode == VividReGIRMode.Onion
                 ? DefaultCellSize * 0.5f
                 : DefaultCellSize;
         }
 
-        private static float ResolveSamplingJitter(VividReGIRMode mode)
+        internal static float ResolveSamplingJitter(VividReGIRMode mode)
         {
             return mode == VividReGIRMode.Onion
                 ? DefaultSamplingJitter * 2.0f
@@ -438,7 +438,7 @@ namespace VividRP.Runtime
             return cellsPerLayer;
         }
 
-        private static unsafe void BuildOnionParameters(
+        internal static unsafe void BuildOnionParameters(
             ref VividReGIRParameters parameters,
             int detailLayerGroups,
             int coverageLayers,
@@ -656,7 +656,7 @@ namespace VividRP.Runtime
             return mipCount;
         }
 
-        private static void ResolveLightPdfTextureLayout(
+        internal static void ResolveLightPdfTextureLayout(
             int lightCount,
             out int textureSize,
             out int texelCount,

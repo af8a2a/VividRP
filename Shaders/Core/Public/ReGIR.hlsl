@@ -35,6 +35,10 @@ struct VividReGIRLightData
     uint renderingLayerMask;
     float cosBarnDoorAngle;
     float barnDoorLength;
+    float shadowStrength;
+    float rangeAttenuationScale;
+    float rangeAttenuationBias;
+    float indirectMultiplier;
 };
 
 struct VividReGIRParameters

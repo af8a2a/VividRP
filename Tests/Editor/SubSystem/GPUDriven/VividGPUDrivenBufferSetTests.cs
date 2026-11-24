@@ -10,6 +10,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 using VividRP.Runtime.RenderPass.Core;
@@ -81,6 +82,12 @@ namespace VividRP.Editor.Tests
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroupPacked>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividMeshLODGroupOverflow>(), Is.EqualTo(8));
             Assert.That(UnsafeUtility.SizeOf<VividMeshletVertex>(), Is.EqualTo(20));
+            Assert.That(typeof(VividReGIRLightData).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividReGIRLightData>(), Is.EqualTo(120));
+            AssertFieldOffset<VividReGIRLightData>(nameof(VividReGIRLightData.shadowStrength), 104);
+            AssertFieldOffset<VividReGIRLightData>(nameof(VividReGIRLightData.rangeAttenuationScale), 108);
+            AssertFieldOffset<VividReGIRLightData>(nameof(VividReGIRLightData.rangeAttenuationBias), 112);
+            AssertFieldOffset<VividReGIRLightData>(nameof(VividReGIRLightData.indirectMultiplier), 116);
         }
 
         [Test]

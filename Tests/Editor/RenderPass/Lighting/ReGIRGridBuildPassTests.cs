@@ -161,7 +161,11 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(lightBuffer.desc.Count, Is.EqualTo(2));
                 Assert.That(lightBuffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
-                Assert.That(VividReGIRLightData.Stride, Is.EqualTo(sizeof(uint) * 26));
+                Assert.That(VividReGIRLightData.Stride, Is.EqualTo(sizeof(uint) * 30));
+                Assert.That((int)System.Runtime.InteropServices.Marshal.OffsetOf<VividReGIRLightData>(nameof(VividReGIRLightData.shadowStrength)), Is.EqualTo(sizeof(uint) * 26));
+                Assert.That((int)System.Runtime.InteropServices.Marshal.OffsetOf<VividReGIRLightData>(nameof(VividReGIRLightData.rangeAttenuationScale)), Is.EqualTo(sizeof(uint) * 27));
+                Assert.That((int)System.Runtime.InteropServices.Marshal.OffsetOf<VividReGIRLightData>(nameof(VividReGIRLightData.rangeAttenuationBias)), Is.EqualTo(sizeof(uint) * 28));
+                Assert.That((int)System.Runtime.InteropServices.Marshal.OffsetOf<VividReGIRLightData>(nameof(VividReGIRLightData.indirectMultiplier)), Is.EqualTo(sizeof(uint) * 29));
                 Assert.That(parameterBuffer.desc.Count, Is.EqualTo(1));
                 Assert.That(parameterBuffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
                 Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultSlotCount()));

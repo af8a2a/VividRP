@@ -113,6 +113,10 @@ namespace VividRP.Runtime
             var barnDoorAngleRadians = Mathf.Deg2Rad
                 * Mathf.Clamp(trackedLightData.barnDoorAngle, 0.0f, 90.0f);
 
+            var hasCustomAttenuation = trackedLightData.rangeAttenuationScale > 0.0f;
+            var fallbackAttenuationScale = 1.0f / (range * range);
+            var castsShadows = (trackedLightData.flags & VividLightRenderDataFlags.CastShadows) != 0;
+
             return new VividReGIRLightData
             {
                 positionWS = trackedLightData.positionWS,
@@ -136,6 +140,16 @@ namespace VividRP.Runtime
                 barnDoorLength = isRectangleLight
                     ? Mathf.Max(trackedLightData.barnDoorLength, 0.0f)
                     : 0.0f,
+                shadowStrength = castsShadows
+                    ? Mathf.Clamp01(trackedLightData.shadowStrength)
+                    : 0.0f,
+                rangeAttenuationScale = hasCustomAttenuation
+                    ? trackedLightData.rangeAttenuationScale
+                    : fallbackAttenuationScale,
+                rangeAttenuationBias = hasCustomAttenuation
+                    ? trackedLightData.rangeAttenuationBias
+                    : 1.0f,
+                indirectMultiplier = 1.0f,
             };
         }
 

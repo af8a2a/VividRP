@@ -204,23 +204,25 @@ struct GridCardLighting
 #endif
 };
 
-void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 cardMin, float3 sizeLS,
-    float3 posLS, float3 unitsPerMeter, float normalWeight, float bias,
+void AccumulateGridCard(uint index, DiffuseSurface surface, VividMeshSdfInstance inst, uint slot, uint face, uint slice,
+    float3 cardMin, float3 sizeLS, float3 posLS, float3 unitsPerMeter, float normalWeight, float bias,
     float3 rayDirection, inout GridCardLighting accum)
 {
     uint axis=face>>1u;
     uint2 tangent = axis==0u ? uint2(1,2) : axis==1u ? uint2(0,2) : uint2(0,1);
-    float3 halfExtent=0.5f*sizeLS / unitsPerMeter;
-    float3 centered=(posLS-(cardMin+0.5f*sizeLS))/unitsPerMeter;
+    float3 invUnits = rcp(unitsPerMeter);
+    float3 halfExtent=0.5f*sizeLS * invUnits;
+    float3 centered=(posLS-(cardMin+0.5f*sizeLS)) * invUnits;
     if(any(abs(centered)>halfExtent+0.5f*bias))return;
     float2 extentXY=float2(halfExtent[tangent.x],halfExtent[tangent.y]);
     if (any(extentXY <= 0.0f) || halfExtent[axis] <= 0.0f) return;
     float3 CardSpacePosition=float3(clamp(float2(centered[tangent.x],centered[tangent.y]),-extentXY,extentXY), (face&1u)?centered[axis]:-centered[axis]);
     float3 LocalExtent=float3(extentXY,halfExtent[axis]);
-    float2 CardUV=min(CardSpacePosition.xy/(2.0f*LocalExtent.xy)+0.5f,0.999999f);
+    float2 CardUV=min(CardSpacePosition.xy*rcp(2.0f*LocalExtent.xy)+0.5f,0.999999f);
     uint width,height,slices;
     _SdfSurfaceAlbedoDepth.GetDimensions(width,height,slices);
     float2 atlasSize=float2(width,height);
+    float2 invAtlasSize=rcp(atlasSize);
     float SubTexelPrecisionBias=1.0f/512.0f;
     float2 CoordInPage=clamp(CardUV*atlasSize,0.5f,atlasSize-0.5f-SubTexelPrecisionBias);
     float2 FracUV=frac(CoordInPage+0.5f+SubTexelPrecisionBias);
@@ -229,39 +231,44 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
     TexelBilinearWeights.y=(FracUV.x)*(FracUV.y);
     TexelBilinearWeights.z=(FracUV.x)*(1-FracUV.y);
     TexelBilinearWeights.w=(1-FracUV.x)*(1-FracUV.y);
-    // Point-sampler Gather on the native texture array uses the same four lanes as UE.
-    float4 TexelDepths;
-    float4 packedNormals[4];
+    // Point-sampler Gather on the native texture array matches the four bilinear lanes (.xyzw) directly.
     uint2 low=uint2(floor(CoordInPage-0.5f+SubTexelPrecisionBias));
-    [unroll]
-    for(uint k=0;k<4;k++){
-        int4 texel=int4(min(low + uint2(k == 1u || k == 2u, k < 2u),uint2(width-1u,height-1u)),slice,0);
-        float raw=_SdfSurfaceAlbedoDepth.Load(texel).w;
-        packedNormals[k]=_SdfSurfaceNormalCoverage.Load(texel);
-        TexelDepths[k]=EncodeSurfaceCacheDepth((face&1u)?1.0f-raw:raw,packedNormals[k].w>0);
+    float4 rawDepths;
+    float4 coverages;
+    if (low.x + 1u < width && low.y + 1u < height)
+    {
+        float3 gatherCoord = float3((float2(low) + 1.0f) * invAtlasSize, float(slice));
+        rawDepths = _SdfSurfaceAlbedoDepth.GatherAlpha(sampler_PointClamp, gatherCoord);
+        coverages = _SdfSurfaceNormalCoverage.GatherAlpha(sampler_PointClamp, gatherCoord);
     }
-    const bool bHeightfield = false;
+    else
+    {
+        [unroll]
+        for (uint k = 0u; k < 4u; ++k)
+        {
+            int4 texel = int4(min(low + uint2(k == 1u || k == 2u, k < 2u), uint2(width - 1u, height - 1u)), slice, 0);
+            rawDepths[k] = _SdfSurfaceAlbedoDepth.Load(texel).w;
+            coverages[k] = _SdfSurfaceNormalCoverage.Load(texel).w;
+        }
+    }
+    float4 rawAligned = (face & 1u) != 0u ? (1.0f - rawDepths) : rawDepths;
+    float4 TexelDepths = float4(
+        EncodeSurfaceCacheDepth(rawAligned.x, coverages.x > 0.0f),
+        EncodeSurfaceCacheDepth(rawAligned.y, coverages.y > 0.0f),
+        EncodeSurfaceCacheDepth(rawAligned.z, coverages.z > 0.0f),
+        EncodeSurfaceCacheDepth(rawAligned.w, coverages.w > 0.0f));
     float NormalWeight=normalWeight, SurfaceCacheBias=bias;
-    float NormalizedHitDistance = -(CardSpacePosition.z / LocalExtent.z) * 0.5f + 0.5f;
-    float BiasTreshold = SurfaceCacheBias / LocalExtent.z;
-    float BiasFalloff = 0.25f * BiasTreshold;
+    float invExtentZ = rcp(LocalExtent.z);
+    float NormalizedHitDistance = -(CardSpacePosition.z * invExtentZ) * 0.5f + 0.5f;
+    float BiasTreshold = SurfaceCacheBias * invExtentZ;
+    float invBiasFalloff = rcp(0.25f * BiasTreshold);
 
     float4 TexelVisibility = 0.0f;
+    [unroll]
     for (uint TexelIndex = 0; TexelIndex < 4; ++TexelIndex)
     {
-        // Skip invalid texels
         if (IsSurfaceCacheDepthValid(TexelDepths[TexelIndex]))
-        {
-            // No need to depth test heightfields
-            if (bHeightfield)
-            {
-                TexelVisibility[TexelIndex] = 1.0f;
-            }
-            else
-            {
-                TexelVisibility[TexelIndex] = 1.0f - saturate((abs(NormalizedHitDistance - TexelDepths[TexelIndex]) - BiasTreshold) / BiasFalloff);
-            }
-        }
+            TexelVisibility[TexelIndex] = 1.0f - saturate((abs(NormalizedHitDistance - TexelDepths[TexelIndex]) - BiasTreshold) * invBiasFalloff);
     }
 
     float4 TexelWeights = TexelBilinearWeights * TexelVisibility;
@@ -275,7 +282,6 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
         accum.maximumWeight = CardSampleWeight;
         accum.instance = index;
     }
-    DiffuseSurface surface = _SdfDiffuseSurfaces[index];
     uint finalCard;
     bool ready = TryGetFinalLightingCard(surface, slot, finalCard);
     float3 emission = max(surface.emission.rgb, 0.0f);
@@ -286,14 +292,15 @@ void AccumulateGridCard(uint index, uint slot, uint face, uint slice, float3 car
     float4 lightWeights = TexelWeights;
     if (surface.emission.w != 0.0f)
     {
-        VividMeshSdfInstance inst = _MeshSdfInstances[index];
         float3 a = inst.worldToLocal0.xyz, b = inst.worldToLocal1.xyz, c = inst.worldToLocal2.xyz;
         [unroll] for (uint tap = 0u; tap < 4u; ++tap)
         {
             if (lightWeights[tap] <= 0.0f) continue;
-            float3 normalLS = packedNormals[tap].xyz * 2.0f - 1.0f;
+            int4 texel = int4(min(low + uint2(tap == 1u || tap == 2u, tap < 2u), uint2(width - 1u, height - 1u)), slice, 0);
+            float4 packedNormal = _SdfSurfaceNormalCoverage.Load(texel);
+            float3 normalLS = packedNormal.xyz * 2.0f - 1.0f;
             float3 normal = SafeNormalize(a * normalLS.x + b * normalLS.y + c * normalLS.z);
-            float3 originalNormal = packedNormals[tap].w < 0.75f ? -normal : normal;
+            float3 originalNormal = packedNormal.w < 0.75f ? -normal : normal;
             if (!VividSdfMaterialSideVisible(surface.emission.w, originalNormal, -rayDirection))
                 lightWeights[tap] = 0.0f;
         }
@@ -356,36 +363,37 @@ GridCardLighting EvaluateGlobalDistanceFieldHit(float3 pos, float3 normal, float
     if (any(_SdfObjectPageWork[entry-1u].xyz != float3(page))) return result;
     uint3 cell = uint3(frac(frac(pageCoord)) * 4.0f);
     uint4 objects = _SdfObjectGrid[(entry-1u) * 64u + ObjectGridMorton(cell)];
+    float baseBias = 3.0f * (0.5f * _GlobalSdfLevels[min(level, VividGlobalSdfLevelCount - 1u)].w);
+    float4 p = float4(pos, 1.0f);
     for (uint j = 0u; j < 4u; ++j)
     {
         if (objects[j] == 0xffffffffu) break;
         uint index = objects[j] & 0xffffffu;
-        float SurfaceCacheBias = 3.0f * (0.5f * _GlobalSdfLevels[min(level, VividGlobalSdfLevelCount - 1u)].w);
-        if (_MeshSdfFields[_MeshSdfInstances[index].fieldIndex].mostlyTwoSided != 0u)
+        DiffuseSurface surface = _SdfDiffuseSurfaces[index];
+        uint owner = uint(surface.cardMinAndFirst.w);
+        if (owner == 0u || surface.albedoAndValid.w == 0.0f) continue;
+        VividMeshSdfInstance inst = _MeshSdfInstances[index];
+        float SurfaceCacheBias = baseBias;
+        if (_MeshSdfFields[inst.fieldIndex].mostlyTwoSided != 0u)
             SurfaceCacheBias += 0.50f;
-        DiffuseSurface surface=_SdfDiffuseSurfaces[index];
-        uint owner=uint(surface.cardMinAndFirst.w);
-        if(owner==0u || surface.albedoAndValid.w == 0.0f) continue;
-        VividMeshSdfInstance inst=_MeshSdfInstances[index];
-        float3 units=float3(length(inst.worldToLocal0.xyz),length(inst.worldToLocal1.xyz),length(inst.worldToLocal2.xyz));
-        float4 p=float4(pos,1.0f);
-        float3 posLS=float3(dot(inst.worldToLocal0,p),dot(inst.worldToLocal1,p),dot(inst.worldToLocal2,p));
-        float3 meshNormal=float3(dot(inst.worldToLocal0.xyz,normal),dot(inst.worldToLocal1.xyz,normal),dot(inst.worldToLocal2.xyz,normal))/units;
-        float3 AxisWeights=meshNormal*meshNormal;
-        uint2 local=(uint2)_SdfLocalCardTable[(owner-1u)/6u].xy;
-        uint count=6u+(local.y-local.x)/2u;
-        for(uint slot=0;slot<count;slot++) {
-            uint face=slot,slice=owner-1u+slot;float3 lower=surface.cardMinAndFirst.xyz,size=surface.cardExtent.xyz;
-            if(slot>=6u) {
-                uint row=local.x+2u*(slot-6u);
-                float4 a=_SdfLocalCardTable[row],b=_SdfLocalCardTable[row+1u];
-                lower=a.xyz;size=b.xyz;slice=uint(a.w);face=uint(b.w);
+        float3 units = float3(length(inst.worldToLocal0.xyz), length(inst.worldToLocal1.xyz), length(inst.worldToLocal2.xyz));
+        float3 posLS = float3(dot(inst.worldToLocal0, p), dot(inst.worldToLocal1, p), dot(inst.worldToLocal2, p));
+        float3 meshNormal = float3(dot(inst.worldToLocal0.xyz, normal), dot(inst.worldToLocal1.xyz, normal), dot(inst.worldToLocal2.xyz, normal)) * rcp(units);
+        float3 AxisWeights = meshNormal * meshNormal;
+        uint2 local = (uint2)_SdfLocalCardTable[(owner - 1u) / 6u].xy;
+        uint count = 6u + (local.y - local.x) / 2u;
+        for (uint slot = 0; slot < count; slot++) {
+            uint face = slot, slice = owner - 1u + slot; float3 lower = surface.cardMinAndFirst.xyz, size = surface.cardExtent.xyz;
+            if (slot >= 6u) {
+                uint row = local.x + 2u * (slot - 6u);
+                float4 a = _SdfLocalCardTable[row], b = _SdfLocalCardTable[row + 1u];
+                lower = a.xyz; size = b.xyz; slice = uint(a.w); face = uint(b.w);
             }
-            uint axis=face>>1u;
-            if(AxisWeights[axis]>0.0f && ((face&1u)!=0u)==(meshNormal[axis]>=0.0f))
-                AccumulateGridCard(index,slot,face,slice,lower,size,posLS,units,AxisWeights[axis],SurfaceCacheBias,direction,result);
+            uint axis = face >> 1u;
+            if (AxisWeights[axis] > 0.0f && ((face & 1u) != 0u) == (meshNormal[axis] >= 0.0f))
+                AccumulateGridCard(index, surface, inst, slot, face, slice, lower, size, posLS, units, AxisWeights[axis], SurfaceCacheBias, direction, result);
         }
-        if(result.total>=0.9f)break;
+        if (result.total >= 0.9f) break;
     }
     if (result.total > 0.0f) result.sum /= result.total;
     return result;

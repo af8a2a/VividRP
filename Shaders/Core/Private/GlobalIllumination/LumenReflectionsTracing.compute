@@ -774,8 +774,10 @@ void TraceReflectionVoxels(uint2 ReflectionTracingCoord, float TraceHitDistance)
         float VoxelStartDistance = max(TraceHitDistance - PullbackForSurfaceExpand, 0.0f);
 
         VividGlobalSdfHit GlobalHit;
+        // Global SDF clipmap + coarse mip already composite thin shells; compile out the
+        // legacy non-mip Mesh SDF thin-shell fallback and cap steps at 128 for specular rays.
         if (VoxelStartDistance < _LumenReflectionMaxTraceDistance
-            && VividTraceGlobalSdf(SamplePosition, RayData.Direction, VoxelStartDistance, _LumenReflectionMaxTraceDistance, GlobalHit))
+            && VividTraceGlobalSdf(SamplePosition, RayData.Direction, VoxelStartDistance, _LumenReflectionMaxTraceDistance, GlobalHit, true, false, 128))
         {
             bHit = true;
             FinalHitDistance = GlobalHit.distance;
@@ -819,9 +821,15 @@ void TraceReflectionVoxels(uint2 ReflectionTracingCoord, float TraceHitDistance)
             FinalHitDistance = _LumenReflectionMaxTraceDistance;
             if (_LumenReflectionSkyEnabled != 0u && HasSkyTexture())
             {
-                // Verify sky escape against Mesh SDF so enclosed rooms never leak Sky IBL
-                uint SkyState = ResolveSdfSkyMiss(SamplePosition, RayData.Direction,
-                    min(TraceHitDistance, _LumenReflectionMaxTraceDistance), false, 0u, (VividMeshSdfReceiver)0);
+                // When Global SDF + coarse mip already traced across the full sky trace distance and missed,
+                // trust the Global SDF escape without running a redundant full-scene Mesh SDF BVH trace.
+                bool bSkipMeshSkyCheck = _LumenReflectionUseGlobalSdf != 0u
+                    && _LumenReflectionMaxTraceDistance >= _SdfDiffuseSkyTraceDistance;
+                uint SkyState = bSkipMeshSkyCheck
+                    ? RaySkyVisible
+                    : ResolveSdfSkyMiss(SamplePosition, RayData.Direction,
+                        _LumenReflectionUseGlobalSdf != 0u ? _LumenReflectionMaxTraceDistance : min(TraceHitDistance, _LumenReflectionMaxTraceDistance),
+                        false, 0u, (VividMeshSdfReceiver)0);
                 if (SkyState == RaySkyVisible)
                 {
                     Radiance = SampleSkyTexture(RayData.Direction, 0.0f);

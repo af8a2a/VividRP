@@ -13,6 +13,7 @@
 #pragma kernel FilterWorldProbeRadiance VIVID_SDF_WORLD
 #pragma kernel UpdateWorldProbesGlobal VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_WORLD_GLOBAL_SDF_ONLY
 #pragma kernel UpdateWorldProbesGlobalWithSky VIVID_SDF_WORLD VIVID_SDF_SURFACE_CACHE VIVID_SDF_FAR_UPDATE VIVID_SDF_WORLD_SKY VIVID_WORLD_GLOBAL_SDF_ONLY
+#pragma require wavebasic waveballot : VIVID_SDF_WORLD
 
 #include "SdfScreenProbeCommon.hlsl"
 #include "SdfSurfaceCacheLighting.hlsl"
@@ -78,7 +79,23 @@ uint GetProbeTraceCost(float3 ProbeWorldPosition)
     return ProbeTraceCostNormal;
 }
 
-[numthreads(8,8,1)]
+uint AllocateWorldWorkCounter(uint counterIndex)
+{
+    uint index = 0u;
+#if defined(UNITY_COMPILER_DXC)
+    uint waveCount = WaveActiveCountBits(true);
+    uint waveRank = WavePrefixCountBits(true);
+    uint waveBase = 0u;
+    if (WaveIsFirstLane())
+        InterlockedAdd(_SdfWorldWork[Counter(counterIndex)], waveCount, waveBase);
+    index = WaveReadLaneFirst(waveBase) + waveRank;
+#else
+    InterlockedAdd(_SdfWorldWork[Counter(counterIndex)], 1u, index);
+#endif
+    return index;
+}
+
+[numthreads(64,1,1)]
 void ClearWorldProbeDemand(uint3 id : SV_DispatchThreadID)
 {
     uint index = id.x + 1024u * id.y;
@@ -132,12 +149,11 @@ void ReuseWorldProbes(uint slot : SV_DispatchThreadID)
         }
     }
     _SdfFarOutput[keyAddress] = 0.0f;
-    uint freeIndex;
-    InterlockedAdd(_SdfWorldWork[Counter(0)], 1u, freeIndex);
+    uint freeIndex = AllocateWorldWorkCounter(0u);
     _SdfWorldWork[FreeAddress(freeIndex)] = slot;
 }
 
-[numthreads(8,8,1)]
+[numthreads(64,1,1)]
 void AllocateWorldProbes(uint3 id : SV_DispatchThreadID)
 {
     uint marker = _SdfWorldWork[id.xy];
@@ -147,12 +163,16 @@ void AllocateWorldProbes(uint3 id : SV_DispatchThreadID)
     uint slot = marker - 2u;
     uint lastTraced = 0u;
     uint lastUsed = _SdfDiffuseFrame + 1u;
-    int3 local = int3(index % 48u, (index / 48u) % 48u, (index / 2304u) % 48u);
+    uint cellInLevel = index - level * (48u * 48u * 48u);
+    uint zLocal = cellInLevel / 2304u;
+    uint xyRem = cellInLevel - zLocal * 2304u;
+    uint yLocal = xyRem / 48u;
+    uint xLocal = xyRem - yLocal * 48u;
+    int3 local = int3(xLocal, yLocal, zLocal);
     int3 cell = WorldOrigin(level) + local;
     if (marker == 1u)
     {
-        uint freeIndex;
-        InterlockedAdd(_SdfWorldWork[Counter(1)], 1u, freeIndex);
+        uint freeIndex = AllocateWorldWorkCounter(1u);
         if (freeIndex >= _SdfWorldWork[Counter(0)]) return;
         slot = _SdfWorldWork[FreeAddress(freeIndex)];
         _SdfFarOutput[WorldKeyAddress(slot)] = float4(cell, level + 1u);
@@ -176,7 +196,15 @@ void AllocateWorldProbes(uint3 id : SV_DispatchThreadID)
     uint cost = GetProbeTraceCost(float3(cell) * WorldCellSize(level));
     InterlockedAdd(_SdfWorldWork[Counter(2u + bucket)], cost);
     if (bucket == 0u)
+    {
+#if defined(UNITY_COMPILER_DXC)
+        uint waveNewCost = WaveActiveCountBits(true) * ProbeTraceCostDownsampled;
+        if (WaveIsFirstLane())
+            InterlockedAdd(_SdfWorldWork[Counter(20u)], waveNewCost);
+#else
         InterlockedAdd(_SdfWorldWork[Counter(20u)], ProbeTraceCostDownsampled);
+#endif
+    }
 }
 
 [numthreads(1,1,1)]
@@ -227,8 +255,7 @@ void BuildWorldTickets(uint slot : SV_DispatchThreadID)
             bForceDownsampleProbe = true;
     }
 
-    uint TraceIndex;
-    InterlockedAdd(_SdfWorldWork[Counter(22u)], 1u, TraceIndex);
+    uint TraceIndex = AllocateWorldWorkCounter(22u);
     _SdfWorldWork[Ticket(TraceIndex)] = slot | (bForceDownsampleProbe || ProbeTraceCost == ProbeTraceCostDownsampled ? 0x10000u : 0u);
 }
 
@@ -295,14 +322,58 @@ uint2 WorldDepthCoord(float3 direction)
     return min(uint2(ProbeSphereUV(direction) * WorldResolution), WorldResolution - 1u);
 }
 
+groupshared uint SharedFilterSlot;
+groupshared uint SharedFilterLevel;
+groupshared int3 SharedFilterKeyCoord;
+groupshared float3 SharedFilterProbeCenter;
+groupshared float SharedFilterOcclusionOffset;
+groupshared uint SharedFilterNeighborSlots[6];
+groupshared float3 SharedFilterNeighborCenters[6];
+
 [numthreads(8,8,1)]
-void FilterWorldProbeRadiance(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID)
+void FilterWorldProbeRadiance(uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID, uint laneIndex : SV_GroupIndex)
 {
-    uint slot = _SdfWorldWork[Ticket(group.z)] & 0xffffu;
-    float4 key = _SdfFarOutput[WorldKeyAddress(slot)];
-    uint level = uint(key.w) - 1u;
-    int3 ProbeCoord = int3(key.xyz) - WorldOrigin(level);
-    float3 ProbeWorldCenter = key.xyz * WorldCellSize(level);
+    const int3 Offsets[6] = { int3(-1,0,0), int3(1,0,0), int3(0,-1,0), int3(0,1,0), int3(0,0,-1), int3(0,0,1) };
+    if (laneIndex == 0u)
+    {
+        uint s = _SdfWorldWork[Ticket(group.z)] & 0xffffu;
+        float4 key = _SdfFarOutput[WorldKeyAddress(s)];
+        uint lv = uint(key.w) - 1u;
+        float cellSize = WorldCellSize(lv);
+        SharedFilterSlot = s;
+        SharedFilterLevel = lv;
+        SharedFilterKeyCoord = int3(key.xyz);
+        SharedFilterProbeCenter = key.xyz * cellSize;
+        SharedFilterOcclusionOffset = 2.0f * WorldProbeTMin(lv);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint slot = SharedFilterSlot;
+    uint level = SharedFilterLevel;
+    float3 ProbeWorldCenter = SharedFilterProbeCenter;
+    float OcclusionTestOffset = SharedFilterOcclusionOffset;
+    if (laneIndex < 6u)
+    {
+        float cellSize = WorldCellSize(level);
+        int3 origin = WorldOrigin(level);
+        int3 ProbeCoord = SharedFilterKeyCoord - origin;
+        int3 NeighborCoord = ProbeCoord + Offsets[laneIndex];
+        uint neighborSlot = WorldCapacity;
+        float3 neighborPos = 0.0f;
+        if (all(NeighborCoord >= 0) && all(NeighborCoord < int(WorldGrid)))
+        {
+            uint candidate = uint(_SdfFarOutput[WorldIndirection(WorldCellIndex(NeighborCoord, level))].x) - 1u;
+            if (candidate < WorldCapacity)
+            {
+                neighborSlot = candidate;
+                neighborPos = float3(origin + NeighborCoord) * cellSize;
+            }
+        }
+        SharedFilterNeighborSlots[laneIndex] = neighborSlot;
+        SharedFilterNeighborCenters[laneIndex] = neighborPos;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
     uint2 ProbeTexelCoord = group.xy * 8u + lane.xy;
     uint2 address = WorldTexelAddress(slot, ProbeTexelCoord);
     float4 current = _SdfWorldRawRadiance[address];
@@ -310,46 +381,40 @@ void FilterWorldProbeRadiance(uint3 group : SV_GroupID, uint3 lane : SV_GroupThr
     float HitDistance = current.w;
     float TotalWeight = 1.0f;
     float3 WorldConeDirection = ProbeSphereDirection((ProbeTexelCoord + 0.5f) / float(WorldResolution));
-    const int3 Offsets[6] = { int3(-1,0,0), int3(1,0,0), int3(0,-1,0), int3(0,1,0), int3(0,0,-1), int3(0,0,1) };
+    float3 OcclusionStep = OcclusionTestOffset * WorldConeDirection;
+    float3 OcclusionTestPosition = ProbeWorldCenter + OcclusionStep;
+
+    [unroll]
     for (uint OffsetIndex = 0; OffsetIndex < 6u; OffsetIndex++)
     {
-        int3 NeighborCoord = ProbeCoord + Offsets[OffsetIndex];
-        if (all(NeighborCoord >= 0) && all(NeighborCoord < int(WorldGrid)))
-        {
-            uint NeighborProbeIndex = uint(_SdfFarOutput[WorldIndirection(WorldCellIndex(NeighborCoord, level))].x) - 1u;
-            if (NeighborProbeIndex < WorldCapacity)
-            {
-                float4 NeighborRadiance = _SdfWorldRawRadiance[WorldTexelAddress(NeighborProbeIndex, ProbeTexelCoord)];
-                float NeighborRadianceDepth = NeighborRadiance.w;
-                float3 NeighborWorldPosition = float3(WorldOrigin(level) + NeighborCoord) * WorldCellSize(level);
-                float OcclusionWeight = 1.0f;
-                float OcclusionTestOffset = 2.0f * WorldProbeTMin(level);
-                float3 NeighborOcclusionTestPosition = NeighborWorldPosition + OcclusionTestOffset * WorldConeDirection;
-                float3 ToNeighborOcclusionPosition = NeighborOcclusionTestPosition - ProbeWorldCenter;
-                float ProbeDepthForNeighborOcclusionPosition = _SdfWorldRawRadiance[
-                    WorldTexelAddress(slot, WorldDepthCoord(ToNeighborOcclusionPosition))].w;
-                if (ProbeDepthForNeighborOcclusionPosition * ProbeDepthForNeighborOcclusionPosition < dot(ToNeighborOcclusionPosition, ToNeighborOcclusionPosition))
-                    OcclusionWeight = 0.0f;
+        uint NeighborProbeIndex = SharedFilterNeighborSlots[OffsetIndex];
+        if (NeighborProbeIndex >= WorldCapacity)
+            continue;
 
-                float3 OcclusionTestPosition = ProbeWorldCenter + OcclusionTestOffset * WorldConeDirection;
-                float3 ToOcclusionPosition = OcclusionTestPosition - NeighborWorldPosition;
-                float NeighborProbeDepthForOcclusionPosition = _SdfWorldRawRadiance[
-                    WorldTexelAddress(NeighborProbeIndex, WorldDepthCoord(ToOcclusionPosition))].w;
-                if (NeighborProbeDepthForOcclusionPosition * NeighborProbeDepthForOcclusionPosition < dot(ToOcclusionPosition, ToOcclusionPosition))
-                    OcclusionWeight = 0.0f;
+        float3 NeighborWorldPosition = SharedFilterNeighborCenters[OffsetIndex];
+        float3 ToNeighborOcclusionPosition = (NeighborWorldPosition + OcclusionStep) - ProbeWorldCenter;
+        float ProbeDepthForNeighborOcclusionPosition = _SdfWorldRawRadiance[
+            WorldTexelAddress(slot, WorldDepthCoord(ToNeighborOcclusionPosition))].w;
+        if (ProbeDepthForNeighborOcclusionPosition * ProbeDepthForNeighborOcclusionPosition < dot(ToNeighborOcclusionPosition, ToNeighborOcclusionPosition))
+            continue;
 
-                if (HitDistance >= 0.0f)
-                    NeighborRadianceDepth = min(NeighborRadianceDepth, HitDistance);
-                float3 NeighborHitPosition = NeighborWorldPosition + WorldConeDirection * NeighborRadianceDepth;
-                float3 ToNeighborHit = NeighborHitPosition - ProbeWorldCenter;
-                float NeighborAngle = WorldProbeHitAngle(dot(ToNeighborHit, WorldConeDirection) / length(ToNeighborHit));
-                const float SpatialFilterMaxRadianceHitAngle = 0.2f;
-                float AngleWeight = 1.0f - saturate(NeighborAngle / SpatialFilterMaxRadianceHitAngle);
-                float Weight = AngleWeight * OcclusionWeight;
-                Lighting += NeighborRadiance.rgb * Weight;
-                TotalWeight += Weight;
-            }
-        }
+        float3 ToOcclusionPosition = OcclusionTestPosition - NeighborWorldPosition;
+        float NeighborProbeDepthForOcclusionPosition = _SdfWorldRawRadiance[
+            WorldTexelAddress(NeighborProbeIndex, WorldDepthCoord(ToOcclusionPosition))].w;
+        if (NeighborProbeDepthForOcclusionPosition * NeighborProbeDepthForOcclusionPosition < dot(ToOcclusionPosition, ToOcclusionPosition))
+            continue;
+
+        float4 NeighborRadiance = _SdfWorldRawRadiance[WorldTexelAddress(NeighborProbeIndex, ProbeTexelCoord)];
+        float NeighborRadianceDepth = NeighborRadiance.w;
+        if (HitDistance >= 0.0f)
+            NeighborRadianceDepth = min(NeighborRadianceDepth, HitDistance);
+        float3 NeighborHitPosition = NeighborWorldPosition + WorldConeDirection * NeighborRadianceDepth;
+        float3 ToNeighborHit = NeighborHitPosition - ProbeWorldCenter;
+        float NeighborAngle = WorldProbeHitAngle(dot(ToNeighborHit, WorldConeDirection) * rsqrt(max(dot(ToNeighborHit, ToNeighborHit), 1e-12f)));
+        const float SpatialFilterMaxRadianceHitAngle = 0.2f;
+        float AngleWeight = 1.0f - saturate(NeighborAngle / SpatialFilterMaxRadianceHitAngle);
+        Lighting += NeighborRadiance.rgb * AngleWeight;
+        TotalWeight += AngleWeight;
     }
     _SdfFarOutput[address] = float4(Lighting / TotalWeight, HitDistance);
 }

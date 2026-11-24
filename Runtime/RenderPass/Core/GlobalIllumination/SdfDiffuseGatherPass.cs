@@ -3683,7 +3683,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     var work = m_WorldWork.innerHandle;
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldClearKernel, WorldWorkId, work);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldClearKernel, FarOutputId, m_FarAtlas);
-                    cmd.DispatchCompute(m_FarCompute, m_WorldClearKernel, 128, 54, 1);
+                    cmd.DispatchCompute(m_FarCompute, m_WorldClearKernel, 16, 432, 1);
                     BindReceiver(cmd, m_FarCompute, m_WorldMarkKernel);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldMarkKernel, PlacementId, placement);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldMarkKernel, WorldWorkId, work);
@@ -3693,7 +3693,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.DispatchCompute(m_FarCompute, m_WorldReuseKernel, 64, 1, 1);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldAllocateKernel, WorldWorkId, work);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldAllocateKernel, FarOutputId, m_FarAtlas);
-                    cmd.DispatchCompute(m_FarCompute, m_WorldAllocateKernel, 128, 54, 1);
+                    cmd.DispatchCompute(m_FarCompute, m_WorldAllocateKernel, 16, 432, 1);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldSelectKernel, WorldWorkId, work);
                     cmd.DispatchCompute(m_FarCompute, m_WorldSelectKernel, 1, 1, 1);
                     cmd.SetComputeTextureParam(m_FarCompute, m_WorldTicketsKernel, WorldWorkId, work);

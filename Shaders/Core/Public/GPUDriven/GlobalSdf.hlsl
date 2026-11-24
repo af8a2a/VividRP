@@ -53,9 +53,9 @@ uint VividGlobalSdfPage(uint3 physical, uint level)
 
 uint3 VividGlobalSdfAtlasCell(uint slot, uint3 physical)
 {
-    uint3 tile = uint3(slot % VividGlobalSdfBrickResolution,
-        (slot / VividGlobalSdfBrickResolution) % VividGlobalSdfBrickResolution,
-        slot / VividGlobalSdfPagesPerSlice);
+    uint3 tile = uint3(slot & (VividGlobalSdfBrickResolution - 1u),
+        (slot >> 4u) & (VividGlobalSdfBrickResolution - 1u),
+        slot >> 8u);
     return tile * VividGlobalSdfStoredBrickSize + (physical & (VividGlobalSdfBrickSize - 1u));
 }
 
@@ -68,7 +68,7 @@ float VividGlobalSdfSampleAtlas(Texture3D<float> atlas, float3 cell, uint level,
     uint3 size;
     atlas.GetDimensions(size.x, size.y, size.z);
     float3 atlasCell = float3(VividGlobalSdfAtlasCell(page - 1u, physical)) + frac(cell);
-    return atlas.SampleLevel(sampler_LinearClamp, (atlasCell + 0.5f) / float3(size), 0.0f);
+    return atlas.SampleLevel(sampler_LinearClamp, (atlasCell + 0.5f) * rcp(float3(size)), 0.0f);
 }
 
 float VividGlobalSdfSampleFine(float3 grid, uint level, float emptyDistance)
@@ -92,14 +92,17 @@ float VividGlobalSdfSampleLevel(float3 positionWS, uint level)
 float VividGlobalSdfSampleTraceDistance(float3 positionWS, uint level, bool useMip)
 {
     float4 layout = _GlobalSdfLevels[level];
-    float3 grid = clamp((positionWS - layout.xyz) / layout.w, 0.0, VividGlobalSdfResolution - 1.0);
+    float3 grid = clamp((positionWS - layout.xyz) * rcp(layout.w), 0.0f, VividGlobalSdfResolution - 1.0f);
     if (!useMip)
         return VividGlobalSdfSampleFine(grid, level, VividGlobalSdfBand) * layout.w;
 
-    float3 texel = clamp((grid + 0.5f) / VividGlobalSdfMipFactor, 0.5f, VividGlobalSdfMipResolution - 0.5f);
+    static const float3 kInvMipDimensions = float3(
+        1.0f / float(VividGlobalSdfMipResolution),
+        1.0f / float(VividGlobalSdfMipResolution),
+        1.0f / float(VividGlobalSdfMipResolution * VividGlobalSdfLevelCount));
+    float3 texel = clamp((grid + 0.5f) * (1.0f / float(VividGlobalSdfMipFactor)), 0.5f, VividGlobalSdfMipResolution - 0.5f);
     texel.z += level * VividGlobalSdfMipResolution;
-    float3 uv = texel / float3(VividGlobalSdfMipResolution, VividGlobalSdfMipResolution,
-        VividGlobalSdfMipResolution * VividGlobalSdfLevelCount);
+    float3 uv = texel * kInvMipDimensions;
     float distance = _GlobalSdfMip.SampleLevel(sampler_LinearClamp, uv, 0.0f);
     if (distance < VividGlobalSdfMipTransition)
         distance = VividGlobalSdfSampleFine(grid, level, distance);
@@ -192,13 +195,15 @@ bool VividTraceGlobalSdf(float3 originWS, float3 directionWS, float minDistance,
     hit = (VividGlobalSdfHit)0;
     float3 entry = FLT_MAX;
     float3 exit = 0.0;
+    float3 invDir = VividMeshSdfSafeInvDir(directionWS);
+    float3 negOriginInvDir = -originWS * invDir;
     [unroll]
     for (uint i = 0u; i < VividGlobalSdfLevelCount; i++)
     {
         float4 layout = _GlobalSdfLevels[i];
         float a = minDistance;
         float b = maxDistance;
-        if (!VividMeshSdfClipRay(originWS, directionWS, layout.xyz + layout.w,
+        if (!VividMeshSdfClipRayFast(invDir, negOriginInvDir, layout.xyz + layout.w,
             layout.xyz + (VividGlobalSdfResolution - 2.0) * layout.w, a, b))
         {
             a = FLT_MAX;

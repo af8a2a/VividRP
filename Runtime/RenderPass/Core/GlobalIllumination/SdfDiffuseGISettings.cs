@@ -79,16 +79,16 @@ namespace VividRP.Runtime.RenderPass.Core
         public BoolParameter cacheSunVisibility = new(false);
 
         [Tooltip("Additional diffuse bounce orders propagated through the Surface Cache. Zero uses direct light and emission at SDF hits.")]
-        public ClampedIntParameter surfaceCacheBounceOrders = new(0, 0, 8);
+        public ClampedIntParameter surfaceCacheBounceOrders = new(3, 0, 8);
 
         [Tooltip("Use Global SDF and continue indirect lighting in one feedback atlas when the graph provides Global SDF cards. Bounce orders above zero enable feedback.")]
         public BoolParameter surfaceCacheRadiosityFeedback = new(true);
 
         [Tooltip("Cosine rays per radiosity texel and bounce sweep. Higher counts reduce fixed Surface Cache sampling error; use a smaller card update budget for expensive reference solves.")]
-        public ClampedIntParameter surfaceCacheRadiositySamples = new(16, 16, 4096);
+        public ClampedIntParameter surfaceCacheRadiositySamples = new(32, 16, 4096);
 
         [Tooltip("Keep a separate estimate for each bounce order and refine it with new sample batches. Lighting changes restart sample accumulation; progressive publishing can retain compatible incident lighting during the rebuild.")]
-        public BoolParameter surfaceCacheRadiosityAccumulate = new(false);
+        public BoolParameter surfaceCacheRadiosityAccumulate = new(true);
 
         [Tooltip("Retain compatible incident lighting while rebuilding. Cold starts and large changes publish low orders progressively; small changes retain higher bounces until fresh target-order cards arrive. Later sample batches publish at target order. Incompatible card identities discard history.")]
         public BoolParameter surfaceCacheProgressiveRadiosity = new(true);
@@ -97,13 +97,13 @@ namespace VividRP.Runtime.RenderPass.Core
         public ClampedFloatParameter surfaceCacheLightingTolerance = new(0.005f, 0f, 0.01f);
 
         [Tooltip("Temporary card-budget multiplier after lighting/geometry changes or fast camera motion. One disables the boost. Small-scene full updates and the remaining-card limit still apply.")]
-        public ClampedIntParameter surfaceCacheUpdateBoost = new(4, 1, 4);
+        public ClampedIntParameter surfaceCacheUpdateBoost = new(2, 1, 4);
 
         [Tooltip("Maximum bounce sweeps in a relighting frame for a compatible small scene. One retains incremental rebuilding. Only the first sample batch is accelerated; the existing card limit and a bounded ray-work budget still apply.")]
         public ClampedIntParameter surfaceCacheRelightSweeps = new(8, 1, 8);
 
         [Tooltip("Independent sample batches per bounce order before the static radiosity cache stops updating. Rays per texel are samples per batch times this limit.")]
-        public ClampedIntParameter surfaceCacheRadiosityBatchLimit = new(64, 1, 4096);
+        public ClampedIntParameter surfaceCacheRadiosityBatchLimit = new(4, 1, 4096);
 
         [Tooltip("Base cards updated per frame in a large Surface Cache. Dynamic boost can temporarily raise this budget. One complete sweep updates a bounce order.")]
         public ClampedIntParameter surfaceCacheCardsPerFrame = new(16, 1, 4096);
@@ -117,35 +117,35 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Trace the full-sphere screen probes through the closest HZB and sample the previous pre-postprocessing SceneColor.")]
         public BoolParameter lumenScreenTracing = new(true);
 
-        [Tooltip("Screen tracing requires final-depth HZB and motion vector inputs on the gather pass.")]
-        public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.SdfOnly);
+        [Tooltip("Selects the tracing backend. Hybrid combines screen-space HZB traces with Mesh SDF and Global SDF tracing (Lumen default).")]
+        public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.Hybrid);
 
         [Tooltip("Split the SDF trace into detail, clipmap-assisted and far segments. Reconstruct far lighting at the confirmed first hit.")]
-        public BoolParameter segmentedSdfTracing = new(false);
+        public BoolParameter segmentedSdfTracing = new(true);
 
         [Tooltip("Length of the initial Mesh SDF detail segment in world units.")]
         public MinFloatParameter meshSdfDetailDistance = new(2f, 0.1f);
 
         [Tooltip("Sample the sky on confirmed Mesh SDF escapes. ReSTIR requires 2x2 integration and Far Radiance Cache. Physically Based Sky requires a cubemap baked without the sun disk.")]
-        public BoolParameter occludedSky = new(false);
+        public BoolParameter occludedSky = new(true);
 
         [Tooltip("Maximum sky visibility distance. A ray that reaches the limit inside the SDF scene is unresolved.")]
         public MinFloatParameter skyTraceDistance = new(64f, 1f);
 
         [Tooltip("Use a budgeted world-space directional Surface Cache for rays that leave the near trace range.")]
-        public BoolParameter farRadianceCache = new(false);
+        public BoolParameter farRadianceCache = new(true);
 
-        [Tooltip("Maximum distance from the receiver for a far-cache hit.")]
+        [Tooltip("Maximum distance from the receiver for far radiance cache and sky visibility traces.")]
         public MinFloatParameter farTraceDistance = new(64f, 1f);
 
-        [Tooltip("Strength of short-range occlusion on realtime indirect lighting.")]
-        public ClampedFloatParameter nearOcclusionStrength = new(0f, 0f, 1f);
+        [Tooltip("Strength of short-range ambient occlusion on realtime indirect lighting.")]
+        public ClampedFloatParameter nearOcclusionStrength = new(1f, 0f, 1f);
 
         [Tooltip("Apply directional near-field visibility during diffuse integration. Uses the receiver shading normal and keeps GI coverage separate.")]
-        public BoolParameter directionalNearOcclusion = new(true);
+        public BoolParameter directionalNearOcclusion = new(false);
 
         [Tooltip("Use half-resolution horizon search and a separate per-camera bent-normal history for Screen Probe Gather. Overrides directional near occlusion.")]
-        public BoolParameter screenProbeBentNormalAO = new(false);
+        public BoolParameter screenProbeBentNormalAO = new(true);
 
         [Tooltip("Use Lumen's full-resolution short-range AO during SH3 integration. With this disabled, Bent Normal AO uses its separate history.")]
         public BoolParameter screenProbeBentNormalApplyDuringIntegration = new(false);
@@ -166,7 +166,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public BoolParameter screenProbeDitherTraceDirections = new(true);
 
         [Tooltip("Use Lumen full-tile blue-noise jitter and pick one weighted probe per pixel for SH3 integration.")]
-        public BoolParameter screenProbeStochasticInterpolation = new(false);
+        public BoolParameter screenProbeStochasticInterpolation = new(true);
 
         [Tooltip("Blend the previous probe radiance before spatial filtering. The lighting sampling guide retains its own filtered history.")]
         public BoolParameter screenProbeTemporalFilter = new(false);
@@ -193,10 +193,10 @@ namespace VividRP.Runtime.RenderPass.Core
         public ClampedFloatParameter screenProbeMinAdaptiveRayFraction = new(0.5f, 0.25f, 1.0f);
 
         [Tooltip("Trace one additional probe per tile with weak geometric support. Enabled by default with Screen Probe Gather.")]
-        public BoolParameter adaptiveScreenProbes = new(false);
+        public BoolParameter adaptiveScreenProbes = new(true);
 
         [Tooltip("Filter neighboring screen probes before resolving diffuse GI. Enabled by default with Screen Probe Gather.")]
-        public BoolParameter screenProbeSpatialFilter = new(false);
+        public BoolParameter screenProbeSpatialFilter = new(true);
 
         [Tooltip("Legacy probe-grid filter footprint. Screen Probe Gather uses three directional cross passes; the ray-pair hit-distance filter also uses the cross footprint.")]
         public SdfScreenProbeSpatialKernelParameter screenProbeSpatialKernel = new(SdfScreenProbeSpatialKernel.Neighborhood3x3);
@@ -225,10 +225,10 @@ namespace VividRP.Runtime.RenderPass.Core
         public BoolParameter restirOpenPbrDiffuse = new(true);
 
         [Tooltip("Reproject the resolved diffuse lighting using motion vectors. Enabled by default for either Gather Method when motion is connected.")]
-        public BoolParameter pixelTemporal = new(false);
+        public BoolParameter pixelTemporal = new(true);
 
         [Tooltip("Maximum age of stable full-resolution diffuse GI history. Motion, coverage loss and shading changes shorten the window.")]
-        public ClampedIntParameter pixelHistoryMaxAge = new(16, 8, 32);
+        public ClampedIntParameter pixelHistoryMaxAge = new(10, 8, 32);
 
         [Tooltip("Clamp fast-updating Screen Probe pixel history to the 3x3 current resolved lighting neighborhood when traces hit moving geometry. Disabled by default to match UE Lumen.")]
         public BoolParameter screenProbeFastUpdateNeighborhoodClamp = new(false);
@@ -315,11 +315,11 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Depth plane weight scale for the bilateral spatial filter (UE5 default 10000).")]
         public MinFloatParameter lumenReflectionBilateralFilterDepthWeightScale = new(10000.0f, 1.0f);
 
-        [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the existing ReSTIR bilateral filter and skips filtering for ordinary probes.")]
-        public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Atrous2);
+        [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the native Screen Probe filters and skips extra À-Trous passes.")]
+        public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Legacy);
 
         [Tooltip("Resolve thin-shell self hits using the matching GPU-driven visibility and depth buffers.")]
-        public BoolParameter correctReceiverSelfHits = new(false);
+        public BoolParameter correctReceiverSelfHits = new(true);
 
         [Tooltip("Store per-ray radiance, hit distance and trace state for GPU inspection.")]
         public BoolParameter recordRayDiagnostics = new(false);

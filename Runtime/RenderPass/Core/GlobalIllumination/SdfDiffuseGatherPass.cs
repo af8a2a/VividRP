@@ -1752,7 +1752,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SkyTexture = PassRecorder.ImportTextureForPass(this, SkyManager.GetSkySourceCubemapHandle());
                 if (useSettings && settings.occludedSky.value && (!m_RestirGather || farConfigured)
                     && !m_OffscreenOnly && m_SkyTexture.IsValid())
-                    PrepareOccludedSky(frameData.GetOrCreate<VividSkyData>(), settings.skyTraceDistance.value);
+                {
+                    float skyDistance = settings.skyTraceDistance.overrideState
+                        ? settings.skyTraceDistance.value
+                        : settings.farTraceDistance.value;
+                    PrepareOccludedSky(frameData.GetOrCreate<VividSkyData>(), skyDistance);
+                }
             }
             m_Cameras.PurgeDestroyedCameras();
             m_State = m_Cameras.GetOrCreateBase(camera);

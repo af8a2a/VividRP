@@ -36,6 +36,45 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DefaultSettings_ConvergeMatureLumenPipelineDefaults()
+        {
+            var settings = ScriptableObject.CreateInstance<SdfDiffuseGISettings>();
+            try
+            {
+                Assert.That(settings.enabled.value, Is.True);
+                Assert.That(settings.gatherMethod.value, Is.EqualTo(SdfDiffuseGatherMethod.ScreenProbeGather));
+                Assert.That(settings.traceMode.value, Is.EqualTo(SdfDiffuseTraceMode.Hybrid));
+                Assert.That(settings.lumenScreenTracing.value, Is.True);
+                Assert.That(settings.segmentedSdfTracing.value, Is.True);
+                Assert.That(settings.occludedSky.value, Is.True);
+                Assert.That(settings.farRadianceCache.value, Is.True);
+                Assert.That(settings.surfaceCacheBounceOrders.value, Is.EqualTo(3));
+                Assert.That(settings.surfaceCacheRadiositySamples.value, Is.EqualTo(32));
+                Assert.That(settings.surfaceCacheRadiosityAccumulate.value, Is.True);
+                Assert.That(settings.surfaceCacheUpdateBoost.value, Is.EqualTo(2));
+                Assert.That(settings.surfaceCacheRadiosityBatchLimit.value, Is.EqualTo(4));
+                Assert.That(settings.nearOcclusionStrength.value, Is.EqualTo(1f).Within(1e-5f));
+                Assert.That(settings.screenProbeBentNormalAO.value, Is.True);
+                Assert.That(settings.directionalNearOcclusion.value, Is.False);
+                Assert.That(settings.screenProbeFullSphere.value, Is.True);
+                Assert.That(settings.screenProbeDitherTraceDirections.value, Is.True);
+                Assert.That(settings.screenProbeStochasticInterpolation.value, Is.True);
+                Assert.That(settings.screenProbeTemporalFilter.value, Is.False);
+                Assert.That(settings.screenProbeSamplingGuide.value, Is.True);
+                Assert.That(settings.adaptiveScreenProbes.value, Is.True);
+                Assert.That(settings.screenProbeSpatialFilter.value, Is.True);
+                Assert.That(settings.pixelTemporal.value, Is.True);
+                Assert.That(settings.pixelHistoryMaxAge.value, Is.EqualTo(10));
+                Assert.That(settings.spatialDenoise.value, Is.EqualTo(SdfDiffuseSpatialDenoise.Legacy));
+                Assert.That(settings.correctReceiverSelfHits.value, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
         public void PrepareSphereDirectionalGuide_HighVariancePeakSubdividesToLevel2AndRemainsUnbiased()
         {
             RequireComputeAndReversedZ();

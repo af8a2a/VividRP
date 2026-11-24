@@ -308,6 +308,11 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem/Stats/PhysicalPools");
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureStatsAdaptiveMipBiasMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem/Stats/AdaptiveMipBias");
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureStatsReportGlobalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem/Stats/ReportGlobal");
+        public static readonly ProfilerMarker VirtualTextureBeginFrameMarker = new("VividRP.RenderPipeline.VirtualTexture.BeginFrame");
+        public static readonly ProfilerMarker VirtualTexturePrepareCameraMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem/PrepareCamera");
+        public static readonly ProfilerMarker VirtualTextureScheduleReadbackMarker = new("VividRP.RenderPipeline.VirtualTexture.ScheduleFeedbackReadback");
+        public static readonly ProfilerMarker VirtualTextureEndFrameMarker = new("VividRP.RenderPipeline.VirtualTexture.EndFrame");
+        public static readonly ProfilerMarker VirtualTextureEndFrameSubmitUploadsMarker = new("VividRP.RenderPipeline.VirtualTexture.EndFrame.SubmitUploads");
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureStatsReportViewMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem/Stats/ReportView");
         public static readonly ProfilerMarker PrepareAllMarker = new("VividRP.RenderPass.PrepareAll");
         public static readonly ProfilerMarker RecordRenderGraphMarker = new("VividRP.RenderPass.RecordRenderGraph");

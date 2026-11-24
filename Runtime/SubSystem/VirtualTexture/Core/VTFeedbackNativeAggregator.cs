@@ -629,6 +629,7 @@ namespace VividRP.Runtime
                     GroupedRequests = m_GroupedRequests.AsDeferredJobArray(),
                     SpaceRanges = m_SpaceRanges,
                 }.Schedule(groupedSortHandle));
+                JobHandle.ScheduleBatchedJobs();
             }
             catch
             {

@@ -145,6 +145,8 @@ namespace VividRP.Runtime
         private static readonly List<ResidencyPriorityCandidate> s_ResidencyPriorityCandidates = new();
         private static readonly List<VTRequestPreparationBatch> s_RequestPreparationBatches = new();
         private static readonly List<PrefetchPriorityCandidate> s_PrefetchPriorityCandidates = new();
+        private static readonly List<FrameReadbackViewStats> s_FrameReadbackViewStats = new();
+        private static readonly List<FrameRecordedView> s_FrameRecordedViews = new();
         private static readonly UploadCommitterResolver s_UploadCommitterResolver = new();
         private static readonly VTAdaptiveMipBiasController s_AdaptiveMipBiasController = new();
         private static readonly VTPageTableScatterUploader s_PageTableScatterUploader = new();
@@ -165,12 +167,19 @@ namespace VividRP.Runtime
         private static int s_LastPrefetchCandidateProcessCount;
         private static float s_MaxAdaptiveMipBias;
         private static float s_MaxAdaptiveControllerMipBias;
+        private static bool s_IsFrameActive;
+        private static int s_ActiveFrameIndex = -1;
+        private static VirtualTextureViewId s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
+        private static VirtualTextureViewId s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
+        private static CameraType s_ActiveFrameCameraType;
+        private static FrameReadbackSummary s_ActiveFrameReadbackSummary;
 #if UNITY_INCLUDE_TESTS
         private static int s_PhysicalPoolFreePageCollectionCount;
         private static int s_PhysicalPoolStatsCollectionCount;
         private static int s_UploadSpaceSortCount;
         private static int s_LastRequestPreparationScheduledJobCount;
         private static int s_LastRequestPreparationWaitCount;
+        private static int s_EndFrameExecutionCount;
 #endif
 
         private static int s_NextSpaceId = 1;
@@ -386,6 +395,118 @@ namespace VividRP.Runtime
             internal Vector2 Centroid { get; }
         }
 
+        private struct FrameReadbackSummary
+        {
+            internal int LastReadbackFrame;
+            internal int FaultCount;
+            internal int FeedbackOverflowCount;
+            internal int FallbackSampleCount;
+            internal int FaultOverflowCount;
+            internal int ResidentOverflowCount;
+            internal int NonResidentFallbackSampleCount;
+            internal int ResidentFallbackSampleCount;
+            internal int WeightedResolvedSampleCount;
+            internal int MeasuredAcceptedFaultRequestCount;
+            internal int MeasuredAcceptedResidentRequestCount;
+            internal int FeedbackMeasurementFrameIndex;
+            internal bool HasFreshFeedbackMeasurement;
+            internal int ActiveViewFaultCount;
+            internal int ActiveViewFeedbackOverflowCount;
+            internal int ActiveViewFallbackSampleCount;
+            internal int ActiveViewLastReadbackFrame;
+        }
+
+        private readonly struct FrameReadbackViewStats
+        {
+            internal FrameReadbackViewStats(
+                VirtualTextureViewId viewId,
+                CameraType cameraType,
+                int faultCount,
+                int feedbackOverflowCount,
+                int fallbackSampleCount,
+                int frameIndex)
+            {
+                ViewId = viewId;
+                CameraType = cameraType;
+                FaultCount = faultCount;
+                FeedbackOverflowCount = feedbackOverflowCount;
+                FallbackSampleCount = fallbackSampleCount;
+                FrameIndex = frameIndex;
+            }
+
+            internal VirtualTextureViewId ViewId { get; }
+            internal CameraType CameraType { get; }
+            internal int FaultCount { get; }
+            internal int FeedbackOverflowCount { get; }
+            internal int FallbackSampleCount { get; }
+            internal int FrameIndex { get; }
+        }
+
+        private readonly struct FrameRecordedView
+        {
+            internal FrameRecordedView(
+                VirtualTextureViewId viewId,
+                CameraType cameraType,
+                string cameraName,
+                int frameIndex,
+                int actualWidth,
+                int actualHeight,
+                int pixelWidth,
+                int pixelHeight,
+                bool supportsFeedback,
+                int feedbackCapacity,
+                string statusMessage)
+            {
+                ViewId = viewId;
+                CameraType = cameraType;
+                CameraName = cameraName;
+                FrameIndex = frameIndex;
+                ActualWidth = actualWidth;
+                ActualHeight = actualHeight;
+                PixelWidth = pixelWidth;
+                PixelHeight = pixelHeight;
+                SupportsFeedback = supportsFeedback;
+                FeedbackCapacity = feedbackCapacity;
+                StatusMessage = statusMessage;
+            }
+
+            internal VirtualTextureViewId ViewId { get; }
+            internal CameraType CameraType { get; }
+            internal string CameraName { get; }
+            internal int FrameIndex { get; }
+            internal int ActualWidth { get; }
+            internal int ActualHeight { get; }
+            internal int PixelWidth { get; }
+            internal int PixelHeight { get; }
+            internal bool SupportsFeedback { get; }
+            internal int FeedbackCapacity { get; }
+            internal string StatusMessage { get; }
+        }
+
+        private struct FrameResidencyUploadResult
+        {
+            internal int EvictionCount;
+            internal int PendingMipGapSum;
+            internal int PendingMipGapMax;
+            internal int PendingMipGapSampleCount;
+            internal int PrefetchRequestCount;
+            internal int DeduplicatedRequestCount;
+            internal int ActiveViewDeduplicatedRequestCount;
+            internal int InFlightUploadBatchCount;
+            internal int DuplicateUploadCount;
+            internal int SkippedUploadCount;
+            internal int CpuProducedPageCount;
+            internal int GpuProducedPageCount;
+            internal int GpuDispatchCount;
+            internal int StreamSaturatedRequestCount;
+            internal int PendingDataCount;
+            internal int PhysicalPendingUploadCount;
+            internal VTPhysicalPoolStats PhysicalPoolStats;
+            internal float AdaptiveMipBias;
+            internal bool ScheduledUploads;
+            internal bool AnyPageTableRebuilt;
+        }
+
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
 #else
@@ -445,6 +566,8 @@ namespace VividRP.Runtime
             s_ResidencyPriorityCandidates.Clear();
             s_RequestPreparationBatches.Clear();
             s_PrefetchPriorityCandidates.Clear();
+            s_FrameReadbackViewStats.Clear();
+            s_FrameRecordedViews.Clear();
             s_FeedbackCameraSystem.Dispose();
             s_NextSpaceId = 1;
             s_NextAllocationId = 1;
@@ -459,12 +582,19 @@ namespace VividRP.Runtime
             s_LastPrefetchCandidateProcessCount = 0;
             s_MaxAdaptiveMipBias = 0f;
             s_MaxAdaptiveControllerMipBias = 0f;
+            s_IsFrameActive = false;
+            s_ActiveFrameIndex = -1;
+            s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
+            s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
+            s_ActiveFrameCameraType = default;
+            s_ActiveFrameReadbackSummary = default;
 #if UNITY_INCLUDE_TESTS
             s_PhysicalPoolFreePageCollectionCount = 0;
             s_PhysicalPoolStatsCollectionCount = 0;
             s_UploadSpaceSortCount = 0;
             s_LastRequestPreparationScheduledJobCount = 0;
             s_LastRequestPreparationWaitCount = 0;
+            s_EndFrameExecutionCount = 0;
 #endif
             s_RuntimeStateResetRequested = false;
             s_FeedbackRequestReadbackErrorCount = 0;
@@ -703,6 +833,9 @@ namespace VividRP.Runtime
             s_ResidencyPriorityCandidates.Clear();
             s_RequestPreparationBatches.Clear();
             s_PrefetchPriorityCandidates.Clear();
+            s_FrameReadbackViewStats.Clear();
+            s_FrameRecordedViews.Clear();
+            s_ActiveFrameReadbackSummary = default;
             s_DemandEvictionBudgetFrameIndex = int.MinValue;
             s_RemainingDemandEvictionBudget = 0;
             s_GlobalFrameIndex = int.MinValue;
@@ -719,6 +852,7 @@ namespace VividRP.Runtime
             s_UploadSpaceSortCount = 0;
             s_LastRequestPreparationScheduledJobCount = 0;
             s_LastRequestPreparationWaitCount = 0;
+            s_EndFrameExecutionCount = 0;
 #endif
             s_AdaptiveMipBiasController.Reset();
             s_FeedbackRequestReadbackErrorCount = 0;
@@ -808,7 +942,312 @@ namespace VividRP.Runtime
 
         protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
+            if (s_IsFrameActive)
+            {
+                PrepareCameraForFrame(frameData, cmd);
+                return;
+            }
+
             Update(frameData, cmd);
+        }
+
+        internal static void BeginFrame(int frameIndex, List<Camera> cameras)
+        {
+            BeginFrame(frameIndex, ResolvePrimaryCamera(cameras));
+        }
+
+        internal static void BeginFrame(int frameIndex, Camera primaryCamera = null)
+        {
+            using (RenderPassProfilingUtility.VirtualTextureBeginFrameMarker.Auto())
+            {
+                if (!IsInitialized)
+                    Initialize();
+
+                if (s_IsFrameActive)
+                    AbortFrameIfActive();
+
+                if (frameIndex >= 0)
+                    s_FallbackFrameIndex = Mathf.Max(s_FallbackFrameIndex, frameIndex);
+
+                if (s_RuntimeStateResetRequested)
+                    ResetRuntimeState(frameIndex);
+
+                s_FeedbackCameraSystem.PurgeDestroyedCameras();
+                s_FrameRecordedViews.Clear();
+                s_FrameReadbackViewStats.Clear();
+                s_CompletedReadbacks.Clear();
+
+                VirtualTextureViewId activeViewId = VirtualTextureViewId.FromCamera(primaryCamera);
+                CameraType activeCameraType = primaryCamera != null ? primaryCamera.cameraType : default;
+                VirtualTextureViewId cachePriorityViewId = ResolveCachePriorityViewId(
+                    activeViewId,
+                    activeCameraType);
+
+#if VT_DEBUG
+                foreach (VTPhysicalPool physicalPool in s_PhysicalPools.Values)
+                    physicalPool.DebugAdvanceTimelineFrame(frameIndex);
+#endif
+
+                int lastReadbackFrame = -1;
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackMarker.Auto())
+                    CollectCompletedReadbacks(ref lastReadbackFrame);
+
+                // Kick feedback aggregation jobs now so worker threads overlap with camera
+                // culling and RenderGraph recording while the main thread never waits here.
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateMarker.Auto())
+                {
+                    s_FeedbackAggregator.Schedule(
+                        s_CompletedReadbacks,
+                        cachePriorityViewId,
+                        activeViewId,
+                        activeCameraType);
+                }
+
+                // Summarize readbacks now and release batch references before RenderCamera can
+                // reuse or resize per-camera feedback buffers during the frame.
+                s_ActiveFrameReadbackSummary = CollectReadbackSummary(
+                    frameIndex,
+                    lastReadbackFrame,
+                    activeViewId,
+                    activeCameraType,
+                    s_FrameReadbackViewStats);
+                s_CompletedReadbacks.Clear();
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsMarker.Auto())
+                    AdvanceAndSchedulePageTransitions(frameIndex);
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsBeginFrameMarker.Auto())
+                {
+                    bool isFirstUpdateForFrame = s_GlobalFrameIndex != frameIndex;
+                    if (isFirstUpdateForFrame)
+                    {
+                        VTVirtualTextureStreamRequestGate.BeginFrame();
+                        s_UploadScheduler.BeginFrame();
+                        s_AllocatedResidencyRequestCount = 0;
+                        s_AllocatedPrefetchRequestCount = 0;
+                        s_AllocatedResidencyRequestsBySpace.Clear();
+                        s_AllocatedPrefetchRequestsBySpace.Clear();
+                        s_ScheduledUploadsBySpace.Clear();
+                        s_GlobalFrameIndex = frameIndex;
+                    }
+                    else
+                    {
+                        s_UploadScheduler.DiscardQueuedUploads();
+                    }
+                }
+
+                // Commit uploads whose GPU fences already passed between frames so newly
+                // resident pages are immediately visible in this frame's RenderGraph.
+                bool committedUploads;
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
+                    committedUploads = s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, frameIndex);
+
+                bool rebuiltPageTable = false;
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
+                {
+                    foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
+                        rebuiltPageTable |= pair.Value.RebuildPageTableIfDirty();
+                }
+
+                if (committedUploads || rebuiltPageTable)
+                    s_FeedbackCameraSystem.InvalidateAllQuiescence(frameIndex, "begin-frame-publish");
+
+                s_ActiveFrameIndex = frameIndex;
+                s_ActiveFramePriorityViewId = cachePriorityViewId;
+                s_ActiveFrameViewId = activeViewId;
+                s_ActiveFrameCameraType = activeCameraType;
+                s_IsFrameActive = true;
+            }
+        }
+
+        internal static void PrepareCameraForFrame(ContextContainer frameData, CommandBuffer cmd)
+        {
+            using (RenderPassProfilingUtility.VirtualTexturePrepareCameraMarker.Auto())
+            {
+                if (!IsInitialized)
+                    Initialize();
+
+                int frameIndex = s_ActiveFrameIndex >= 0
+                    ? s_ActiveFrameIndex
+                    : ResolveFrameIndex(frameData);
+                float adaptiveMipBias = ResolveCurrentAdaptiveMipBias();
+                PrepareCameraBindingsAndFeedback(
+                    frameData,
+                    cmd,
+                    frameIndex,
+                    adaptiveMipBias,
+                    out FrameRecordedView recordedView,
+                    out _);
+
+                if (recordedView.ViewId.IsValid || !string.IsNullOrEmpty(recordedView.CameraName))
+                    s_FrameRecordedViews.Add(recordedView);
+            }
+        }
+
+        internal static bool ScheduleCameraFeedbackReadback(Camera camera, int frameIndex)
+        {
+            if (!IsInitialized || camera == null)
+                return false;
+
+            using (RenderPassProfilingUtility.VirtualTextureScheduleReadbackMarker.Auto())
+            {
+                if (!s_FeedbackCameraSystem.TryGetState(camera, out VirtualTextureFeedbackCameraState cameraState)
+                    || !cameraState.TryGetStreamState(out VirtualTextureFeedbackBufferState streamState))
+                {
+                    return false;
+                }
+
+                return streamState.SchedulePendingReadback(
+                    frameIndex,
+                    HasActiveUploadOrPendingWork());
+            }
+        }
+
+        internal static void DiscardCameraFeedbackWrite(Camera camera)
+        {
+            if (!IsInitialized || camera == null)
+                return;
+
+            if (!s_FeedbackCameraSystem.TryGetState(camera, out VirtualTextureFeedbackCameraState cameraState)
+                || !cameraState.TryGetStreamState(out VirtualTextureFeedbackBufferState streamState))
+            {
+                return;
+            }
+
+            streamState.DiscardPendingWrite();
+        }
+
+        internal static bool EndFrame(ScriptableRenderContext context, int frameIndex)
+        {
+            if (!IsInitialized && !s_IsFrameActive)
+                return false;
+
+            CommandBuffer cmd = CommandBufferPool.Get("VividRP.VirtualTexture.EndFrame");
+            try
+            {
+                bool hasGpuCommands = EndFrame(frameIndex, cmd);
+                if (hasGpuCommands || cmd.sizeInBytes > 0)
+                {
+                    using (RenderPassProfilingUtility.VirtualTextureEndFrameSubmitUploadsMarker.Auto())
+                    {
+                        context.ExecuteCommandBuffer(cmd);
+                        context.Submit();
+                    }
+
+                    return true;
+                }
+
+                return false;
+            }
+            finally
+            {
+                cmd.Clear();
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        internal static bool EndFrame(int frameIndex, CommandBuffer cmd)
+        {
+            if (!s_IsFrameActive)
+                return false;
+
+            using (RenderPassProfilingUtility.VirtualTextureEndFrameMarker.Auto())
+            {
+                try
+                {
+                    int resolvedFrameIndex = s_ActiveFrameIndex >= 0 ? s_ActiveFrameIndex : frameIndex;
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamBeginFrameMarker.Auto())
+                        VTStreamChunkManager.Shared.BeginFrame();
+
+                    bool committedUploads;
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
+                        committedUploads = s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, resolvedFrameIndex);
+
+                    FrameResidencyUploadResult result = ExecuteResidencyUploadsAndAdaptiveMipBias(
+                        resolvedFrameIndex,
+                        cmd,
+                        s_ActiveFramePriorityViewId,
+                        s_ActiveFrameReadbackSummary);
+
+                    if (committedUploads || result.ScheduledUploads || result.AnyPageTableRebuilt)
+                        s_FeedbackCameraSystem.InvalidateAllQuiescence(resolvedFrameIndex, "end-frame-activity");
+
+                    long pageTableByteCount = ComputePageTableByteCount(out int feedbackCapacity);
+                    string globalStatusMessage = ResolveGlobalStatusMessage();
+                    ReportGlobalStats(
+                        s_ActiveFrameReadbackSummary,
+                        result,
+                        feedbackCapacity,
+                        pageTableByteCount,
+                        globalStatusMessage);
+
+                    for (int viewIndex = 0; viewIndex < s_FrameRecordedViews.Count; viewIndex++)
+                    {
+                        FrameRecordedView recordedView = s_FrameRecordedViews[viewIndex];
+                        AccumulateViewReadbackStats(
+                            recordedView.ViewId,
+                            recordedView.CameraType,
+                            out int viewFaultCount,
+                            out int viewFeedbackOverflowCount,
+                            out int viewFallbackSampleCount,
+                            out int viewLastReadbackFrame);
+                        int viewDeduplicatedCount =
+                            IsMatchingView(
+                                recordedView.ViewId,
+                                recordedView.CameraType,
+                                s_ActiveFrameViewId,
+                                s_ActiveFrameCameraType)
+                                ? result.ActiveViewDeduplicatedRequestCount
+                                : 0;
+                        ReportViewStats(
+                            recordedView,
+                            result,
+                            viewFaultCount,
+                            viewDeduplicatedCount,
+                            viewFeedbackOverflowCount,
+                            viewFallbackSampleCount,
+                            viewLastReadbackFrame,
+                            pageTableByteCount);
+                    }
+
+#if UNITY_INCLUDE_TESTS
+                    s_EndFrameExecutionCount += 1;
+#endif
+                    return result.ScheduledUploads;
+                }
+                finally
+                {
+                    CleanupActiveFrameState();
+                }
+            }
+        }
+
+        internal static void AbortFrameIfActive()
+        {
+            if (!s_IsFrameActive)
+                return;
+
+            CleanupActiveFrameState();
+        }
+
+        private static void CleanupActiveFrameState()
+        {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureCleanupMarker.Auto())
+            {
+                s_FeedbackAggregator?.Clear();
+                s_CompletedReadbacks.Clear();
+                s_PrefetchBiasBySpace.Clear();
+                s_RemainingResidencyBudgetBySpace.Clear();
+                s_FrameReadbackViewStats.Clear();
+                s_FrameRecordedViews.Clear();
+            }
+
+            s_ActiveFrameReadbackSummary = default;
+            s_ActiveFrameIndex = -1;
+            s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
+            s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
+            s_ActiveFrameCameraType = default;
+            s_IsFrameActive = false;
         }
 
         private static void AdvanceAndSchedulePageTransitions(int frameIndex)
@@ -871,13 +1310,11 @@ namespace VividRP.Runtime
 
         private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            VividVirtualTextureFrameData virtualTextureFrameData;
             VividCameraData cameraData;
             Camera camera;
             VirtualTextureViewId activeViewId;
             CameraType activeCameraType;
             VirtualTextureViewId cachePriorityViewId;
-            VirtualTextureFeedbackViewSignature activeViewSignature;
             int frameIndex;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFrameSetupMarker.Auto())
             {
@@ -888,8 +1325,6 @@ namespace VividRP.Runtime
                 if (s_RuntimeStateResetRequested)
                     ResetRuntimeState(frameIndex);
 
-                virtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
-                virtualTextureFrameData?.Reset();
                 s_FeedbackCameraSystem.PurgeDestroyedCameras();
 
                 cameraData = TryGetCameraData(frameData);
@@ -897,7 +1332,6 @@ namespace VividRP.Runtime
                 activeViewId = VirtualTextureViewId.FromCameraData(cameraData);
                 activeCameraType = camera != null ? camera.cameraType : default;
                 cachePriorityViewId = ResolveCachePriorityViewId(activeViewId, activeCameraType);
-                activeViewSignature = VirtualTextureFeedbackViewSignature.FromCameraData(cameraData);
             }
 
             // Advance the diagnostics clock before readback collection. Transition pages
@@ -920,94 +1354,12 @@ namespace VividRP.Runtime
                     activeCameraType);
             }
 
-            int faultCount = 0;
-            int feedbackOverflowCount = 0;
-            int fallbackSampleCount = 0;
-            int faultOverflowCount = 0;
-            int residentOverflowCount = 0;
-            int nonResidentFallbackSampleCount = 0;
-            int residentFallbackSampleCount = 0;
-            int weightedResolvedSampleCount = 0;
-            int measuredAcceptedFaultRequestCount = 0;
-            int measuredAcceptedResidentRequestCount = 0;
-            int requestReadbackErrorCount = 0;
-            int counterReadbackErrorCount = 0;
-            int feedbackMeasurementFrameIndex = -1;
-            bool hasFreshFeedbackMeasurement = false;
-            int activeViewFaultCount = 0;
-            int activeViewFeedbackOverflowCount = 0;
-            int activeViewFallbackSampleCount = 0;
-            int activeViewLastReadbackFrame = -1;
-            s_FeedbackFaultHitsByPhysicalPool.Clear();
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackStatsMarker.Auto())
-            {
-                for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
-                {
-                    VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
-                    AccumulateFeedbackFaultHitsByPhysicalPool(batch);
-                    faultCount = SaturatingAddFeedbackCount(
-                        faultCount,
-                        batch.AcceptedFaultRequestCount);
-                    feedbackOverflowCount = SaturatingAddFeedbackCount(
-                        feedbackOverflowCount,
-                        batch.FeedbackOverflowCount);
-                    fallbackSampleCount = SaturatingAddFeedbackCount(
-                        fallbackSampleCount,
-                        batch.FallbackSampleCount);
-                    faultOverflowCount = SaturatingAddFeedbackCount(
-                        faultOverflowCount,
-                        batch.FaultOverflowCount);
-                    residentOverflowCount = SaturatingAddFeedbackCount(
-                        residentOverflowCount,
-                        batch.ResidentOverflowCount);
-                    nonResidentFallbackSampleCount = SaturatingAddFeedbackCount(
-                        nonResidentFallbackSampleCount,
-                        batch.NonResidentFallbackSampleCount);
-                    residentFallbackSampleCount = SaturatingAddFeedbackCount(
-                        residentFallbackSampleCount,
-                        batch.ResidentFallbackSampleCount);
-                    weightedResolvedSampleCount = SaturatingAddFeedbackCount(
-                        weightedResolvedSampleCount,
-                        batch.WeightedResolvedSampleCount);
-                    requestReadbackErrorCount += batch.RequestsReadbackValid ? 0 : 1;
-                    counterReadbackErrorCount += batch.CounterReadbackValid ? 0 : 1;
-                    hasFreshFeedbackMeasurement |= batch.CounterReadbackValid;
-                    if (batch.CounterReadbackValid)
-                    {
-                        // Only fault traffic drives adaptive overflow pressure. Resident
-                        // accesses use the same physical buffer, so subtract the accepted
-                        // resident entries before normalizing rejected fault attempts.
-                        measuredAcceptedFaultRequestCount = SaturatingAddFeedbackCount(
-                            measuredAcceptedFaultRequestCount,
-                            batch.AcceptedFaultRequestCount);
-                        measuredAcceptedResidentRequestCount = SaturatingAddFeedbackCount(
-                            measuredAcceptedResidentRequestCount,
-                            batch.AcceptedResidentRequestCount);
-                        feedbackMeasurementFrameIndex = Mathf.Max(
-                            feedbackMeasurementFrameIndex,
-                            batch.FrameIndex);
-                    }
-
-                    if (IsBatchFromView(batch, activeViewId, activeCameraType))
-                    {
-                        activeViewFaultCount += Mathf.Max(
-                            0,
-                            batch.AcceptedFaultRequestCount);
-                        activeViewFeedbackOverflowCount += batch.FeedbackOverflowCount;
-                        activeViewFallbackSampleCount += batch.FallbackSampleCount;
-                        activeViewLastReadbackFrame = Mathf.Max(activeViewLastReadbackFrame, batch.FrameIndex);
-                    }
-                }
-            }
-
-            s_FeedbackRequestReadbackErrorCount = (int)Math.Min(
-                int.MaxValue,
-                (long)s_FeedbackRequestReadbackErrorCount + requestReadbackErrorCount);
-            s_FeedbackCounterReadbackErrorCount = (int)Math.Min(
-                int.MaxValue,
-                (long)s_FeedbackCounterReadbackErrorCount + counterReadbackErrorCount);
-            if (requestReadbackErrorCount > 0 || counterReadbackErrorCount > 0)
-                s_FeedbackLastReadbackErrorFrameIndex = frameIndex;
+            FrameReadbackSummary readbackSummary = CollectReadbackSummary(
+                frameIndex,
+                lastReadbackFrame,
+                activeViewId,
+                activeCameraType,
+                perViewStats: null);
 
             // Starts are invisible (phase zero resolves the stable ancestor), so upload
             // work may continue in parallel. Each page publishes after its own transition
@@ -1015,11 +1367,6 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureTransitionsMarker.Auto())
                 AdvanceAndSchedulePageTransitions(frameIndex);
 
-            int evictionCount = 0;
-            int pendingMipGapSum = 0;
-            int pendingMipGapMax = 0;
-            int pendingMipGapSampleCount = 0;
-            int prefetchRequestCount = 0;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsBeginFrameMarker.Auto())
             {
                 // Reset global budgets once, while still polling progress for every camera.
@@ -1052,6 +1399,160 @@ namespace VividRP.Runtime
             }
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
                 s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, frameIndex);
+
+            FrameResidencyUploadResult result = ExecuteResidencyUploadsAndAdaptiveMipBias(
+                frameIndex,
+                cmd,
+                cachePriorityViewId,
+                readbackSummary);
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureCleanupMarker.Auto())
+            {
+                s_FeedbackAggregator.Clear();
+                s_CompletedReadbacks.Clear();
+                s_PrefetchBiasBySpace.Clear();
+                s_RemainingResidencyBudgetBySpace.Clear();
+            }
+
+            PrepareCameraBindingsAndFeedback(
+                frameData,
+                cmd,
+                frameIndex,
+                result.AdaptiveMipBias,
+                out FrameRecordedView recordedView,
+                out long pageTableByteCount);
+
+            ReportGlobalStats(
+                readbackSummary,
+                result,
+                recordedView.FeedbackCapacity,
+                pageTableByteCount,
+                recordedView.StatusMessage);
+
+            if (camera != null)
+            {
+                ReportViewStats(
+                    recordedView,
+                    result,
+                    readbackSummary.ActiveViewFaultCount,
+                    result.ActiveViewDeduplicatedRequestCount,
+                    readbackSummary.ActiveViewFeedbackOverflowCount,
+                    readbackSummary.ActiveViewFallbackSampleCount,
+                    readbackSummary.ActiveViewLastReadbackFrame,
+                    pageTableByteCount);
+            }
+        }
+
+        private static FrameReadbackSummary CollectReadbackSummary(
+            int frameIndex,
+            int lastReadbackFrame,
+            VirtualTextureViewId activeViewId,
+            CameraType activeCameraType,
+            List<FrameReadbackViewStats> perViewStats)
+        {
+            var summary = new FrameReadbackSummary
+            {
+                LastReadbackFrame = lastReadbackFrame,
+                FeedbackMeasurementFrameIndex = -1,
+                ActiveViewLastReadbackFrame = -1,
+            };
+            int requestReadbackErrorCount = 0;
+            int counterReadbackErrorCount = 0;
+            s_FeedbackFaultHitsByPhysicalPool.Clear();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackStatsMarker.Auto())
+            {
+                for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
+                {
+                    VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
+                    AccumulateFeedbackFaultHitsByPhysicalPool(batch);
+                    summary.FaultCount = SaturatingAddFeedbackCount(
+                        summary.FaultCount,
+                        batch.AcceptedFaultRequestCount);
+                    summary.FeedbackOverflowCount = SaturatingAddFeedbackCount(
+                        summary.FeedbackOverflowCount,
+                        batch.FeedbackOverflowCount);
+                    summary.FallbackSampleCount = SaturatingAddFeedbackCount(
+                        summary.FallbackSampleCount,
+                        batch.FallbackSampleCount);
+                    summary.FaultOverflowCount = SaturatingAddFeedbackCount(
+                        summary.FaultOverflowCount,
+                        batch.FaultOverflowCount);
+                    summary.ResidentOverflowCount = SaturatingAddFeedbackCount(
+                        summary.ResidentOverflowCount,
+                        batch.ResidentOverflowCount);
+                    summary.NonResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                        summary.NonResidentFallbackSampleCount,
+                        batch.NonResidentFallbackSampleCount);
+                    summary.ResidentFallbackSampleCount = SaturatingAddFeedbackCount(
+                        summary.ResidentFallbackSampleCount,
+                        batch.ResidentFallbackSampleCount);
+                    summary.WeightedResolvedSampleCount = SaturatingAddFeedbackCount(
+                        summary.WeightedResolvedSampleCount,
+                        batch.WeightedResolvedSampleCount);
+                    requestReadbackErrorCount += batch.RequestsReadbackValid ? 0 : 1;
+                    counterReadbackErrorCount += batch.CounterReadbackValid ? 0 : 1;
+                    summary.HasFreshFeedbackMeasurement |= batch.CounterReadbackValid;
+                    if (batch.CounterReadbackValid)
+                    {
+                        // Only fault traffic drives adaptive overflow pressure. Resident
+                        // accesses use the same physical buffer, so subtract the accepted
+                        // resident entries before normalizing rejected fault attempts.
+                        summary.MeasuredAcceptedFaultRequestCount = SaturatingAddFeedbackCount(
+                            summary.MeasuredAcceptedFaultRequestCount,
+                            batch.AcceptedFaultRequestCount);
+                        summary.MeasuredAcceptedResidentRequestCount = SaturatingAddFeedbackCount(
+                            summary.MeasuredAcceptedResidentRequestCount,
+                            batch.AcceptedResidentRequestCount);
+                        summary.FeedbackMeasurementFrameIndex = Mathf.Max(
+                            summary.FeedbackMeasurementFrameIndex,
+                            batch.FrameIndex);
+                    }
+
+                    perViewStats?.Add(new FrameReadbackViewStats(
+                        batch.ViewId,
+                        batch.CameraType,
+                        Mathf.Max(0, batch.AcceptedFaultRequestCount),
+                        batch.FeedbackOverflowCount,
+                        batch.FallbackSampleCount,
+                        batch.FrameIndex));
+
+                    if (IsBatchFromView(batch, activeViewId, activeCameraType))
+                    {
+                        summary.ActiveViewFaultCount += Mathf.Max(
+                            0,
+                            batch.AcceptedFaultRequestCount);
+                        summary.ActiveViewFeedbackOverflowCount += batch.FeedbackOverflowCount;
+                        summary.ActiveViewFallbackSampleCount += batch.FallbackSampleCount;
+                        summary.ActiveViewLastReadbackFrame = Mathf.Max(
+                            summary.ActiveViewLastReadbackFrame,
+                            batch.FrameIndex);
+                    }
+                }
+            }
+
+            s_FeedbackRequestReadbackErrorCount = (int)Math.Min(
+                int.MaxValue,
+                (long)s_FeedbackRequestReadbackErrorCount + requestReadbackErrorCount);
+            s_FeedbackCounterReadbackErrorCount = (int)Math.Min(
+                int.MaxValue,
+                (long)s_FeedbackCounterReadbackErrorCount + counterReadbackErrorCount);
+            if (requestReadbackErrorCount > 0 || counterReadbackErrorCount > 0)
+                s_FeedbackLastReadbackErrorFrameIndex = frameIndex;
+
+            return summary;
+        }
+
+        private static FrameResidencyUploadResult ExecuteResidencyUploadsAndAdaptiveMipBias(
+            int frameIndex,
+            CommandBuffer cmd,
+            VirtualTextureViewId cachePriorityViewId,
+            in FrameReadbackSummary readbackSummary)
+        {
+            int evictionCount = 0;
+            int pendingMipGapSum = 0;
+            int pendingMipGapMax = 0;
+            int pendingMipGapSampleCount = 0;
+            int prefetchRequestCount = 0;
 
             s_FeedbackAggregator.Complete();
             int deduplicatedRequestCount = s_FeedbackAggregator.AggregatedRequests.Length;
@@ -1374,8 +1875,9 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStreamSubmitReadsMarker.Auto())
                 VTStreamChunkManager.Shared.SubmitPendingReads();
 
+            bool scheduledUploads;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeMarker.Auto())
-                s_UploadScheduler.FinalizeUploads(cmd);
+                scheduledUploads = s_UploadScheduler.FinalizeUploads(cmd);
             int inFlightUploadBatchCount = s_UploadScheduler.InFlightBatchCount;
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
@@ -1389,7 +1891,6 @@ namespace VividRP.Runtime
             CollectPendingRequestCounts(
                 out int pendingDataCount,
                 out int physicalPendingUploadCount);
-            int pendingUploadCount = pendingDataCount + physicalPendingUploadCount;
             VTPhysicalPoolStats physicalPoolStats;
             ProspectivePhysicalPoolStats prospectivePhysicalPoolStats;
             VTPhysicalPool prospectivePhysicalPool;
@@ -1410,19 +1911,19 @@ namespace VividRP.Runtime
                 {
                     // Feedback can complete while a later camera is rendering the same frame.
                     // Carry it forward because the global controller intentionally updates once.
-                    if (hasFreshFeedbackMeasurement)
+                    if (readbackSummary.HasFreshFeedbackMeasurement)
                     {
                         AccumulatePendingAdaptiveFeedbackMeasurement(
-                            feedbackOverflowCount,
-                            fallbackSampleCount,
-                            faultOverflowCount,
-                            residentOverflowCount,
-                            nonResidentFallbackSampleCount,
-                            residentFallbackSampleCount,
-                            weightedResolvedSampleCount,
-                            measuredAcceptedFaultRequestCount,
-                            measuredAcceptedResidentRequestCount,
-                            feedbackMeasurementFrameIndex);
+                            readbackSummary.FeedbackOverflowCount,
+                            readbackSummary.FallbackSampleCount,
+                            readbackSummary.FaultOverflowCount,
+                            readbackSummary.ResidentOverflowCount,
+                            readbackSummary.NonResidentFallbackSampleCount,
+                            readbackSummary.ResidentFallbackSampleCount,
+                            readbackSummary.WeightedResolvedSampleCount,
+                            readbackSummary.MeasuredAcceptedFaultRequestCount,
+                            readbackSummary.MeasuredAcceptedResidentRequestCount,
+                            readbackSummary.FeedbackMeasurementFrameIndex);
                     }
 
                     adaptiveMipBias = s_AdaptiveMipBiasController.CurrentMipBias;
@@ -1430,36 +1931,36 @@ namespace VividRP.Runtime
                 else
                 {
                     int measuredFeedbackOverflowCount = SaturatingAddFeedbackCount(
-                        feedbackOverflowCount,
+                        readbackSummary.FeedbackOverflowCount,
                         s_PendingAdaptiveFeedbackOverflowCount);
                     int measuredFallbackSampleCount = SaturatingAddFeedbackCount(
-                        fallbackSampleCount,
+                        readbackSummary.FallbackSampleCount,
                         s_PendingAdaptiveFallbackSampleCount);
                     int measuredFaultOverflowCount = SaturatingAddFeedbackCount(
-                        faultOverflowCount,
+                        readbackSummary.FaultOverflowCount,
                         s_PendingAdaptiveFaultOverflowCount);
                     int measuredResidentOverflowCount = SaturatingAddFeedbackCount(
-                        residentOverflowCount,
+                        readbackSummary.ResidentOverflowCount,
                         s_PendingAdaptiveResidentOverflowCount);
                     int measuredNonResidentFallbackSampleCount = SaturatingAddFeedbackCount(
-                        nonResidentFallbackSampleCount,
+                        readbackSummary.NonResidentFallbackSampleCount,
                         s_PendingAdaptiveNonResidentFallbackSampleCount);
                     int measuredResidentFallbackSampleCount = SaturatingAddFeedbackCount(
-                        residentFallbackSampleCount,
+                        readbackSummary.ResidentFallbackSampleCount,
                         s_PendingAdaptiveResidentFallbackSampleCount);
                     int measuredWeightedResolvedSampleCount = SaturatingAddFeedbackCount(
-                        weightedResolvedSampleCount,
+                        readbackSummary.WeightedResolvedSampleCount,
                         s_PendingAdaptiveWeightedResolvedSampleCount);
                     int adaptiveAcceptedFaultRequestCount = SaturatingAddFeedbackCount(
-                        measuredAcceptedFaultRequestCount,
+                        readbackSummary.MeasuredAcceptedFaultRequestCount,
                         s_PendingAdaptiveAcceptedFaultRequestCount);
                     int adaptiveAcceptedResidentRequestCount = SaturatingAddFeedbackCount(
-                        measuredAcceptedResidentRequestCount,
+                        readbackSummary.MeasuredAcceptedResidentRequestCount,
                         s_PendingAdaptiveAcceptedResidentRequestCount);
                     int measuredFeedbackFrameIndex = Mathf.Max(
-                        feedbackMeasurementFrameIndex,
+                        readbackSummary.FeedbackMeasurementFrameIndex,
                         s_PendingAdaptiveFeedbackMeasurementFrameIndex);
-                    bool hasMeasuredFeedback = hasFreshFeedbackMeasurement
+                    bool hasMeasuredFeedback = readbackSummary.HasFreshFeedbackMeasurement
                                                || s_HasPendingAdaptiveFeedbackMeasurement;
                     ResetPendingAdaptiveFeedbackMeasurement();
 
@@ -1520,22 +2021,60 @@ namespace VividRP.Runtime
                     debugSettings,
                     adaptiveMipBias);
             }
-            if (virtualTextureFrameData != null)
-                virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
-            activeViewSignature = activeViewSignature.WithAdaptiveMipBias(adaptiveMipBias);
+
+            bool anyPageTableRebuilt = false;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
             {
                 foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
-                    pair.Value.RebuildPageTableIfDirty();
+                    anyPageTableRebuilt |= pair.Value.RebuildPageTableIfDirty();
             }
 
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureCleanupMarker.Auto())
+            return new FrameResidencyUploadResult
             {
-                s_FeedbackAggregator.Clear();
-                s_CompletedReadbacks.Clear();
-                s_PrefetchBiasBySpace.Clear();
-                s_RemainingResidencyBudgetBySpace.Clear();
-            }
+                EvictionCount = evictionCount,
+                PendingMipGapSum = pendingMipGapSum,
+                PendingMipGapMax = pendingMipGapMax,
+                PendingMipGapSampleCount = pendingMipGapSampleCount,
+                PrefetchRequestCount = prefetchRequestCount,
+                DeduplicatedRequestCount = deduplicatedRequestCount,
+                ActiveViewDeduplicatedRequestCount = activeViewDeduplicatedRequestCount,
+                InFlightUploadBatchCount = inFlightUploadBatchCount,
+                DuplicateUploadCount = duplicateUploadCount,
+                SkippedUploadCount = skippedUploadCount,
+                CpuProducedPageCount = cpuProducedPageCount,
+                GpuProducedPageCount = gpuProducedPageCount,
+                GpuDispatchCount = gpuDispatchCount,
+                StreamSaturatedRequestCount = streamSaturatedRequestCount,
+                PendingDataCount = pendingDataCount,
+                PhysicalPendingUploadCount = physicalPendingUploadCount,
+                PhysicalPoolStats = physicalPoolStats,
+                AdaptiveMipBias = adaptiveMipBias,
+                ScheduledUploads = scheduledUploads,
+                AnyPageTableRebuilt = anyPageTableRebuilt,
+            };
+        }
+
+        private static void PrepareCameraBindingsAndFeedback(
+            ContextContainer frameData,
+            CommandBuffer cmd,
+            int frameIndex,
+            float adaptiveMipBias,
+            out FrameRecordedView recordedView,
+            out long pageTableByteCount)
+        {
+            VividVirtualTextureFrameData virtualTextureFrameData =
+                frameData?.GetOrCreate<VividVirtualTextureFrameData>();
+            virtualTextureFrameData?.Reset();
+            if (virtualTextureFrameData != null)
+                virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
+
+            VividCameraData cameraData = TryGetCameraData(frameData);
+            Camera camera = cameraData?.camera;
+            VirtualTextureViewId activeViewId = VirtualTextureViewId.FromCameraData(cameraData);
+            CameraType activeCameraType = camera != null ? camera.cameraType : default;
+            VirtualTextureFeedbackViewSignature activeViewSignature =
+                VirtualTextureFeedbackViewSignature.FromCameraData(cameraData)
+                    .WithAdaptiveMipBias(adaptiveMipBias);
 
             bool supportsFeedback;
             VirtualTextureFeedbackCameraState cameraFeedbackState;
@@ -1547,12 +2086,10 @@ namespace VividRP.Runtime
                     : null;
             }
 
-            int residentPageCount = 0;
-            int freePageCount = 0;
             int feedbackCapacity = 0;
             int feedbackPageCapacity = 0;
-            long pageTableByteCount = 0;
-            string statusMessage = s_PageTableSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
+            pageTableByteCount = 0;
+            string statusMessage = ResolveGlobalStatusMessage();
 
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
             {
@@ -1569,17 +2106,7 @@ namespace VividRP.Runtime
             VirtualTextureFeedbackBufferState feedbackBufferState = null;
             if (supportsFeedback && cameraFeedbackState != null && feedbackCapacity > 0)
             {
-                bool forceImmediateReadback = false;
-                foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
-                {
-                    if (addressSpace.PendingRequestCount > 0
-                        || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId))
-                    {
-                        forceImmediateReadback = true;
-                        break;
-                    }
-                }
-
+                bool forceImmediateReadback = HasActiveUploadOrPendingWork();
                 feedbackBufferState = cameraFeedbackState.GetOrCreateStreamState();
                 if (!feedbackBufferState.TryPrepareForFrame(
                         cmd,
@@ -1615,8 +2142,6 @@ namespace VividRP.Runtime
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureBindingsMarker.Auto())
                 {
-                    residentPageCount += addressSpace.ResidentPageCount;
-                    freePageCount += addressSpace.FreePageCount;
                     int allocationId = s_AllocationIdBySpaceId.TryGetValue(addressSpace.SpaceId, out int mappedAllocationId)
                         ? mappedAllocationId
                         : 0;
@@ -1635,26 +2160,155 @@ namespace VividRP.Runtime
                 }
             }
 
-            residentPageCount = physicalPoolStats.ResidentPageCount;
-            freePageCount = physicalPoolStats.FreePageCount;
+            recordedView = new FrameRecordedView(
+                activeViewId,
+                activeCameraType,
+                ResolveCameraName(cameraData, camera),
+                frameIndex,
+                cameraData?.actualWidth ?? 0,
+                cameraData?.actualHeight ?? 0,
+                cameraData?.pixelWidth ?? 0,
+                cameraData?.pixelHeight ?? 0,
+                supportsFeedback,
+                feedbackCapacity,
+                statusMessage);
+        }
 
+        private static bool HasActiveUploadOrPendingWork()
+        {
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            {
+                if (addressSpace.PendingRequestCount > 0
+                    || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static float ResolveCurrentAdaptiveMipBias()
+        {
+            float adaptiveMipBiasOverride =
+                VividRenderingDebugDisplaySettings.Data.virtualTextureAdaptiveMipBiasOverride;
+            return adaptiveMipBiasOverride >= 0f
+                ? adaptiveMipBiasOverride
+                : s_MaxAdaptiveMipBias;
+        }
+
+        private static string ResolveGlobalStatusMessage()
+        {
+            return s_PageTableSpaces.Count == 0
+                ? "[VividRP] VT has no registered spaces."
+                : string.Empty;
+        }
+
+        private static long ComputePageTableByteCount(out int feedbackCapacity)
+        {
+            feedbackCapacity = 0;
+            long pageTableByteCount = 0;
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+            {
+                feedbackCapacity = checked(
+                    feedbackCapacity + addressSpace.StackDesc.FeedbackCapacity);
+                pageTableByteCount = checked(
+                    pageTableByteCount + (long)addressSpace.TotalPageCount * sizeof(uint));
+            }
+
+            return pageTableByteCount;
+        }
+
+        private static void AccumulateViewReadbackStats(
+            VirtualTextureViewId viewId,
+            CameraType cameraType,
+            out int faultCount,
+            out int feedbackOverflowCount,
+            out int fallbackSampleCount,
+            out int lastReadbackFrame)
+        {
+            faultCount = 0;
+            feedbackOverflowCount = 0;
+            fallbackSampleCount = 0;
+            lastReadbackFrame = -1;
+            for (int statIndex = 0; statIndex < s_FrameReadbackViewStats.Count; statIndex++)
+            {
+                FrameReadbackViewStats batchStats = s_FrameReadbackViewStats[statIndex];
+                if (!IsMatchingView(batchStats.ViewId, batchStats.CameraType, viewId, cameraType))
+                    continue;
+
+                faultCount += batchStats.FaultCount;
+                feedbackOverflowCount += batchStats.FeedbackOverflowCount;
+                fallbackSampleCount += batchStats.FallbackSampleCount;
+                lastReadbackFrame = Mathf.Max(lastReadbackFrame, batchStats.FrameIndex);
+            }
+        }
+
+        private static bool IsMatchingView(
+            VirtualTextureViewId candidateViewId,
+            CameraType candidateCameraType,
+            VirtualTextureViewId targetViewId,
+            CameraType targetCameraType)
+        {
+            if (!targetViewId.IsValid && !targetViewId.IsCameraTypeOnly)
+                return false;
+
+            return targetViewId.IsValid
+                ? candidateViewId.Equals(targetViewId)
+                  || (!candidateViewId.IsValid && candidateCameraType == targetCameraType)
+                : candidateCameraType == targetViewId.CameraType;
+        }
+
+        private static Camera ResolvePrimaryCamera(List<Camera> cameras)
+        {
+            if (cameras == null || cameras.Count == 0)
+                return null;
+
+            Camera sceneFallback = null;
+            Camera generalFallback = null;
+            for (int cameraIndex = 0; cameraIndex < cameras.Count; cameraIndex++)
+            {
+                Camera candidate = cameras[cameraIndex];
+                if (candidate == null || candidate.cameraType == CameraType.Preview)
+                    continue;
+
+                if (candidate.cameraType == CameraType.Game)
+                    return candidate;
+
+                if (sceneFallback == null && candidate.cameraType == CameraType.SceneView)
+                    sceneFallback = candidate;
+
+                generalFallback ??= candidate;
+            }
+
+            return sceneFallback != null ? sceneFallback : generalFallback;
+        }
+
+        private static void ReportGlobalStats(
+            in FrameReadbackSummary readbackSummary,
+            in FrameResidencyUploadResult result,
+            int feedbackCapacity,
+            long pageTableByteCount,
+            string statusMessage)
+        {
+            int pendingUploadCount = result.PendingDataCount + result.PhysicalPendingUploadCount;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsMarker.Auto())
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsReportGlobalMarker.Auto())
             {
                 var globalStats = new VTDebugStats(
                     s_PageTableSpaces.Count,
-                    residentPageCount,
-                    freePageCount,
+                    result.PhysicalPoolStats.ResidentPageCount,
+                    result.PhysicalPoolStats.FreePageCount,
                     pendingUploadCount,
-                    evictionCount,
-                    faultCount,
-                    deduplicatedRequestCount,
-                    feedbackOverflowCount,
-                    inFlightUploadBatchCount,
-                    duplicateUploadCount,
-                    skippedUploadCount,
-                    fallbackSampleCount,
-                    lastReadbackFrame,
+                    result.EvictionCount,
+                    readbackSummary.FaultCount,
+                    result.DeduplicatedRequestCount,
+                    readbackSummary.FeedbackOverflowCount,
+                    result.InFlightUploadBatchCount,
+                    result.DuplicateUploadCount,
+                    result.SkippedUploadCount,
+                    readbackSummary.FallbackSampleCount,
+                    readbackSummary.LastReadbackFrame,
                     statusMessage,
                     VirtualTextureViewId.Invalid,
                     default,
@@ -1667,84 +2321,93 @@ namespace VividRP.Runtime
                     false,
                     feedbackCapacity,
                     false,
-                    physicalPoolStats.PoolCount,
-                    physicalPoolStats.ResidentPageCount,
-                    physicalPoolStats.FreePageCount,
-                    physicalPoolStats.LockedPageCount,
-                    physicalPoolStats.EvictedPageCount,
-                    pendingMipGapSum,
-                    pendingMipGapMax,
-                    pendingMipGapSampleCount,
-                    prefetchRequestCount,
-                    cpuProducedPageCount,
-                    gpuProducedPageCount,
-                    gpuDispatchCount,
-                    streamSaturatedRequestCount,
-                    adaptiveMipBias,
-                    physicalPoolStats.AllocatedByteCount,
-                    physicalPoolStats.ResidentByteCount,
+                    result.PhysicalPoolStats.PoolCount,
+                    result.PhysicalPoolStats.ResidentPageCount,
+                    result.PhysicalPoolStats.FreePageCount,
+                    result.PhysicalPoolStats.LockedPageCount,
+                    result.PhysicalPoolStats.EvictedPageCount,
+                    result.PendingMipGapSum,
+                    result.PendingMipGapMax,
+                    result.PendingMipGapSampleCount,
+                    result.PrefetchRequestCount,
+                    result.CpuProducedPageCount,
+                    result.GpuProducedPageCount,
+                    result.GpuDispatchCount,
+                    result.StreamSaturatedRequestCount,
+                    result.AdaptiveMipBias,
+                    result.PhysicalPoolStats.AllocatedByteCount,
+                    result.PhysicalPoolStats.ResidentByteCount,
                     pageTableByteCount,
                     VTStreamChunkManager.SharedReadyByteCount,
                     VTStreamChunkManager.SharedDecodedCacheBudget,
-                    pendingDataCount,
-                    physicalPendingUploadCount);
+                    result.PendingDataCount,
+                    result.PhysicalPendingUploadCount);
                 VirtualTextureStatsRegistry.Report(globalStats);
             }
+        }
 
-            if (camera != null)
+        private static void ReportViewStats(
+            in FrameRecordedView recordedView,
+            in FrameResidencyUploadResult result,
+            int viewFaultCount,
+            int viewDeduplicatedRequestCount,
+            int viewFeedbackOverflowCount,
+            int viewFallbackSampleCount,
+            int viewLastReadbackFrame,
+            long pageTableByteCount)
+        {
+            int pendingUploadCount = result.PendingDataCount + result.PhysicalPendingUploadCount;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsMarker.Auto())
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsReportViewMarker.Auto())
             {
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsMarker.Auto())
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsReportViewMarker.Auto())
-                {
-                    var viewStats = new VTDebugStats(
-                        s_PageTableSpaces.Count,
-                        residentPageCount,
-                        freePageCount,
-                        pendingUploadCount,
-                        evictionCount,
-                        activeViewFaultCount,
-                        activeViewDeduplicatedRequestCount,
-                        activeViewFeedbackOverflowCount,
-                        inFlightUploadBatchCount,
-                        duplicateUploadCount,
-                        skippedUploadCount,
-                        activeViewFallbackSampleCount,
-                        activeViewLastReadbackFrame,
-                        statusMessage,
-                        activeViewId,
-                        camera.cameraType,
-                        ResolveCameraName(cameraData, camera),
-                        frameIndex,
-                        cameraData?.actualWidth ?? 0,
-                        cameraData?.actualHeight ?? 0,
-                        cameraData?.pixelWidth ?? 0,
-                        cameraData?.pixelHeight ?? 0,
-                        supportsFeedback,
-                        feedbackCapacity,
-                        true,
-                        physicalPoolStats.PoolCount,
-                        physicalPoolStats.ResidentPageCount,
-                        physicalPoolStats.FreePageCount,
-                        physicalPoolStats.LockedPageCount,
-                        physicalPoolStats.EvictedPageCount,
-                        pendingMipGapSum,
-                        pendingMipGapMax,
-                        pendingMipGapSampleCount,
-                        prefetchRequestCount,
-                        cpuProducedPageCount,
-                        gpuProducedPageCount,
-                        gpuDispatchCount,
-                        streamSaturatedRequestCount,
-                        adaptiveMipBias,
-                        physicalPoolStats.AllocatedByteCount,
-                        physicalPoolStats.ResidentByteCount,
-                        pageTableByteCount,
-                        VTStreamChunkManager.SharedReadyByteCount,
-                        VTStreamChunkManager.SharedDecodedCacheBudget,
-                        pendingDataCount,
-                        physicalPendingUploadCount);
-                    VirtualTextureStatsRegistry.ReportView(viewStats);
-                }
+                var viewStats = new VTDebugStats(
+                    s_PageTableSpaces.Count,
+                    result.PhysicalPoolStats.ResidentPageCount,
+                    result.PhysicalPoolStats.FreePageCount,
+                    pendingUploadCount,
+                    result.EvictionCount,
+                    viewFaultCount,
+                    viewDeduplicatedRequestCount,
+                    viewFeedbackOverflowCount,
+                    result.InFlightUploadBatchCount,
+                    result.DuplicateUploadCount,
+                    result.SkippedUploadCount,
+                    viewFallbackSampleCount,
+                    viewLastReadbackFrame,
+                    recordedView.StatusMessage,
+                    recordedView.ViewId,
+                    recordedView.CameraType,
+                    recordedView.CameraName,
+                    recordedView.FrameIndex,
+                    recordedView.ActualWidth,
+                    recordedView.ActualHeight,
+                    recordedView.PixelWidth,
+                    recordedView.PixelHeight,
+                    recordedView.SupportsFeedback,
+                    recordedView.FeedbackCapacity,
+                    true,
+                    result.PhysicalPoolStats.PoolCount,
+                    result.PhysicalPoolStats.ResidentPageCount,
+                    result.PhysicalPoolStats.FreePageCount,
+                    result.PhysicalPoolStats.LockedPageCount,
+                    result.PhysicalPoolStats.EvictedPageCount,
+                    result.PendingMipGapSum,
+                    result.PendingMipGapMax,
+                    result.PendingMipGapSampleCount,
+                    result.PrefetchRequestCount,
+                    result.CpuProducedPageCount,
+                    result.GpuProducedPageCount,
+                    result.GpuDispatchCount,
+                    result.StreamSaturatedRequestCount,
+                    result.AdaptiveMipBias,
+                    result.PhysicalPoolStats.AllocatedByteCount,
+                    result.PhysicalPoolStats.ResidentByteCount,
+                    pageTableByteCount,
+                    VTStreamChunkManager.SharedReadyByteCount,
+                    VTStreamChunkManager.SharedDecodedCacheBudget,
+                    result.PendingDataCount,
+                    result.PhysicalPendingUploadCount);
+                VirtualTextureStatsRegistry.ReportView(viewStats);
             }
         }
 
@@ -2507,6 +3170,29 @@ namespace VividRP.Runtime
             return false;
         }
 
+#if UNITY_INCLUDE_TESTS
+        internal static bool IsFrameActiveForTesting => s_IsFrameActive;
+
+        internal static bool HasOutstandingFeedbackAggregationJobForTesting =>
+            s_FeedbackAggregator != null && s_FeedbackAggregator.HasOutstandingJobs;
+
+        internal static int GetEndFrameExecutionCountForTesting() => s_EndFrameExecutionCount;
+
+        internal static bool HasWrittenFeedbackPendingReadbackForTesting(Camera camera)
+        {
+            return s_FeedbackCameraSystem.TryGetState(camera, out VirtualTextureFeedbackCameraState cameraState)
+                   && cameraState.TryGetStreamState(out VirtualTextureFeedbackBufferState streamState)
+                   && streamState.HasWrittenBufferPendingReadbackForTesting;
+        }
+
+        internal static bool HasInFlightFeedbackReadbackForTesting(Camera camera)
+        {
+            return s_FeedbackCameraSystem.TryGetState(camera, out VirtualTextureFeedbackCameraState cameraState)
+                   && cameraState.TryGetStreamState(out VirtualTextureFeedbackBufferState streamState)
+                   && streamState.HasInFlightReadbackForTesting;
+        }
+#endif
+
         internal static bool TryGetProducerNameForTesting(int spaceId, out string producerName)
         {
             if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
@@ -3205,8 +3891,11 @@ namespace VividRP.Runtime
             // A camera owns one compact stream shared by every space. Stream-level counters
             // cannot be split when the topology changes, so conservatively discard the batch.
             s_FeedbackCameraSystem.ResetStreamStates();
+            s_FeedbackAggregator?.Clear();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
+            s_FrameReadbackViewStats.Clear();
+            s_ActiveFrameReadbackSummary = default;
             ResetPendingAdaptiveFeedbackMeasurement();
             RemoveFeedbackMotionStateForSpace(spaceId);
         }

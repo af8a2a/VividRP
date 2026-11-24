@@ -646,6 +646,26 @@ namespace VividRP.Runtime
             return m_CameraStates;
         }
 
+        internal bool TryGetState(Camera camera, out VirtualTextureFeedbackCameraState state)
+        {
+            if (camera == null)
+            {
+                state = null;
+                return false;
+            }
+
+            return m_CameraStates.TryGetValue(camera, out state);
+        }
+
+        internal void InvalidateAllQuiescence(int frameIndex, string reason)
+        {
+            foreach (VirtualTextureFeedbackCameraState state in m_CameraStates.Values)
+            {
+                if (state.TryGetStreamState(out VirtualTextureFeedbackBufferState streamState))
+                    streamState.InvalidateQuiescenceForActivity(frameIndex, reason);
+            }
+        }
+
         internal void ResetStreamStates()
         {
             foreach (VirtualTextureFeedbackCameraState state in m_CameraStates.Values)
@@ -948,39 +968,7 @@ namespace VividRP.Runtime
             // Upload completion and page-table publication can make an empty readback stale in
             // the same frame. Only feedback captured after the last active frame may contribute
             // to quiescence coverage.
-            if (forceImmediateReadback)
-                InvalidateQuiescence(frameIndex, "activity");
-
-            if (m_LastWrittenBufferIndex >= 0)
-            {
-                BufferPairState readPair = m_BufferPairs[m_LastWrittenBufferIndex];
-                if (readPair.WasWritten
-                    && !readPair.ReadbackPending
-                    && !readPair.HasCompletedReadback)
-                {
-                    bool shouldScheduleReadback = ShouldScheduleReadback(
-                        forceImmediateReadback,
-                        m_HasCompletedReadbackResult,
-                        m_LastCompletedReadbackWasEmpty,
-                        HasCompleteQuiescenceCoverage(),
-                        m_LastScheduledReadbackFrame,
-                        frameIndex,
-                        readPair.LastViewSignature,
-                        m_LastCompletedReadbackSignature);
-                    if (shouldScheduleReadback)
-                    {
-                        using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsScheduleReadbackMarker.Auto())
-                            ScheduleReadback(readPair, m_RequestCapacity);
-                        m_LastScheduledReadbackFrame = frameIndex;
-                    }
-                    else
-                    {
-                        // The stable-view heartbeat deliberately discards this sample. Mark it
-                        // reusable instead of pinning a ring entry that will never be read back.
-                        readPair.WasWritten = false;
-                    }
-                }
-            }
+            SchedulePendingReadback(frameIndex, forceImmediateReadback);
 
             int writeBufferIndex = FindWritableBufferIndex();
             if (writeBufferIndex < 0)
@@ -1022,6 +1010,88 @@ namespace VividRP.Runtime
             m_WriteBufferIndex = (writeBufferIndex + 1) % FeedbackBufferCount;
             return true;
         }
+
+        internal bool SchedulePendingReadback(int frameIndex, bool forceImmediateReadback)
+        {
+            if (forceImmediateReadback)
+                InvalidateQuiescence(frameIndex, "activity");
+
+            if (m_LastWrittenBufferIndex < 0)
+                return false;
+
+            BufferPairState readPair = m_BufferPairs[m_LastWrittenBufferIndex];
+            if (!readPair.WasWritten
+                || readPair.ReadbackPending
+                || readPair.HasCompletedReadback)
+            {
+                return false;
+            }
+
+            bool shouldScheduleReadback = ShouldScheduleReadback(
+                forceImmediateReadback,
+                m_HasCompletedReadbackResult,
+                m_LastCompletedReadbackWasEmpty,
+                HasCompleteQuiescenceCoverage(),
+                m_LastScheduledReadbackFrame,
+                frameIndex,
+                readPair.LastViewSignature,
+                m_LastCompletedReadbackSignature);
+            if (shouldScheduleReadback)
+            {
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsScheduleReadbackMarker.Auto())
+                    ScheduleReadback(readPair, m_RequestCapacity);
+                m_LastScheduledReadbackFrame = frameIndex;
+                return true;
+            }
+
+            // The stable-view heartbeat deliberately discards this sample. Mark it
+            // reusable instead of pinning a ring entry that will never be read back.
+            readPair.WasWritten = false;
+            return false;
+        }
+
+        internal void DiscardPendingWrite()
+        {
+            if (m_LastWrittenBufferIndex < 0)
+                return;
+
+            BufferPairState pair = m_BufferPairs[m_LastWrittenBufferIndex];
+            if (pair.WasWritten && !pair.ReadbackPending && !pair.HasCompletedReadback)
+                pair.WasWritten = false;
+        }
+
+        internal void InvalidateQuiescenceForActivity(int frameIndex, string reason)
+        {
+            InvalidateQuiescence(frameIndex, reason);
+        }
+
+#if UNITY_INCLUDE_TESTS
+        internal bool HasWrittenBufferPendingReadbackForTesting
+        {
+            get
+            {
+                if (m_LastWrittenBufferIndex < 0)
+                    return false;
+
+                BufferPairState pair = m_BufferPairs[m_LastWrittenBufferIndex];
+                return pair.WasWritten && !pair.ReadbackPending && !pair.HasCompletedReadback;
+            }
+        }
+
+        internal bool HasInFlightReadbackForTesting
+        {
+            get
+            {
+                for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
+                {
+                    if (m_BufferPairs[bufferIndex].ReadbackPending)
+                        return true;
+                }
+
+                return false;
+            }
+        }
+#endif
 
         internal void CollectCompletedReadbacks(List<VirtualTextureFeedbackBatch> output, ref int lastReadbackFrame)
         {

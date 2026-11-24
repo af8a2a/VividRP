@@ -2470,6 +2470,292 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void SplitFrameLifecycle_DefersFeedbackCompletionAndUploadsToEndFrame_AndCommitsOnNextBeginFrame()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "SplitFrameDefer",
+                    cachePageCount: 8,
+                    maxUploadsPerFrame: 2,
+                    virtualPageCountX: 16,
+                    virtualPageCountY: 16,
+                    mipCount: 5,
+                    feedbackCapacity: 128),
+                VTProceduralPageProducer.Instance);
+            var fenceFactory = new ManualUploadFenceFactory();
+            VirtualTextureSystem.SetUploadFenceFactoryForTesting(fenceFactory);
+
+            var requestKeys = new ulong[65];
+            for (int requestIndex = 0; requestIndex < requestKeys.Length; requestIndex++)
+            {
+                requestKeys[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    spaceId,
+                    new VirtualTexturePageCoord(requestIndex % 16, requestIndex / 16, 0));
+            }
+
+            var cameraObject = new GameObject("SplitFrameCamera");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.cameraType = CameraType.Game;
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKeys);
+                VirtualTextureSystem.BeginFrame(frameIndex: 10, primaryCamera: camera);
+
+                Assert.That(VirtualTextureSystem.IsFrameActiveForTesting, Is.True);
+                Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.True);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.Zero);
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.Zero);
+
+                ContextContainer frameData = CreateFrameData(camera, frameIndex: 10);
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+
+                VividVirtualTextureFrameData vtFrameData = frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(vtFrameData, Is.Not.Null);
+                Assert.That(vtFrameData.TryGetDefaultBinding(out VirtualTextureSpaceBinding binding), Is.True);
+                Assert.That(binding.SpaceId, Is.EqualTo(spaceId));
+                Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.True);
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.Zero);
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.Zero);
+
+                VirtualTextureSystem.DiscardCameraFeedbackWrite(camera);
+                bool scheduledUploads = VirtualTextureSystem.EndFrame(frameIndex: 10, endFrameCmd);
+
+                Assert.That(VirtualTextureSystem.IsFrameActiveForTesting, Is.False);
+                Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.False);
+                Assert.That(scheduledUploads, Is.True);
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.EqualTo(1));
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.GreaterThan(0));
+                Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(1));
+
+                fenceFactory.MarkAllPassed();
+                endFrameCmd.Clear();
+                VirtualTextureSystem.BeginFrame(frameIndex: 11, primaryCamera: camera);
+                Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.GreaterThan(1));
+                VirtualTextureSystem.EndFrame(frameIndex: 11, endFrameCmd);
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                VirtualTextureSystem.SetUploadFenceFactoryForTesting(null);
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void SplitFrameLifecycle_MultipleCameras_RunsGlobalEndFrameOnceAndReportsAllViews()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SplitFrameMultiCam",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1));
+            var gameCameraObject = new GameObject("SplitFrameGameCam");
+            var gameCamera = gameCameraObject.AddComponent<Camera>();
+            gameCamera.cameraType = CameraType.Game;
+            var sceneCameraObject = new GameObject("SplitFrameSceneCam");
+            var sceneCamera = sceneCameraObject.AddComponent<Camera>();
+            sceneCamera.cameraType = CameraType.SceneView;
+            var cameras = new global::System.Collections.Generic.List<Camera> { gameCamera, sceneCamera };
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                ulong faultKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                    spaceId,
+                    new VirtualTexturePageCoord(0, 0, 0));
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, faultKey);
+
+                VirtualTextureSystem.BeginFrame(frameIndex: 20, cameras);
+
+                ContextContainer gameFrameData = CreateFrameData(gameCamera, frameIndex: 20);
+                VirtualTextureSystem.PrepareCameraForFrame(gameFrameData, cameraCmd);
+                VirtualTextureSystem.DiscardCameraFeedbackWrite(gameCamera);
+                cameraCmd.Clear();
+
+                ContextContainer sceneFrameData = CreateFrameData(sceneCamera, frameIndex: 20);
+                VirtualTextureSystem.PrepareCameraForFrame(sceneFrameData, cameraCmd);
+                VirtualTextureSystem.DiscardCameraFeedbackWrite(sceneCamera);
+
+                VirtualTextureSystem.EndFrame(frameIndex: 20, endFrameCmd);
+
+                Assert.That(gameFrameData.Get<VividVirtualTextureFrameData>().TryGetDefaultBinding(out _), Is.True);
+                Assert.That(sceneFrameData.Get<VividVirtualTextureFrameData>().TryGetDefaultBinding(out _), Is.True);
+                Assert.That(VirtualTextureSystem.GetEndFrameExecutionCountForTesting(), Is.EqualTo(1));
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.EqualTo(1));
+                VirtualTextureStats gameViewStats = VirtualTextureStatsRegistry.GetDisplayStats(
+                    VirtualTextureStatsViewMode.SelectedCamera,
+                    gameCamera);
+                VirtualTextureStats sceneViewStats = VirtualTextureStatsRegistry.GetDisplayStats(
+                    VirtualTextureStatsViewMode.SelectedCamera,
+                    sceneCamera);
+                Assert.That(gameViewStats.CameraFrameIndex, Is.EqualTo(20));
+                Assert.That(gameViewStats.FaultCount, Is.EqualTo(1));
+                Assert.That(sceneViewStats.CameraFrameIndex, Is.EqualTo(20));
+                Assert.That(sceneViewStats.FaultCount, Is.Zero);
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+                UnityEngine.Object.DestroyImmediate(gameCameraObject);
+                UnityEngine.Object.DestroyImmediate(sceneCameraObject);
+            }
+        }
+
+        [Test]
+        public void ScheduleCameraFeedbackReadback_SchedulesImmediatelyAfterSubmit_AndDiscardClearsPendingWrite()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "ImmediateReadback",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var cameraObject = new GameObject("ImmediateReadbackCam");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.cameraType = CameraType.Game;
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.BeginFrame(frameIndex: 30, primaryCamera: camera);
+                VirtualTextureSystem.PrepareCameraForFrame(CreateFrameData(camera, frameIndex: 30), cameraCmd);
+
+                if (VirtualTextureSystem.IsFeedbackPlatformSupported(
+                        SystemInfo.graphicsShaderLevel,
+                        SystemInfo.supportsAsyncGPUReadback,
+                        SystemInfo.supportedRandomWriteTargetCount))
+                {
+                    Assert.That(VirtualTextureSystem.HasWrittenFeedbackPendingReadbackForTesting(camera), Is.True);
+                    VirtualTextureSystem.DiscardCameraFeedbackWrite(camera);
+                    Assert.That(VirtualTextureSystem.HasWrittenFeedbackPendingReadbackForTesting(camera), Is.False);
+                    Assert.That(VirtualTextureSystem.HasInFlightFeedbackReadbackForTesting(camera), Is.False);
+                }
+
+                VirtualTextureSystem.EndFrame(frameIndex: 30, endFrameCmd);
+
+                cameraCmd.Clear();
+                endFrameCmd.Clear();
+                VirtualTextureSystem.BeginFrame(frameIndex: 31, primaryCamera: camera);
+                VirtualTextureSystem.PrepareCameraForFrame(CreateFrameData(camera, frameIndex: 31), cameraCmd);
+
+                if (VirtualTextureSystem.IsFeedbackPlatformSupported(
+                        SystemInfo.graphicsShaderLevel,
+                        SystemInfo.supportsAsyncGPUReadback,
+                        SystemInfo.supportedRandomWriteTargetCount))
+                {
+                    Assert.That(VirtualTextureSystem.HasWrittenFeedbackPendingReadbackForTesting(camera), Is.True);
+                    bool scheduled = VirtualTextureSystem.ScheduleCameraFeedbackReadback(camera, frameIndex: 31);
+                    Assert.That(scheduled, Is.True);
+                    Assert.That(VirtualTextureSystem.HasWrittenFeedbackPendingReadbackForTesting(camera), Is.False);
+                    Assert.That(VirtualTextureSystem.HasInFlightFeedbackReadbackForTesting(camera), Is.True);
+                }
+
+                VirtualTextureSystem.EndFrame(frameIndex: 31, endFrameCmd);
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void AbortFrameIfActive_CompletesOutstandingJobAndResetsActiveState()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "AbortFrame",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                virtualPageCountX: 16,
+                virtualPageCountY: 16,
+                mipCount: 5,
+                feedbackCapacity: 128));
+            var requestKeys = new ulong[65];
+            for (int requestIndex = 0; requestIndex < requestKeys.Length; requestIndex++)
+            {
+                requestKeys[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    spaceId,
+                    new VirtualTexturePageCoord(requestIndex % 16, requestIndex / 16, 0));
+            }
+
+            VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKeys);
+            VirtualTextureSystem.BeginFrame(frameIndex: 40);
+            Assert.That(VirtualTextureSystem.IsFrameActiveForTesting, Is.True);
+            Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.True);
+
+            VirtualTextureSystem.AbortFrameIfActive();
+
+            Assert.That(VirtualTextureSystem.IsFrameActiveForTesting, Is.False);
+            Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.False);
+        }
+
+        [Test]
+        public void SplitFrameLifecycle_DoesNotAllocate_WhenSteadyState()
+        {
+            VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "SplitFrameNoAlloc",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 1));
+            var frameData = new ContextContainer();
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+
+            try
+            {
+                for (int warmupFrame = 1; warmupFrame <= 2; warmupFrame++)
+                {
+                    VirtualTextureSystem.BeginFrame(warmupFrame);
+                    VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                    VirtualTextureSystem.EndFrame(warmupFrame, endFrameCmd);
+                    cameraCmd.Clear();
+                    endFrameCmd.Clear();
+                }
+
+                long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+                VirtualTextureSystem.BeginFrame(3);
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                VirtualTextureSystem.EndFrame(3, endFrameCmd);
+                long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+            }
+        }
+
+        private sealed class ManualUploadFenceHandle : IVTUploadFenceHandle
+        {
+            public bool IsPassed { get; set; }
+        }
+
+        private sealed class ManualUploadFenceFactory : IVTUploadFenceFactory
+        {
+            private readonly global::System.Collections.Generic.List<ManualUploadFenceHandle> m_Handles = new();
+
+            public IVTUploadFenceHandle Create(CommandBuffer cmd)
+            {
+                var handle = new ManualUploadFenceHandle();
+                m_Handles.Add(handle);
+                return handle;
+            }
+
+            public void MarkAllPassed()
+            {
+                for (int handleIndex = 0; handleIndex < m_Handles.Count; handleIndex++)
+                    m_Handles[handleIndex].IsPassed = true;
+            }
+        }
+
         private static ContextContainer CreateFrameData(Camera camera, int frameIndex)
         {
             var frameData = new ContextContainer();

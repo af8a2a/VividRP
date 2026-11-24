@@ -140,8 +140,18 @@ namespace VividRP.Runtime
                 Application.isPlaying,
                 Time.frameCount,
                 ref m_EditModePipelineFrameIndex);
-            foreach (var camera in cameras)
-                RenderCamera(context, camera, frameIndex);
+            VirtualTextureSystem.BeginFrame(frameIndex, cameras);
+            try
+            {
+                foreach (var camera in cameras)
+                    RenderCamera(context, camera, frameIndex);
+
+                VirtualTextureSystem.EndFrame(context, frameIndex);
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+            }
 
             using (s_EndFrameMarker.Auto())
             {
@@ -253,6 +263,8 @@ namespace VividRP.Runtime
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
+            var preparedVirtualTextureFeedback = false;
+            var renderGraphExecuted = false;
             CameraHistory cameraHistory = null;
             var cameraHistoryFrameActive = false;
             var projectionState = camera.CaptureProjectionState();
@@ -348,6 +360,7 @@ namespace VividRP.Runtime
                     PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
                 }
 
+                preparedVirtualTextureFeedback = true;
                 shouldSubmit = true;
                 using (s_ExecutePreGraphCommandsMarker.Auto())
                 {
@@ -381,6 +394,8 @@ namespace VividRP.Runtime
                         return VividCaptureOutcome.RenderGraphFailed;
                     }
                 }
+
+                renderGraphExecuted = true;
 
                 using (s_CommitFrameMarker.Auto())
                 {
@@ -442,6 +457,18 @@ namespace VividRP.Runtime
                         {
                             context.Submit();
                         }
+
+                        if (preparedVirtualTextureFeedback)
+                        {
+                            if (renderGraphExecuted)
+                                VirtualTextureSystem.ScheduleCameraFeedbackReadback(camera, frameIndex);
+                            else
+                                VirtualTextureSystem.DiscardCameraFeedbackWrite(camera);
+                        }
+                    }
+                    else if (preparedVirtualTextureFeedback)
+                    {
+                        VirtualTextureSystem.DiscardCameraFeedbackWrite(camera);
                     }
                 }
                 finally

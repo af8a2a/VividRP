@@ -893,18 +893,77 @@ namespace VividRP.Runtime.GPUDriven
         {
             VividMaterialData legacyCopy = legacyMaterialData;
             VividDualSlabMaterialData dualSlabCopy = dualSlabMaterialData;
+            bool isOpenPBROpaque = materialProgram.Topology
+                == MaterialProgramTopologySpecialization.OpenPBROpaque;
             return CreateGenericParameterLanes(
                 materialProgram,
                 declaration =>
-                    MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
-                        declaration,
-                        out _)
+                {
+                    if (isOpenPBROpaque
+                        && TryGetOpenPBROpaquePreviewValue(declaration, out float4 nativeValue))
+                    {
+                        return nativeValue;
+                    }
+
+                    return MaterialNativeTemplateDeclarationAdapter.TryGetParameter(
+                            declaration,
+                            out _)
                         ? ResolveCompatibilityParameter(
                             declaration,
                             legacyCopy,
                             dualSlabCopy,
                             isDualSlab)
-                        : GetNeutralPreviewValue(declaration.Type));
+                        : GetNeutralPreviewValue(declaration.Type);
+                });
+        }
+
+        private static bool TryGetOpenPBROpaquePreviewValue(
+            in MaterialParameterDeclaration declaration,
+            out float4 value)
+        {
+            OpenPBROpaqueInputs defaults = OpenPBROpaqueContract.CreateDefault();
+            switch (declaration.Symbol)
+            {
+                case "BaseWeight" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.BaseWeight, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "BaseColor" when declaration.Type == MaterialValueType.Float3
+                    || declaration.Type == MaterialValueType.Float4:
+                    value = new float4(defaults.BaseColor, 1.0f);
+                    return true;
+                case "BaseDiffuseRoughness" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.BaseDiffuseRoughness, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "BaseMetalness" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.BaseMetalness, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "SpecularWeight" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.SpecularWeight, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "SpecularColor" when declaration.Type == MaterialValueType.Float3
+                    || declaration.Type == MaterialValueType.Float4:
+                    value = new float4(defaults.SpecularColor, 1.0f);
+                    return true;
+                case "SpecularRoughness" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.SpecularRoughness, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "SpecularIor" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.SpecularIor, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "NormalWS" when declaration.Type == MaterialValueType.Float3:
+                    value = new float4(defaults.NormalWS, 0.0f);
+                    return true;
+                case "EmissionLuminance" when declaration.Type == MaterialValueType.Float:
+                    value = new float4(defaults.EmissionLuminance, 0.0f, 0.0f, 0.0f);
+                    return true;
+                case "EmissionColor" when declaration.Type == MaterialValueType.Float3
+                    || declaration.Type == MaterialValueType.Float4:
+                    value = new float4(defaults.EmissionColor, 1.0f);
+                    return true;
+                default:
+                    value = float4.zero;
+                    return false;
+            }
         }
 
         private static uint4[] CreateGenericParameterLanes(

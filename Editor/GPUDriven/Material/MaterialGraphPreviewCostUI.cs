@@ -9,6 +9,7 @@ using UnityEditor.Overlays;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Unity.Scripting.LifecycleManagement;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using Object = UnityEngine.Object;
 
@@ -218,7 +219,9 @@ namespace VividRP.Editor.GPUDriven
                 ? m_PreviewRenderer.Render(viewModel.ProgramID)
                 : null;
             m_PreviewCaption.text = viewModel.CanPreview
-                ? "AOT Surface dispatcher · neutral parameters · textures unbound"
+                ? viewModel.IsOpenPBROpaque
+                    ? "OpenPBR 1.1 · AOT Surface dispatcher · neutral parameters · textures unbound"
+                    : "AOT Surface dispatcher · neutral parameters · textures unbound"
                 : GetPreviewUnavailableMessage(viewModel.Status);
         }
 
@@ -516,8 +519,8 @@ namespace VividRP.Editor.GPUDriven
                 TopMetallic = Mathf.Clamp01(legacy.Metallic * 0.35f),
                 LayerWeight = 0.5f,
             };
-            bool isDual = program.Topology
-                != MaterialProgramTopologySpecialization.SingleSlab;
+            bool isDual = program.Topology == MaterialProgramTopologySpecialization.HorizontalMix
+                || program.Topology == MaterialProgramTopologySpecialization.VerticalLayer;
             uint4[] parameterLanes =
                 GPUDrivenMaterialCompiler.CreatePreviewParameterLanes(
                     program,
@@ -551,6 +554,21 @@ namespace VividRP.Editor.GPUDriven
             m_Material.SetBuffer("_MaterialResourceData", m_ResourceBuffer);
             m_Material.SetInt("_MaterialParameterDataCount", parameterLanes.Length);
             m_Material.SetInt("_MaterialResourceDataCount", resourceCount);
+            BindOpenPBRLuts();
+        }
+
+        private void BindOpenPBRLuts()
+        {
+            VividOpenPBRLuts luts = PipelineResourceManager
+                .Get<VividRPCoreResources>()
+                ?.OpenPBRLuts;
+            bool ready = luts != null && luts.IsReady;
+            m_Material.SetInt(VividOpenPBRLuts.ReadyId, ready ? 1 : 0);
+            if (!ready)
+                return;
+
+            for (int i = 0; i < VividOpenPBRLuts.Count; ++i)
+                m_Material.SetTexture(VividOpenPBRLuts.TextureIds[i], luts.GetTexture(i));
         }
 
         private static VividMaterialResourceData CreatePreviewResource()

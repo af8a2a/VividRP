@@ -135,7 +135,7 @@ Output 未连接的 Coverage/AlphaClipThreshold 分别为 `1`/`0`；Material Fea
 
 模板注册表包含 4 个 template；原有 3 个 builtin programs 和生产 P0–P3 共 4 个槽继续保留。OpenPBR 图通过动态 Catalog 槽发布，不占用旧程序 ID。Native selection 只声明 `OpenPBROpaqueExport` 和独立 Coverage/AlphaClip 能力，使用实际 generic 参数与资源布局；没有 StandardLit 兼容字段映射。
 
-Editor cost model 继续展示原生编译的 hash、预算和诊断，但原生 profile 的预览状态明确为 `UnsupportedProfile`，`CanPreview = false`。当前预览尚未实现 OpenPBR shading；即使 program 已进入 Frozen Catalog，也不显示旧 Slab 球体作为原生 OpenPBR 的预览。Native export 的 Surface Summary 和 DualSlab Sidecar ABI 均为 `None`，不继承旧材质的 SSR／Decal 策略；Resolve 通过独立原生存储规则消费该 payload。
+Editor cost model 展示原生编译的 hash、预算与诊断，并在 program 进入 Frozen Catalog 后启用真实 OpenPBR 1.1 球体预览（`Ready` / `CanPreview = true`）；未入 Catalog 时报告 `CatalogMiss`。预览着色器通过 `MaterialGraphPreview.shader` 与 `MaterialGraphPreviewRenderer` 显式绑定 `VividOpenPBRLuts`，直接调用 `VividPrepareOpenPBROpaque`、`openpbr_eval` 与共享的 O(1) `VividEvaluateOpenPBROpaqueAlbedo`（缺 LUT 或非法输入显示洋红诊断色，不回退旧 Slab 预览）。Native export 的 Surface Summary 和 DualSlab Sidecar ABI 均为 `None`，不继承旧材质的 SSR／Decal 策略；Resolve 通过独立原生存储规则消费该 payload。
 
 ## 原生 Deferred 接入（2026-10-12）
 

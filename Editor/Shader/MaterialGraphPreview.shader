@@ -21,11 +21,33 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
         {
             HLSLPROGRAM
             #pragma target 5.0
-            #pragma vertex vert_img
+            #pragma use_dxc
+            #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "UnityCG.cginc"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBROpaque.hlsl"
+
+            struct PreviewAttributes
+            {
+                float4 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            struct PreviewVaryings
+            {
+                float4 pos : SV_POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            PreviewVaryings Vert(PreviewAttributes input)
+            {
+                PreviewVaryings output;
+                output.pos = TransformObjectToHClip(input.positionOS.xyz);
+                output.uv = input.uv;
+                return output;
+            }
 
             float4 _BaseColor;
             float4 _TopColor;
@@ -33,6 +55,7 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
             float _Metallic;
             float _LayerWeight;
             uint _ProgramID;
+            uint _VividOpenPBRLutsReady;
 
             struct VividSurfaceSampleContext
             {
@@ -252,7 +275,63 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
                 return diffuse + specular;
             }
 
-            float4 Frag(v2f_img input) : SV_Target
+            float3 ShadeOpenPBROpaque(
+                const VividOpenPBROpaqueInputs inputs,
+                const float3 viewDirection)
+            {
+                OpenPBR_ResolvedInputs resolved;
+                if (_VividOpenPBRLutsReady == 0u
+                    || !VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
+                {
+                    return float3(1.0f, 0.0f, 1.0f);
+                }
+
+                const float3 normalWS = resolved.geometry_basis.n;
+                if (dot(normalWS, viewDirection) <= 0.0f)
+                    return max(inputs.emissionLuminance * inputs.emissionColor, 0.0f);
+
+                const OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(
+                    resolved,
+                    viewDirection);
+                const OpenPBR_DiffuseSpecular albedo = VividEvaluateOpenPBROpaqueAlbedo(
+                    inputs,
+                    normalWS,
+                    viewDirection);
+
+                float3 color = 0.0f;
+                const float3 keyDir = normalize(float3(-0.45f, 0.70f, 0.55f));
+                const float3 keyRadiance = float3(2.80f, 2.75f, 2.65f);
+                if (dot(normalWS, keyDir) > 0.0f)
+                {
+                    const OpenPBR_DiffuseSpecular keyResponse = openpbr_eval(prepared, keyDir);
+                    color += (keyResponse.diffuse + keyResponse.specular) * keyRadiance;
+                }
+
+                const float3 fillDir = normalize(float3(0.65f, 0.25f, 0.45f));
+                const float3 fillRadiance = float3(0.55f, 0.65f, 0.80f);
+                if (dot(normalWS, fillDir) > 0.0f)
+                {
+                    const OpenPBR_DiffuseSpecular fillResponse = openpbr_eval(prepared, fillDir);
+                    color += (fillResponse.diffuse + fillResponse.specular) * fillRadiance;
+                }
+
+                // Studio hemisphere environment fill weighted by O(1) OpenPBR directional albedo.
+                const float3 envDiffuse = lerp(
+                    float3(0.08f, 0.08f, 0.09f),
+                    float3(0.24f, 0.27f, 0.32f),
+                    saturate(normalWS.y * 0.5f + 0.5f));
+                const float3 reflectDir = reflect(-viewDirection, normalWS);
+                const float envSpecSharpness = lerp(0.5f, 0.15f, saturate(inputs.specularRoughness));
+                const float3 envSpecular = lerp(
+                    float3(0.06f, 0.06f, 0.07f),
+                    float3(0.32f, 0.36f, 0.42f),
+                    saturate(reflectDir.y * envSpecSharpness + 0.5f));
+                color += albedo.diffuse * envDiffuse + albedo.specular * envSpecular;
+                color += max(prepared.emission, 0.0f);
+                return color;
+            }
+
+            float4 Frag(PreviewVaryings input) : SV_Target
             {
                 const float2 centered = input.uv * 2.0f - 1.0f;
                 const float radiusSquared = dot(centered, centered);
@@ -300,6 +379,14 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
                         surface))
                 {
                     return float4(0.55f, 0.08f, 0.12f, 1.0f);
+                }
+
+                if (surface.Profile == VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE)
+                {
+                    const float3 openPbrColor = ShadeOpenPBROpaque(
+                        surface.OpenPBROpaque,
+                        viewDirection);
+                    return float4(openPbrColor, 1.0f);
                 }
 
                 float3 color = ShadeSlab(surface.BaseSlab, normalWS, viewDirection);

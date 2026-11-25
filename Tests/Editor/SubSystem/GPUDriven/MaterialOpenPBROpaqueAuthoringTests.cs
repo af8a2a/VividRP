@@ -107,5 +107,104 @@ namespace VividRP.Editor.Tests.GPUDriven
                     graph, "Native", (OpenPBROpaqueFieldSemantic) 999u));
             Assert.That(graph.ValueNodes.Count, Is.Zero);
         }
+
+        [Test]
+        public void PreviewViewModel_SupportsCatalogedOpenPBROpaqueAndReportsCatalogMiss()
+        {
+            var graph = new MaterialGraph();
+            var inputs = new MaterialGraphValue[OpenPBROpaqueContract.FieldCount];
+            for (int field = 0; field < inputs.Length; ++field)
+            {
+                inputs[field] = MaterialOpenPBROpaqueAuthoring.CreateDefaultInput(
+                    graph, "Native", (OpenPBROpaqueFieldSemantic) field);
+            }
+            MaterialGraphClosure surface = graph.OpenPBROpaque(
+                "Native", inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
+                inputs[5], inputs[6], inputs[7], inputs[8], inputs[9], inputs[10]);
+            graph.Output("Output", surface,
+                graph.Constant("Coverage", 1.0f),
+                graph.Constant("Threshold", 0.0f),
+                graph.Constant("LegacyEmission", float3.zero),
+                MaterialFeatureMask.None, MaterialShadingModelMask.OpenPBROpaque);
+
+            MaterialGraphCompilationResult compilation = MaterialGraphCompiler.Compile(
+                graph, GPUDrivenMaterialCompiler.ProgramVersion);
+            Assert.That(compilation.Succeeded, Is.True);
+
+            MaterialProgramCatalog emptyCatalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates);
+            MaterialGraphPreviewCostViewModel uncataloged = MaterialGraphPreviewCostViewModel.Build(
+                compilation, emptyCatalog, GPUDrivenMaterialCompiler.ProgramVersion);
+            Assert.That(uncataloged.Status, Is.EqualTo(MaterialGraphPreviewStatus.CatalogMiss));
+            Assert.That(uncataloged.IsOpenPBROpaque, Is.True);
+            Assert.That(uncataloged.CanPreview, Is.False);
+
+            MaterialProgramCatalog baked = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram("Test.OpenPBROpaque", compilation.Program));
+            MaterialGraphPreviewCostViewModel ready = MaterialGraphPreviewCostViewModel.Build(
+                compilation, baked, GPUDrivenMaterialCompiler.ProgramVersion);
+            Assert.That(ready.Status, Is.EqualTo(MaterialGraphPreviewStatus.Ready));
+            Assert.That(ready.IsOpenPBROpaque, Is.True);
+            Assert.That(ready.CanPreview, Is.True);
+            Assert.That(ready.ProgramID, Is.Not.EqualTo(VividMaterialProgramID.Invalid));
+            Assert.That(ready.Diagnostics, Is.Empty);
+        }
+
+        [Test]
+        public void PreviewParameters_UseOpenPBRContractDefaultsForNamedInputs()
+        {
+            var graph = new MaterialGraph();
+            var inputs = new MaterialGraphValue[OpenPBROpaqueContract.FieldCount];
+            for (int field = 0; field < inputs.Length; ++field)
+            {
+                inputs[field] = MaterialOpenPBROpaqueAuthoring.CreateDefaultInput(
+                    graph, "Native", (OpenPBROpaqueFieldSemantic) field);
+            }
+            inputs[(int) OpenPBROpaqueFieldSemantic.SpecularIor] = graph.Parameter(
+                "SpecularIorParam",
+                new MaterialParameterDeclaration("SpecularIor", MaterialValueType.Float));
+            inputs[(int) OpenPBROpaqueFieldSemantic.SpecularRoughness] = graph.Parameter(
+                "SpecularRoughnessParam",
+                new MaterialParameterDeclaration("SpecularRoughness", MaterialValueType.Float));
+            MaterialGraphClosure surface = graph.OpenPBROpaque(
+                "Native", inputs[0], inputs[1], inputs[2], inputs[3], inputs[4],
+                inputs[5], inputs[6], inputs[7], inputs[8], inputs[9], inputs[10]);
+            graph.Output("Output", surface,
+                graph.Constant("Coverage", 1.0f),
+                graph.Constant("Threshold", 0.0f),
+                graph.Constant("LegacyEmission", float3.zero),
+                MaterialFeatureMask.None, MaterialShadingModelMask.OpenPBROpaque);
+
+            MaterialGraphCompilationResult compilation = MaterialGraphCompiler.Compile(
+                graph, GPUDrivenMaterialCompiler.ProgramVersion);
+            Assert.That(compilation.Succeeded, Is.True);
+
+            MaterialProgramCatalog catalog = MaterialProgramCatalog.Bake(
+                MaterialProgramBuiltinCatalog.Templates,
+                MaterialProgramCatalogBakeSlot.ForProgram("Test.OpenPBROpaqueNamed", compilation.Program));
+            Assert.That(catalog.TryGetCatalogedProgram(compilation.Program, out MaterialProgramCatalog.ManifestEntry entry), Is.True);
+            var binding = new MaterialProgramRuntimeBinding(entry);
+            uint4[] lanes = GPUDrivenMaterialCompiler.CreatePreviewParameterLanes(
+                binding,
+                default,
+                default,
+                isDualSlab: false);
+            Assert.That(lanes.Length, Is.GreaterThan(0));
+
+            float readFloat(string symbol)
+            {
+                foreach (MaterialRuntimeParameterBindingDescriptor desc in binding.ParameterBindings)
+                {
+                    if (desc.Declaration.Symbol == symbol)
+                        return math.asfloat(lanes[desc.WordOffset >> 2][desc.WordOffset & 3]);
+                }
+                Assert.Fail($"Missing parameter binding '{symbol}'.");
+                return 0.0f;
+            }
+
+            Assert.That(readFloat("SpecularIor"), Is.EqualTo(OpenPBROpaqueContract.DefaultSpecularIor));
+            Assert.That(readFloat("SpecularRoughness"), Is.EqualTo(OpenPBROpaqueContract.DefaultSpecularRoughness));
+        }
     }
 }

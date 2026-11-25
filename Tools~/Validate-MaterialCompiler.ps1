@@ -24,9 +24,9 @@ if (!$BeeDagDirectory) {
 $beeRoot = (Resolve-Path -LiteralPath $BeeDagDirectory).Path
 $runtimeText = Get-Content -Raw -LiteralPath (Join-Path $beeRoot 'VividRP.Runtime.rsp')
 $editorReference = [regex]::Match($runtimeText,
-    '-r:"(?<path>[^"]*/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule\.dll)"')
+    '-r:"(?<data>[^"]*/Editor/Data)/[^"]*UnityEngine\.CoreModule\.dll"')
 if (!$editorReference.Success) { throw 'Cannot determine this project Editor SDK from its Bee references.' }
-$editorData = $editorReference.Groups['path'].Value -replace '/Managed/UnityEngine/UnityEngine.CoreModule\.dll$', ''
+$editorData = $editorReference.Groups['data'].Value
 $dotnet = Join-Path $editorData 'DotNetSdk/dotnet.exe'
 $sdk = @(Get-ChildItem -LiteralPath (Join-Path $editorData 'DotNetSdk/sdk') -Directory |
     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Roslyn/bincore/csc.dll') } |
@@ -159,7 +159,7 @@ internal static class Program
         {
             ["VividRP.Editor.Tests.OpenPBROpaqueContractTests"] = 21,
             ["VividRP.Editor.Tests.GPUDriven.OpenPBROpaqueMaterialIRTests"] = 12,
-            ["VividRP.Editor.Tests.GPUDriven.MaterialOpenPBROpaqueAuthoringTests"] = 14,
+            ["VividRP.Editor.Tests.GPUDriven.MaterialOpenPBROpaqueAuthoringTests"] = 16,
             ["VividRP.Editor.Tests.OpenPBROpaqueSurfaceExportTests"] = 12,
             ["VividRP.Editor.Tests.GPUDriven.MaterialGraphCompilerTests"] = 0,
             ["VividRP.Editor.Tests.MaterialCoverageHlslBackendTests"] = 0,

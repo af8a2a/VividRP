@@ -66,6 +66,7 @@ namespace VividRP.Editor.GPUDriven
 
         private MaterialGraphPreviewCostViewModel(
             MaterialGraphPreviewStatus status,
+            bool isOpenPBROpaque,
             VividMaterialProgramID programID,
             string semanticHash,
             string compiledHash,
@@ -76,6 +77,7 @@ namespace VividRP.Editor.GPUDriven
             string[] diagnostics)
         {
             Status = status;
+            IsOpenPBROpaque = isOpenPBROpaque;
             ProgramID = programID;
             SemanticHash = semanticHash ?? string.Empty;
             CompiledHash = compiledHash ?? string.Empty;
@@ -87,6 +89,8 @@ namespace VividRP.Editor.GPUDriven
         }
 
         internal MaterialGraphPreviewStatus Status { get; }
+
+        internal bool IsOpenPBROpaque { get; }
 
         internal VividMaterialProgramID ProgramID { get; }
 
@@ -158,7 +162,13 @@ namespace VividRP.Editor.GPUDriven
             else
             {
                 bool isCataloged = catalog.TryGetCatalogedProgram(result.Program, out catalogEntry);
-                status = result.Program.Module.ShadingModels == MaterialShadingModelMask.OpenPBROpaque
+                const MaterialShadingModelMask supportedPreviewShadingModels =
+                    MaterialShadingModelMask.StandardLit
+                    | MaterialShadingModelMask.Unlit
+                    | MaterialShadingModelMask.OpenPBROpaque;
+                bool isSupportedProfile =
+                    (result.Program.Module.ShadingModels & ~supportedPreviewShadingModels) == 0;
+                status = !isSupportedProfile
                     ? MaterialGraphPreviewStatus.UnsupportedProfile
                     : isCataloged
                         ? MaterialGraphPreviewStatus.Ready
@@ -192,14 +202,17 @@ namespace VividRP.Editor.GPUDriven
             if (status == MaterialGraphPreviewStatus.UnsupportedProfile)
             {
                 diagnostics.Add(
-                    "OpenPBROpaqueV1 compiled successfully; this Editor preview does not yet implement OpenPBR shading.");
+                    "Compiled shading profile is not yet supported by this Editor preview.");
                 if (catalogEntry == null)
                     diagnostics.Add("Compiled program is not present in the Frozen Catalog.");
             }
 
             MaterialIRModule module = result.Program?.Module ?? result.Module;
+            bool isOpenPBROpaque = module != null
+                && module.ShadingModels == MaterialShadingModelMask.OpenPBROpaque;
             return new MaterialGraphPreviewCostViewModel(
                 status,
+                isOpenPBROpaque,
                 catalogEntry?.ProgramID ?? VividMaterialProgramID.Invalid,
                 result.Program?.SemanticHash.ToString(),
                 result.Program?.CompiledHash.ToString(),

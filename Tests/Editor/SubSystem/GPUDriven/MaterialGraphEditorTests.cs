@@ -154,7 +154,7 @@ namespace VividRP.Editor.Tests.GPUDriven
         }
 
         [Test]
-        public void OpenPBROpaqueGraph_PreviewReportsUnsupportedProfile()
+        public void OpenPBROpaqueGraph_PreviewSupportsCatalogedProgramAndReportsCatalogMiss()
         {
             MaterialGraphEditorGraph graph = CreateGraph();
             try
@@ -163,12 +163,33 @@ namespace VividRP.Editor.Tests.GPUDriven
                 MaterialOpenPBROpaqueOutputNode output = AddNode<MaterialOpenPBROpaqueOutputNode>(graph);
                 ConnectClosure(graph, native, output, MaterialOpenPBROpaqueOutputNode.SurfacePortName);
 
-                MaterialGraphPreviewCostViewModel viewModel = MaterialGraphPreviewCostViewModel.Build(graph);
+                MaterialGraphCompilationResult compilation = MaterialGraphEditorCompiler.Compile(graph);
+                Assert.That(compilation.Succeeded, Is.True, DiagnosticsToString(compilation));
 
-                Assert.That(viewModel.Status, Is.EqualTo(MaterialGraphPreviewStatus.UnsupportedProfile));
-                Assert.That(viewModel.CanPreview, Is.False);
-                Assert.That(viewModel.CompiledHash, Is.Not.Empty);
-                Assert.That(viewModel.Diagnostics.Any(message => message.Contains("OpenPBR shading")), Is.True);
+                MaterialProgramCatalog emptyCatalog = MaterialProgramCatalog.Bake(
+                    MaterialProgramBuiltinCatalog.Templates);
+                MaterialGraphPreviewCostViewModel uncatalogedViewModel = MaterialGraphPreviewCostViewModel.Build(
+                    compilation,
+                    emptyCatalog,
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+                Assert.That(uncatalogedViewModel.Status, Is.EqualTo(MaterialGraphPreviewStatus.CatalogMiss));
+                Assert.That(uncatalogedViewModel.IsOpenPBROpaque, Is.True);
+                Assert.That(uncatalogedViewModel.CanPreview, Is.False);
+                Assert.That(uncatalogedViewModel.CompiledHash, Is.Not.Empty);
+                Assert.That(uncatalogedViewModel.Diagnostics.Any(message => message.Contains("Frozen Catalog")), Is.True);
+
+                MaterialProgramCatalog catalogWithProgram = MaterialProgramCatalog.Bake(
+                    MaterialProgramBuiltinCatalog.Templates,
+                    MaterialProgramCatalogBakeSlot.ForProgram("Test.OpenPBROpaque", compilation.Program));
+                MaterialGraphPreviewCostViewModel readyViewModel = MaterialGraphPreviewCostViewModel.Build(
+                    compilation,
+                    catalogWithProgram,
+                    GPUDrivenMaterialCompiler.ProgramVersion);
+                Assert.That(readyViewModel.Status, Is.EqualTo(MaterialGraphPreviewStatus.Ready));
+                Assert.That(readyViewModel.IsOpenPBROpaque, Is.True);
+                Assert.That(readyViewModel.CanPreview, Is.True);
+                Assert.That(readyViewModel.ProgramID, Is.Not.EqualTo(VividMaterialProgramID.Invalid));
+                Assert.That(readyViewModel.Diagnostics, Is.Empty);
             }
             finally
             {

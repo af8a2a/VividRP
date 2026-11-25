@@ -157,8 +157,11 @@ Editor cost model 继续展示原生编译的 hash、预算和诊断，但原生
 原生着色由 `VividOpenPBROpaqueDeferredLighting.hlsl` 和共享 `VividDeferredLighting.hlsl` 实现：
 
 - 每个像素先 `openpbr_prepare`，方向／点／聚光直接调用 `openpbr_eval`，只在外部乘光源 radiance、attenuation 和主方向光阴影，不重复乘 cosine，也不使用 Slab 能量补偿。
-- 间接光的 specular 方向反照率保留 32 个确定性 Vendor BSDF 重要性样本；仅在 `pdf > 0` 时读取已经包含 `f*cos/pdf` 的 weight。diffuse 使用连续半球积分：针对 V1 各向同性 EON 的方位角依赖，在两个半圆的平均 cosine（`±2/pi`）调用 Vendor `eval`，再用 8 点 Gauss-Legendre 积分 `NdotL`，共 16 次漫反射求值。这样避免固定混合采样的 lobe 数目随视角离散变化，在已滤波 GI 上形成固定条带。BSDF、输入语义、ABI 与 GI 射线预算不变；4096 样本重要性积分仍作为独立能量参考。
-- 方向反照率再结合 APV／SH 和现有 GGX 环境预滤波。这是实时 split-sum 近似，不是完整环境积分；材质积分的硬件耗时仍需单独验收。连续漫反射求积仅适用于 V1 的能力边界，不能直接扩展到 coat、fuzz 或各向异性材质。
+- 间接光的方向反照率采用 `VividEvaluateOpenPBROpaqueAlbedo` 的 O(1) 闭合/查表求值（无逐像素采样循环）：
+  - 介电镜面与漫反射复用已绑定的 Vendor 3D `opaque_dielectric_energy_complement` LUT（`roughness == 0` 直接用精确 `openpbr_fresnel`；超出 `OpenPBR_IorMax = 2.5` 时按有效微表面余弦的精确 Fresnel 比值外推并截断至 `E_white`）。
+  - 金属单散射按 OpenPBR F82-tint 的线性基展开为 `E_white * saturate(F0 + (1 - F0) * M5 - b * M16)`，由 1 次 2D `ideal_metal_energy_complement` 查表与 `r == 0` 精确的 GGX-VNDF 解析矩 `(M5, M16)` 求得；金属多重散射直接用 `darkenedMetal * L_metal * F_avg^2`（`alpha >= OpenPBR_MinAlphaWithVisibleEnergyLoss`）。
+  - 漫反射直接使用 EON 解析方向反照率（`openpbr_E_FON_approx` + 多重散射项 `rhoMs`）乘以介电透射互补项，保证视角连续且无条带；纯金属跳过 3D 介电查表，纯介电（`IOR <= 2.5`）跳过 2D 金属查表。4096 样本重要性积分 `VividIntegrateOpenPBROpaqueAlbedo` 保留作为独立能量参考。
+- 方向反照率再结合 APV／SH 和现有 GGX 环境预滤波。这是实时 split-sum 近似，不是完整环境积分；材质积分的硬件耗时仍需单独验收。该 O(1) 方向反照率针对 V1 的能力边界设计，后续扩展 coat、fuzz 或各向异性时需在对应 profile 中补充层间衰减与新 lobe 贡献。
 - 矩形／线面积光复用现有范围、barn-door 和 Lambert／GGX LTC 形状，以 OpenPBR 方向反照率作为幅度。EON 与多重散射的形状并未重新拟合，需保留误差验收。
 - AO 仅作用于间接光；曝光和发光仍由公共 compositor 处理。Native v1 不启用 SSR／decal，也不从旧材质继承这两个 flag。
 - immutable Vendor LUT 每帧由现有 FGD 子系统绑定；原生像素独立检查资源就绪与侧车尺寸，缺资源或非法 payload 显示诊断色，不回退 SimpleSlab。

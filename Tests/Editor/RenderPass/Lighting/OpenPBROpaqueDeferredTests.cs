@@ -83,7 +83,7 @@ namespace VividRP.Editor.Tests
                             Mathf.Abs(values[offset + 2 + lobe][c] - values[offset + 4 + lobe][c]));
             }
             TestContext.WriteLine($"OpenPBR Deferred directional albedo: max absolute error {maxAlbedoError:R} against 4096 samples.");
-            Assert.That(maxAlbedoError, Is.LessThan(0.08f));
+            Assert.That(maxAlbedoError, Is.LessThan(0.02f));
         }
     }
 }

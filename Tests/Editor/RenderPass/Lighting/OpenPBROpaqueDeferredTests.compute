@@ -42,7 +42,7 @@ void EvaluateNativeDeferred(uint3 id : SV_DispatchThreadID)
     uint offset = id.x * 8u;
     _Output[offset] = float4(abs(actual.diffuse - reference.diffuse), valid ? 1.0 : 0.0);
     _Output[offset + 1u] = float4(abs(actual.specular - reference.specular), 0);
-    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(prepared, inputs.normalWS, view);
+    OpenPBR_DiffuseSpecular albedo = VividEvaluateOpenPBROpaqueAlbedo(inputs, inputs.normalWS, view);
     OpenPBR_DiffuseSpecular referenceAlbedo = VividIntegrateOpenPBROpaqueAlbedo(prepared, 4096u);
     _Output[offset + 2u] = float4(albedo.diffuse, 0);
     _Output[offset + 3u] = float4(albedo.specular, 0);
@@ -88,7 +88,7 @@ void EvaluateDiffuseAlbedoContinuity(uint3 id : SV_DispatchThreadID)
     OpenPBR_ResolvedInputs resolved;
     VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved);
     OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBROpaque(resolved, view);
-    float3 actual = VividIntegrateOpenPBROpaqueDiffuseAlbedo(prepared, inputs.normalWS, view);
+    float3 actual = VividEvaluateOpenPBROpaqueDiffuseAlbedo(inputs, dot(inputs.normalWS, view));
     OpenPBR_DiffuseSpecular reference = VividIntegrateOpenPBROpaqueAlbedo(prepared, 4096u);
     uint offset = (id.y * 256u + id.x) * 2u;
     _Output[offset] = float4(actual, 0);

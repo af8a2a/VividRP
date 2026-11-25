@@ -5,12 +5,8 @@
 #include "VividOpenPBROpaqueGBuffer.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
 
-// Importance sampling is retained for sharp specular lobes and as an independent
-// high-sample reference. Its discrete lobe selection must not set diffuse energy.
-#ifndef VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES
-#define VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES 32u
-#endif
-
+// High-sample importance-sampling reference used by validation fixtures to
+// verify the O(1) production directional albedo against Vendor OpenPBR.
 OpenPBR_DiffuseSpecular VividIntegrateOpenPBROpaqueAlbedo(OpenPBR_PreparedBsdf prepared, uint sampleCount)
 {
     OpenPBR_DiffuseSpecular albedo = openpbr_make_zero_diffuse_specular();
@@ -35,49 +31,129 @@ OpenPBR_DiffuseSpecular VividIntegrateOpenPBROpaqueAlbedo(OpenPBR_PreparedBsdf p
     return openpbr_scale_diffuse_specular(albedo, 1.0 / sampleCount);
 }
 
-float3 VividIntegrateOpenPBROpaqueDiffuseAlbedo(
-    OpenPBR_PreparedBsdf prepared, float3 normalWS, float3 viewDirectionWS)
+// Analytic GGX VNDF single-scatter Fresnel moments for isotropic OpenPBR metal:
+//   x = E[(1 - VdotH)^5]
+//   y = E[(VdotH) * (1 - VdotH)^6]
+// Exact at roughness == 0 and smooth across all view angles.
+float2 VividEvaluateOpenPBROpaqueMetalFresnelMoments(float perceptualRoughness, float nDotV)
 {
-    // Opaque V1 has isotropic EON diffuse with no coat/fuzz/transmission. At fixed
-    // NdotL its azimuth dependence is affine in cos(phi) on each half-circle.
-    // Evaluating their mean cosines (+/- 2/pi) integrates azimuth exactly, while
-    // eight Gauss-Legendre nodes integrate NdotL. All BSDF/energy terms still
-    // come from vendor eval; no prepared internals or replacement BRDF are used.
-    const float nodes[8] = {0.0198550718, 0.1016667613, 0.2372337950, 0.4082826788,
-        0.5917173212, 0.7627662050, 0.8983332387, 0.9801449282};
-    const float weights[8] = {0.0506142681, 0.1111905172, 0.1568533229, 0.1813418917,
-        0.1813418917, 0.1568533229, 0.1111905172, 0.0506142681};
-    float3 tangent = viewDirectionWS - dot(normalWS, viewDirectionWS) * normalWS;
-    float tangentLengthSq = dot(tangent, tangent);
-    tangent = tangentLengthSq > 1e-8 ? tangent * rsqrt(tangentLengthSq)
-        : openpbr_make_basis(normalWS).t;
-    float3 bitangent = cross(normalWS, tangent);
-    float3 azimuthX = (2.0 * INV_PI) * tangent;
-    float3 azimuthY = sqrt(1.0 - 4.0 * INV_PI * INV_PI) * bitangent;
-    float3 albedo = 0.0;
-    [loop]
-    for (uint i = 0u; i < 8u; ++i)
-    {
-        float mu = nodes[i];
-        float radius = sqrt(1.0 - mu * mu);
-        float3 positive = normalWS * mu + radius * (azimuthY + azimuthX);
-        float3 negative = normalWS * mu + radius * (azimuthY - azimuthX);
-        // eval includes NdotL; each azimuth half has measure pi.
-        albedo += (openpbr_eval(prepared, positive).diffuse
-            + openpbr_eval(prepared, negative).diffuse) * (PI * weights[i]);
-    }
-    return albedo;
+    float r = saturate(perceptualRoughness);
+    float mu = saturate(nDotV);
+    float a = r * r;
+    float g = (3.550254 * a) / (1.0 + 0.474257 * a);
+    float base = sqrt(mu * mu + 0.123840 * mu * g + g * g);
+    float base2 = base * base;
+    float u5 = saturate(base + r * (-0.070284 * base + 3.119923 * r * base
+        - 0.372022 * base2 - 0.167350 * r * base2
+        - 2.211443 * g - 0.325312 * r * g));
+    float oneMinusU5 = 1.0 - u5;
+    float m5 = openpbr_fifth_power(oneMinusU5);
+    float delta16 = (base - mu) * (-0.317033 + 0.712343 * r + 0.882984 * base - 0.947608 * g)
+        + r * (0.007521 + 0.119960 * r - 0.108890 * base - 0.055646 * base2 - 0.065363 * g);
+    float m16 = m5 * max(0.0, u5 * oneMinusU5 + delta16);
+    return float2(m5, m16);
 }
 
-OpenPBR_DiffuseSpecular VividIntegrateOpenPBROpaqueAlbedo(
-    OpenPBR_PreparedBsdf prepared, float3 normalWS, float3 viewDirectionWS)
+float3 VividEvaluateOpenPBROpaqueDiffuseAlbedo(VividOpenPBROpaqueInputs inputs, float nDotV)
 {
-    OpenPBR_DiffuseSpecular albedo = VividIntegrateOpenPBROpaqueAlbedo(
-        prepared, VIVID_OPENPBR_DEFERRED_ALBEDO_SAMPLES);
-    // Fixed mixture samples jump whenever a view-dependent lobe CDF crosses a
-    // sample. Diffuse multiplies already filtered GI, so those jumps never converge.
-    albedo.diffuse = VividIntegrateOpenPBROpaqueDiffuseAlbedo(prepared, normalWS, viewDirectionWS);
-    return albedo;
+    float mu = saturate(nDotV);
+    float opaqueDielectric = 1.0 - inputs.baseMetalness;
+    if (mu <= 0.0 || opaqueDielectric <= 0.0)
+        return 0.0;
+
+    float3 diffAlbedo = inputs.baseColor * (inputs.baseWeight * opaqueDielectric);
+    float rd = inputs.baseDiffuseRoughness;
+    float af = 1.0 / (1.0 + OpenPBR_FONConstantA * rd);
+    float eFo = openpbr_E_FON_approx(mu, rd);
+    float avgEf = af * (1.0 + OpenPBR_FONConstantB * rd);
+    float3 rhoMs = (diffAlbedo * diffAlbedo) * avgEf
+        / max(1.0 - diffAlbedo * (1.0 - avgEf), 1e-7);
+    float3 eonDirAlbedo = diffAlbedo * eFo + rhoMs * (1.0 - eFo);
+
+    float alpha = inputs.specularRoughness * inputs.specularRoughness;
+    float weightedIor = openpbr_apply_specular_weight_to_ior(inputs.specularIor, inputs.specularWeight);
+    float dielCompLut = openpbr_look_up_opaque_dielectric_energy_complement(weightedIor, alpha, mu);
+    return eonDirAlbedo * dielCompLut;
+}
+
+// O(1) directional albedo for OpenPBROpaqueV1 using Vendor's bound energy LUTs
+// and closed-form EON / GGX metal moment terms (replaces per-pixel MC loops).
+OpenPBR_DiffuseSpecular VividEvaluateOpenPBROpaqueAlbedo(
+    VividOpenPBROpaqueInputs inputs, float3 normalWS, float3 viewDirectionWS)
+{
+    float mu = saturate(dot(normalWS, viewDirectionWS));
+    if (mu <= 0.0)
+        return openpbr_make_zero_diffuse_specular();
+
+    float roughness = saturate(inputs.specularRoughness);
+    float alpha = roughness * roughness;
+    float opaqueDielectric = 1.0 - inputs.baseMetalness;
+    float darkenedMetal = inputs.baseMetalness * inputs.specularWeight;
+    float3 weightedBaseColor = inputs.baseColor * inputs.baseWeight;
+
+    bool hasMetalLut = false;
+    float metalLoss = 0.0;
+
+    float3 diffuse = 0.0;
+    float3 specDielectric = 0.0;
+    if (opaqueDielectric > 0.0)
+    {
+        float weightedIor = openpbr_apply_specular_weight_to_ior(inputs.specularIor, inputs.specularWeight);
+        float dielCompLut = openpbr_look_up_opaque_dielectric_energy_complement(weightedIor, alpha, mu);
+
+        float dielRefl;
+        if (alpha == 0.0)
+        {
+            dielRefl = openpbr_fresnel(weightedIor, mu);
+        }
+        else if (weightedIor > OpenPBR_IorMax)
+        {
+            // Beyond OpenPBR_IorMax (2.5), extrapolate specular reflectance using exact
+            // Fresnel ratio at effective microfacet cosine, clamped to single-scatter E_white.
+            float compAtMax = openpbr_look_up_opaque_dielectric_energy_complement(OpenPBR_IorMax, alpha, mu);
+            float reflAtMax = saturate(1.0 - compAtMax);
+            float muEff = lerp(mu, 0.5 + 0.35 * mu, roughness);
+            float fMax = max(openpbr_fresnel(OpenPBR_IorMax, muEff), 1e-5);
+            float fCur = openpbr_fresnel(weightedIor, muEff);
+            metalLoss = openpbr_look_up_ideal_metal_energy_complement(alpha, mu);
+            hasMetalLut = true;
+            dielRefl = min(reflAtMax * (fCur / fMax), saturate(1.0 - metalLoss));
+        }
+        else
+        {
+            dielRefl = saturate(1.0 - dielCompLut);
+        }
+        specDielectric = inputs.specularColor * (opaqueDielectric * dielRefl);
+
+        float3 diffAlbedo = weightedBaseColor * opaqueDielectric;
+        float rd = inputs.baseDiffuseRoughness;
+        float af = 1.0 / (1.0 + OpenPBR_FONConstantA * rd);
+        float eFo = openpbr_E_FON_approx(mu, rd);
+        float avgEf = af * (1.0 + OpenPBR_FONConstantB * rd);
+        float3 rhoMs = (diffAlbedo * diffAlbedo) * avgEf
+            / max(1.0 - diffAlbedo * (1.0 - avgEf), 1e-7);
+        diffuse = (diffAlbedo * eFo + rhoMs * (1.0 - eFo)) * dielCompLut;
+    }
+
+    float3 specMetal = 0.0;
+    if (darkenedMetal > 0.0)
+    {
+        if (!hasMetalLut && alpha > 0.0)
+            metalLoss = openpbr_look_up_ideal_metal_energy_complement(alpha, mu);
+        float eWhite = saturate(1.0 - metalLoss);
+        float2 moments = VividEvaluateOpenPBROpaqueMetalFresnelMoments(roughness, mu);
+        float3 bFactor = openpbr_compute_metal_schlick_b_factor(weightedBaseColor, inputs.specularColor);
+        float3 fresnelSS = saturate(
+            weightedBaseColor + (1.0 - weightedBaseColor) * moments.x - bFactor * moments.y);
+        specMetal = darkenedMetal * eWhite * fresnelSS;
+        if (alpha >= OpenPBR_MinAlphaWithVisibleEnergyLoss)
+        {
+            float3 fresnelAvg = openpbr_metal_average_fresnel_with_f82_tint(weightedBaseColor, inputs.specularColor);
+            specMetal += (darkenedMetal * metalLoss) * (fresnelAvg * fresnelAvg);
+        }
+    }
+
+    return openpbr_make_diffuse_specular(diffuse, specDielectric + specMetal);
 }
 
 OpenPBR_DiffuseSpecular VividEvaluateOpenPBROpaqueLight(

@@ -1288,6 +1288,31 @@ namespace VividRP.Runtime
                 TouchResolvedResidentRequestsBeforeAllocation(requests, frameIndex);
         }
 
+        internal bool TryTouchExactResidentPage(
+            in VirtualTexturePageCoord coord,
+            VirtualTextureViewId viewId,
+            int frameIndex,
+            bool isActiveView)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(m_Desc, coord))
+                return true;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(m_Desc, m_MipOffsets, coord);
+            if (pageIndex < 0 || pageIndex >= m_PageStates.Length)
+                return true;
+
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (!pageState.Resident)
+                return false;
+
+            m_PhysicalPool.Touch(
+                pageState.PhysicalPageId,
+                viewId,
+                frameIndex,
+                isActiveView);
+            return true;
+        }
+
         internal void DiscardRequestPreparation()
         {
             CompleteRequestPreparation();

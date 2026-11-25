@@ -2733,6 +2733,150 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void PureResidentFastPath_TouchesResidentLru_WithoutSchedulingAggregatorOrRequestPreparation()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "PureResidentFastPath",
+                    cachePageCount: 80,
+                    maxUploadsPerFrame: 4,
+                    virtualPageCountX: 16,
+                    virtualPageCountY: 16,
+                    mipCount: 5,
+                    feedbackCapacity: 128),
+                VTProceduralPageProducer.Instance);
+            var residentKeys = new ulong[65];
+            for (int pageIndex = 0; pageIndex < residentKeys.Length; pageIndex++)
+            {
+                var coord = new VirtualTexturePageCoord(pageIndex % 16, pageIndex / 16, 0);
+                Assert.That(
+                    VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: false, frameIndex: 1),
+                    Is.True);
+                residentKeys[pageIndex] = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, coord);
+            }
+
+            var frameData = new ContextContainer();
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.InjectCompletedResidentAccessReadbackForTesting(
+                    CameraType.Game,
+                    residentKeys);
+                VirtualTextureSystem.BeginFrame(frameIndex: 50);
+
+                Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.False);
+                Assert.That(VirtualTextureSystem.GetPureResidentFastPathCountForTesting(), Is.EqualTo(1));
+
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                bool scheduledUploads = VirtualTextureSystem.EndFrame(frameIndex: 50, endFrameCmd);
+
+                Assert.That(scheduledUploads, Is.False);
+                Assert.That(VirtualTextureSystem.GetLastRequestPreparationScheduledJobCountForTesting(), Is.Zero);
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.Zero);
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.Zero);
+                Assert.That(VirtualTextureStatsRegistry.LastStats.DeduplicatedRequestCount, Is.EqualTo(residentKeys.Length));
+                Assert.That(VirtualTextureSystem.AdaptiveRecentVisiblePhysicalPageCount, Is.GreaterThanOrEqualTo(residentKeys.Length));
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+            }
+        }
+
+        [Test]
+        public void PureResidentFastPath_FallsBackToFullPipeline_WhenResidentPageWasEvicted()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "PureResidentFallback",
+                    cachePageCount: 4,
+                    maxUploadsPerFrame: 2),
+                VTProceduralPageProducer.Instance);
+            var missingCoord = new VirtualTexturePageCoord(0, 0, 0);
+            ulong missingKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, missingCoord);
+
+            var frameData = new ContextContainer();
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.InjectCompletedResidentAccessReadbackForTesting(
+                    CameraType.Game,
+                    missingKey);
+                VirtualTextureSystem.BeginFrame(frameIndex: 60);
+
+                Assert.That(VirtualTextureSystem.GetPureResidentFastPathCountForTesting(), Is.Zero);
+
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                VirtualTextureSystem.EndFrame(frameIndex: 60, endFrameCmd);
+
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.EqualTo(1));
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.GreaterThan(0));
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+            }
+        }
+
+        [Test]
+        public void PureResidentFastPath_DoesNotAllocate_WhenSteadyState()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "PureResidentNoAlloc",
+                    cachePageCount: 8,
+                    maxUploadsPerFrame: 2),
+                VTProceduralPageProducer.Instance);
+            var residentCoord = new VirtualTexturePageCoord(0, 0, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, residentCoord, locked: false, frameIndex: 1),
+                Is.True);
+            ulong[] residentKeys = { VirtualTextureFeedbackProcessor.EncodeKey(spaceId, residentCoord) };
+
+            var frameData = new ContextContainer();
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                for (int warmupFrame = 2; warmupFrame <= 3; warmupFrame++)
+                {
+                    VirtualTextureSystem.InjectCompletedResidentAccessReadbackForTesting(
+                        CameraType.Game,
+                        residentKeys);
+                    VirtualTextureSystem.BeginFrame(warmupFrame);
+                    VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                    VirtualTextureSystem.EndFrame(warmupFrame, endFrameCmd);
+                    cameraCmd.Clear();
+                    endFrameCmd.Clear();
+                }
+
+                VirtualTextureSystem.InjectCompletedResidentAccessReadbackForTesting(
+                    CameraType.Game,
+                    residentKeys);
+                long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+                VirtualTextureSystem.BeginFrame(4);
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                VirtualTextureSystem.EndFrame(4, endFrameCmd);
+                long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(allocatedBytes, Is.Zero);
+                Assert.That(VirtualTextureSystem.GetPureResidentFastPathCountForTesting(), Is.EqualTo(3));
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+            }
+        }
+
         private sealed class ManualUploadFenceHandle : IVTUploadFenceHandle
         {
             public bool IsPassed { get; set; }

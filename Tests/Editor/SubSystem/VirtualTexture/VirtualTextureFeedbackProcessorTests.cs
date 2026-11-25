@@ -698,6 +698,166 @@ namespace VividRP.Editor.Tests
                     stableSignature),
                 Is.True);
         }
+
+        [Test]
+        public void ShouldReadbackRequestsBuffer_SkipsPureResidentSteadyState_UntilLruRefreshInterval()
+        {
+            var signature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.identity,
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ResidentLruRefreshIntervalFrames,
+                Is.LessThan(VTPhysicalPool.FeedbackEvictionProtectionFrames));
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ResidentLruRefreshIntervalFrames % 2,
+                Is.EqualTo(1),
+                "LRU refresh interval should be odd (coprime to power-of-two jitter cycles).");
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 64,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 0,
+                    residentFallbackSampleCount: 0,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 100 + VirtualTextureFeedbackBufferState.ResidentLruRefreshIntervalFrames - 1,
+                    signature,
+                    signature),
+                Is.False);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 64,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 0,
+                    residentFallbackSampleCount: 0,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 100 + VirtualTextureFeedbackBufferState.ResidentLruRefreshIntervalFrames,
+                    signature,
+                    signature),
+                Is.True);
+        }
+
+        [Test]
+        public void ShouldReadbackRequestsBuffer_ReadsImmediately_OnAnyDemandViewChangeOrPoolPressure()
+        {
+            var firstSignature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.identity,
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+            var secondSignature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.Translate(Vector3.right),
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 32,
+                    acceptedFaultRequestCount: 1,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 0,
+                    residentFallbackSampleCount: 0,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 101,
+                    firstSignature,
+                    firstSignature),
+                Is.True);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 32,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 1,
+                    fallbackSampleCount: 0,
+                    residentFallbackSampleCount: 0,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 101,
+                    firstSignature,
+                    firstSignature),
+                Is.True);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 32,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 4,
+                    residentFallbackSampleCount: 2,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 101,
+                    firstSignature,
+                    firstSignature),
+                Is.True);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 32,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 4,
+                    residentFallbackSampleCount: 4,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 101,
+                    firstSignature,
+                    firstSignature),
+                Is.False,
+                "Resident-only fallback samples must not count as demand faults.");
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 32,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 0,
+                    residentFallbackSampleCount: 0,
+                    forceResidentLruRefresh: true,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 101,
+                    firstSignature,
+                    firstSignature),
+                Is.True);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldReadbackRequestsBufferForTesting(
+                    requestCount: 32,
+                    acceptedFaultRequestCount: 0,
+                    faultOverflowCount: 0,
+                    fallbackSampleCount: 0,
+                    residentFallbackSampleCount: 0,
+                    forceResidentLruRefresh: false,
+                    hasCompletedResidentLruRefresh: true,
+                    lastResidentLruRefreshFrame: 100,
+                    scheduledFrameIndex: 101,
+                    secondSignature,
+                    firstSignature),
+                Is.True);
+        }
     }
 
     public sealed class VirtualTextureFeedbackCompactionTests

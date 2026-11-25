@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Collections;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -673,6 +674,95 @@ namespace VividRP.Runtime
         }
     }
 
+    internal static class VTFeedbackBufferGpuClearer
+    {
+        private const string ClearCounterKernelName = "ClearFeedbackCounter";
+        private const string ClearResidentHashKernelName = "ClearFeedbackResidentHash";
+        private const int CounterThreadGroupSize = 8;
+        private const int HashThreadGroupSize = 64;
+        private const int MaxThreadGroupsPerDispatch = 65535;
+        private const int MaxHashElementsPerDispatch = HashThreadGroupSize * MaxThreadGroupsPerDispatch;
+
+        [NoAutoStaticsCleanup]
+        private static readonly int s_ClearCounterBufferId = Shader.PropertyToID("_VTFeedbackClearCounter");
+        [NoAutoStaticsCleanup]
+        private static readonly int s_ClearCounterCountId = Shader.PropertyToID("_VTFeedbackClearCounterCount");
+        [NoAutoStaticsCleanup]
+        private static readonly int s_ClearResidentHashBufferId = Shader.PropertyToID("_VTFeedbackClearResidentHash");
+        [NoAutoStaticsCleanup]
+        private static readonly int s_ClearResidentHashBaseId = Shader.PropertyToID("_VTFeedbackClearResidentHashBase");
+        [NoAutoStaticsCleanup]
+        private static readonly int s_ClearResidentHashCountId = Shader.PropertyToID("_VTFeedbackClearResidentHashCount");
+
+        private static ComputeShader s_Shader;
+        private static int s_ClearCounterKernel = -1;
+        private static int s_ClearResidentHashKernel = -1;
+
+        internal static bool TryClearCounter(CommandBuffer cmd, ComputeBuffer counterBuffer, int count)
+        {
+            if (cmd == null || counterBuffer == null || count <= 0)
+                return false;
+
+            if (!TryResolveShader() || s_ClearCounterKernel < 0)
+                return false;
+
+            int threadGroups = (count + CounterThreadGroupSize - 1) / CounterThreadGroupSize;
+            cmd.SetComputeIntParam(s_Shader, s_ClearCounterCountId, count);
+            cmd.SetComputeBufferParam(s_Shader, s_ClearCounterKernel, s_ClearCounterBufferId, counterBuffer);
+            cmd.DispatchCompute(s_Shader, s_ClearCounterKernel, threadGroups, 1, 1);
+            return true;
+        }
+
+        internal static bool TryClearResidentHash(CommandBuffer cmd, ComputeBuffer residentHashBuffer, int count)
+        {
+            if (cmd == null || residentHashBuffer == null || count <= 0)
+                return false;
+
+            if (!TryResolveShader() || s_ClearResidentHashKernel < 0)
+                return false;
+
+            cmd.SetComputeBufferParam(s_Shader, s_ClearResidentHashKernel, s_ClearResidentHashBufferId, residentHashBuffer);
+            int remaining = count;
+            int elementBase = 0;
+            while (remaining > 0)
+            {
+                int chunkCount = Mathf.Min(remaining, MaxHashElementsPerDispatch);
+                int threadGroups = (chunkCount + HashThreadGroupSize - 1) / HashThreadGroupSize;
+                cmd.SetComputeIntParam(s_Shader, s_ClearResidentHashBaseId, elementBase);
+                cmd.SetComputeIntParam(s_Shader, s_ClearResidentHashCountId, chunkCount);
+                cmd.DispatchCompute(s_Shader, s_ClearResidentHashKernel, threadGroups, 1, 1);
+                elementBase += chunkCount;
+                remaining -= chunkCount;
+            }
+
+            return true;
+        }
+
+        private static bool TryResolveShader()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+                return false;
+
+            ComputeShader resolvedShader =
+                PipelineResourceManager.Get<VividRPCoreResources>()?.VirtualTexturePageTableScatterCompute;
+            if (ReferenceEquals(resolvedShader, s_Shader) && s_Shader != null)
+                return s_ClearCounterKernel >= 0 || s_ClearResidentHashKernel >= 0;
+
+            s_Shader = resolvedShader;
+            s_ClearCounterKernel = -1;
+            s_ClearResidentHashKernel = -1;
+            if (s_Shader == null)
+                return false;
+
+            if (s_Shader.HasKernel(ClearCounterKernelName))
+                s_ClearCounterKernel = s_Shader.FindKernel(ClearCounterKernelName);
+            if (s_Shader.HasKernel(ClearResidentHashKernelName))
+                s_ClearResidentHashKernel = s_Shader.FindKernel(ClearResidentHashKernelName);
+
+            return s_ClearCounterKernel >= 0 || s_ClearResidentHashKernel >= 0;
+        }
+    }
+
     internal sealed class VirtualTextureFeedbackBufferState : IDisposable
     {
         private struct FeedbackHashEntry
@@ -703,6 +793,7 @@ namespace VividRP.Runtime
             public AsyncGPUReadbackRequest RequestsReadbackRequest;
             public AsyncGPUReadbackRequest CounterReadbackRequest;
             public bool CompletedRequestsValid;
+            public bool CompletedRequestsSkipped;
             public bool CompletedCounterValid;
             public uint CompletedCount;
             public int CompletedFallbackSampleCount;
@@ -719,7 +810,12 @@ namespace VividRP.Runtime
                 while (ReadbackPending)
                 {
                     AsyncGPUReadback.WaitAllRequests();
-                    PollReadback();
+                    PollReadback(
+                        forceResidentLruRefresh: false,
+                        hasCompletedResidentLruRefresh: true,
+                        lastResidentLruRefreshFrame: int.MaxValue,
+                        lastResidentLruRefreshSignature: LastViewSignature,
+                        allowNewRequestReadback: false);
                 }
 
                 RequestsBuffer?.Dispose();
@@ -739,6 +835,7 @@ namespace VividRP.Runtime
                 LastViewId = VirtualTextureViewId.Invalid;
                 LastViewSignature = VirtualTextureFeedbackViewSignature.Invalid;
                 CompletedRequestsValid = false;
+                CompletedRequestsSkipped = false;
                 CompletedCounterValid = false;
                 CompletedCount = 0u;
                 CompletedFallbackSampleCount = 0;
@@ -766,7 +863,12 @@ namespace VividRP.Runtime
                 while (ReadbackPending)
                 {
                     AsyncGPUReadback.WaitAllRequests();
-                    PollReadback();
+                    PollReadback(
+                        forceResidentLruRefresh: false,
+                        hasCompletedResidentLruRefresh: true,
+                        lastResidentLruRefreshFrame: int.MaxValue,
+                        lastResidentLruRefreshSignature: LastViewSignature,
+                        allowNewRequestReadback: false);
                 }
 
                 DisposeReadbackData();
@@ -780,10 +882,23 @@ namespace VividRP.Runtime
                     NativeArrayOptions.UninitializedMemory);
             }
 
-            public void PollReadback()
+            public void PollReadback(
+                bool forceResidentLruRefresh,
+                bool hasCompletedResidentLruRefresh,
+                int lastResidentLruRefreshFrame,
+                in VirtualTextureFeedbackViewSignature lastResidentLruRefreshSignature,
+                bool allowNewRequestReadback = true)
             {
                 if (CounterReadbackPending && CounterReadbackRequest.done)
-                    CompleteCounterReadback(CounterReadbackRequest);
+                {
+                    CompleteCounterReadback(
+                        CounterReadbackRequest,
+                        forceResidentLruRefresh,
+                        hasCompletedResidentLruRefresh,
+                        lastResidentLruRefreshFrame,
+                        lastResidentLruRefreshSignature,
+                        allowNewRequestReadback);
+                }
 
                 if (RequestReadbackPending && RequestsReadbackRequest.done)
                     CompleteRequestsReadback(RequestsReadbackRequest);
@@ -793,13 +908,21 @@ namespace VividRP.Runtime
             {
                 RequestReadbackPending = false;
                 CompletedRequestsValid = !request.hasError && RequestsReadbackData.IsCreated;
+                CompletedRequestsSkipped = false;
 
                 CompleteReadbackIfReady();
             }
 
-            private void CompleteCounterReadback(AsyncGPUReadbackRequest request)
+            private void CompleteCounterReadback(
+                AsyncGPUReadbackRequest request,
+                bool forceResidentLruRefresh,
+                bool hasCompletedResidentLruRefresh,
+                int lastResidentLruRefreshFrame,
+                in VirtualTextureFeedbackViewSignature lastResidentLruRefreshSignature,
+                bool allowNewRequestReadback)
             {
                 CounterReadbackPending = false;
+                CompletedRequestsSkipped = false;
                 CompletedCounterValid = !request.hasError && CounterReadbackData.IsCreated;
                 if (CompletedCounterValid)
                 {
@@ -846,7 +969,19 @@ namespace VividRP.Runtime
                     int requestCount = Mathf.Min(
                         RequestCapacity,
                         SaturatingUIntToInt(CompletedCount));
-                    if (requestCount > 0)
+                    if (allowNewRequestReadback
+                        && ShouldReadbackRequestsBuffer(
+                            requestCount,
+                            CompletedAcceptedFaultRequestCount,
+                            CompletedFaultOverflowCount,
+                            CompletedFallbackSampleCount,
+                            CompletedResidentFallbackSampleCount,
+                            forceResidentLruRefresh,
+                            hasCompletedResidentLruRefresh,
+                            lastResidentLruRefreshFrame,
+                            ScheduledFrameIndex,
+                            LastViewSignature,
+                            lastResidentLruRefreshSignature))
                     {
                         RequestReadbackPending = true;
                         RequestsReadbackRequest = AsyncGPUReadback.RequestIntoNativeArray(
@@ -859,6 +994,7 @@ namespace VividRP.Runtime
                     else
                     {
                         CompletedRequestsValid = true;
+                        CompletedRequestsSkipped = requestCount > 0;
                     }
                 }
 
@@ -895,6 +1031,9 @@ namespace VividRP.Runtime
         private const int FeedbackBufferCount = 8;
         private const int MaxTrackedFeedbackSampleArea = sizeof(ulong) * 8;
         internal const int StableReadbackIntervalFrames = 30;
+        // Prime interval (< FeedbackEvictionProtectionFrames = 16) coprime to all power-of-two
+        // feedback tile areas so periodic resident LRU keepalive sweeps every jitter phase.
+        internal const int ResidentLruRefreshIntervalFrames = 7;
         private readonly BufferPairState[] m_BufferPairs =
         {
             new(),
@@ -919,6 +1058,9 @@ namespace VividRP.Runtime
         private int m_QuiescenceInvalidatedFrame = -1;
         private int m_LastScheduledReadbackFrame = -1;
         private VirtualTextureFeedbackViewSignature m_LastCompletedReadbackSignature;
+        private bool m_HasCompletedResidentLruRefresh;
+        private int m_LastResidentLruRefreshFrame = -1;
+        private VirtualTextureFeedbackViewSignature m_LastResidentLruRefreshSignature;
         private string m_ReadbackPendingStatusSpaceName;
         private string m_ReadbackPendingStatusMessage;
         private bool m_IsDisposed;
@@ -963,7 +1105,7 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsEnsureCapacityMarker.Auto())
                 EnsureCapacity(streamName, feedbackCapacity, pageCapacity);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsPollMarker.Auto())
-                PollReadbacks();
+                PollReadbacks(forceImmediateReadback);
 
             // Upload completion and page-table publication can make an empty readback stale in
             // the same frame. Only feedback captured after the last active frame may contribute
@@ -986,13 +1128,25 @@ namespace VividRP.Runtime
             BufferPairState writePair = m_BufferPairs[writeBufferIndex];
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsResetCounterMarker.Auto())
             {
-                cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);
+                if (!VTFeedbackBufferGpuClearer.TryClearCounter(
+                        cmd,
+                        writePair.CounterBuffer,
+                        FeedbackCounterElementCount))
+                {
+                    cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);
+                }
                 if (RequiresFeedbackHashClear(writePair.ScheduledFrameIndex, frameIndex))
                 {
                     // The frame index is the hash epoch. A camera rendered more than one
                     // ring-length in the same pipeline frame may reacquire this pair, so its
                     // old epoch must not point at the freshly reset compact output.
-                    cmd.SetBufferData(writePair.ResidentHashBuffer, m_ZeroFeedbackHashData);
+                    if (!VTFeedbackBufferGpuClearer.TryClearResidentHash(
+                            cmd,
+                            writePair.ResidentHashBuffer,
+                            m_ResidentHashCapacity))
+                    {
+                        cmd.SetBufferData(writePair.ResidentHashBuffer, m_ZeroFeedbackHashData);
+                    }
                 }
             }
             writePair.WasWritten = true;
@@ -1093,13 +1247,16 @@ namespace VividRP.Runtime
         }
 #endif
 
-        internal void CollectCompletedReadbacks(List<VirtualTextureFeedbackBatch> output, ref int lastReadbackFrame)
+        internal void CollectCompletedReadbacks(
+            List<VirtualTextureFeedbackBatch> output,
+            ref int lastReadbackFrame,
+            bool forceResidentLruRefresh = false)
         {
             if (output == null)
                 return;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackPollMarker.Auto())
-                PollReadbacks();
+                PollReadbacks(forceResidentLruRefresh);
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackCollectBatchesMarker.Auto())
             {
@@ -1109,7 +1266,9 @@ namespace VividRP.Runtime
                     if (!pair.HasCompletedReadback)
                         continue;
 
-                    int completedRequestCount = SaturatingUIntToInt(pair.CompletedCount);
+                    int completedRequestCount = pair.CompletedRequestsSkipped
+                        ? 0
+                        : SaturatingUIntToInt(pair.CompletedCount);
                     int requestCapacity = pair.RequestsReadbackData.IsCreated
                         ? pair.RequestsReadbackData.Length
                         : m_RequestCapacity;
@@ -1126,8 +1285,12 @@ namespace VividRP.Runtime
                     int fallbackSampleCount = pair.CompletedCounterValid
                         ? pair.CompletedFallbackSampleCount
                         : 0;
-                    int residentAccessCount = pair.CompletedRequestsValid && pair.CompletedCounterValid
-                        ? Mathf.Min(requestCount, pair.CompletedResidentAccessCount)
+                    int residentAccessCount = pair.CompletedCounterValid
+                        ? (pair.CompletedRequestsSkipped
+                            ? Mathf.Max(0, pair.CompletedResidentAccessCount)
+                            : (pair.CompletedRequestsValid
+                                ? Mathf.Min(requestCount, pair.CompletedResidentAccessCount)
+                                : 0))
                         : 0;
                     int acceptedFaultRequestCount = ResolveCompletedAcceptedFaultRequestCount(
                         pair.CompletedCounterValid,
@@ -1166,7 +1329,8 @@ namespace VividRP.Runtime
                     if (completedReadbackValid)
                     {
                         m_HasCompletedReadbackResult = true;
-                        bool completedReadbackWasEmpty = requestCount == 0
+                        bool completedReadbackWasEmpty = !pair.CompletedRequestsSkipped
+                                                         && requestCount == 0
                                                          && overflowCount == 0
                                                          && fallbackSampleCount == 0;
                         bool sameViewAsPrevious = m_LastCompletedReadbackSignature.IsValid
@@ -1179,6 +1343,12 @@ namespace VividRP.Runtime
                             pair.ScheduledFrameIndex);
                         m_LastCompletedReadbackWasEmpty = completedReadbackWasEmpty;
                         m_LastCompletedReadbackSignature = pair.LastViewSignature;
+                        if (!pair.CompletedRequestsSkipped && requestCount > 0)
+                        {
+                            m_HasCompletedResidentLruRefresh = true;
+                            m_LastResidentLruRefreshFrame = pair.ScheduledFrameIndex;
+                            m_LastResidentLruRefreshSignature = pair.LastViewSignature;
+                        }
                     }
                     else
                     {
@@ -1187,6 +1357,7 @@ namespace VividRP.Runtime
                     }
                     pair.HasCompletedReadback = false;
                     pair.CompletedRequestsValid = false;
+                    pair.CompletedRequestsSkipped = false;
                     pair.CompletedCounterValid = false;
                     pair.CompletedCount = 0u;
                     pair.CompletedFallbackSampleCount = 0;
@@ -1230,6 +1401,9 @@ namespace VividRP.Runtime
             m_QuiescenceInvalidatedFrame = -1;
             m_LastScheduledReadbackFrame = -1;
             m_LastCompletedReadbackSignature = VirtualTextureFeedbackViewSignature.Invalid;
+            m_HasCompletedResidentLruRefresh = false;
+            m_LastResidentLruRefreshFrame = -1;
+            m_LastResidentLruRefreshSignature = VirtualTextureFeedbackViewSignature.Invalid;
             m_ReadbackPendingStatusSpaceName = null;
             m_ReadbackPendingStatusMessage = null;
 #if VT_DEBUG
@@ -1253,13 +1427,96 @@ namespace VividRP.Runtime
             return m_ReadbackPendingStatusMessage;
         }
 
-        private void PollReadbacks()
+        private void PollReadbacks(bool forceResidentLruRefresh)
         {
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
             {
                 BufferPairState pair = m_BufferPairs[bufferIndex];
-                pair.PollReadback();
+                pair.PollReadback(
+                    forceResidentLruRefresh,
+                    m_HasCompletedResidentLruRefresh,
+                    m_LastResidentLruRefreshFrame,
+                    m_LastResidentLruRefreshSignature);
             }
+        }
+
+        internal static bool HasDemandFeedback(
+            int acceptedFaultRequestCount,
+            int faultOverflowCount,
+            int fallbackSampleCount,
+            int residentFallbackSampleCount)
+        {
+            int nonResidentFallbackSampleCount = Mathf.Max(
+                0,
+                fallbackSampleCount - Mathf.Max(0, residentFallbackSampleCount));
+            return acceptedFaultRequestCount > 0
+                   || faultOverflowCount > 0
+                   || nonResidentFallbackSampleCount > 0;
+        }
+
+        internal static bool ShouldReadbackRequestsBufferForTesting(
+            int requestCount,
+            int acceptedFaultRequestCount,
+            int faultOverflowCount,
+            int fallbackSampleCount,
+            int residentFallbackSampleCount,
+            bool forceResidentLruRefresh,
+            bool hasCompletedResidentLruRefresh,
+            int lastResidentLruRefreshFrame,
+            int scheduledFrameIndex,
+            VirtualTextureFeedbackViewSignature viewSignature,
+            VirtualTextureFeedbackViewSignature lastResidentLruRefreshSignature)
+        {
+            return ShouldReadbackRequestsBuffer(
+                requestCount,
+                acceptedFaultRequestCount,
+                faultOverflowCount,
+                fallbackSampleCount,
+                residentFallbackSampleCount,
+                forceResidentLruRefresh,
+                hasCompletedResidentLruRefresh,
+                lastResidentLruRefreshFrame,
+                scheduledFrameIndex,
+                viewSignature,
+                lastResidentLruRefreshSignature);
+        }
+
+        private static bool ShouldReadbackRequestsBuffer(
+            int requestCount,
+            int acceptedFaultRequestCount,
+            int faultOverflowCount,
+            int fallbackSampleCount,
+            int residentFallbackSampleCount,
+            bool forceResidentLruRefresh,
+            bool hasCompletedResidentLruRefresh,
+            int lastResidentLruRefreshFrame,
+            int scheduledFrameIndex,
+            in VirtualTextureFeedbackViewSignature viewSignature,
+            in VirtualTextureFeedbackViewSignature lastResidentLruRefreshSignature)
+        {
+            if (requestCount <= 0)
+                return false;
+
+            if (HasDemandFeedback(
+                    acceptedFaultRequestCount,
+                    faultOverflowCount,
+                    fallbackSampleCount,
+                    residentFallbackSampleCount))
+            {
+                return true;
+            }
+
+            if (forceResidentLruRefresh || !hasCompletedResidentLruRefresh)
+                return true;
+
+            if (viewSignature.IsValid && !viewSignature.Equals(lastResidentLruRefreshSignature))
+                return true;
+
+            if (lastResidentLruRefreshFrame < 0 || scheduledFrameIndex < lastResidentLruRefreshFrame)
+                return true;
+
+            return scheduledFrameIndex - lastResidentLruRefreshFrame
+                   >= ResidentLruRefreshIntervalFrames;
         }
 
         private void EnsureCapacity(string streamName, int feedbackCapacity, int pageCapacity)
@@ -1287,6 +1544,9 @@ namespace VividRP.Runtime
             m_QuiescenceInvalidatedFrame = -1;
             m_LastScheduledReadbackFrame = -1;
             m_LastCompletedReadbackSignature = VirtualTextureFeedbackViewSignature.Invalid;
+            m_HasCompletedResidentLruRefresh = false;
+            m_LastResidentLruRefreshFrame = -1;
+            m_LastResidentLruRefreshSignature = VirtualTextureFeedbackViewSignature.Invalid;
 #if VT_DEBUG
             m_ReadbackStallActive = false;
             m_ReadbackStallStartFrame = -1;

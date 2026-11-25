@@ -297,6 +297,19 @@ namespace VividRP.Runtime
             m_ResidencyManager.TouchPreparedResidentRequests(requests, frameIndex);
         }
 
+        internal bool TryTouchExactResidentPage(
+            in VirtualTexturePageCoord coord,
+            VirtualTextureViewId viewId,
+            int frameIndex,
+            bool isActiveView)
+        {
+            return m_ResidencyManager.TryTouchExactResidentPage(
+                coord,
+                viewId,
+                frameIndex,
+                isActiveView);
+        }
+
         internal VTResidencyProcessResult ProcessPreparedRequests(
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,

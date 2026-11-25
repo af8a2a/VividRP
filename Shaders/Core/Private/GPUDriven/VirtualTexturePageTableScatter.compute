@@ -1,10 +1,19 @@
 #pragma kernel ScatterPageTableUpdates
+#pragma kernel ClearFeedbackCounter
+#pragma kernel ClearFeedbackResidentHash
 #pragma use_dxc
 
 StructuredBuffer<uint2> _VTPageTableUpdates;
 RWStructuredBuffer<uint> _VTPageTableDestination;
 uint _VTPageTableUpdateBase;
 uint _VTPageTableUpdateCount;
+
+RWStructuredBuffer<uint> _VTFeedbackClearCounter;
+uint _VTFeedbackClearCounterCount;
+
+RWStructuredBuffer<uint4> _VTFeedbackClearResidentHash;
+uint _VTFeedbackClearResidentHashBase;
+uint _VTFeedbackClearResidentHashCount;
 
 [numthreads(64, 1, 1)]
 void ScatterPageTableUpdates(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -15,4 +24,24 @@ void ScatterPageTableUpdates(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     const uint2 update = _VTPageTableUpdates[_VTPageTableUpdateBase + localUpdateIndex];
     _VTPageTableDestination[update.x] = update.y;
+}
+
+[numthreads(8, 1, 1)]
+void ClearFeedbackCounter(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint index = dispatchThreadId.x;
+    if (index >= _VTFeedbackClearCounterCount)
+        return;
+
+    _VTFeedbackClearCounter[index] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void ClearFeedbackResidentHash(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint localIndex = dispatchThreadId.x;
+    if (localIndex >= _VTFeedbackClearResidentHashCount)
+        return;
+
+    _VTFeedbackClearResidentHash[_VTFeedbackClearResidentHashBase + localIndex] = uint4(0u, 0u, 0u, 0u);
 }

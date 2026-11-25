@@ -101,7 +101,8 @@ namespace VividRP.Editor.RenderGraph
                 producer.Position = gather.Position + new Vector2(-280f, 320f);
                 scope.AddNode(producer);
             }
-            if (!scope.Connect(producer.GetOutputPortByName("m_Near"), input))
+            var nearOutput = producer.GetOutputPortByName("m_Near_Out") ?? producer.GetOutputPortByName("m_Near");
+            if (nearOutput == null || !scope.Connect(nearOutput, input))
                 throw new InvalidOperationException("Could not connect the Global SDF to the GI gather.");
             GraphDatabase.SaveGraph(graph);
             AssetDatabase.ImportAsset(graphPath, ImportAssetOptions.ForceSynchronousImport);

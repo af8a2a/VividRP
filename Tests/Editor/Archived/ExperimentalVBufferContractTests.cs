@@ -10,7 +10,7 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalVBufferContractTests
     {
         private const string ResolveAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve.shader";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureBufferResolve.shader";
         private const string SurfaceProgramAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl";
         private const string SurfaceAotAssetPath =

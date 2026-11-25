@@ -24,7 +24,7 @@ Shader "Hidden/VividRP/Experimental/ClosureBufferResolve"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
-            #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureBuffer.hlsl"
             #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
                 #define VIVID_VT_ENABLE_FEEDBACK_RW 1
             #else

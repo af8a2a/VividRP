@@ -189,13 +189,13 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
 
-        [VividResourcePath("Shaders/Material/Experimental/Closure/ExperimentalClosureClassification")]
+        [VividResourcePath("Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureClassification")]
         public ComputeShader ExperimentalClosureClassificationCompute;
 
-        [VividResourcePath("Shaders/Material/Experimental/Closure/ExperimentalClosureDeferredLit")]
+        [VividResourcePath("Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureDeferredLit")]
         public ComputeShader ExperimentalClosureDeferredLitCompute;
 
-        [VividResourcePath("Shaders/Material/Experimental/Closure/ExperimentalClosureBufferResolve")]
+        [VividResourcePath("Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureBufferResolve")]
         public Shader ExperimentalClosureBufferResolveShader;
 
         [VividResourcePath("Shaders/Core/Private/Lighting/scrbound")]

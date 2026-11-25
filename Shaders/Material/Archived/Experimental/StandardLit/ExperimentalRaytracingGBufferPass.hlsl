@@ -5,7 +5,7 @@
 
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitOpenPBRAdapter.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/StandardLit/ExperimentalStandardLitOpenPBRAdapter.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/RaytracingGBuffer.hlsl"
 
 #endif

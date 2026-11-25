@@ -8,7 +8,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
 #undef VividReferencedPathtracingResolveStandardLitOpenPBR
 
-#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosure.hlsl"
 
 VividExperimentalClosureMaterial VividCompileExperimentalOpenPBRMaterial(
     VividReferencedPathtracingMaterial material)

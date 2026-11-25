@@ -8,7 +8,7 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureContractTests
     {
         private const string ClosureShaderAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosure.hlsl";
 
         [Test]
         public void ClosureContract_CpuAndHlslIdentifiersMatch()

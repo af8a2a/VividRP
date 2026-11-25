@@ -682,7 +682,7 @@ namespace VividRP.Editor.Tests
             {
                 ReadRuntimeSource("Shaders", "Material", "StandardLit", "StandardLit.shader"),
                 ReadRuntimeSource("Shaders", "Material", "StandardLayeredLit", "StandardLayeredLit.shader"),
-                ReadRuntimeSource("Shaders", "Material", "Experimental", "StandardLit", "ExperimentalStandardLit.shader"),
+                ReadRuntimeSource("Shaders", "Material", "Archived", "Experimental", "StandardLit", "ExperimentalStandardLit.shader"),
                 ReadRuntimeSource("Shaders", "Material", "Unlit", "Unlit.shader"),
                 ReadRuntimeSource("Shaders", "Material", "TerrainLit", "TerrainLit.shader"),
                 ReadRuntimeSource("Shaders", "Material", "TerrainLit", "TerrainLit_Basemap.shader"),

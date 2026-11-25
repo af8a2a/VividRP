@@ -8,7 +8,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitInput.hlsl"
 #undef VividBuildGBufferSurfaceData
 
-#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosure.hlsl"
 
 VividExperimentalStandardSurfaceParameters SampleExperimentalStandardLitSurface(
     FragInputs input)

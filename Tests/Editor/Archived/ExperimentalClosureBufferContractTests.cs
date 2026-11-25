@@ -10,11 +10,11 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalClosureBufferContractTests
     {
         private const string BufferAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureBuffer.hlsl";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureBuffer.hlsl";
         private const string ClassificationAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureClassification.compute";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureClassification.compute";
         private const string DeferredLitAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosureDeferredLit.compute";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureDeferredLit.compute";
 
         [Test]
         public void ClosureBuffer_CpuAndHlslAbiIdentifiersMatch()

@@ -12,9 +12,9 @@ namespace VividRP.Editor.Tests
     public sealed class ExperimentalStandardLitShaderTests
     {
         private const string ExperimentalShaderAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLit.shader";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/StandardLit/ExperimentalStandardLit.shader";
         private const string ExperimentalInputAssetPath =
-            "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalStandardLitInput.hlsl";
+            "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/StandardLit/ExperimentalStandardLitInput.hlsl";
         private const string ExistingShaderAssetPath =
             "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLit.shader";
 
@@ -175,6 +175,7 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("_TopLayer", source);
             StringAssert.Contains("VividExportExperimentalClosureToLegacyGBuffer", source);
             StringAssert.DoesNotContain("Material/Experimental/", existingSource);
+            StringAssert.DoesNotContain("Material/Archived/Experimental/", existingSource);
         }
 
         private static Shader LoadShader()

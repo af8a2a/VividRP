@@ -223,7 +223,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
 
                 #define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME ExperimentalStandardLitIndirectDiffuseClosestHit
                 #define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME ExperimentalStandardLitIndirectDiffuseAnyHit
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalIndirectDiffuse.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/StandardLit/ExperimentalIndirectDiffuse.hlsl"
             ENDHLSL
         }
 
@@ -248,7 +248,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma shader_feature_local_raytracing _CLEARCOAT
                 #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
 
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalReferencedPathtracingPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/StandardLit/ExperimentalReferencedPathtracingPass.hlsl"
             ENDHLSL
         }
 
@@ -272,7 +272,7 @@ Shader "VividRP/Experimental/Material/StandardLit"
                 #pragma shader_feature_local_raytracing _CLEARCOAT
                 #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
 
-                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/StandardLit/ExperimentalRaytracingGBufferPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/StandardLit/ExperimentalRaytracingGBufferPass.hlsl"
             ENDHLSL
         }
     }

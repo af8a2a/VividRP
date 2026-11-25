@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_EXPERIMENTAL_CLOSURE_BUFFER_INCLUDED
 #define VIVIDRP_EXPERIMENTAL_CLOSURE_BUFFER_INCLUDED
 
-#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosure.hlsl"
 
 // Stage 4 screen-space ABI. This is deliberately versioned separately from
 // the semantic contract so packing can change without redefining Closure.

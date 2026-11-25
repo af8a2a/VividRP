@@ -3,7 +3,7 @@
 
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Material/Experimental/Closure/ExperimentalClosure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/Archived/Experimental/Closure/ExperimentalClosure.hlsl"
 
 VividExperimentalStandardSurfaceParameters SampleExperimentalStandardLitSurface(
     VividIndirectDiffuseHitGeometry geometry,

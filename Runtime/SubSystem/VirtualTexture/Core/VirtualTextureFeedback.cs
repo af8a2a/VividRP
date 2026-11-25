@@ -330,6 +330,14 @@ namespace VividRP.Runtime
                 : 1;
         }
 
+        internal int GetRequestFaultHitCount(int requestIndex)
+        {
+            if (NativeCompactedRequests.IsCreated)
+                return NativeCompactedRequests[requestIndex].SaturatedFaultHitCount;
+
+            return AcceptedFaultRequestCount > 0 ? 1 : 0;
+        }
+
         internal void CopyRequestsTo(
             NativeArray<ulong> keys,
             NativeArray<int> faultHitCounts,

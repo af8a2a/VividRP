@@ -168,6 +168,7 @@ namespace VividRP.Runtime
         private static float s_MaxAdaptiveMipBias;
         private static float s_MaxAdaptiveControllerMipBias;
         private static bool s_IsFrameActive;
+        private static bool s_IsFrameFrozenForDebugger;
         private static int s_ActiveFrameIndex = -1;
         private static VirtualTextureViewId s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
         private static VirtualTextureViewId s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
@@ -176,6 +177,7 @@ namespace VividRP.Runtime
         private static int s_ActiveFrameFastPathDeduplicatedRequestCount;
         private static int s_ActiveFrameFastPathActiveViewDeduplicatedRequestCount;
 #if UNITY_INCLUDE_TESTS
+        private static bool? s_FrameDebuggerEnabledOverrideForTesting;
         private static int s_PhysicalPoolFreePageCollectionCount;
         private static int s_PhysicalPoolStatsCollectionCount;
         private static int s_UploadSpaceSortCount;
@@ -586,6 +588,7 @@ namespace VividRP.Runtime
             s_MaxAdaptiveMipBias = 0f;
             s_MaxAdaptiveControllerMipBias = 0f;
             s_IsFrameActive = false;
+            s_IsFrameFrozenForDebugger = false;
             s_ActiveFrameIndex = -1;
             s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
             s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
@@ -594,6 +597,7 @@ namespace VividRP.Runtime
             s_ActiveFrameFastPathDeduplicatedRequestCount = 0;
             s_ActiveFrameFastPathActiveViewDeduplicatedRequestCount = 0;
 #if UNITY_INCLUDE_TESTS
+            s_FrameDebuggerEnabledOverrideForTesting = null;
             s_PhysicalPoolFreePageCollectionCount = 0;
             s_PhysicalPoolStatsCollectionCount = 0;
             s_UploadSpaceSortCount = 0;
@@ -960,6 +964,22 @@ namespace VividRP.Runtime
             Update(frameData, cmd);
         }
 
+        internal static bool IsFrameDebuggerFrozen =>
+            s_IsFrameFrozenForDebugger || IsFrameDebuggerFreezeActive();
+
+        private static bool IsFrameDebuggerFreezeActive()
+        {
+#if UNITY_INCLUDE_TESTS
+            if (s_FrameDebuggerEnabledOverrideForTesting.HasValue)
+                return s_FrameDebuggerEnabledOverrideForTesting.Value;
+#endif
+#if UNITY_EDITOR || UNITY_INCLUDE_INSTRUMENTATION
+            return UnityEngine.FrameDebugger.enabled;
+#else
+            return false;
+#endif
+        }
+
         internal static void BeginFrame(int frameIndex, List<Camera> cameras)
         {
             BeginFrame(frameIndex, ResolvePrimaryCamera(cameras));
@@ -974,6 +994,25 @@ namespace VividRP.Runtime
 
                 if (s_IsFrameActive)
                     AbortFrameIfActive();
+
+                if (IsFrameDebuggerFreezeActive())
+                {
+                    // Keep the current page table and physical pools static across Unity Frame Debugger
+                    // replay frames so conditional VT passes cannot shift downstream event indices.
+                    s_FrameRecordedViews.Clear();
+                    s_FrameReadbackViewStats.Clear();
+                    s_CompletedReadbacks.Clear();
+                    s_ActiveFrameIndex = frameIndex;
+                    s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
+                    s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
+                    s_ActiveFrameCameraType = default;
+                    s_ActiveFrameReadbackSummary = default;
+                    s_ActiveFrameFastPathDeduplicatedRequestCount = 0;
+                    s_ActiveFrameFastPathActiveViewDeduplicatedRequestCount = 0;
+                    s_IsFrameFrozenForDebugger = true;
+                    s_IsFrameActive = true;
+                    return;
+                }
 
                 if (frameIndex >= 0)
                     s_FallbackFrameIndex = Mathf.Max(s_FallbackFrameIndex, frameIndex);
@@ -1123,14 +1162,17 @@ namespace VividRP.Runtime
                     out FrameRecordedView recordedView,
                     out _);
 
-                if (recordedView.ViewId.IsValid || !string.IsNullOrEmpty(recordedView.CameraName))
+                if (!s_IsFrameFrozenForDebugger
+                    && (recordedView.ViewId.IsValid || !string.IsNullOrEmpty(recordedView.CameraName)))
+                {
                     s_FrameRecordedViews.Add(recordedView);
+                }
             }
         }
 
         internal static bool ScheduleCameraFeedbackReadback(Camera camera, int frameIndex)
         {
-            if (!IsInitialized || camera == null)
+            if (!IsInitialized || camera == null || IsFrameDebuggerFrozen)
                 return false;
 
             using (RenderPassProfilingUtility.VirtualTextureScheduleReadbackMarker.Auto())
@@ -1149,7 +1191,7 @@ namespace VividRP.Runtime
 
         internal static void DiscardCameraFeedbackWrite(Camera camera)
         {
-            if (!IsInitialized || camera == null)
+            if (!IsInitialized || camera == null || IsFrameDebuggerFrozen)
                 return;
 
             if (!s_FeedbackCameraSystem.TryGetState(camera, out VirtualTextureFeedbackCameraState cameraState)
@@ -1165,6 +1207,12 @@ namespace VividRP.Runtime
         {
             if (!IsInitialized && !s_IsFrameActive)
                 return false;
+
+            if (s_IsFrameFrozenForDebugger || IsFrameDebuggerFreezeActive())
+            {
+                AbortFrameIfActive();
+                return false;
+            }
 
             CommandBuffer cmd = CommandBufferPool.Get("VividRP.VirtualTexture.EndFrame");
             try
@@ -1194,6 +1242,12 @@ namespace VividRP.Runtime
         {
             if (!s_IsFrameActive)
                 return false;
+
+            if (s_IsFrameFrozenForDebugger || IsFrameDebuggerFreezeActive())
+            {
+                CleanupActiveFrameState();
+                return false;
+            }
 
             using (RenderPassProfilingUtility.VirtualTextureEndFrameMarker.Auto())
             {
@@ -1295,6 +1349,7 @@ namespace VividRP.Runtime
             s_ActiveFramePriorityViewId = VirtualTextureViewId.Invalid;
             s_ActiveFrameViewId = VirtualTextureViewId.Invalid;
             s_ActiveFrameCameraType = default;
+            s_IsFrameFrozenForDebugger = false;
             s_IsFrameActive = false;
         }
 
@@ -1370,6 +1425,18 @@ namespace VividRP.Runtime
                     Initialize();
 
                 frameIndex = ResolveFrameIndex(frameData);
+                if (IsFrameDebuggerFreezeActive())
+                {
+                    PrepareCameraBindingsAndFeedback(
+                        frameData,
+                        cmd,
+                        frameIndex,
+                        ResolveCurrentAdaptiveMipBias(),
+                        out _,
+                        out _);
+                    return;
+                }
+
                 if (s_RuntimeStateResetRequested)
                     ResetRuntimeState(frameIndex);
 
@@ -2179,7 +2246,7 @@ namespace VividRP.Runtime
             VirtualTextureFeedbackCameraState cameraFeedbackState;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
             {
-                supportsFeedback = IsFeedbackSupported(camera);
+                supportsFeedback = !IsFrameDebuggerFrozen && IsFeedbackSupported(camera);
                 cameraFeedbackState = supportsFeedback
                     ? s_FeedbackCameraSystem.GetOrCreateBase(camera)
                     : null;
@@ -2372,7 +2439,7 @@ namespace VividRP.Runtime
 
                     for (int requestIndex = 0; requestIndex < requestCount; requestIndex++)
                     {
-                        if (batch.GetRequestHitCount(requestIndex) > 0)
+                        if (batch.GetRequestFaultHitCount(requestIndex) > 0)
                         {
                             deduplicatedRequestCount = 0;
                             activeViewDeduplicatedRequestCount = 0;
@@ -2634,6 +2701,9 @@ namespace VividRP.Runtime
         internal static bool RecordPageTableUpdates(RenderGraph renderGraph)
         {
             Initialize();
+            if (IsFrameDebuggerFrozen)
+                return false;
+
             return s_PageTableScatterUploader.Record(renderGraph, s_PageTableSpaces.Values);
         }
 
@@ -3392,6 +3462,32 @@ namespace VividRP.Runtime
 
 #if UNITY_INCLUDE_TESTS
         internal static bool IsFrameActiveForTesting => s_IsFrameActive;
+
+        internal static bool IsFrameFrozenForDebuggerForTesting => s_IsFrameFrozenForDebugger;
+
+        internal static void SetFrameDebuggerEnabledOverrideForTesting(bool? enabled)
+        {
+            s_FrameDebuggerEnabledOverrideForTesting = enabled;
+        }
+
+        internal static void InjectCompletedCompactedReadbackForTesting(
+            CameraType cameraType,
+            NativeArray<VirtualTextureCompactedFeedbackRequest> compactedRequests,
+            int residentAccessCount,
+            int acceptedFaultRequestCount = 0)
+        {
+            if (!compactedRequests.IsCreated || compactedRequests.Length == 0)
+                return;
+
+            s_InjectedReadbacks.Add(new VirtualTextureFeedbackBatch(
+                VirtualTextureViewId.FromCameraType(cameraType),
+                cameraType,
+                compactedRequests,
+                compactedRequests.Length,
+                Time.frameCount,
+                residentAccessCount: residentAccessCount,
+                acceptedFaultRequestCount: acceptedFaultRequestCount));
+        }
 
         internal static bool HasOutstandingFeedbackAggregationJobForTesting =>
             s_FeedbackAggregator != null && s_FeedbackAggregator.HasOutstandingJobs;

@@ -2877,6 +2877,231 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void PureResidentFastPath_CompactedGpuFeedback_TouchesResidentLru_WithoutFallback()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "PureResidentCompactedFastPath",
+                    cachePageCount: 32,
+                    maxUploadsPerFrame: 4,
+                    virtualPageCountX: 8,
+                    virtualPageCountY: 8,
+                    mipCount: 4,
+                    feedbackCapacity: 64),
+                VTProceduralPageProducer.Instance);
+            var residentCoord = new VirtualTexturePageCoord(2, 3, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, residentCoord, locked: false, frameIndex: 1),
+                Is.True);
+
+            var compacted = new NativeArray<VirtualTextureCompactedFeedbackRequest>(1, Allocator.Temp);
+            var frameData = new ContextContainer();
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            try
+            {
+                compacted[0] = new VirtualTextureCompactedFeedbackRequest(
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, residentCoord),
+                    faultHitCount: 0u,
+                    residentAccessCount: 5u);
+                VirtualTextureSystem.InjectCompletedCompactedReadbackForTesting(
+                    CameraType.Game,
+                    compacted,
+                    residentAccessCount: 1,
+                    acceptedFaultRequestCount: 0);
+
+                VirtualTextureSystem.BeginFrame(frameIndex: 60);
+                Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.False);
+                Assert.That(VirtualTextureSystem.GetPureResidentFastPathCountForTesting(), Is.EqualTo(1));
+
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                bool scheduledUploads = VirtualTextureSystem.EndFrame(frameIndex: 60, endFrameCmd);
+
+                Assert.That(scheduledUploads, Is.False);
+                Assert.That(VirtualTextureSystem.GetResidencyProcessRequestsCallCountForTesting(spaceId), Is.Zero);
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.Zero);
+                Assert.That(VirtualTextureStatsRegistry.LastStats.DeduplicatedRequestCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                VirtualTextureSystem.AbortFrameIfActive();
+                if (compacted.IsCreated)
+                    compacted.Dispose();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+            }
+        }
+
+        [Test]
+        public void FrameDebuggerFreeze_SkipsFeedbackPageTableScatterAndUploads_WhilePreservingReadOnlyBindings()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "FrameDebuggerFreeze",
+                    cachePageCount: 16,
+                    maxUploadsPerFrame: 4,
+                    virtualPageCountX: 4,
+                    virtualPageCountY: 4,
+                    mipCount: 3,
+                    feedbackCapacity: 32),
+                VTProceduralPageProducer.Instance);
+            var residentCoord = new VirtualTexturePageCoord(0, 0, 2);
+            var faultCoord = new VirtualTexturePageCoord(1, 0, 0);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, residentCoord, locked: true, frameIndex: 1),
+                Is.True);
+            int pendingEntriesBeforeFreeze = VirtualTextureSystem.GetPageTablePendingUploadEntryCountForTesting(spaceId);
+            Assert.That(pendingEntriesBeforeFreeze, Is.GreaterThan(0));
+
+            var cameraObject = new GameObject("VTFrameDebuggerCamera");
+            Camera camera = cameraObject.AddComponent<Camera>();
+            camera.cameraType = CameraType.Game;
+            var frameData = CreateFrameData(camera, frameIndex: 10);
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            var renderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VTFrameDebuggerFreezeTest");
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    camera,
+                    VirtualTextureFeedbackProcessor.EncodeKey(spaceId, faultCoord));
+                VirtualTextureSystem.SetFrameDebuggerEnabledOverrideForTesting(true);
+
+                VirtualTextureSystem.BeginFrame(frameIndex: 10, primaryCamera: camera);
+                Assert.That(VirtualTextureSystem.IsFrameActiveForTesting, Is.True);
+                Assert.That(VirtualTextureSystem.IsFrameFrozenForDebuggerForTesting, Is.True);
+                Assert.That(VirtualTextureSystem.HasOutstandingFeedbackAggregationJobForTesting, Is.False);
+
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                Assert.That(cameraCmd.sizeInBytes, Is.Zero);
+
+                VividVirtualTextureFrameData vtFrameData = frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(vtFrameData, Is.Not.Null);
+                Assert.That(vtFrameData.TryGetBinding(spaceId, out VirtualTextureSpaceBinding binding), Is.True);
+                Assert.That(binding.IsValid, Is.True);
+                Assert.That(binding.PageTableBuffer, Is.Not.Null);
+                Assert.That(binding.HasFeedback, Is.False);
+
+                Assert.That(VirtualTextureSystem.RecordPageTableUpdates(renderGraph), Is.False);
+                Assert.That(
+                    VirtualTextureSystem.GetPageTablePendingUploadEntryCountForTesting(spaceId),
+                    Is.EqualTo(pendingEntriesBeforeFreeze));
+                Assert.That(VirtualTextureSystem.ScheduleCameraFeedbackReadback(camera, frameIndex: 10), Is.False);
+                Assert.That(VirtualTextureSystem.HasInFlightFeedbackReadbackForTesting(camera), Is.False);
+
+                bool scheduledUploads = VirtualTextureSystem.EndFrame(frameIndex: 10, endFrameCmd);
+                Assert.That(scheduledUploads, Is.False);
+                Assert.That(endFrameCmd.sizeInBytes, Is.Zero);
+                Assert.That(VirtualTextureSystem.IsFrameActiveForTesting, Is.False);
+                Assert.That(VirtualTextureSystem.IsFrameFrozenForDebuggerForTesting, Is.False);
+                Assert.That(VirtualTextureSystem.GetEndFrameExecutionCountForTesting(), Is.Zero);
+
+                // Disabling Frame Debugger resumes normal processing on the next frame.
+                VirtualTextureSystem.SetFrameDebuggerEnabledOverrideForTesting(false);
+                VirtualTextureSystem.BeginFrame(frameIndex: 11, primaryCamera: camera);
+                Assert.That(VirtualTextureSystem.IsFrameFrozenForDebuggerForTesting, Is.False);
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                VirtualTextureSystem.EndFrame(frameIndex: 11, endFrameCmd);
+                Assert.That(VirtualTextureSystem.GetEndFrameExecutionCountForTesting(), Is.EqualTo(1));
+            }
+            finally
+            {
+                VirtualTextureSystem.SetFrameDebuggerEnabledOverrideForTesting(null);
+                VirtualTextureSystem.AbortFrameIfActive();
+                renderGraph.Cleanup();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void FrameDebuggerFreeze_DoesNotAllocate_OnRepeatedReplayFrames()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc(
+                    "FrameDebuggerFreezeAlloc",
+                    cachePageCount: 16,
+                    maxUploadsPerFrame: 4),
+                VTProceduralPageProducer.Instance);
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(
+                    spaceId,
+                    new VirtualTexturePageCoord(0, 0, 2),
+                    locked: true,
+                    frameIndex: 1),
+                Is.True);
+
+            var cameraObject = new GameObject("VTFrameDebuggerAllocCamera");
+            Camera camera = cameraObject.AddComponent<Camera>();
+            camera.cameraType = CameraType.Game;
+            var frameData = CreateFrameData(camera, frameIndex: 20);
+            var cameraCmd = new CommandBuffer();
+            var endFrameCmd = new CommandBuffer();
+            var renderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VTFrameDebuggerFreezeAllocTest");
+            try
+            {
+                VirtualTextureSystem.SetFrameDebuggerEnabledOverrideForTesting(true);
+
+                for (int warmupFrame = 20; warmupFrame < 22; warmupFrame++)
+                {
+                    VirtualTextureSystem.BeginFrame(warmupFrame, primaryCamera: camera);
+                    VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                    VirtualTextureSystem.RecordPageTableUpdates(renderGraph);
+                    VirtualTextureSystem.ScheduleCameraFeedbackReadback(camera, warmupFrame);
+                    VirtualTextureSystem.EndFrame(warmupFrame, endFrameCmd);
+                }
+
+                long allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+                VirtualTextureSystem.BeginFrame(22, primaryCamera: camera);
+                VirtualTextureSystem.PrepareCameraForFrame(frameData, cameraCmd);
+                bool recordedScatter = VirtualTextureSystem.RecordPageTableUpdates(renderGraph);
+                bool scheduledReadback = VirtualTextureSystem.ScheduleCameraFeedbackReadback(camera, 22);
+                bool scheduledUploads = VirtualTextureSystem.EndFrame(22, endFrameCmd);
+                long allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(allocatedBytes, Is.Zero);
+                Assert.That(recordedScatter, Is.False);
+                Assert.That(scheduledReadback, Is.False);
+                Assert.That(scheduledUploads, Is.False);
+            }
+            finally
+            {
+                VirtualTextureSystem.SetFrameDebuggerEnabledOverrideForTesting(null);
+                VirtualTextureSystem.AbortFrameIfActive();
+                renderGraph.Cleanup();
+                cameraCmd.Dispose();
+                endFrameCmd.Dispose();
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void RequestEditorTemporalRepaint_IsSuppressed_WhenFrameDebuggerIsEnabled()
+        {
+            var antialiasingData = new VividAntialiasingData { usesTemporalJitter = true };
+
+            Assert.That(
+                VividRenderPipeline.ShouldRequestEditorTemporalRepaint(
+                    isPlaying: false,
+                    isFrameDebuggerEnabled: false,
+                    antialiasingData),
+                Is.True);
+            Assert.That(
+                VividRenderPipeline.ShouldRequestEditorTemporalRepaint(
+                    isPlaying: false,
+                    isFrameDebuggerEnabled: true,
+                    antialiasingData),
+                Is.False);
+            Assert.That(
+                VividRenderPipeline.ShouldRequestEditorTemporalRepaint(
+                    isPlaying: true,
+                    isFrameDebuggerEnabled: false,
+                    antialiasingData),
+                Is.False);
+        }
+
         private sealed class ManualUploadFenceHandle : IVTUploadFenceHandle
         {
             public bool IsPassed { get; set; }

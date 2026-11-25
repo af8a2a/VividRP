@@ -682,6 +682,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             TerrainRVTCameraState cameraState = GetOrCreateTerrainRVTCameraState(renderingCamera);
             m_CurrentTerrainRVTCameraState = cameraState;
+            if (VirtualTextureSystem.IsFrameDebuggerFrozen)
+                return;
+
             foreach (TerrainRVTRegistration registration in m_TerrainRVTRegistrations.Values)
                 TryCreateTerrainRVTClipmap(cameraState, registration);
 

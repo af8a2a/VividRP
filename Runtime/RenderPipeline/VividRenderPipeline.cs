@@ -942,15 +942,28 @@ namespace VividRP.Runtime
 #endif
         }
 
+        internal static bool ShouldRequestEditorTemporalRepaint(
+            bool isPlaying,
+            bool isFrameDebuggerEnabled,
+            VividAntialiasingData antialiasingData)
+        {
+            return !isPlaying
+                && !isFrameDebuggerEnabled
+                && antialiasingData != null
+                && antialiasingData.usesTemporalJitter;
+        }
+
         private static void RequestEditorTemporalRepaint()
         {
 #if UNITY_EDITOR
-            if (Application.isPlaying)
-                return;
-
             var antialiasingData = PassRecorder.GetFrameData().Get<VividAntialiasingData>();
-            if (antialiasingData == null || !antialiasingData.usesTemporalJitter)
+            if (!ShouldRequestEditorTemporalRepaint(
+                    Application.isPlaying,
+                    UnityEngine.FrameDebugger.enabled,
+                    antialiasingData))
+            {
                 return;
+            }
 
             UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
             UnityEditorInternal.InternalEditorUtility.RepaintAllViews();

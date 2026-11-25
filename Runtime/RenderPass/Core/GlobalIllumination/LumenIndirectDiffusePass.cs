@@ -17,7 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Reset() => Visibility = Depth = GBuffer0 = GBuffer1 = null;
     }
 
-    internal sealed class VividSdfDiffuseFrameData : ContextItem
+    internal sealed class VividLumenIndirectDiffuseFrameData : ContextItem
     {
         internal RenderGraphTexture DeclaredOutput;
         internal RenderGraphTexture Output;
@@ -33,7 +33,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal float SpecularReflectionSmoothBias;
         internal bool SkyHandled;
         internal bool RealtimeOnly;
-        internal SdfDiffuseGatherPass OpenPbrSource;
+        internal LumenIndirectDiffusePass OpenPbrSource;
 
         public override void Reset()
         {
@@ -55,7 +55,7 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
-    public sealed class SdfDiffuseGatherPass : ComputePass, IRenderGraphPreparePass
+    public sealed class LumenIndirectDiffusePass : ComputePass, IRenderGraphPreparePass
     {
 #if UNITY_EDITOR
         internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
@@ -164,17 +164,17 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId RestirVarianceHistoryId = CameraHistoryId.Create("SdfRestirPixelVarianceHistory");
         private static readonly CameraHistoryId ScreenRadianceHistoryId = CameraHistoryId.Create("SdfDiffuseScreenLambertRadianceHistory");
         private static readonly CameraHistoryId ScreenGeometryHistoryId = CameraHistoryId.Create("SdfDiffuseScreenGeometryHistory");
-        private static readonly ProfilingSampler ScreenTraceSampler = new("Diffuse GI Screen Trace");
-        private static readonly ProfilingSampler GatherSampler = new("Diffuse GI Gather and SDF Fallback");
-        private static readonly ProfilingSampler TotalSampler = new("Diffuse GI Total");
-        private static readonly ProfilingSampler PlacementSampler = new("Screen Probe Adaptive Placement");
-        private static readonly ProfilingSampler FilterSampler = new("Screen Probe Spatial Filter");
-        private static readonly ProfilingSampler DirectionalGuideSampler = new("Screen Probe Directional Guide");
-        private static readonly ProfilingSampler DirectionalCompositeSampler = new("Screen Probe Composite Traces");
-        private static readonly ProfilingSampler DirectionalTemporalSampler = new("Screen Probe Temporal Trace Radiance");
-        private static readonly ProfilingSampler DirectionalFilterSampler = new("Screen Probe Filter Gather Traces");
-        private static readonly ProfilingSampler DirectionalIrradianceSampler = new("Screen Probe Convert to Irradiance");
-        private static readonly ProfilingSampler AnchorPreFilterSampler = new("Screen Probe Anchor Prefilter");
+        private static readonly ProfilingSampler ScreenTraceSampler = new("Lumen Screen Probe Screen Trace");
+        private static readonly ProfilingSampler GatherSampler = new("Lumen Screen Probe Gather & SDF Trace");
+        private static readonly ProfilingSampler TotalSampler = new("Lumen Indirect Diffuse Total");
+        private static readonly ProfilingSampler PlacementSampler = new("Lumen Screen Probe Placement");
+        private static readonly ProfilingSampler FilterSampler = new("Lumen Screen Probe Legacy Spatial Filter");
+        private static readonly ProfilingSampler DirectionalGuideSampler = new("Lumen Screen Probe Importance Sampling");
+        private static readonly ProfilingSampler DirectionalCompositeSampler = new("Lumen Screen Probe Composite Traces");
+        private static readonly ProfilingSampler DirectionalTemporalSampler = new("Lumen Screen Probe Temporal Radiance");
+        private static readonly ProfilingSampler DirectionalFilterSampler = new("Lumen Screen Probe Spatial Filter");
+        private static readonly ProfilingSampler DirectionalIrradianceSampler = new("Lumen Screen Probe Convert To Irradiance");
+        private static readonly ProfilingSampler AnchorPreFilterSampler = new("Lumen Screen Probe Anchor Prefilter");
         private static readonly int DirectionalCacheEnabledId = Shader.PropertyToID("_SdfDirectionalCacheEnabled");
         private static readonly int DirectionalGuideEnabledId = Shader.PropertyToID("_SdfDirectionalGuideEnabled");
         private static readonly int DirectionalWorldGuideId = Shader.PropertyToID("_SdfDirectionalWorldGuide");
@@ -198,23 +198,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DirectionalSpatialInputId = Shader.PropertyToID("_SdfDirectionalSpatialInput");
         private static readonly int DirectionalFilteredId = Shader.PropertyToID("_SdfDirectionalFiltered");
         private static readonly int DirectionalFilteredOutputId = Shader.PropertyToID("_SdfDirectionalFilteredOutput");
-        private static readonly ProfilingSampler RestirTemporalSampler = new("ReSTIR Gather Temporal");
-        private static readonly ProfilingSampler RestirSpatialSampler = new("ReSTIR Gather Spatial");
-        private static readonly ProfilingSampler RestirResolveSampler = new("ReSTIR Gather Resolve");
-        private static readonly ProfilingSampler RestirPixelTemporalSampler = new("ReSTIR Pixel Temporal");
-        private static readonly ProfilingSampler RestirDenoiseSampler = new("ReSTIR Variance Bilateral");
-        private static readonly ProfilingSampler AtrousFineSampler = new("Diffuse GI Atrous Step 1");
-        private static readonly ProfilingSampler AtrousMiddleSampler = new("Diffuse GI Atrous Step 2");
-        private static readonly ProfilingSampler AtrousCoarseSampler = new("Diffuse GI Atrous Step 4");
-        private static readonly ProfilingSampler AtrousWideSampler = new("Diffuse GI Atrous Step 8");
-        private static readonly ProfilingSampler ResolveSampler = new("Screen Probe Resolve");
-        private static readonly ProfilingSampler PixelTemporalSampler = new("Screen Probe Pixel Temporal");
+        private static readonly ProfilingSampler RestirTemporalSampler = new("Lumen ReSTIR Temporal");
+        private static readonly ProfilingSampler RestirSpatialSampler = new("Lumen ReSTIR Spatial");
+        private static readonly ProfilingSampler RestirResolveSampler = new("Lumen ReSTIR Resolve");
+        private static readonly ProfilingSampler RestirPixelTemporalSampler = new("Lumen ReSTIR Pixel Temporal");
+        private static readonly ProfilingSampler RestirDenoiseSampler = new("Lumen ReSTIR Variance Bilateral");
+        private static readonly ProfilingSampler AtrousFineSampler = new("Lumen Indirect Diffuse Atrous Step 1");
+        private static readonly ProfilingSampler AtrousMiddleSampler = new("Lumen Indirect Diffuse Atrous Step 2");
+        private static readonly ProfilingSampler AtrousCoarseSampler = new("Lumen Indirect Diffuse Atrous Step 4");
+        private static readonly ProfilingSampler AtrousWideSampler = new("Lumen Indirect Diffuse Atrous Step 8");
+        private static readonly ProfilingSampler ResolveSampler = new("Lumen Screen Probe Integrate");
+        private static readonly ProfilingSampler PixelTemporalSampler = new("Lumen Screen Probe Temporal Denoise");
         private static readonly int PixelHistoryMaxAgeId = Shader.PropertyToID("_SdfPixelHistoryMaxAge");
-        private static readonly ProfilingSampler RadiositySampler = new("Surface Cache Radiosity");
-        private static readonly ProfilingSampler RadiosityTraceSampler = new("Radiosity Trace Global SDF");
-        private static readonly ProfilingSampler RadiosityResolveSampler = new("Radiosity Resolve Cards");
-        private static readonly ProfilingSampler RadiosityIntegrateSampler = new("Radiosity Integrate Feedback");
-        private static readonly ProfilingSampler RadiosityRescaleSampler = new("Surface Cache Light Rescale");
+        private static readonly ProfilingSampler RadiositySampler = new("Lumen Surface Cache Radiosity");
+        private static readonly ProfilingSampler RadiosityTraceSampler = new("Lumen Surface Cache Radiosity Trace Global SDF");
+        private static readonly ProfilingSampler RadiosityResolveSampler = new("Lumen Surface Cache Radiosity Resolve Cards");
+        private static readonly ProfilingSampler RadiosityIntegrateSampler = new("Lumen Surface Cache Radiosity Integrate Feedback");
+        private static readonly ProfilingSampler RadiosityRescaleSampler = new("Lumen Surface Cache Light Rescale");
         private static readonly CameraHistoryId RadiosityAId = CameraHistoryId.Create("SdfRadiosityA");
         private static readonly CameraHistoryId RadiosityBId = CameraHistoryId.Create("SdfRadiosityB");
         private static readonly CameraHistoryId RadiosityPublishedId = CameraHistoryId.Create("SdfRadiosityAccumulatedPublished");
@@ -261,8 +261,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CardLightingOutputId = Shader.PropertyToID("_SdfCardLightingOutput");
         private static readonly int CardLightingHasDirectId = Shader.PropertyToID("_SdfCardLightingHasDirect");
         private static readonly int CardDirectLightingId = Shader.PropertyToID("_SdfCardDirectLighting");
-        private static readonly ProfilingSampler CardDirectLightingSampler = new("Surface Cache Card Direct Lighting");
-        private static readonly ProfilingSampler CardFinalLightingSampler = new("Surface Cache Combine Final Lighting");
+        private static readonly ProfilingSampler CardDirectLightingSampler = new("Lumen Surface Cache Direct Lighting");
+        private static readonly ProfilingSampler CardFinalLightingSampler = new("Lumen Surface Cache Combine Final Lighting");
         private static readonly CameraHistoryId FarHistoryId = CameraHistoryId.Create("SdfFarRadiance");
         private static readonly CameraHistoryId WorldRawRadianceHistoryId = CameraHistoryId.Create("SdfWorldRawRadiance");
         private static readonly int WorldWorkId = Shader.PropertyToID("_SdfWorldWork");
@@ -307,18 +307,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int MeshCardGridInverseViewId = Shader.PropertyToID("_MeshSdfCardGridInverseView");
         private static readonly int MeshCardGridInverseProjectionId = Shader.PropertyToID("_MeshSdfCardGridInverseProjection");
         private static readonly int MeshCardGridParametersId = Shader.PropertyToID("_MeshSdfCardGridParameters");
-        private static readonly ProfilingSampler MeshCardGridSampler = new("Build Mesh SDF CardGrid");
+        private static readonly ProfilingSampler MeshCardGridSampler = new("Lumen Mesh SDF CardGrid Build");
         // Must match MeshSdfCardGridSize and MeshSdfCardGridCapacity in MeshSdfTrace.hlsl.
         private const int MeshCardGridX = 16, MeshCardGridY = 12, MeshCardGridZ = 32, MeshCardGridStride = 97;
         [RenderGraphResource(Name = "Mesh SDF CardGrid", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphBuffer m_MeshCardGrid = RenderGraphBuffer.CreateStructured("Mesh SDF CardGrid", sizeof(uint));
-        private static readonly ProfilingSampler CompactScreenSampler = new("Compact Screen Probe Traces");
-        private static readonly ProfilingSampler CompactMeshSampler = new("Trace Compacted Mesh SDF");
-        private static readonly ProfilingSampler CompactMeshLightingSampler = new("Resolve Compacted Mesh SDF");
-        private static readonly ProfilingSampler CompactGlobalSampler = new("Trace Compacted Global SDF");
-        private static readonly ProfilingSampler CompactGlobalLightingSampler = new("Resolve Compacted Global SDF");
-        private static readonly ProfilingSampler CompactFinalizeSampler = new("Finalize Probe Gather");
+        private static readonly ProfilingSampler CompactScreenSampler = new("Lumen Screen Probe Compact Traces");
+        private static readonly ProfilingSampler CompactMeshSampler = new("Lumen Screen Probe Trace Mesh SDF");
+        private static readonly ProfilingSampler CompactMeshLightingSampler = new("Lumen Screen Probe Shade Mesh SDF");
+        private static readonly ProfilingSampler CompactGlobalSampler = new("Lumen Screen Probe Trace Global SDF");
+        private static readonly ProfilingSampler CompactGlobalLightingSampler = new("Lumen Screen Probe Shade Global SDF");
+        private static readonly ProfilingSampler CompactFinalizeSampler = new("Lumen Screen Probe Finalize Traces");
         [RenderGraphResource(Name = "Compact Probe Receivers", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphBuffer m_CompactProbes = RenderGraphBuffer.CreateStructured("Compact Probe Receivers", 80);
@@ -383,8 +383,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly CameraHistoryId FarHitIdsHistoryId = CameraHistoryId.Create("SdfFarRadianceHitIds");
         private static readonly CameraHistoryBufferDescriptor FarHitIdsDescriptor = new(FarProbeCount * FarDirectionCount,
             sizeof(uint), GraphicsBuffer.Target.Structured);
-        private static readonly ProfilingSampler FarCacheSampler = new("Diffuse GI Far Radiance Update");
-        private static readonly ProfilingSampler NearOcclusionSampler = new("Diffuse GI Near Contact Occlusion");
+        private static readonly ProfilingSampler FarCacheSampler = new("Lumen Radiance Cache Update");
+        private static readonly ProfilingSampler NearOcclusionSampler = new("Lumen Short Range AO");
         private static readonly int FarRadianceId = Shader.PropertyToID("_SdfFarRadiance");
         private static readonly int FarOutputId = Shader.PropertyToID("_SdfFarOutput");
         private static readonly int FarHitIdsId = Shader.PropertyToID("_SdfFarHitIds");
@@ -609,7 +609,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal Matrix4x4 ViewProjection;
             internal VividSdfSurfaceCache Cache;
             internal bool OffscreenOnly;
-            internal SdfDiffuseTraceMode TraceMode;
+            internal LumenIndirectDiffuseTraceMode TraceMode;
             internal bool HasScreenRays, LumenScreenTrace;
             internal bool DirectionalProbes;
             internal bool AdaptiveProbes, SpatialFilter, HitDistanceFilter;
@@ -1058,13 +1058,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_RecordFirstHitDiagnostics;
         private bool m_RecordProbeAnchorDiagnostics;
         private bool m_SpatialAnchor, m_AnchorPreFilter;
-        private SdfDiffuseTraceMode m_TraceMode;
+        private LumenIndirectDiffuseTraceMode m_TraceMode;
 
-        public SdfDiffuseGatherPass()
+        public LumenIndirectDiffusePass()
         {
             m_SkyRadianceBoundReadback = OnSkyRadianceBoundReadback;
             m_SkyBoundAfterSubmit = OnSkyBoundAfterSubmit;
-            profilingSampler = new ProfilingSampler(nameof(SdfDiffuseGatherPass));
+            profilingSampler = new ProfilingSampler("Lumen Indirect Diffuse");
             m_ScreenHzb = m_LocalHzb;
             m_ScreenMotion = m_LocalMotion;
             m_ScreenRays.desc.ClearBuffer = false;
@@ -1347,7 +1347,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            frameData.GetOrCreate<VividSdfDiffuseFrameData>().DeclaredOutput = m_Output;
+            frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>().DeclaredOutput = m_Output;
             var cameraData = frameData.Get<VividCameraData>();
             var camera = cameraData.camera;
             m_State = null;
@@ -1442,7 +1442,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenJitterUv = default;
             m_Width = CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
             m_Height = CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
-            var settings = VolumeManager.instance.stack.GetComponent<SdfDiffuseGISettings>();
+            var settings = VolumeManager.instance.stack.GetComponent<LumenIndirectDiffuse>();
             bool useSettings = settings != null && settings.active && settings.enabled.value;
             bool legacyGather = useSettings && settings.UsesLegacyGatherSettings;
             m_AdaptiveProbes = useSettings && m_PlacementKernel >= 0 && IsEnabledForGather(settings.adaptiveScreenProbes, legacyGather);
@@ -1488,8 +1488,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var cache = m_Scene.RefreshSurfaceCache();
             m_RealtimeOnly = settings != null && settings.active && settings.realtimeOnly.value;
             m_OffscreenOnly = settings != null && settings.active && settings.offscreenBounceOnly.value;
-            m_TraceMode = settings != null && settings.active ? settings.traceMode.value : SdfDiffuseTraceMode.SdfOnly;
-            m_UseSdf = m_TraceMode != SdfDiffuseTraceMode.ScreenOnly
+            m_TraceMode = settings != null && settings.active ? settings.traceMode.value : LumenIndirectDiffuseTraceMode.SdfOnly;
+            m_UseSdf = m_TraceMode != LumenIndirectDiffuseTraceMode.ScreenOnly
                 && (cache == null || (m_CachedTraceKernel >= 0 && cache.IsUsable));
             if (m_UseSdf)
             {
@@ -1504,7 +1504,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var temporal = frameData.Get<VividTemporalData>();
-            bool screenInputs = m_ScreenTraceKernel >= 0 && !m_OffscreenOnly && m_TraceMode != SdfDiffuseTraceMode.SdfOnly && motionConnected;
+            bool screenInputs = m_ScreenTraceKernel >= 0 && !m_OffscreenOnly && m_TraceMode != LumenIndirectDiffuseTraceMode.SdfOnly && motionConnected;
             bool screenConfigured = screenInputs && m_ScreenHzb != null
                 && !ReferenceEquals(m_ScreenHzb, m_LocalHzb);
             m_CorrectReceiverSelfHits = m_UseSdf && useSettings && settings.correctReceiverSelfHits.value;
@@ -1512,14 +1512,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 && settings.screenHitCardLighting.value && settings.surfaceCacheBounceOrders.value > 0;
 
             bool wantsRestir = useSettings && (legacyGather ? settings.restirGather.value
-                : settings.gatherMethod.value == SdfDiffuseGatherMethod.ReSTIRGather);
+                : settings.gatherMethod.value == LumenIndirectDiffuseGatherMethod.ReSTIRGather);
             bool canRestir = wantsRestir && m_RestirTemporalKernel >= 0 && m_UseSdf && !m_OffscreenOnly;
             m_RestirPixelIntegration = canRestir && (!legacyGather || settings.restirPixelIntegration.value)
                 && m_RestirDenoiseKernel >= 0
                 && 4 * CoreUtils.DivRoundUp(m_Width, RestirPixelSpacing) <= SystemInfo.maxTextureSize
                 && 2 * CoreUtils.DivRoundUp(m_Height, RestirPixelSpacing) <= SystemInfo.maxTextureSize;
             m_RestirGather = m_RestirPixelIntegration
-                || (legacyGather && canRestir && m_TraceMode == SdfDiffuseTraceMode.SdfOnly);
+                || (legacyGather && canRestir && m_TraceMode == LumenIndirectDiffuseTraceMode.SdfOnly);
             m_RestirOpenPbrDiffuse = m_RestirPixelIntegration && m_OpenPbrResolveKernel >= 0
                 && settings.restirOpenPbrDiffuse.value && CoversReceiver(m_OpenPbrParameters)
                 && CoversReceiver(m_OpenPbrAux0) && CoversReceiver(m_OpenPbrAux1)
@@ -1680,9 +1680,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenRays.Resize(screenConfigured ? m_ProbeWidth * rayCount : 1, screenConfigured ? directionHeight : 1);
             m_AtrousIterations = useSettings && m_AtrousKernel >= 0 ? settings.spatialDenoise.value switch
             {
-                SdfDiffuseSpatialDenoise.Atrous2 => 2,
-                SdfDiffuseSpatialDenoise.Atrous3 => 3,
-                SdfDiffuseSpatialDenoise.Atrous4 => 4,
+                LumenIndirectDiffuseSpatialDenoise.Atrous2 => 2,
+                LumenIndirectDiffuseSpatialDenoise.Atrous3 => 3,
+                LumenIndirectDiffuseSpatialDenoise.Atrous4 => 4,
                 _ => 0
             } : 0;
 #if UNITY_EDITOR
@@ -1846,7 +1846,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CurrentRoughSpecular.Resize(m_Width, m_Height);
                 CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, RoughSpecularHistoryId,
                     m_PreviousRoughSpecular, m_CurrentRoughSpecular, m_CurrentRoughSpecular.desc, out m_RoughSpecularHistory, AccessFlags.Write);
-                frameData.GetOrCreate<VividSdfDiffuseFrameData>().RoughSpecularHistory = m_RoughSpecularHistory;
+                frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>().RoughSpecularHistory = m_RoughSpecularHistory;
             }
             if (useSettings && !m_OffscreenOnly)
             {
@@ -1864,7 +1864,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     && motionConnected && m_PixelGeometryHistory != null && m_PixelGeometryHistory.IsValid()
                     && m_State.NearOcclusion.w == m_NearOcclusion.w && m_State.NearOcclusion.y == m_NearOcclusion.y
                     && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
-                frameData.GetOrCreate<VividSdfDiffuseFrameData>().BentNormalHistory = m_BentNormalHistory;
+                frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>().BentNormalHistory = m_BentNormalHistory;
             }
             int atlasWidth = m_ProbeWidth * (m_DirectionalProbes ? DirectionalProbePlanes : 1);
             m_Probes.Resize(m_RestirPixelIntegration ? 1 : atlasWidth, m_RestirPixelIntegration ? 1 : m_AtlasHeight);
@@ -2397,7 +2397,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_SkyTextureParams.w > 0.5f,
                     m_LumenDebugView);
             }
-            var diffuse = context.GetOrCreate<VividSdfDiffuseFrameData>();
+            var diffuse = context.GetOrCreate<VividLumenIndirectDiffuseFrameData>();
             diffuse.Output = m_Output;
             diffuse.BentNormalOutput = m_BentNormalHistory != null && m_PixelGeometryHistory != null
                 && (!m_BentComposite || compositeBent) ? m_CurrentBentNormal.innerHandle : default;

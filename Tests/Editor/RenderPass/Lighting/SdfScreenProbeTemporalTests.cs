@@ -19,7 +19,7 @@ namespace VividRP.Editor.Tests
         public void HistoryScreenCoordCodec_MatchesUePowerOfTwoSubPixelGridAndAllocatesZeroBytes(
             int width, int height, int expectedSubX, int expectedSubY, int expectedShiftX, int expectedShiftY)
         {
-            SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(
+            LumenIndirectDiffusePass.GetHistoryScreenCoordCodec(
                 width, height, out var subPixel, out var shift, out var gatherMinMax);
 
             Assert.That(subPixel.x, Is.EqualTo(expectedSubX));
@@ -33,11 +33,11 @@ namespace VividRP.Editor.Tests
             Assert.That(gatherMinMax.w, Is.LessThan(1f - 0.5f / height));
 
             for (int i = 0; i < 32; i++)
-                SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(width, height, out _, out _, out _);
+                LumenIndirectDiffusePass.GetHistoryScreenCoordCodec(width, height, out _, out _, out _);
 
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 256; i++)
-                SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(width, height, out _, out _, out _);
+                LumenIndirectDiffusePass.GetHistoryScreenCoordCodec(width, height, out _, out _, out _);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(allocated, Is.Zero);
         }
@@ -45,7 +45,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void DefaultSettings_MatchUeLumenTemporalDefaults()
         {
-            var settings = ScriptableObject.CreateInstance<SdfDiffuseGISettings>();
+            var settings = ScriptableObject.CreateInstance<LumenIndirectDiffuse>();
             try
             {
                 Assert.That(settings.screenProbeFastUpdateNeighborhoodClamp.value, Is.False);
@@ -64,15 +64,15 @@ namespace VividRP.Editor.Tests
         [Test]
         public void FullSphereGather_RetainsTemporalHistoryAcrossLightingAndSkyChanges()
         {
-            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+            Assert.That(LumenIndirectDiffusePass.AllowsContinuousLightingHistory(
                 fullSphere: true, preserveRelitHistory: false, matchesLighting: false), Is.True,
                 "UE Lumen FullSphere Screen Probe Gather must keep pixel temporal and directional guide history through dynamic light/sky changes.");
-            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+            Assert.That(LumenIndirectDiffusePass.AllowsContinuousLightingHistory(
                 fullSphere: false, preserveRelitHistory: false, matchesLighting: false), Is.False,
                 "Legacy non-FullSphere gather must retain its explicit lighting invalidation when not rescaling.");
-            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+            Assert.That(LumenIndirectDiffusePass.AllowsContinuousLightingHistory(
                 fullSphere: false, preserveRelitHistory: true, matchesLighting: false), Is.True);
-            Assert.That(SdfDiffuseGatherPass.AllowsContinuousLightingHistory(
+            Assert.That(LumenIndirectDiffusePass.AllowsContinuousLightingHistory(
                 fullSphere: false, preserveRelitHistory: false, matchesLighting: true), Is.True);
         }
 
@@ -579,17 +579,17 @@ namespace VividRP.Editor.Tests
         [Test]
         public void DynamicLightingFastUpdateWindow_EngagesOnlyOnLightingChangesAndDetectsCameraMotion()
         {
-            Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: false, lightingChanged: true), Is.Zero);
-            Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: true, lightingChanged: false), Is.Zero);
-            int frames = SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: true, lightingChanged: true);
+            Assert.That(LumenIndirectDiffusePass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: false, lightingChanged: true), Is.Zero);
+            Assert.That(LumenIndirectDiffusePass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: true, lightingChanged: false), Is.Zero);
+            int frames = LumenIndirectDiffusePass.StepDynamicLightingFastUpdateWindow(0, hasPreviousState: true, lightingChanged: true);
             Assert.That(frames, Is.EqualTo(8));
-            Assert.That(SdfDiffuseGatherPass.StepDynamicLightingFastUpdateWindow(frames, hasPreviousState: true, lightingChanged: false), Is.EqualTo(7));
+            Assert.That(LumenIndirectDiffusePass.StepDynamicLightingFastUpdateWindow(frames, hasPreviousState: true, lightingChanged: false), Is.EqualTo(7));
 
             var pos = new Vector4(4f, 0.5f, -7f, 1f);
             var fwd = new Vector4(0f, 0f, 1f, 0f);
-            Assert.That(SdfDiffuseGatherPass.HasCameraMotion(pos, pos, fwd, fwd), Is.False);
-            Assert.That(SdfDiffuseGatherPass.HasCameraMotion(pos, pos + new Vector4(0.01f, 0f, 0f, 0f), fwd, fwd), Is.True);
-            Assert.That(SdfDiffuseGatherPass.HasCameraMotion(pos, pos, fwd, new Vector4(0.01f, 0f, 1f, 0f).normalized), Is.True);
+            Assert.That(LumenIndirectDiffusePass.HasCameraMotion(pos, pos, fwd, fwd), Is.False);
+            Assert.That(LumenIndirectDiffusePass.HasCameraMotion(pos, pos + new Vector4(0.01f, 0f, 0f, 0f), fwd, fwd), Is.True);
+            Assert.That(LumenIndirectDiffusePass.HasCameraMotion(pos, pos, fwd, new Vector4(0.01f, 0f, 1f, 0f).normalized), Is.True);
         }
 
         [Test]
@@ -921,7 +921,7 @@ namespace VividRP.Editor.Tests
                 bool readResult = true, int reprojectionFlags = 0, bool disocclusionSpatialFilter = false,
                 float preExposure = 0f, bool roughSpecularEnabled = false, Vector4? previousCameraPosition = null)
             {
-                SdfDiffuseGatherPass.GetHistoryScreenCoordCodec(
+                LumenIndirectDiffusePass.GetHistoryScreenCoordCodec(
                     width, height, out var subPixel, out var shift, out var gatherMinMax);
 
                 var currJitterMat = Matrix4x4.identity;

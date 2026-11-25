@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void DefaultSettings_EnableAdaptiveRayBudgetWithMultiLevelImportanceSampling()
         {
-            var settings = ScriptableObject.CreateInstance<SdfDiffuseGISettings>();
+            var settings = ScriptableObject.CreateInstance<LumenIndirectDiffuse>();
             try
             {
                 Assert.That(settings.screenProbeAdaptiveRayBudget.value, Is.True);
@@ -38,12 +38,12 @@ namespace VividRP.Editor.Tests
         [Test]
         public void DefaultSettings_ConvergeMatureLumenPipelineDefaults()
         {
-            var settings = ScriptableObject.CreateInstance<SdfDiffuseGISettings>();
+            var settings = ScriptableObject.CreateInstance<LumenIndirectDiffuse>();
             try
             {
                 Assert.That(settings.enabled.value, Is.True);
-                Assert.That(settings.gatherMethod.value, Is.EqualTo(SdfDiffuseGatherMethod.ScreenProbeGather));
-                Assert.That(settings.traceMode.value, Is.EqualTo(SdfDiffuseTraceMode.Hybrid));
+                Assert.That(settings.gatherMethod.value, Is.EqualTo(LumenIndirectDiffuseGatherMethod.ScreenProbeGather));
+                Assert.That(settings.traceMode.value, Is.EqualTo(LumenIndirectDiffuseTraceMode.Hybrid));
                 Assert.That(settings.lumenScreenTracing.value, Is.True);
                 Assert.That(settings.segmentedSdfTracing.value, Is.True);
                 Assert.That(settings.occludedSky.value, Is.True);
@@ -65,7 +65,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.screenProbeSpatialFilter.value, Is.True);
                 Assert.That(settings.pixelTemporal.value, Is.True);
                 Assert.That(settings.pixelHistoryMaxAge.value, Is.EqualTo(10));
-                Assert.That(settings.spatialDenoise.value, Is.EqualTo(SdfDiffuseSpatialDenoise.Legacy));
+                Assert.That(settings.spatialDenoise.value, Is.EqualTo(LumenIndirectDiffuseSpatialDenoise.Legacy));
                 Assert.That(settings.correctReceiverSelfHits.value, Is.True);
             }
             finally

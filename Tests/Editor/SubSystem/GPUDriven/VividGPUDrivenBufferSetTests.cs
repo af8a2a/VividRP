@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
         [TestCase(1024, 32)]
         public void SdfDirectLightingBudgetScalesWithTheResidentCardCount(int cards, int budget)
         {
-            Assert.That(SdfDiffuseGatherPass.GetCardDirectUpdateBudget(cards), Is.EqualTo(budget));
+            Assert.That(LumenIndirectDiffusePass.GetCardDirectUpdateBudget(cards), Is.EqualTo(budget));
         }
 
         internal static VividMeshLODNode ExpandMeshLODNode(VividMeshLODNodePacked node, IReadOnlyList<VividMeshLODGroup> groups)

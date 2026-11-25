@@ -393,7 +393,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
-            var sdfDiffuse = frameData.Contains<VividSdfDiffuseFrameData>() ? frameData.Get<VividSdfDiffuseFrameData>() : null;
+            var sdfDiffuse = frameData.Contains<VividLumenIndirectDiffuseFrameData>() ? frameData.Get<VividLumenIndirectDiffuseFrameData>() : null;
             m_BentNormal = sdfDiffuse != null
                 ? CameraHistoryRenderGraphBridge.ImportForPass(this, sdfDiffuse.BentNormalHistory, 0, AccessFlags.Read)
                 : default;
@@ -660,7 +660,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindIndirectLightingParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
         {
             var rgDefaultResource = context.renderGraphContext.defaultResources;
-            context.TryGet<VividSdfDiffuseFrameData>(out var diffuse);
+            context.TryGet<VividLumenIndirectDiffuseFrameData>(out var diffuse);
             bool hasRealtimeGI = HasRealtimeDiffuseGI(diffuse);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, RealtimeDiffuseGIId,
                 hasRealtimeGI ? m_RealtimeDiffuseGI.innerHandle : rgDefaultResource.blackTexture);
@@ -720,7 +720,7 @@ namespace VividRP.Runtime.RenderPass.Core
             BindSkyTextureParameters(cmd, kernel);
         }
 
-        internal bool HasRealtimeDiffuseGI(VividSdfDiffuseFrameData diffuse)
+        internal bool HasRealtimeDiffuseGI(VividLumenIndirectDiffuseFrameData diffuse)
         {
             // An allocated graph texture can exist even when SDF Gather skipped
             // producing it. Other graph inputs retain the normal texture contract.

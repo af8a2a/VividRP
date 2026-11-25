@@ -1,11 +1,13 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Scripting.APIUpdating;
 using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public enum SdfDiffuseTraceMode
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseTraceMode")]
+    public enum LumenIndirectDiffuseTraceMode
     {
         SdfOnly,
         ScreenOnly,
@@ -13,13 +15,15 @@ namespace VividRP.Runtime.RenderPass.Core
     }
 
     [Serializable]
-    public sealed class SdfDiffuseTraceModeParameter : VolumeParameter<SdfDiffuseTraceMode>
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseTraceModeParameter")]
+    public sealed class LumenIndirectDiffuseTraceModeParameter : VolumeParameter<LumenIndirectDiffuseTraceMode>
     {
-        public SdfDiffuseTraceModeParameter(SdfDiffuseTraceMode value, bool overrideState = false)
+        public LumenIndirectDiffuseTraceModeParameter(LumenIndirectDiffuseTraceMode value, bool overrideState = false)
             : base(value, overrideState) { }
     }
 
-    public enum SdfDiffuseGatherMethod
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseGatherMethod")]
+    public enum LumenIndirectDiffuseGatherMethod
     {
         [InspectorName("Screen Probe Gather")]
         ScreenProbeGather,
@@ -28,12 +32,14 @@ namespace VividRP.Runtime.RenderPass.Core
     }
 
     [Serializable]
-    public sealed class SdfDiffuseGatherMethodParameter : VolumeParameter<SdfDiffuseGatherMethod>
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseGatherMethodParameter")]
+    public sealed class LumenIndirectDiffuseGatherMethodParameter : VolumeParameter<LumenIndirectDiffuseGatherMethod>
     {
-        public SdfDiffuseGatherMethodParameter(SdfDiffuseGatherMethod value) : base(value) { }
+        public LumenIndirectDiffuseGatherMethodParameter(LumenIndirectDiffuseGatherMethod value) : base(value) { }
     }
 
-    public enum SdfDiffuseSpatialDenoise
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseSpatialDenoise")]
+    public enum LumenIndirectDiffuseSpatialDenoise
     {
         Legacy,
         [InspectorName("À-Trous (2 passes)")] Atrous2 = 2,
@@ -42,9 +48,10 @@ namespace VividRP.Runtime.RenderPass.Core
     }
 
     [Serializable]
-    public sealed class SdfDiffuseSpatialDenoiseParameter : VolumeParameter<SdfDiffuseSpatialDenoise>
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseSpatialDenoiseParameter")]
+    public sealed class LumenIndirectDiffuseSpatialDenoiseParameter : VolumeParameter<LumenIndirectDiffuseSpatialDenoise>
     {
-        public SdfDiffuseSpatialDenoiseParameter(SdfDiffuseSpatialDenoise value)
+        public LumenIndirectDiffuseSpatialDenoiseParameter(LumenIndirectDiffuseSpatialDenoise value)
             : base(value) { }
     }
 
@@ -61,14 +68,15 @@ namespace VividRP.Runtime.RenderPass.Core
         public SdfScreenProbeSpatialKernelParameter(SdfScreenProbeSpatialKernel value) : base(value) { }
     }
 
-    [Serializable, VolumeComponentMenu("VividRP/Lighting/SDF Diffuse GI")]
-    public sealed class SdfDiffuseGISettings : VolumeComponent
+    [Serializable, VolumeComponentMenu("VividRP/Lighting/Lumen Indirect Diffuse")]
+    [MovedFrom(true, "VividRP.Runtime.RenderPass.Core", "VividRP.Runtime", "SdfDiffuseGISettings")]
+    public sealed class LumenIndirectDiffuse : VolumeComponent
     {
-        [Tooltip("Enable the gather pass for cameras using the pipeline asset's Realtime GI mode.")]
+        [Tooltip("Enable Lumen Indirect Diffuse GI and Reflections for cameras using the pipeline asset's Realtime GI mode.")]
         public BoolParameter enabled = new(true);
 
         [Tooltip("Choose the final gather independently of the trace mode. Screen Probe Gather filters directional probe radiance. ReSTIR Gather resamples 2×2 reservoirs and requires a usable Mesh SDF scene.")]
-        public SdfDiffuseGatherMethodParameter gatherMethod = new(SdfDiffuseGatherMethod.ScreenProbeGather);
+        public LumenIndirectDiffuseGatherMethodParameter gatherMethod = new(LumenIndirectDiffuseGatherMethod.ScreenProbeGather);
 
         // Existing profiles retain their reference until the Editor migrates it to the owning scene.
         [SerializeField, HideInInspector]
@@ -130,7 +138,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public BoolParameter lumenScreenTracing = new(true);
 
         [Tooltip("Selects the tracing backend. Hybrid combines screen-space HZB traces with Mesh SDF and Global SDF tracing (Lumen default).")]
-        public SdfDiffuseTraceModeParameter traceMode = new(SdfDiffuseTraceMode.Hybrid);
+        public LumenIndirectDiffuseTraceModeParameter traceMode = new(LumenIndirectDiffuseTraceMode.Hybrid);
 
         [Tooltip("Split the SDF trace into detail, clipmap-assisted and far segments. Reconstruct far lighting at the confirmed first hit.")]
         public BoolParameter segmentedSdfTracing = new(true);
@@ -328,7 +336,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public MinFloatParameter lumenReflectionBilateralFilterDepthWeightScale = new(10000.0f, 1.0f);
 
         [Tooltip("Filter resolved diffuse GI at full resolution. Legacy uses the native Screen Probe filters and skips extra À-Trous passes.")]
-        public SdfDiffuseSpatialDenoiseParameter spatialDenoise = new(SdfDiffuseSpatialDenoise.Legacy);
+        public LumenIndirectDiffuseSpatialDenoiseParameter spatialDenoise = new(LumenIndirectDiffuseSpatialDenoise.Legacy);
 
         [Tooltip("Resolve thin-shell self hits using the matching GPU-driven visibility and depth buffers.")]
         public BoolParameter correctReceiverSelfHits = new(true);
@@ -347,7 +355,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         // Serialized profiles can retain the former gather options until a method is selected.
         internal bool UsesLegacyGatherSettings => !gatherMethod.overrideState
-            && gatherMethod.value == SdfDiffuseGatherMethod.ScreenProbeGather
+            && gatherMethod.value == LumenIndirectDiffuseGatherMethod.ScreenProbeGather
             && (restirGather.overrideState || restirGather.value
                 || restirPixelIntegration.overrideState || restirPixelIntegration.value
                 || directionalScreenProbes.overrideState || directionalScreenProbes.value

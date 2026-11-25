@@ -24,7 +24,7 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_GlobalIlluminationLabel = EditorGUIUtility.TrTextContent(
             "Global Illumination",
-            "Realtime GI uses the render graph's SDF Diffuse Gather pass. APV uses baked Adaptive Probe Volumes.");
+            "Realtime GI uses the render graph's Lumen Indirect Diffuse pass. APV uses baked Adaptive Probe Volumes.");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
         private static readonly GUIContent s_ReflectionProbeAtlasResolutionLabel =
             EditorGUIUtility.TrTextContent("Atlas Resolution", "Size of the runtime texture atlas used for visible reflection probes.");

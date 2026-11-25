@@ -19,16 +19,16 @@ namespace VividRP.Editor.Tests
         public void UpdateBudget_RespectsSceneLimitAndRemainingCards(
             int cards, int cursor, int budget, int fullUpdateLimit, int expected)
         {
-            Assert.That(SdfDiffuseGatherPass.GetRadiosityUpdateCount(cards, cursor, budget, fullUpdateLimit),
+            Assert.That(LumenIndirectDiffusePass.GetRadiosityUpdateCount(cards, cursor, budget, fullUpdateLimit),
                 Is.EqualTo(expected));
         }
 
         [Test]
         public void UpdateBudget_ChangingBudgetContinuesAnUnfinishedSweep()
         {
-            int cursor = SdfDiffuseGatherPass.GetRadiosityUpdateCount(37, 0, 16, 0);
-            cursor += SdfDiffuseGatherPass.GetRadiosityUpdateCount(37, cursor, 8, 0);
-            cursor += SdfDiffuseGatherPass.GetRadiosityUpdateCount(37, cursor, 8, 128);
+            int cursor = LumenIndirectDiffusePass.GetRadiosityUpdateCount(37, 0, 16, 0);
+            cursor += LumenIndirectDiffusePass.GetRadiosityUpdateCount(37, cursor, 8, 0);
+            cursor += LumenIndirectDiffusePass.GetRadiosityUpdateCount(37, cursor, 8, 128);
             Assert.That(cursor, Is.EqualTo(37));
         }
 
@@ -40,7 +40,7 @@ namespace VividRP.Editor.Tests
         public void UpdateBudget_BoostIsBoundedAndKeepsTheCursor(
             int cards, int cursor, int budget, int fullUpdateLimit, int boost, int expected)
         {
-            Assert.That(SdfDiffuseGatherPass.GetRadiosityUpdateCount(cards, cursor, budget, fullUpdateLimit, boost),
+            Assert.That(LumenIndirectDiffusePass.GetRadiosityUpdateCount(cards, cursor, budget, fullUpdateLimit, boost),
                 Is.EqualTo(expected));
         }
 
@@ -54,7 +54,7 @@ namespace VividRP.Editor.Tests
             var direction = new UnityEngine.Vector4(0, 1, 0, -1);
             var original = new UnityEngine.Vector4(3600, 1800, 900, 1);
             var changed = new UnityEngine.Vector4(original.x * scale, original.y * scale, original.z * scale, 1);
-            Assert.That(SdfDiffuseGatherPass.LightingWithinTolerance(direction, original, direction, changed, .005f),
+            Assert.That(LumenIndirectDiffusePass.LightingWithinTolerance(direction, original, direction, changed, .005f),
                 Is.EqualTo(expected));
         }
 
@@ -65,10 +65,10 @@ namespace VividRP.Editor.Tests
             var color = new UnityEngine.Vector4(3600, 1800, 900, 1);
             var changed = color;
             changed.w = 0;
-            Assert.That(SdfDiffuseGatherPass.LightingWithinTolerance(direction, color, direction, changed, .005f), Is.False);
+            Assert.That(LumenIndirectDiffusePass.LightingWithinTolerance(direction, color, direction, changed, .005f), Is.False);
             changed = color;
             changed.x = float.NaN;
-            Assert.That(SdfDiffuseGatherPass.LightingWithinTolerance(direction, color, direction, changed, .005f), Is.False);
+            Assert.That(LumenIndirectDiffusePass.LightingWithinTolerance(direction, color, direction, changed, .005f), Is.False);
         }
 
         [Test]
@@ -79,7 +79,7 @@ namespace VividRP.Editor.Tests
             for (int step = 1; step <= 8; step++)
             {
                 var current = new UnityEngine.Vector4(1000 + step, 1000 + step, 1000 + step, 1);
-                bool matches = SdfDiffuseGatherPass.LightingWithinTolerance(direction, accepted, direction, current, .005f);
+                bool matches = LumenIndirectDiffusePass.LightingWithinTolerance(direction, accepted, direction, current, .005f);
                 if (step >= 6)
                     Assert.That(matches, Is.False, "The comparison baseline must not advance for tolerated changes.");
             }
@@ -107,7 +107,7 @@ namespace VividRP.Editor.Tests
         {
             var a = new UnityEngine.Vector4(before, before, before, 1);
             var b = new UnityEngine.Vector4(after, after, after, 1);
-            bool valid = SdfDiffuseGatherPass.TryGetRadiosityLightScale(a, b, 8, out var scale);
+            bool valid = LumenIndirectDiffusePass.TryGetRadiosityLightScale(a, b, 8, out var scale);
             Assert.That(valid, Is.EqualTo(expected));
             if (valid)
                 Assert.That(scale.x, Is.EqualTo(ratio));
@@ -118,16 +118,16 @@ namespace VividRP.Editor.Tests
         {
             var a = new UnityEngine.Vector4(1000, 0, 500, 1);
             var b = new UnityEngine.Vector4(2000, 0, 1000, 1);
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightScale(a, b, 8, out var scale), Is.True);
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightScale(a, b, 8, out var scale), Is.True);
             Assert.That(scale.y, Is.EqualTo(1f));
             b.y = 1;
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightScale(a, b, 8, out _), Is.False);
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightScale(a, b, 8, out _), Is.False);
             b.y = 0;
             b.w = 0;
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightScale(a, b, 8, out _), Is.False);
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightScale(a, b, 8, out _), Is.False);
             b.w = 1;
             b.x = float.NaN;
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightScale(a, b, 8, out _), Is.False);
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightScale(a, b, 8, out _), Is.False);
         }
 
         [Test]
@@ -137,10 +137,10 @@ namespace VividRP.Editor.Tests
             var current = new UnityEngine.Vector4(3600, 3600, 3600, 1);
             bool valid = true;
             for (int i = 0; i < 256; i++)
-                valid &= SdfDiffuseGatherPass.TryGetRadiosityLightScale(previous, current, 8, out _);
+                valid &= LumenIndirectDiffusePass.TryGetRadiosityLightScale(previous, current, 8, out _);
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 4096; i++)
-                valid &= SdfDiffuseGatherPass.TryGetRadiosityLightScale(previous, current, 8, out _);
+                valid &= LumenIndirectDiffusePass.TryGetRadiosityLightScale(previous, current, 8, out _);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(valid, Is.True);
             Assert.That(allocated, Is.Zero);
@@ -154,12 +154,12 @@ namespace VividRP.Editor.Tests
             var brightSun = new UnityEngine.Vector4(2000, 2000, 2000, 1);
             var emission = new UnityEngine.Vector4(120, 40, 12, 0);
             var brightEmission = emission * 2;
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiositySourceScale(black, black,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiositySourceScale(black, black,
                 emission, brightEmission, 8, out var scale), Is.True);
             Assert.That(scale.x, Is.EqualTo(2f));
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiositySourceScale(sun, brightSun,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiositySourceScale(sun, brightSun,
                 emission, brightEmission, 8, out _), Is.True);
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiositySourceScale(sun, sun,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiositySourceScale(sun, sun,
                 emission, brightEmission, 8, out _), Is.False, "A constant sun must not scale with a changing emitter.");
         }
 
@@ -216,15 +216,15 @@ namespace VividRP.Editor.Tests
         {
             var black = new UnityEngine.Vector4(0, 0, 0, 1);
             var sky = UnityEngine.Vector4.one;
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightingScale(black, black, black, black,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightingScale(black, black, black, black,
                 sky, sky * 2, 120f, 8, out var scale), Is.True);
             Assert.That(scale.x, Is.EqualTo(2f));
             var sun = new UnityEngine.Vector4(900, 900, 900, 1);
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightingScale(sun, sun, black, black,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightingScale(sun, sun, black, black,
                 sky, sky * 2, 120f, 8, out _), Is.False);
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightingScale(black, black, black, black,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightingScale(black, black, black, black,
                 sky, sky * 2, 10000f, 8, out _), Is.False);
-            Assert.That(SdfDiffuseGatherPass.TryGetRadiosityLightingScale(black, black, black, black,
+            Assert.That(LumenIndirectDiffusePass.TryGetRadiosityLightingScale(black, black, black, black,
                 sky, sky * 2, float.NaN, 8, out _), Is.False);
         }
 
@@ -237,7 +237,7 @@ namespace VividRP.Editor.Tests
         [TestCase(int.MaxValue, int.MaxValue, int.MaxValue, 8, 8, 1)]
         public void RelightSweeps_BoundSmallSceneWork(int cards, int limit, int samples, int remaining, int requested, int expected)
         {
-            Assert.That(SdfDiffuseGatherPass.GetRadiosityRelightSweepCount(cards, limit, samples, remaining, requested), Is.EqualTo(expected));
+            Assert.That(LumenIndirectDiffusePass.GetRadiosityRelightSweepCount(cards, limit, samples, remaining, requested), Is.EqualTo(expected));
         }
 
         [Test]
@@ -245,10 +245,10 @@ namespace VividRP.Editor.Tests
         {
             int total = 0;
             for (int i = 0; i < 256; i++)
-                total += SdfDiffuseGatherPass.GetRadiosityUpdateCount(4096, i, 16, 128, 4);
+                total += LumenIndirectDiffusePass.GetRadiosityUpdateCount(4096, i, 16, 128, 4);
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 4096; i++)
-                total += SdfDiffuseGatherPass.GetRadiosityUpdateCount(4096, i, 16, 128, 4);
+                total += LumenIndirectDiffusePass.GetRadiosityUpdateCount(4096, i, 16, 128, 4);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(total, Is.GreaterThan(0));
             Assert.That(allocated, Is.Zero);

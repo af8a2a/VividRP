@@ -10,7 +10,7 @@ using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.RenderGraph
 {
-    public static class VividSdfDiffuseGraphUtility
+    public static class VividLumenIndirectDiffuseGraphUtility
     {
         public static void AddGatherPass(string graphPath)
         {
@@ -24,7 +24,7 @@ namespace VividRP.Editor.RenderGraph
                 .Any(node => node.GetPassType() == typeof(DeferredLightingPass)));
             var nodes = lighting.GetNodes().OfType<RenderPassNodeData>().ToArray();
             var deferred = nodes.Single(node => node.GetPassType() == typeof(DeferredLightingPass));
-            var existingGather = nodes.SingleOrDefault(node => node.GetPassType() == typeof(SdfDiffuseGatherPass));
+            var existingGather = nodes.SingleOrDefault(node => node.GetPassType() == typeof(LumenIndirectDiffusePass));
             var diffuse = deferred.GetInputPortByName("m_RealtimeDiffuseGI");
             if (existingGather != null)
             {
@@ -63,7 +63,7 @@ namespace VividRP.Editor.RenderGraph
             if (depth == null || gbuffer0 == null || gbuffer1 == null)
                 throw new InvalidOperationException("Connect Deferred depth and GBuffer inputs before adding SDF diffuse GI.");
 
-            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(SdfDiffuseGatherPass));
+            var nodeType = RenderPassNodeRegistry.GetNodeType(typeof(LumenIndirectDiffusePass));
             var gather = (RenderPassNodeData)Activator.CreateInstance(nodeType);
             gather.Position = deferred.Position + new Vector2(-300f, -250f);
             lighting.AddNode(gather);
@@ -85,9 +85,9 @@ namespace VividRP.Editor.RenderGraph
             var scope = graph.GetNodes().OfType<ISubgraphNode>().Select(node => node.GetSubgraph())
                 .OfType<RenderGraphEditorGraph>().Where(child => GraphDatabase.GetGraphAssetPath(child) == graphPath)
                 .Prepend(graph).Single(child => child.GetNodes().OfType<RenderPassNodeData>()
-                    .Any(node => node.GetPassType() == typeof(SdfDiffuseGatherPass)));
+                    .Any(node => node.GetPassType() == typeof(LumenIndirectDiffusePass)));
             var nodes = scope.GetNodes().OfType<RenderPassNodeData>().ToArray();
-            var gather = nodes.Single(node => node.GetPassType() == typeof(SdfDiffuseGatherPass));
+            var gather = nodes.Single(node => node.GetPassType() == typeof(LumenIndirectDiffusePass));
             var input = gather.GetInputPortByName("m_ClipmapNear");
             var producer = nodes.SingleOrDefault(node => node.GetPassType() == typeof(GlobalSdfClipmapPass));
             if (input.IsConnected)
@@ -164,10 +164,10 @@ namespace VividRP.Editor.RenderGraph
             var owner = graph.GetNodes().OfType<ISubgraphNode>().Single(node =>
                 node.GetSubgraph() is RenderGraphEditorGraph child
                 && GraphDatabase.GetGraphAssetPath(child) == graphPath
-                && child.GetNodes().OfType<RenderPassNodeData>().Any(pass => pass.GetPassType() == typeof(SdfDiffuseGatherPass)));
+                && child.GetNodes().OfType<RenderPassNodeData>().Any(pass => pass.GetPassType() == typeof(LumenIndirectDiffusePass)));
             var lighting = (RenderGraphEditorGraph)owner.GetSubgraph();
             var gather = lighting.GetNodes().OfType<RenderPassNodeData>()
-                .Single(node => node.GetPassType() == typeof(SdfDiffuseGatherPass));
+                .Single(node => node.GetPassType() == typeof(LumenIndirectDiffusePass));
             gather.DefineNode();
             var depth = gather.GetInputPortByName("m_Depth").FirstConnectedPort;
             var hzbInput = gather.GetInputPortByName("m_ScreenHzb");

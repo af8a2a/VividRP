@@ -6,16 +6,16 @@ using VividRP.Runtime.RenderPass.Core;
 namespace VividRP.Editor
 {
     /// <summary>
-    /// Streamlined Unreal Lumen-style Volume Inspector for <see cref="SdfDiffuseGISettings"/>.
+    /// Streamlined Unreal Lumen-style Volume Inspector for <see cref="LumenIndirectDiffuse"/>.
     /// Exposes core GI and Reflections controls by default, keeping fine-tuning and diagnostics
     /// behind Unity's Additional Properties toggle.
     /// </summary>
     [CanEditMultipleObjects]
-    [CustomEditor(typeof(SdfDiffuseGISettings))]
-    internal sealed class SdfDiffuseGISettingsVolumeEditor : VolumeComponentEditor
+    [CustomEditor(typeof(LumenIndirectDiffuse))]
+    internal sealed class LumenIndirectDiffuseVolumeEditor : VolumeComponentEditor
     {
         private static readonly GUIContent s_EnabledLabel =
-            EditorGUIUtility.TrTextContent("Enabled", "Enable Lumen-style SDF Diffuse GI and Reflections for this volume.");
+            EditorGUIUtility.TrTextContent("Enabled", "Enable Lumen Indirect Diffuse GI and Reflections for this volume.");
         private static readonly GUIContent s_TraceModeLabel =
             EditorGUIUtility.TrTextContent("Trace Mode", "Hybrid combines Screen Traces with Mesh SDF and Global SDF (Lumen default).");
         private static readonly GUIContent s_BounceOrdersLabel =
@@ -147,7 +147,7 @@ namespace VividRP.Editor
 
         public override void OnEnable()
         {
-            var o = new PropertyFetcher<SdfDiffuseGISettings>(serializedObject);
+            var o = new PropertyFetcher<LumenIndirectDiffuse>(serializedObject);
 
             m_Enabled = Unpack(o.Find(x => x.enabled));
             m_TraceMode = Unpack(o.Find(x => x.traceMode));
@@ -267,7 +267,7 @@ namespace VividRP.Editor
             PropertyField(m_TraceMode, s_TraceModeLabel);
 
             bool usesSdf = !m_TraceMode.overrideState.boolValue
-                || (SdfDiffuseTraceMode)m_TraceMode.value.intValue != SdfDiffuseTraceMode.ScreenOnly;
+                || (LumenIndirectDiffuseTraceMode)m_TraceMode.value.intValue != LumenIndirectDiffuseTraceMode.ScreenOnly;
             if (usesSdf)
             {
                 PropertyField(m_SurfaceCacheBounceOrders, s_BounceOrdersLabel);
@@ -348,7 +348,7 @@ namespace VividRP.Editor
             DrawSectionHeader("Screen Probe Gather (Advanced)");
             PropertyField(m_GatherMethod);
             bool isRestir = m_GatherMethod.overrideState.boolValue
-                && (SdfDiffuseGatherMethod)m_GatherMethod.value.intValue == SdfDiffuseGatherMethod.ReSTIRGather;
+                && (LumenIndirectDiffuseGatherMethod)m_GatherMethod.value.intValue == LumenIndirectDiffuseGatherMethod.ReSTIRGather;
             if (isRestir)
                 PropertyField(m_RestirOpenPbrDiffuse);
 

@@ -70,7 +70,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             var scene = SceneManager.GetActiveScene();
             var settings = scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<Volume>(true))
                 .Where(volume => volume.sharedProfile != null)
-                .Select(volume => volume.sharedProfile.TryGet<SdfDiffuseGISettings>(out var gi) ? gi : null)
+                .Select(volume => volume.sharedProfile.TryGet<LumenIndirectDiffuse>(out var gi) ? gi : null)
                 .Where(gi => gi != null && gi.surfaceCache.value != null).Distinct().ToArray();
             var caches = settings.Select(gi => gi.surfaceCache.value).Where(cache => cache.IsUsable).Distinct().ToArray();
             var cache = Selection.activeObject as VividSdfSurfaceCache;

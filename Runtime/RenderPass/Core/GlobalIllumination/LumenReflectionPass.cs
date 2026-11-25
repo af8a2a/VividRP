@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     /// <summary>
     /// UE5 Lumen Specular Reflections subsystem (Software SDF: HZB Screen Trace + Mesh SDF + Global SDF,
     /// followed by UE5 Resolve + BRDF Spatial Reconstruction + Native Temporal &amp; Bilateral Spatial Denoiser).
-    /// Runs alongside <see cref="SdfDiffuseGatherPass"/> so it shares ClosestHZB, MeshSDF CardGrid,
+    /// Runs alongside <see cref="LumenIndirectDiffusePass"/> so it shares ClosestHZB, MeshSDF CardGrid,
     /// Surface Cache FinalLighting, Global SDF Clipmap, and Surface Cache Feedback without duplicating GPU work
     /// or requiring .vrdg RenderGraph asset edits.
     /// </summary>
@@ -451,7 +451,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Camera camera,
             int width,
             int height,
-            SdfDiffuseGISettings settings,
+            LumenIndirectDiffuse settings,
             bool resetHistory)
         {
             ResetFrame();
@@ -592,13 +592,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_Prepared = true;
-            var diffuse = frameData.GetOrCreate<VividSdfDiffuseFrameData>();
+            var diffuse = frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>();
             diffuse.SpecularReflectionHistory = m_SpecularOutputHistory;
         }
 
         internal void Record(
             ComputeCommandBuffer cmd,
-            SdfDiffuseGatherPass owner,
+            LumenIndirectDiffusePass owner,
             int frame,
             TextureHandle black,
             TextureHandle layerAux0,
@@ -925,7 +925,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal bool RecordDebugView(
             ComputeCommandBuffer cmd,
-            SdfDiffuseGatherPass owner,
+            LumenIndirectDiffusePass owner,
             LumenDebugViewMode mode,
             TextureHandle output,
             int outputWidth,
@@ -992,7 +992,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindCommonParameters(
             ComputeCommandBuffer cmd,
             ComputeShader shader,
-            SdfDiffuseGatherPass owner,
+            LumenIndirectDiffusePass owner,
             uint stateFrame,
             uint rayDirFrame,
             bool hasDualSlabSidecar,
@@ -1035,7 +1035,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ComputeCommandBuffer cmd,
             ComputeShader shader,
             int kernel,
-            SdfDiffuseGatherPass owner,
+            LumenIndirectDiffusePass owner,
             TextureHandle layerAux0,
             TextureHandle layerAux1,
             bool hasDualSlabSidecar,

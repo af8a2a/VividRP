@@ -176,12 +176,12 @@ namespace VividRP.Editor.Tools
                 exposure.exposureMode.Override(AutoExposureExposureMode.Fixed);
                 exposure.fixedExposure.Override(ExposureEV100);
                 if (profile.TryGet<LocalExposure>(out var localExposure)) localExposure.active = false;
-                var gi = Get<SdfDiffuseGISettings>();
+                var gi = Get<LumenIndirectDiffuse>();
                 gi.enabled.Override(true);
                 gi.surfaceCache.Override(null);
                 gi.surfaceCache.overrideState = false;
-                gi.gatherMethod.Override(SdfDiffuseGatherMethod.ScreenProbeGather);
-                gi.traceMode.Override(SdfDiffuseTraceMode.Hybrid);
+                gi.gatherMethod.Override(LumenIndirectDiffuseGatherMethod.ScreenProbeGather);
+                gi.traceMode.Override(LumenIndirectDiffuseTraceMode.Hybrid);
                 gi.realtimeOnly.Override(true);
                 gi.occludedSky.Override(false);
                 gi.farRadianceCache.Override(false);
@@ -203,7 +203,7 @@ namespace VividRP.Editor.Tools
                 gi.screenProbeFullSphere.Override(true);
                 gi.screenProbeTemporalFilter.Override(false);
                 gi.screenProbeMaxRayIntensity.Override(10f);
-                gi.spatialDenoise.Override(SdfDiffuseSpatialDenoise.Legacy);
+                gi.spatialDenoise.Override(LumenIndirectDiffuseSpatialDenoise.Legacy);
                 gi.pixelTemporal.Override(true);
                 gi.pixelHistoryMaxAge.Override(10);
                 gi.correctReceiverSelfHits.Override(true);

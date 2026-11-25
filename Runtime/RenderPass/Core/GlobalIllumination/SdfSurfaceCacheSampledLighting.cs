@@ -22,7 +22,7 @@ namespace VividRP.Runtime
         private const string ReduceLightPdfKernelName = "ReGIRReduceLightPdf";
         private const string PresampleLocalLightsKernelName = "ReGIRPresampleLocalLights";
 
-        private static readonly ProfilingSampler ReGIRBuildSampler = new("Surface Cache Sampled Lighting ReGIR Build");
+        private static readonly ProfilingSampler ReGIRBuildSampler = new("Lumen Surface Cache ReGIR Build");
 
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");

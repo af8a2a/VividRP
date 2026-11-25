@@ -12,7 +12,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void DefaultSettings_MatchUeLumenReflectionDefaults()
         {
-            var settings = ScriptableObject.CreateInstance<SdfDiffuseGISettings>();
+            var settings = ScriptableObject.CreateInstance<LumenIndirectDiffuse>();
             try
             {
                 Assert.That(settings.lumenReflections.value, Is.True);

@@ -222,10 +222,10 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/ColorPyramid/ColorPyramid.compute")]
         public ComputeShader ColorPyramidCompute;
 
-        [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflection.compute")]
+        [VividResourcePath("Shaders/Core/Private/Archived/ScreenSpaceReflection/ScreenSpaceReflection.compute")]
         public ComputeShader ScreenSpaceReflectionCompute;
 
-        [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace")]
+        [VividResourcePath("Shaders/Core/Private/Archived/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace")]
         public RayTracingShader ScreenSpaceReflectionHybridTraceRayTracing;
 
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracing.raytrace")]
@@ -240,10 +240,10 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingEnvironmentSampling.compute")]
         public ComputeShader ReferencedPathTracingEnvironmentSamplingCompute;
 
-        [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
+        [VividResourcePath("Shaders/Core/Private/Archived/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 
-        [VividResourcePath("Shaders/Core/Private/CACAO/CACAO.compute")]
+        [VividResourcePath("Shaders/Core/Private/Archived/CACAO/CACAO.compute")]
         public ComputeShader CACAOCompute;
 
 

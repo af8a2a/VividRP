@@ -38,4 +38,4 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ShaderVariablesFunctions.hlsl"
-#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CACAO/ffx_cacao.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Archived/CACAO/ffx_cacao.hlsl"

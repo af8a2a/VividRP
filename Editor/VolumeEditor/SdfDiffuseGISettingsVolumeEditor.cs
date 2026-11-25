@@ -76,6 +76,10 @@ namespace VividRP.Editor
         private SerializedDataParameter m_SurfaceCacheRadiosityBatchLimit;
         private SerializedDataParameter m_SurfaceCacheCardsPerFrame;
         private SerializedDataParameter m_SurfaceCacheFullUpdateCardLimit;
+        private SerializedDataParameter m_SurfaceCacheSampledLighting;
+        private SerializedDataParameter m_SurfaceCacheSampledLightingHardwareRayTracing;
+        private SerializedDataParameter m_SurfaceCacheSampledLightingIterations;
+        private SerializedDataParameter m_SurfaceCacheSampledLightingCandidates;
 
         // Additional / Expert parameters: Tracing & Sky
         private SerializedDataParameter m_LumenScreenTracing;
@@ -172,6 +176,10 @@ namespace VividRP.Editor
             m_SurfaceCacheRadiosityBatchLimit = Unpack(o.Find(x => x.surfaceCacheRadiosityBatchLimit));
             m_SurfaceCacheCardsPerFrame = Unpack(o.Find(x => x.surfaceCacheCardsPerFrame));
             m_SurfaceCacheFullUpdateCardLimit = Unpack(o.Find(x => x.surfaceCacheFullUpdateCardLimit));
+            m_SurfaceCacheSampledLighting = Unpack(o.Find(x => x.surfaceCacheSampledLighting));
+            m_SurfaceCacheSampledLightingHardwareRayTracing = Unpack(o.Find(x => x.surfaceCacheSampledLightingHardwareRayTracing));
+            m_SurfaceCacheSampledLightingIterations = Unpack(o.Find(x => x.surfaceCacheSampledLightingIterations));
+            m_SurfaceCacheSampledLightingCandidates = Unpack(o.Find(x => x.surfaceCacheSampledLightingCandidates));
 
             m_LumenScreenTracing = Unpack(o.Find(x => x.lumenScreenTracing));
             m_SegmentedSdfTracing = Unpack(o.Find(x => x.segmentedSdfTracing));
@@ -309,6 +317,18 @@ namespace VividRP.Editor
             PropertyField(m_SurfaceCacheRadiosityBatchLimit);
             PropertyField(m_SurfaceCacheCardsPerFrame);
             PropertyField(m_SurfaceCacheFullUpdateCardLimit);
+
+            DrawSectionHeader("Surface Cache Sampled Lighting (Advanced)");
+            PropertyField(m_SurfaceCacheSampledLighting);
+            bool sampledEnabled = !m_SurfaceCacheSampledLighting.overrideState.boolValue
+                || m_SurfaceCacheSampledLighting.value.boolValue;
+            using (new EditorGUI.DisabledScope(!sampledEnabled))
+            using (new IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheSampledLightingHardwareRayTracing);
+                PropertyField(m_SurfaceCacheSampledLightingIterations);
+                PropertyField(m_SurfaceCacheSampledLightingCandidates);
+            }
         }
 
         private void DrawAdditionalTracingSection()

@@ -292,6 +292,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLighting.compute")]
         public ComputeShader SdfSceneDirectLightingCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLightingRayQuery.compute")]
+        public ComputeShader SdfSceneDirectLightingRayQueryCompute;
+
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/SdfRadiosity.compute")]
         public ComputeShader SdfRadiosityCompute;
 

@@ -14,6 +14,8 @@ namespace VividRP.Editor.Tests
     {
         private const string CardLightingShaderPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLighting.compute";
+        private const string CardLightingRayQueryShaderPath =
+            "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLightingRayQuery.compute";
         private const string ReGIRBuildShaderPath =
             "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Lighting/ReGIRGridBuild.compute";
 
@@ -240,6 +242,272 @@ namespace VividRP.Editor.Tests
                 $"Corner should remain lit: unshadowed={cornerUnshadowed}, shadowed={cornerShadowed}");
         }
 
+        [Test]
+        public void PrepareLightState_RespectsVolumeControls_AndModeKeyTracksSettings()
+        {
+            using var helper = new SdfSurfaceCacheSampledLighting();
+            var frameData = new ContextContainer();
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            var lights = CreateMixedTestLights();
+            lightData.reGIRLights = lights;
+            lightData.reGIRLightCount = lights.Length;
+
+            // Disabled via Volume setting -> stays inactive and zero-alloc.
+            helper.PrepareLightState(frameData, enabled: false);
+            Assert.That(helper.HasLocalLights, Is.False);
+            Assert.That(helper.ModeKey, Is.EqualTo(0u));
+
+            // Enabled with Software SDF and default 4x4.
+            helper.PrepareLightState(
+                frameData,
+                enabled: true,
+                allowHardwareRayTracing: false,
+                rayQueryKernelAvailable: true,
+                localIterations: 4,
+                localCandidates: 4);
+            Assert.That(helper.HasLocalLights, Is.True);
+            Assert.That(helper.UseHardwareRayTracing, Is.False);
+            Assert.That(helper.LocalIterations, Is.EqualTo(4));
+            Assert.That(helper.LocalCandidates, Is.EqualTo(4));
+            uint key4x4 = helper.ModeKey;
+
+            // Changing iterations/candidates updates ModeKey so cards invalidate.
+            helper.PrepareLightState(
+                frameData,
+                enabled: true,
+                allowHardwareRayTracing: false,
+                rayQueryKernelAvailable: true,
+                localIterations: 2,
+                localCandidates: 8);
+            Assert.That(helper.LocalIterations, Is.EqualTo(2));
+            Assert.That(helper.LocalCandidates, Is.EqualTo(8));
+            Assert.That(helper.ModeKey, Is.Not.EqualTo(key4x4));
+        }
+
+        [Test]
+        public void PrepareLightState_ActiveLights_DoesNotAllocate()
+        {
+            using var helper = new SdfSurfaceCacheSampledLighting();
+            var frameData = new ContextContainer();
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            var lights = CreateMixedTestLights();
+            lightData.reGIRLights = lights;
+            lightData.reGIRLightCount = lights.Length;
+
+            // Warm-up.
+            for (int i = 0; i < 64; i++)
+                helper.PrepareLightState(frameData, enabled: true, allowHardwareRayTracing: false, rayQueryKernelAvailable: false, localIterations: 4, localCandidates: 4);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++)
+                helper.PrepareLightState(frameData, enabled: true, allowHardwareRayTracing: false, rayQueryKernelAvailable: false, localIterations: 4, localCandidates: 4);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(helper.HasLocalLights, Is.True);
+            Assert.That(helper.LocalLightCount, Is.EqualTo(lights.Length));
+            Assert.That(allocated, Is.EqualTo(0L));
+        }
+
+        [Test]
+        public void IndirectMultiplier_PropagatesFromLightBounceIntensity_AndScalesCardLighting()
+        {
+            var go = new GameObject("__TestIndirectMultiplierLight");
+            try
+            {
+                var light = go.AddComponent<Light>();
+                light.type = LightType.Point;
+                light.color = Color.white;
+                light.intensity = 20.0f;
+                light.range = 10.0f;
+                light.bounceIntensity = 2.5f;
+
+                var renderData = VividLightRenderDatabase.instance.UpdateLightData(light);
+                Assert.That((renderData.flags & VividLightRenderDataFlags.HasIndirectMultiplier) != 0, Is.True);
+                Assert.That(renderData.indirectMultiplier, Is.EqualTo(2.5f).Within(1e-4f));
+
+                light.bounceIntensity = 0.0f;
+                renderData = VividLightRenderDatabase.instance.UpdateLightData(light);
+                Assert.That(renderData.indirectMultiplier, Is.EqualTo(0.0f).Within(1e-6f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+
+            if (!SystemInfo.supportsComputeShaders)
+                return;
+
+            var cardShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(CardLightingShaderPath);
+            var regirShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ReGIRBuildShaderPath);
+            Assert.That(cardShader, Is.Not.Null);
+            Assert.That(regirShader, Is.Not.Null);
+
+            using var harness = new SyntheticCardHarness(cardShader, regirShader, withOccluder: false);
+            var light1x = MakePointLight(new Vector3(0.0f, 3.0f, 0.0f), new Vector3(20.0f, 15.0f, 10.0f), 10.0f, 0.0f);
+            var light0x = light1x;
+            light0x.indirectMultiplier = 0.0f;
+            var light2x = light1x;
+            light2x.indirectMultiplier = 2.0f;
+
+            Vector3 mean0 = harness.DispatchAndReadMean(new[] { light0x }, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: 1u);
+            Vector3 mean1 = harness.DispatchAndReadMean(new[] { light1x }, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: 1u);
+            Vector3 mean2 = harness.DispatchAndReadMean(new[] { light2x }, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: 1u);
+
+            Assert.That(mean0.magnitude, Is.LessThan(1e-5f), $"indirectMultiplier=0 should produce zero lighting, got {mean0}");
+            Assert.That(mean1.x, Is.GreaterThan(0.05f));
+            AssertRelativeParity(mean2, mean1 * 2.0f, 0.01f, "indirectMultiplier=2.0 should double card radiance");
+        }
+
+        [Test]
+        public void UpdateSdfCardSampledDirectLightingRayQuery_ShadowOcclusion_BlocksSunAndLocalLight()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsInlineRayTracing)
+                Assert.Ignore("Inline RayQuery is not supported on this device.");
+
+            var rqShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(CardLightingRayQueryShaderPath);
+            var regirShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ReGIRBuildShaderPath);
+            Assert.That(rqShader, Is.Not.Null, CardLightingRayQueryShaderPath);
+            Assert.That(regirShader, Is.Not.Null, ReGIRBuildShaderPath);
+            Assert.That(rqShader.HasKernel("UpdateSdfCardSampledDirectLightingRayQuery"), Is.True);
+
+            // withOccluder=false for MeshSDF -> any shadow occlusion MUST come 100% from DXR 1.1 RayQuery RTAS!
+            using var harness = new SyntheticCardHarness(rqShader, regirShader, withOccluder: false, kernelName: "UpdateSdfCardSampledDirectLightingRayQuery");
+            using var rtasOccluded = CreateSyntheticQuadRtas(withOccluder: true, out var occluderMesh, out var occluderMat);
+            using var rtasEmpty = CreateSyntheticQuadRtas(withOccluder: false, out var emptyMesh, out var emptyMat);
+
+            try
+            {
+                var localLight = new[]
+                {
+                    MakePointLight(new Vector3(0.0f, 4.0f, 0.0f), new Vector3(40.0f, 30.0f, 20.0f), 12.0f, shadowStrength: 1.0f)
+                };
+                // Directional sun straight overhead (+Y) with shadowStrength = 1.0.
+                var sunPosRange = new Vector4(0.0f, 1.0f, 0.0f, -64.0f);
+                var sunColorShadow = new Vector4(5.0f, 5.0f, 5.0f, 1.0f);
+
+                Color[] unoccluded = harness.DispatchAndReadPixels(
+                    localLight, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: 1u,
+                    accelerationStructure: rtasEmpty, sunPositionRange: sunPosRange, sunColorShadow: sunColorShadow, sunLayerMask: 1);
+                Color[] occluded = harness.DispatchAndReadPixels(
+                    localLight, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: 1u,
+                    accelerationStructure: rtasOccluded, sunPositionRange: sunPosRange, sunColorShadow: sunColorShadow, sunLayerMask: 1);
+
+                Color centerOpen = unoccluded[16 * CardSize + 16];
+                Color centerBlocked = occluded[16 * CardSize + 16];
+                Color cornerOpen = unoccluded[1 * CardSize + 1];
+                Color cornerBlocked = occluded[1 * CardSize + 1];
+
+                Assert.That(centerOpen.r, Is.GreaterThan(1.0f), $"Center unoccluded should receive sun+local light, got {centerOpen}");
+                Assert.That(centerBlocked.r, Is.LessThan(1e-3f), $"Center beneath RTAS quad should block both sun and local light, got {centerBlocked}");
+                Assert.That(cornerBlocked.r, Is.EqualTo(cornerOpen.r).Within(1e-2f),
+                    $"Corner outside RTAS quad should remain lit: open={cornerOpen}, blocked={cornerBlocked}");
+            }
+            finally
+            {
+                if (occluderMesh != null) UnityEngine.Object.DestroyImmediate(occluderMesh);
+                if (occluderMat != null) UnityEngine.Object.DestroyImmediate(occluderMat);
+                if (emptyMesh != null) UnityEngine.Object.DestroyImmediate(emptyMesh);
+                if (emptyMat != null) UnityEngine.Object.DestroyImmediate(emptyMat);
+            }
+        }
+
+        [Test]
+        public void UpdateSdfCardSampledDirectLightingRayQuery_ReGIRRIS_MatchesEvaluateAllAndSoftwareSdf()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsInlineRayTracing)
+                Assert.Ignore("Inline RayQuery is not supported on this device.");
+
+            var sdfShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(CardLightingShaderPath);
+            var rqShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(CardLightingRayQueryShaderPath);
+            var regirShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ReGIRBuildShaderPath);
+            Assert.That(sdfShader, Is.Not.Null);
+            Assert.That(rqShader, Is.Not.Null);
+            Assert.That(regirShader, Is.Not.Null);
+
+            var lights = CreateMixedTestLights();
+            using var sdfHarness = new SyntheticCardHarness(sdfShader, regirShader, withOccluder: false);
+            using var rqHarness = new SyntheticCardHarness(rqShader, regirShader, withOccluder: false, kernelName: "UpdateSdfCardSampledDirectLightingRayQuery");
+            using var rtasEmpty = CreateSyntheticQuadRtas(withOccluder: false, out var emptyMesh, out var emptyMat);
+
+            try
+            {
+                Vector3 sdfGolden = Vector3.zero;
+                Vector3 rqGolden = Vector3.zero;
+                const int goldenFrames = 4;
+                for (uint f = 0; f < goldenFrames; f++)
+                {
+                    sdfGolden += sdfHarness.DispatchAndReadMean(lights, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: f + 1u);
+                    rqGolden += rqHarness.DispatchAndReadMean(lights, Vector3.zero, evaluateAll: true, useReGIR: false, frameIndex: f + 1u, accelerationStructure: rtasEmpty);
+                }
+                sdfGolden /= goldenFrames;
+                rqGolden /= goldenFrames;
+
+                AssertRelativeParity(rqGolden, sdfGolden, 0.02f, "RayQuery EvaluateAll vs Software SDF EvaluateAll");
+
+                Vector3 rqRis = Vector3.zero;
+                const int risFrames = 8;
+                for (uint f = 0; f < risFrames; f++)
+                {
+                    rqRis += rqHarness.DispatchAndReadMean(lights, Vector3.zero, evaluateAll: false, useReGIR: true, frameIndex: f + 100u, accelerationStructure: rtasEmpty);
+                }
+                rqRis /= risFrames;
+
+                AssertRelativeParity(rqRis, rqGolden, 0.06f, "RayQuery Onion ReGIR 4x4 RIS vs RayQuery EvaluateAll");
+            }
+            finally
+            {
+                if (emptyMesh != null) UnityEngine.Object.DestroyImmediate(emptyMesh);
+                if (emptyMat != null) UnityEngine.Object.DestroyImmediate(emptyMat);
+            }
+        }
+
+        private static RayTracingAccelerationStructure CreateSyntheticQuadRtas(
+            bool withOccluder,
+            out Mesh mesh,
+            out Material material)
+        {
+            mesh = null;
+            material = null;
+            var settings = new RayTracingAccelerationStructure.Settings
+            {
+                rayTracingModeMask = RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                managementMode = RayTracingAccelerationStructure.ManagementMode.Manual,
+                layerMask = ~0,
+            };
+            var rtas = new RayTracingAccelerationStructure(settings);
+
+            if (withOccluder)
+            {
+                mesh = new Mesh { name = "RayQueryOccluderQuad" };
+                mesh.vertices = new[]
+                {
+                    new Vector3(-0.6f, 2.0f, -0.6f),
+                    new Vector3( 0.6f, 2.0f, -0.6f),
+                    new Vector3( 0.6f, 2.0f,  0.6f),
+                    new Vector3(-0.6f, 2.0f,  0.6f),
+                };
+                mesh.triangles = new[] { 0, 2, 1, 0, 3, 2, 0, 1, 2, 0, 2, 3 };
+                mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+
+                var shader = Shader.Find("Hidden/InternalErrorShader");
+                material = new Material(shader);
+                var config = new RayTracingMeshInstanceConfig(mesh, 0, material)
+                {
+                    subMeshFlags = RayTracingSubMeshFlags.Enabled | RayTracingSubMeshFlags.ClosestHitOnly,
+                    enableTriangleCulling = false,
+                    mask = 0xFF,
+                };
+                rtas.AddInstance(config, Matrix4x4.identity, Matrix4x4.identity);
+            }
+
+            var cmd = new CommandBuffer { name = "BuildTestRTAS" };
+            cmd.BuildRayTracingAccelerationStructure(rtas);
+            Graphics.ExecuteCommandBuffer(cmd);
+            cmd.Release();
+            return rtas;
+        }
+
         private static void AssertRelativeParity(Vector3 actual, Vector3 expected, float maxRelError, string label)
         {
             float errR = Mathf.Abs(actual.x - expected.x) / Mathf.Max(expected.x, 1e-4f);
@@ -396,11 +664,15 @@ namespace VividRP.Editor.Tests
             private readonly Texture3D m_DummyBrickAtlas;
             private readonly RenderTexture m_Output;
 
-            public SyntheticCardHarness(ComputeShader cardShader, ComputeShader regirShader, bool withOccluder)
+            public SyntheticCardHarness(
+                ComputeShader cardShader,
+                ComputeShader regirShader,
+                bool withOccluder,
+                string kernelName = "UpdateSdfCardSampledDirectLighting")
             {
                 m_CardShader = cardShader;
                 m_ReGIRShader = regirShader;
-                m_SampledKernel = cardShader.FindKernel("UpdateSdfCardSampledDirectLighting");
+                m_SampledKernel = cardShader.FindKernel(kernelName);
                 m_PreparePdfKernel = regirShader.FindKernel("ReGIRPrepareLightPdf");
                 m_ReducePdfKernel = regirShader.FindKernel("ReGIRReduceLightPdf");
                 m_PresampleKernel = regirShader.FindKernel("ReGIRPresampleLocalLights");
@@ -534,9 +806,15 @@ namespace VividRP.Editor.Tests
                 Vector3 onionCenterWS,
                 bool evaluateAll,
                 bool useReGIR,
-                uint frameIndex)
+                uint frameIndex,
+                RayTracingAccelerationStructure accelerationStructure = null,
+                Vector4 sunPositionRange = default,
+                Vector4 sunColorShadow = default,
+                int sunLayerMask = 0)
             {
-                Color[] pixels = DispatchAndReadPixels(lights, onionCenterWS, evaluateAll, useReGIR, frameIndex);
+                Color[] pixels = DispatchAndReadPixels(
+                    lights, onionCenterWS, evaluateAll, useReGIR, frameIndex,
+                    accelerationStructure, sunPositionRange, sunColorShadow, sunLayerMask);
                 Vector3 sum = Vector3.zero;
                 for (int i = 0; i < pixels.Length; i++)
                 {
@@ -554,7 +832,11 @@ namespace VividRP.Editor.Tests
                 Vector3 onionCenterWS,
                 bool evaluateAll,
                 bool useReGIR,
-                uint frameIndex)
+                uint frameIndex,
+                RayTracingAccelerationStructure accelerationStructure = null,
+                Vector4 sunPositionRange = default,
+                Vector4 sunColorShadow = default,
+                int sunLayerMask = 0)
             {
                 var parameters = SdfSurfaceCacheSampledLighting.CreateOnionParameters(
                     onionCenterWS,
@@ -660,9 +942,12 @@ namespace VividRP.Editor.Tests
                     cmd.SetComputeVectorParam(m_CardShader, "_SdfFinalLightingLayout", new Vector4(CardSize, CardSize, 1.0f, 1.0f));
                     cmd.SetComputeFloatParam(m_CardShader, "_SdfDiffuseRayBias", 0.04f);
                     cmd.SetComputeIntParam(m_CardShader, "_SdfDiffuseLayerMask", 1);
-                    cmd.SetComputeIntParam(m_CardShader, "_SdfDiffuseLightLayerMask", 0);
-                    cmd.SetComputeVectorParam(m_CardShader, "_SdfDiffuseLightPositionRange", Vector4.zero);
-                    cmd.SetComputeVectorParam(m_CardShader, "_SdfDiffuseLightColorShadow", Vector4.zero);
+                    cmd.SetComputeIntParam(m_CardShader, "_SdfDiffuseLightLayerMask", sunLayerMask);
+                    cmd.SetComputeVectorParam(m_CardShader, "_SdfDiffuseLightPositionRange", sunPositionRange);
+                    cmd.SetComputeVectorParam(m_CardShader, "_SdfDiffuseLightColorShadow", sunColorShadow);
+
+                    if (accelerationStructure != null)
+                        cmd.SetRayTracingAccelerationStructure(m_CardShader, m_SampledKernel, "_AccelerationStructure", accelerationStructure);
 
                     cmd.SetComputeBufferParam(m_CardShader, m_SampledKernel, "_ReGIRLights", lightBuffer);
                     cmd.SetComputeBufferParam(m_CardShader, m_SampledKernel, "_ReGIRParameters", paramBuffer);

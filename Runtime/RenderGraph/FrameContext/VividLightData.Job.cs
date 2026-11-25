@@ -116,6 +116,9 @@ namespace VividRP.Runtime
             var hasCustomAttenuation = trackedLightData.rangeAttenuationScale > 0.0f;
             var fallbackAttenuationScale = 1.0f / (range * range);
             var castsShadows = (trackedLightData.flags & VividLightRenderDataFlags.CastShadows) != 0;
+            var indirectMultiplier = (trackedLightData.flags & VividLightRenderDataFlags.HasIndirectMultiplier) != 0
+                ? Mathf.Max(trackedLightData.indirectMultiplier, 0.0f)
+                : 1.0f;
 
             return new VividReGIRLightData
             {
@@ -149,7 +152,7 @@ namespace VividRP.Runtime
                 rangeAttenuationBias = hasCustomAttenuation
                     ? trackedLightData.rangeAttenuationBias
                     : 1.0f,
-                indirectMultiplier = 1.0f,
+                indirectMultiplier = indirectMultiplier,
             };
         }
 

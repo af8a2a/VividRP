@@ -495,6 +495,9 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var buildStats = PopulateSceneAccelerationStructure(nativeAccelerationStructure, camera, in resolvedSettings);
+            var rayTracingData = frameData.GetOrCreate<VividRayTracingSettingsData>();
+            rayTracingData.sceneAccelerationStructure = nativeAccelerationStructure;
+            rayTracingData.hasBuiltAccelerationStructure = false;
             m_LastStats = CreateStats(cameraData, in resolvedSettings, buildStats, null);
             VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
         }
@@ -507,6 +510,9 @@ namespace VividRP.Runtime.RenderPass.Core
             context.cmd.BuildRayTracingAccelerationStructure(m_SceneAccelerationStructure);
 
             var nativeAccelerationStructure = (RayTracingAccelerationStructure)m_SceneAccelerationStructure;
+            var rayTracingData = context.frameData.GetOrCreate<VividRayTracingSettingsData>();
+            rayTracingData.sceneAccelerationStructure = nativeAccelerationStructure;
+            rayTracingData.hasBuiltAccelerationStructure = nativeAccelerationStructure != null;
             if (nativeAccelerationStructure == null || !m_LastStats.IsAvailable)
                 return;
 

@@ -20,6 +20,8 @@ namespace VividRP.Runtime
         public RayTracingAccelerationStructureBuildFlags buildFlagsStaticGeometries;
         public RayTracingAccelerationStructureBuildFlags buildFlagsDynamicGeometries;
         public bool enableCompaction;
+        internal RayTracingAccelerationStructure sceneAccelerationStructure;
+        internal bool hasBuiltAccelerationStructure;
 
         public override void Reset()
         {
@@ -37,6 +39,8 @@ namespace VividRP.Runtime
             buildFlagsStaticGeometries = RayTracingAccelerationStructureBuildFlags.None;
             buildFlagsDynamicGeometries = RayTracingAccelerationStructureBuildFlags.None;
             enableCompaction = false;
+            sceneAccelerationStructure = null;
+            hasBuiltAccelerationStructure = false;
         }
     }
 

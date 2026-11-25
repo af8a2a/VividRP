@@ -38,12 +38,14 @@ namespace VividRP.Runtime
         private static readonly int SampledLightingEvaluateAllId = Shader.PropertyToID("_SdfSampledLightingEvaluateAll");
         private static readonly int SampledLightingUseReGIRId = Shader.PropertyToID("_SdfSampledLightingUseReGIR");
         private static readonly int SampledLightingFrameId = Shader.PropertyToID("_SdfSampledLightingFrame");
+        private static readonly int AccelerationStructureId = Shader.PropertyToID("_AccelerationStructure");
 
 #if UNITY_EDITOR
         // -1 = auto (direct eval <= 4 lights, Onion ReGIR RIS > 4 lights),
         //  0 = force Onion ReGIR RIS even for <= 4 lights,
         //  1 = force EvaluateAllLights golden reference.
         internal static int EditorEvaluateAllLightsOverride = -1;
+        internal static RayTracingAccelerationStructure EditorRayTracingAccelerationStructureOverride;
 #endif
 
         private ComputeShader m_ReGIRGridBuildCompute;
@@ -62,6 +64,7 @@ namespace VividRP.Runtime
         private NativeArray<VividReGIRLightData> m_LightUploadData;
         private NativeArray<VividReGIRParameters> m_ParameterUploadData;
         private VividLightData m_FrameLightData;
+        private VividRayTracingSettingsData m_FrameRayTracingData;
 
         private int m_LightPdfTextureSize;
         private int m_LightPdfTexelCount;
@@ -76,6 +79,9 @@ namespace VividRP.Runtime
         internal int LocalLightCount { get; private set; }
         internal bool EvaluateAllLights { get; private set; }
         internal bool NeedsReGIRBuild { get; private set; }
+        internal bool UseHardwareRayTracing { get; private set; }
+        internal int LocalIterations { get; private set; } = DefaultLocalIterations;
+        internal int LocalCandidates { get; private set; } = DefaultLocalCandidates;
         internal ulong LightStateHash { get; private set; }
         internal uint ModeKey { get; private set; }
 
@@ -106,19 +112,29 @@ namespace VividRP.Runtime
             }
         }
 
-        internal void PrepareLightState(ContextContainer frameData)
+        internal void PrepareLightState(
+            ContextContainer frameData,
+            bool enabled = true,
+            bool allowHardwareRayTracing = true,
+            bool rayQueryKernelAvailable = false,
+            int localIterations = DefaultLocalIterations,
+            int localCandidates = DefaultLocalCandidates)
         {
             HasLocalLights = false;
             LocalLightCount = 0;
             EvaluateAllLights = false;
             NeedsReGIRBuild = false;
+            UseHardwareRayTracing = false;
+            LocalIterations = Mathf.Clamp(localIterations, 1, 8);
+            LocalCandidates = Mathf.Clamp(localCandidates, 1, 16);
             LightStateHash = 0UL;
             ModeKey = 0u;
             m_GpuPrepared = false;
             m_LightPdfHandle = default;
             m_FrameLightData = null;
+            m_FrameRayTracingData = null;
 
-            if (frameData == null)
+            if (!enabled || frameData == null)
                 return;
 
             var lightData = frameData.GetOrCreate<VividLightData>();
@@ -129,13 +145,48 @@ namespace VividRP.Runtime
             if (count <= 0)
                 return;
 
+            bool hasRtasCandidate = false;
+            if (allowHardwareRayTracing && rayQueryKernelAvailable && SystemInfo.supportsInlineRayTracing)
+            {
+#if UNITY_EDITOR
+                if (EditorRayTracingAccelerationStructureOverride != null)
+                    hasRtasCandidate = true;
+#endif
+                if (!hasRtasCandidate && frameData.Contains<VividRayTracingSettingsData>())
+                {
+                    m_FrameRayTracingData = frameData.Get<VividRayTracingSettingsData>();
+                    hasRtasCandidate = m_FrameRayTracingData != null
+                        && m_FrameRayTracingData.sceneAccelerationStructure != null;
+                }
+            }
+
             bool evaluateAll = ResolveEvaluateAll(count);
             HasLocalLights = true;
             LocalLightCount = count;
             EvaluateAllLights = evaluateAll;
+            UseHardwareRayTracing = hasRtasCandidate;
             LightStateHash = ComputeLocalLightHash(lightData.reGIRLights, count);
-            ModeKey = evaluateAll ? 1u : 2u;
+            ModeKey = BuildModeKey(evaluateAll, hasRtasCandidate, LocalIterations, LocalCandidates);
             m_FrameLightData = lightData;
+        }
+
+        internal RayTracingAccelerationStructure ResolveBuiltAccelerationStructure()
+        {
+            if (!UseHardwareRayTracing)
+                return null;
+
+#if UNITY_EDITOR
+            if (EditorRayTracingAccelerationStructureOverride != null)
+                return EditorRayTracingAccelerationStructureOverride;
+#endif
+            if (m_FrameRayTracingData != null
+                && m_FrameRayTracingData.hasBuiltAccelerationStructure
+                && m_FrameRayTracingData.sceneAccelerationStructure != null)
+            {
+                return m_FrameRayTracingData.sceneAccelerationStructure;
+            }
+
+            return null;
         }
 
         internal void PrepareGpuResources(IRenderPass pass, Camera camera, uint frameIndex)
@@ -172,7 +223,7 @@ namespace VividRP.Runtime
                 if (!NeedsReGIRBuild)
                 {
                     EvaluateAllLights = true;
-                    ModeKey = 1u;
+                    ModeKey = BuildModeKey(true, UseHardwareRayTracing, LocalIterations, LocalCandidates);
                     reservoirCount = 1;
                     presampledCount = 1;
                 }
@@ -180,7 +231,7 @@ namespace VividRP.Runtime
             else
             {
                 EvaluateAllLights = true;
-                ModeKey = 1u;
+                ModeKey = BuildModeKey(true, UseHardwareRayTracing, LocalIterations, LocalCandidates);
                 parameters = new VividReGIRParameters
                 {
                     lightCount = (uint)LocalLightCount,
@@ -250,6 +301,18 @@ namespace VividRP.Runtime
             cmd.DispatchCompute(m_ReGIRGridBuildCompute, m_BuildKernel, m_BuildDispatchGroupCount, 1, 1);
         }
 
+        internal void BindRayQueryAccelerationStructure(
+            ComputeCommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            RayTracingAccelerationStructure accelerationStructure)
+        {
+            if (accelerationStructure == null)
+                return;
+
+            cmd.SetRayTracingAccelerationStructure(shader, kernel, AccelerationStructureId, accelerationStructure);
+        }
+
         internal void BindForCardDirectLighting(ComputeCommandBuffer cmd, ComputeShader shader, int kernel, uint frameIndex)
         {
             if (!m_GpuPrepared)
@@ -259,8 +322,8 @@ namespace VividRP.Runtime
             cmd.SetComputeBufferParam(shader, kernel, ReGIRParametersId, m_ParameterBuffer);
             cmd.SetComputeBufferParam(shader, kernel, ReGIRReservoirsId, m_ReservoirBuffer);
             cmd.SetComputeBufferParam(shader, kernel, ReGIRPresampledLightsId, m_PresampledLightBuffer);
-            cmd.SetComputeIntParam(shader, SampledLightingLocalIterationsId, DefaultLocalIterations);
-            cmd.SetComputeIntParam(shader, SampledLightingLocalCandidatesId, DefaultLocalCandidates);
+            cmd.SetComputeIntParam(shader, SampledLightingLocalIterationsId, LocalIterations);
+            cmd.SetComputeIntParam(shader, SampledLightingLocalCandidatesId, LocalCandidates);
             cmd.SetComputeIntParam(shader, SampledLightingEvaluateAllId, EvaluateAllLights ? 1 : 0);
             cmd.SetComputeIntParam(shader, SampledLightingUseReGIRId, NeedsReGIRBuild ? 1 : 0);
             cmd.SetComputeIntParam(shader, SampledLightingFrameId, (int)frameIndex);
@@ -376,14 +439,28 @@ namespace VividRP.Runtime
             m_PresampleLocalLightsKernel = -1;
             m_BuildKernel = -1;
             m_FrameLightData = null;
+            m_FrameRayTracingData = null;
             m_LightPdfHandle = default;
             m_GpuPrepared = false;
             HasLocalLights = false;
             LocalLightCount = 0;
             EvaluateAllLights = false;
             NeedsReGIRBuild = false;
+            UseHardwareRayTracing = false;
+            LocalIterations = DefaultLocalIterations;
+            LocalCandidates = DefaultLocalCandidates;
             LightStateHash = 0UL;
             ModeKey = 0u;
+        }
+
+        internal static uint BuildModeKey(bool evaluateAll, bool useHardwareRayTracing, int localIterations, int localCandidates)
+        {
+            uint evalMode = evaluateAll ? 1u : 2u;
+            uint rqBit = useHardwareRayTracing ? 1u : 0u;
+            return evalMode
+                | (rqBit << 2)
+                | ((uint)Mathf.Clamp(localIterations, 1, 8) << 4)
+                | ((uint)Mathf.Clamp(localCandidates, 1, 16) << 8);
         }
 
         private bool ResolveEvaluateAll(int lightCount)

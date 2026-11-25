@@ -145,6 +145,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 8a0c588f863474c438a284827f6efda2, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLighting.compute
     ResourceObject: {fileID: 7200000, guid: d40e99fb239b62d4e8d7686894121bb8, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfSceneDirectLightingRayQuery.compute
+    ResourceObject: {fileID: 7200000, guid: 097cc9603735a9448b486d98b2fb32b2, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeFiltering.compute
     ResourceObject: {fileID: 7200000, guid: 42a6406dbb1af514a81bf806b002bca1, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfScreenProbeGather.compute

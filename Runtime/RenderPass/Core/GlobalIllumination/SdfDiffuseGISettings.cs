@@ -111,6 +111,18 @@ namespace VividRP.Runtime.RenderPass.Core
         [Tooltip("Update a complete bounce sweep per frame when the scene has at most this many cards. Zero disables the small-scene fast fill. Large scenes retain the per-frame card budget.")]
         public ClampedIntParameter surfaceCacheFullUpdateCardLimit = new(128, 0, 4096);
 
+        [Tooltip("Sample local lights (Point, Spot, Rectangle, Tube) into the Surface Cache via world-space Onion ReGIR and single-pass multi-iteration RIS.")]
+        public BoolParameter surfaceCacheSampledLighting = new(true);
+
+        [Tooltip("Use DXR 1.1 Inline RayQuery against the scene RTAS for Surface Cache direct-lighting visibility when available. Automatically falls back to segmented Software SDF tracing otherwise.")]
+        public BoolParameter surfaceCacheSampledLightingHardwareRayTracing = new(true);
+
+        [Tooltip("Number of independent RIS shadow-ray iterations per Surface Cache card texel when sampling more than 4 local lights (NvRTX default: 4).")]
+        public ClampedIntParameter surfaceCacheSampledLightingIterations = new(4, 1, 8);
+
+        [Tooltip("Number of local-light candidates evaluated per RIS iteration from the Onion ReGIR cell reservoirs (NvRTX default: 4).")]
+        public ClampedIntParameter surfaceCacheSampledLightingCandidates = new(4, 1, 16);
+
         [Tooltip("Add published card indirect lighting to screen hits that match the same Mesh SDF surface.")]
         public BoolParameter screenHitCardLighting = new(true);
 

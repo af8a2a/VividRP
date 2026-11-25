@@ -901,6 +901,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_GatherTemporalCompute;
         private ComputeShader m_RestirCompute;
         private ComputeShader m_CardLightingCompute;
+        private ComputeShader m_CardLightingRayQueryCompute;
         [RenderGraphResource(Name = "Surface Cache Bounce Lighting", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private readonly RenderGraphTexture m_BounceFinalLighting = CreateScratch("Surface Cache Bounce Lighting", ProbeFormat);
@@ -908,7 +909,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private CameraHistoryTexture m_CardDirectHistory, m_CardFinalHistory;
         private TextureHandle m_CardDirectAtlas, m_CardFinalAtlas;
         private Vector4 m_FinalLightingLayout;
-        private int m_CardDirectLightingKernel = -1, m_CardSampledDirectLightingKernel = -1, m_CardFinalLightingKernel = -1;
+        private int m_CardDirectLightingKernel = -1, m_CardSampledDirectLightingKernel = -1, m_CardSampledDirectLightingRayQueryKernel = -1, m_CardFinalLightingKernel = -1;
         private readonly SdfSurfaceCacheSampledLighting m_SampledCardLighting = new();
         private int m_FinalLightingReadyCards, m_FinalLightingNewCards;
         private int m_FinalLightingPreviousReadyCards;
@@ -1084,6 +1085,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GatherTemporalCompute = resources?.SdfScreenProbeGatherTemporalCompute;
             m_RestirCompute = resources?.SdfReSTIRGatherCompute;
             m_CardLightingCompute = resources?.SdfSceneDirectLightingCompute;
+            m_CardLightingRayQueryCompute = resources?.SdfSceneDirectLightingRayQueryCompute;
             m_RadiosityCompute = resources?.SdfRadiosityCompute;
             m_FarCompute = resources?.SdfRadianceCacheUpdateCompute;
             m_NearOcclusionCompute = resources?.SdfShortRangeAOCompute;
@@ -1277,6 +1279,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CardFinalLightingKernel = m_CardLightingCompute.FindKernel("CombineSdfCardFinalLighting");
                 if (HasKernel(m_CardLightingCompute, "UpdateSdfCardSampledDirectLighting"))
                     m_CardSampledDirectLightingKernel = m_CardLightingCompute.FindKernel("UpdateSdfCardSampledDirectLighting");
+                if (SystemInfo.supportsInlineRayTracing
+                    && HasKernel(m_CardLightingRayQueryCompute, "UpdateSdfCardSampledDirectLightingRayQuery"))
+                    m_CardSampledDirectLightingRayQueryKernel = m_CardLightingRayQueryCompute.FindKernel("UpdateSdfCardSampledDirectLightingRayQuery");
             }
             if (SystemInfo.usesReversedZBuffer
                 && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_SFloat, GraphicsFormatUsage.LoadStore)
@@ -1750,7 +1755,13 @@ namespace VividRP.Runtime.RenderPass.Core
                     float.IsFinite(settings.meshSdfDetailDistance.value) ? settings.meshSdfDetailDistance.value : 2f,
                     0.1f, m_TraceDistance);
             m_Bias = float.IsFinite(m_RayBias) ? Mathf.Clamp(m_RayBias, 0.001f, 0.25f) : 0.04f;
-            m_SampledCardLighting.PrepareLightState(frameData);
+            m_SampledCardLighting.PrepareLightState(
+                frameData,
+                enabled: !useSettings || settings.surfaceCacheSampledLighting.value,
+                allowHardwareRayTracing: !useSettings || settings.surfaceCacheSampledLightingHardwareRayTracing.value,
+                rayQueryKernelAvailable: m_CardSampledDirectLightingRayQueryKernel >= 0,
+                localIterations: useSettings ? settings.surfaceCacheSampledLightingIterations.value : SdfSurfaceCacheSampledLighting.DefaultLocalIterations,
+                localCandidates: useSettings ? settings.surfaceCacheSampledLightingCandidates.value : SdfSurfaceCacheSampledLighting.DefaultLocalCandidates);
             ReadLight(camera);
             bool farConfigured = useSettings && settings.farRadianceCache.value && m_UseSdf && cache != null
                 && m_FarKernel >= 0 && !m_OffscreenOnly && (!m_RestirGather || m_RestirPixelIntegration)
@@ -2548,12 +2559,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyBoundValid = false;
             m_SkyBoundClearKernel = m_SkyBoundMeasureKernel = -1;
             m_TraceCompute = m_GatherCompute = m_ImportanceSamplingCompute = m_FilterCompute = m_GatherTemporalCompute = null;
-            m_RestirCompute = m_CardLightingCompute = m_RadiosityCompute = m_FarCompute = m_NearOcclusionCompute = null;
+            m_RestirCompute = m_CardLightingCompute = m_CardLightingRayQueryCompute = m_RadiosityCompute = m_FarCompute = m_NearOcclusionCompute = null;
             m_TraceKernel = m_CachedTraceKernel = m_ResolveKernel = -1;
             m_ScreenTraceKernel = m_ScreenReceiverTraceKernel = m_ScreenGatherKernel = -1;
             m_LumenTraceKernel = m_LumenReceiverKernel = m_ClosestHzbKernel = m_SceneColorKernel = -1;
             m_SampledCardLighting.Dispose();
-            m_CardDirectLightingKernel = m_CardSampledDirectLightingKernel = m_CardFinalLightingKernel = -1;
+            m_CardDirectLightingKernel = m_CardSampledDirectLightingKernel = m_CardSampledDirectLightingRayQueryKernel = m_CardFinalLightingKernel = -1;
             m_RadiosityKernel = -1;
             m_RadiosityAccumulationKernel = m_RadiosityPublishKernel = -1;
             m_RadiosityPublishCardsKernel = m_RadiosityClearKernel = -1;
@@ -3268,10 +3279,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FinalLightingDirtyEnd = Mathf.Max(m_FinalLightingDirtyEnd, first + count);
         }
 
-        private void BindCardLightingWork(ComputeCommandBuffer cmd, int kernel, TextureHandle output,
+        private void BindCardLightingWork(ComputeCommandBuffer cmd, ComputeShader shader, int kernel, TextureHandle output,
             VividSdfSurfaceCache cache, int first)
         {
-            var shader = m_CardLightingCompute;
             m_Scene.Bind(cmd, shader, kernel);
             cmd.SetComputeBufferParam(shader, kernel, SurfaceId, m_Scene.DiffuseSurfaces);
             cmd.SetComputeBufferParam(shader, kernel, LocalCardTableId, cache.LocalCardTable);
@@ -3284,11 +3294,18 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeBufferParam(shader, kernel, FinalLightingOrderId, m_State.FinalLightingPriority.Buffer);
         }
 
-        private void DispatchCardLighting(ComputeCommandBuffer cmd, int kernel, int count)
+        private void BindCardLightingWork(ComputeCommandBuffer cmd, int kernel, TextureHandle output,
+            VividSdfSurfaceCache cache, int first) =>
+            BindCardLightingWork(cmd, m_CardLightingCompute, kernel, output, cache, first);
+
+        private void DispatchCardLighting(ComputeCommandBuffer cmd, ComputeShader shader, int kernel, int count)
         {
-            cmd.DispatchCompute(m_CardLightingCompute, kernel, CoreUtils.DivRoundUp((int)m_FinalLightingLayout.x, GroupSize),
+            cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp((int)m_FinalLightingLayout.x, GroupSize),
                 CoreUtils.DivRoundUp((int)m_FinalLightingLayout.y, GroupSize), count);
         }
+
+        private void DispatchCardLighting(ComputeCommandBuffer cmd, int kernel, int count) =>
+            DispatchCardLighting(cmd, m_CardLightingCompute, kernel, count);
 
         private void RecordCardDirectLighting(ComputeCommandBuffer cmd, VividSdfSurfaceCache cache)
         {
@@ -3300,17 +3317,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (useSampled)
                     m_SampledCardLighting.RecordBuild(cmd);
 
+                var rtas = useSampled ? m_SampledCardLighting.ResolveBuiltAccelerationStructure() : null;
+                bool useRayQuery = useSampled && rtas != null
+                    && m_CardLightingRayQueryCompute != null && m_CardSampledDirectLightingRayQueryKernel >= 0;
+                var shader = useRayQuery ? m_CardLightingRayQueryCompute : m_CardLightingCompute;
+                int kernel = useRayQuery
+                    ? m_CardSampledDirectLightingRayQueryKernel
+                    : (useSampled ? m_CardSampledDirectLightingKernel : m_CardDirectLightingKernel);
+
                 using var scope = new ProfilingScope(cmd, CardDirectLightingSampler);
-                BindSdfTraceConstants(cmd, m_CardLightingCompute);
-                BindSunLighting(cmd, m_CardLightingCompute);
-                int kernel = useSampled ? m_CardSampledDirectLightingKernel : m_CardDirectLightingKernel;
-                BindCardLightingWork(cmd, kernel, m_CardDirectAtlas, cache, m_FinalLightingUpdateFirst);
-                if (useSampled)
+                BindSdfTraceConstants(cmd, shader);
+                BindSunLighting(cmd, shader);
+                BindCardLightingWork(cmd, shader, kernel, m_CardDirectAtlas, cache, m_FinalLightingUpdateFirst);
+                if (useRayQuery)
                 {
-                    BindSegmentedTracing(cmd, m_CardLightingCompute, kernel, m_UseSdf && m_GlobalClipmap?.Recorded == true);
-                    m_SampledCardLighting.BindForCardDirectLighting(cmd, m_CardLightingCompute, kernel, m_State.Frame);
+                    m_SampledCardLighting.BindRayQueryAccelerationStructure(cmd, shader, kernel, rtas);
+                    m_SampledCardLighting.BindForCardDirectLighting(cmd, shader, kernel, m_State.Frame);
                 }
-                DispatchCardLighting(cmd, kernel, m_FinalLightingNewCards);
+                else if (useSampled)
+                {
+                    BindSegmentedTracing(cmd, shader, kernel, m_UseSdf && m_GlobalClipmap?.Recorded == true);
+                    m_SampledCardLighting.BindForCardDirectLighting(cmd, shader, kernel, m_State.Frame);
+                }
+                DispatchCardLighting(cmd, shader, kernel, m_FinalLightingNewCards);
             }
             m_CardDirectHistory.MarkWritten();
         }

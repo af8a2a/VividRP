@@ -27,6 +27,7 @@ namespace VividRP.Runtime
         ActiveInHierarchy = 1u << 3,
         CastShadows = 1u << 4,
         AffectVolumetric = 1u << 5,
+        HasIndirectMultiplier = 1u << 6,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -56,6 +57,7 @@ namespace VividRP.Runtime
         public float rangeAttenuationBias;
         public uint renderingLayerMask;
         public uint shadowRenderingLayerMask;
+        public float indirectMultiplier;
         public VividLightRenderDataFlags flags;
     }
 
@@ -523,7 +525,8 @@ namespace VividRP.Runtime
                 rangeAttenuationBias = 1.0f,
                 renderingLayerMask = (uint)light.renderingLayerMask,
                 shadowRenderingLayerMask = (uint)shadowRenderingLayerMask,
-                flags = BuildFlags(light, additionalLightData),
+                indirectMultiplier = Mathf.Max(light.bounceIntensity, 0.0f),
+                flags = BuildFlags(light, additionalLightData) | VividLightRenderDataFlags.HasIndirectMultiplier,
             };
         }
 

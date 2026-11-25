@@ -1,0 +1,14 @@
+#pragma use_dxc
+#pragma require inlineraytracing
+#pragma only_renderers d3d11 xboxseries ps5
+#pragma kernel UpdateSdfCardSampledDirectLightingRayQuery VIVID_SDF_SURFACE_CACHE VIVID_SDF_CARD_DIRECT_UPDATE VIVID_SDF_CARD_SAMPLED_LIGHTING VIVID_SDF_CARD_RAY_QUERY
+
+#include "SdfSceneDirectLightingCommon.hlsl"
+
+#if defined(VIVID_SDF_SURFACE_CACHE) && defined(VIVID_SDF_CARD_DIRECT_UPDATE) && defined(VIVID_SDF_CARD_SAMPLED_LIGHTING) && defined(VIVID_SDF_CARD_RAY_QUERY)
+[numthreads(8, 8, 1)]
+void UpdateSdfCardSampledDirectLightingRayQuery(uint3 id : SV_DispatchThreadID)
+{
+    RunSdfCardSampledDirectLighting(id);
+}
+#endif

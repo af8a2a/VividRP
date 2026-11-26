@@ -10,7 +10,9 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class VisibilityBufferGBufferResolvePass : UnsafePass, IAllowGlobalStateModificationPass
     {
         internal const int DualSlabSidecarTileSize = 8;
+        internal const int ComputeResolveGroupSize = 8;
         internal const string VisibilityBufferGBufferResolveShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve";
+        internal const string ResolveVisibilityBufferKernelName = "ResolveVisibilityBuffer";
         internal const string DualSlabSidecarKeyword = "VIVID_DUAL_SLAB_SIDECAR_OUTPUT";
         internal const string DualSlabSidecarTiledKeyword =
             "VIVID_DUAL_SLAB_SIDECAR_TILED";
@@ -28,6 +30,17 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VisibilityBufferAttributes1ScaleBiasId = Shader.PropertyToID("_VisibilityBufferAttributes1ScaleBias");
         private static readonly int VisibilityBufferBarycentricsId = Shader.PropertyToID("_VisibilityBufferBarycentrics");
         private static readonly int VisibilityBufferBarycentricsScaleBiasId = Shader.PropertyToID("_VisibilityBufferBarycentricsScaleBias");
+        private static readonly int ResolveOutputSizeId = Shader.PropertyToID("_ResolveOutputSize");
+        private static readonly int WriteDualSlabSidecarId = Shader.PropertyToID("_WriteDualSlabSidecar");
+        private static readonly int WriteSubstrateClosureBufferId = Shader.PropertyToID("_WriteSubstrateClosureBuffer");
+        private static readonly int OutGBuffer0Id = Shader.PropertyToID("_OutGBuffer0");
+        private static readonly int OutGBuffer1Id = Shader.PropertyToID("_OutGBuffer1");
+        private static readonly int OutGBuffer2Id = Shader.PropertyToID("_OutGBuffer2");
+        private static readonly int OutGBuffer3Id = Shader.PropertyToID("_OutGBuffer3");
+        private static readonly int OutGBuffer4Id = Shader.PropertyToID("_OutGBuffer4");
+        private static readonly int OutLayerAux0Id = Shader.PropertyToID("_OutLayerAux0");
+        private static readonly int OutLayerAux1Id = Shader.PropertyToID("_OutLayerAux1");
+        private static readonly int OutSubstrateClosureBufferId = Shader.PropertyToID("_OutSubstrateClosureBuffer");
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int ClassificationWidthId = Shader.PropertyToID("_ClassificationWidth");
@@ -128,6 +141,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField, Min(1f)]
         private float m_VirtualTextureFeedbackSampleRate = 4.0f;
 
+        [SerializeField, Range(VividSubstrateContract.OpenPBROpaqueSingleTotalSlices, VividSubstrateContract.MaxSliceCount)]
+        private int m_SubstrateSliceBudget = VividSubstrateContract.DefaultSliceCount;
+
+        private ComputeShader m_ResolveCompute;
+        private int m_ResolveVisibilityBufferKernel = -1;
+        private VividSubstrateMaterialFrameData m_SubstrateFrameData;
+        private TextureHandle m_SubstrateClosureBufferHandle;
+        private bool m_RequiresSubstrateBuffer;
+
         private Material m_Material;
         private Material m_DualSlabSidecarMaterial;
         private Material m_DualSlabSidecarTiledMaterial;
@@ -161,20 +183,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16G16_SFloat);
             m_Barycentrics.desc.FilterMode = FilterMode.Point;
 
-            m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
+            m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer0.desc.EnableRandomWrite = true;
             m_GBuffer1 = RenderGraphTexture.CreateColorTarget("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
+            m_GBuffer1.desc.EnableRandomWrite = true;
             m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer2.desc.EnableRandomWrite = true;
             m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
             m_GBuffer4 = RenderGraphTexture.CreateColorTarget(
                 "DiffuseIrradiance",
                 GraphicsFormat.B10G11R11_UFloatPack32);
+            m_GBuffer4.desc.EnableRandomWrite = true;
             m_LayerAux0 = RenderGraphTexture.CreateColorTarget(
                 "LayerAux0",
-                GraphicsFormat.R8G8B8A8_SRGB);
+                GraphicsFormat.R8G8B8A8_UNorm);
+            m_LayerAux0.desc.EnableRandomWrite = true;
             m_LayerAux1 = RenderGraphTexture.CreateColorTarget(
                 "LayerAux1",
                 GraphicsFormat.R8G8B8A8_UNorm);
+            m_LayerAux1.desc.EnableRandomWrite = true;
             m_DualSlabSidecarTileList = RenderGraphBuffer.CreateStructured(
                 "DualSlabSidecarTileList",
                 1,
@@ -202,34 +230,38 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Create()
         {
+            var coreResources = PipelineResourceManager.Get<VividRPCoreResources>();
+            m_ResolveCompute = coreResources?.VisibilityBufferGBufferResolveCompute;
+            m_ResolveVisibilityBufferKernel = TryFindKernel(
+                m_ResolveCompute,
+                ResolveVisibilityBufferKernelName);
+
             var shader = Shader.Find(VisibilityBufferGBufferResolveShaderName);
-            if (shader == null)
+            if (shader != null)
+            {
+                m_Material = CoreUtils.CreateEngineMaterial(shader);
+                m_DualSlabSidecarMaterial = CoreUtils.CreateEngineMaterial(shader);
+                m_DualSlabSidecarTiledMaterial = CoreUtils.CreateEngineMaterial(shader);
+                CoreUtils.SetKeyword(
+                    m_DualSlabSidecarMaterial,
+                    DualSlabSidecarKeyword,
+                    true);
+                CoreUtils.SetKeyword(
+                    m_DualSlabSidecarTiledMaterial,
+                    DualSlabSidecarKeyword,
+                    true);
+                CoreUtils.SetKeyword(
+                    m_DualSlabSidecarTiledMaterial,
+                    DualSlabSidecarTiledKeyword,
+                    true);
+            }
+            else if (m_ResolveCompute == null)
             {
                 Debug.LogWarning(
-                    $"[VividRP] Could not find shader '{VisibilityBufferGBufferResolveShaderName}' for {nameof(VisibilityBufferGBufferResolvePass)}.");
-                return;
+                    $"[VividRP] Could not find compute shader or fallback shader '{VisibilityBufferGBufferResolveShaderName}' for {nameof(VisibilityBufferGBufferResolvePass)}.");
             }
 
-            m_Material = CoreUtils.CreateEngineMaterial(shader);
-            m_DualSlabSidecarMaterial = CoreUtils.CreateEngineMaterial(shader);
-            m_DualSlabSidecarTiledMaterial = CoreUtils.CreateEngineMaterial(
-                shader);
-            CoreUtils.SetKeyword(
-                m_DualSlabSidecarMaterial,
-                DualSlabSidecarKeyword,
-                true);
-            CoreUtils.SetKeyword(
-                m_DualSlabSidecarTiledMaterial,
-                DualSlabSidecarKeyword,
-                true);
-            CoreUtils.SetKeyword(
-                m_DualSlabSidecarTiledMaterial,
-                DualSlabSidecarTiledKeyword,
-                true);
-
-            m_MaterialClassificationCompute = PipelineResourceManager
-                .Get<VividRPCoreResources>()
-                ?.MaterialClassificationCompute;
+            m_MaterialClassificationCompute = coreResources?.MaterialClassificationCompute;
             m_ClearDualSlabSidecarDrawArgsKernel = TryFindKernel(
                 m_MaterialClassificationCompute,
                 ClearDualSlabSidecarDrawArgsKernelName);
@@ -240,7 +272,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            if (m_Material != null && frameData.Contains<VividSdfReceiverFrameData>())
+            bool hasResolver = m_ResolveCompute != null && m_ResolveVisibilityBufferKernel >= 0
+                || m_Material != null;
+            if (hasResolver && frameData.Contains<VividSdfReceiverFrameData>())
             {
                 var receiver = frameData.Get<VividSdfReceiverFrameData>();
                 if (ReferenceEquals(receiver.Visibility, m_VisibilityBuffer))
@@ -250,9 +284,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             }
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            m_RequiresDualSlabSidecar = frameData
-                .GetOrCreate<VividGPUDrivenFrameData>()
-                .requiresDualSlabSidecar;
+            var gpuDrivenFrameData = frameData.GetOrCreate<VividGPUDrivenFrameData>();
+            m_RequiresDualSlabSidecar = gpuDrivenFrameData.requiresDualSlabSidecar;
+            m_RequiresSubstrateBuffer = gpuDrivenFrameData.requiresSubstrateBuffer;
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
             VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
@@ -284,9 +318,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 sizeof(uint));
             ResizeIndirectDrawArgsBuffer(m_DualSlabSidecarIndirectDrawArgs);
 
-            ConfigurePassOwnedTarget(m_GBuffer0, m_DefaultGBuffer0, width, height, GraphicsFormat.R8G8B8A8_SRGB, false, "GBuffer0");
-            ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.A2B10G10R10_UNormPack32, false, "GBuffer1");
-            ConfigurePassOwnedTarget(m_GBuffer2, m_DefaultGBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer2");
+            ConfigurePassOwnedTarget(m_GBuffer0, m_DefaultGBuffer0, width, height, GraphicsFormat.R8G8B8A8_UNorm, true, "GBuffer0");
+            ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.A2B10G10R10_UNormPack32, true, "GBuffer1");
+            ConfigurePassOwnedTarget(m_GBuffer2, m_DefaultGBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, true, "GBuffer2");
             ConfigurePassOwnedTarget(m_GBuffer3, m_DefaultGBuffer3, width, height, GraphicsFormat.B10G11R11_UFloatPack32, true, "GBuffer3");
             ConfigurePassOwnedTarget(
                 m_GBuffer4,
@@ -294,7 +328,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 width,
                 height,
                 GraphicsFormat.B10G11R11_UFloatPack32,
-                false,
+                true,
                 "DiffuseIrradiance");
             // Preserve the static RenderGraph ports while avoiding two
             // full-resolution allocations on frames without Dual Slab or native
@@ -304,8 +338,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DefaultLayerAux0,
                 m_RequiresDualSlabSidecar ? width : 1,
                 m_RequiresDualSlabSidecar ? height : 1,
-                GraphicsFormat.R8G8B8A8_SRGB,
-                false,
+                GraphicsFormat.R8G8B8A8_UNorm,
+                true,
                 "LayerAux0");
             ConfigurePassOwnedTarget(
                 m_LayerAux1,
@@ -313,15 +347,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RequiresDualSlabSidecar ? width : 1,
                 m_RequiresDualSlabSidecar ? height : 1,
                 GraphicsFormat.R8G8B8A8_UNorm,
-                false,
+                true,
                 "LayerAux1");
+
+            PrepareSubstrateClosureBuffer(frameData, cameraData, width, height);
         }
 
         public override void Record(UnsafePassContext context)
         {
-            if (m_Material == null
-                || m_DualSlabSidecarMaterial == null
-                || !m_VisibilityBuffer.innerHandle.IsValid()
+            if (!m_VisibilityBuffer.innerHandle.IsValid()
                 || !m_Attributes0.innerHandle.IsValid()
                 || !m_Attributes1.innerHandle.IsValid()
                 || !m_Barycentrics.innerHandle.IsValid()
@@ -349,13 +383,26 @@ namespace VividRP.Runtime.RenderPass.Core
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
                 ? VividGPUDrivenSystem.instance
                 : null;
+            var nativeCmd = context.GetNativeCommandBuffer();
+
+            if (CanUseSinglePassComputeResolve())
+            {
+                RecordSinglePassComputeResolve(
+                    nativeCmd,
+                    system,
+                    visibilityTexture);
+                return;
+            }
+
+            if (m_Material == null || m_DualSlabSidecarMaterial == null)
+                return;
+
             system?.ConfigureTextureBackendKeyword(m_Material);
             system?.ConfigureTextureBackendKeyword(m_DualSlabSidecarMaterial);
             system?.ConfigureTextureBackendKeyword(
                 m_DualSlabSidecarTiledMaterial);
 
             bool hasFeedback = false;
-            var nativeCmd = context.GetNativeCommandBuffer();
             if (system?.UsesVirtualTexture == true)
             {
                 if (!GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
@@ -398,8 +445,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_RequiresDualSlabSidecar)
                 return;
 
-            // VT feedback occupies u5-u7, so keep the core draw at five MRTs
-            // and emit the optional Dual Slab sidecar after releasing UAVs.
+            // Legacy raster fallback when compute shader asset has not been collected yet.
             BindDualSlabSidecarTargets(nativeCmd);
             CoreUtils.ClearRenderTarget(
                 nativeCmd,
@@ -438,6 +484,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            m_ResolveCompute = null;
+            m_ResolveVisibilityBufferKernel = -1;
+            m_SubstrateFrameData = null;
+            m_SubstrateClosureBufferHandle = default;
+            m_RequiresSubstrateBuffer = false;
             m_VirtualTextureFrameData = null;
             m_FrameIndex = 0;
             m_ResolveWidth = 1;
@@ -463,6 +514,167 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_DualSlabSidecarTiledMaterial);
                 m_DualSlabSidecarTiledMaterial = null;
             }
+        }
+
+        private void PrepareSubstrateClosureBuffer(
+            ContextContainer frameData,
+            VividCameraData cameraData,
+            int width,
+            int height)
+        {
+            m_SubstrateClosureBufferHandle = default;
+            m_SubstrateFrameData = frameData.GetOrCreate<VividSubstrateMaterialFrameData>();
+            m_SubstrateFrameData.Reset();
+
+            bool allocateSubstrateBuffer = m_ResolveCompute != null
+                && m_ResolveVisibilityBufferKernel >= 0
+                && m_RequiresSubstrateBuffer
+                && cameraData?.camera != null;
+            if (!allocateSubstrateBuffer)
+                return;
+
+            var cameraHistory = cameraData.camera.GetVividCameraHistory();
+            if (!cameraHistory.IsFrameActive)
+                return;
+
+            int sliceCount = VividSubstrateContract.ClampSliceCount(m_SubstrateSliceBudget);
+            var descriptor = VividSubstrateMaterialFrameData.CreateClosureBufferDescriptor(
+                width,
+                height,
+                sliceCount);
+            CameraHistoryTexture history = cameraHistory.GetOrCreateTexture(
+                VividSubstrateMaterialFrameData.ClosureBufferHistoryId,
+                1,
+                descriptor);
+            TextureHandle handle = CameraHistoryRenderGraphBridge.ImportForPass(
+                this,
+                history,
+                0,
+                AccessFlags.Write);
+            if (!handle.IsValid())
+                return;
+
+            m_SubstrateClosureBufferHandle = handle;
+            m_SubstrateFrameData.ClosureBufferHistory = history;
+            m_SubstrateFrameData.ClosureBufferHandle = handle;
+            m_SubstrateFrameData.Width = width;
+            m_SubstrateFrameData.Height = height;
+            m_SubstrateFrameData.SliceCount = sliceCount;
+            m_SubstrateFrameData.HasSubstrateContent = true;
+        }
+
+        private bool CanUseSinglePassComputeResolve()
+        {
+            if (m_ResolveCompute == null || m_ResolveVisibilityBufferKernel < 0)
+                return false;
+
+            return SupportsComputeWrite(m_GBuffer0.innerHandle.ResolveTexture())
+                && SupportsComputeWrite(m_GBuffer1.innerHandle.ResolveTexture())
+                && SupportsComputeWrite(m_GBuffer2.innerHandle.ResolveTexture())
+                && SupportsComputeWrite(m_GBuffer3.innerHandle.ResolveTexture())
+                && SupportsComputeWrite(m_GBuffer4.innerHandle.ResolveTexture())
+                && SupportsComputeWrite(m_LayerAux0.innerHandle.ResolveTexture())
+                && SupportsComputeWrite(m_LayerAux1.innerHandle.ResolveTexture());
+        }
+
+        private static bool SupportsComputeWrite(Texture texture)
+        {
+            return texture is RenderTexture rt && rt.enableRandomWrite;
+        }
+
+        private void RecordSinglePassComputeResolve(
+            CommandBuffer cmd,
+            VividGPUDrivenSystem system,
+            Texture visibilityTexture)
+        {
+            system?.ConfigureTextureBackendKeyword(m_ResolveCompute);
+
+            if (system?.UsesVirtualTexture == true)
+            {
+                if (!GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
+                        cmd,
+                        m_VirtualTextureFrameData,
+                        m_VirtualTextureSpaceParams,
+                        m_VirtualTextureMipOffsets,
+                        m_VirtualTextureLayerFallbacks,
+                        m_FrameIndex,
+                        Mathf.RoundToInt(m_VirtualTextureFeedbackSampleRate),
+                        out VirtualTextureSpaceBinding binding))
+                {
+                    return;
+                }
+
+                VirtualTextureFeedbackBindingUtility.BindFeedbackComputeTargets(
+                    cmd,
+                    m_ResolveCompute,
+                    m_ResolveVisibilityBufferKernel,
+                    binding);
+            }
+
+            bool writeSubstrate = m_SubstrateClosureBufferHandle.IsValid()
+                && m_SubstrateFrameData != null
+                && m_SubstrateFrameData.HasSubstrateContent;
+            cmd.SetComputeTextureParam(
+                m_ResolveCompute,
+                m_ResolveVisibilityBufferKernel,
+                VisibilityBufferId,
+                visibilityTexture);
+            cmd.SetComputeVectorParam(
+                m_ResolveCompute,
+                VisibilityBufferScaleBiasId,
+                m_VisibilityBuffer.innerHandle.GetScaleBias());
+            cmd.SetComputeVectorParam(
+                m_ResolveCompute,
+                ResolveOutputSizeId,
+                new Vector4(
+                    m_ResolveWidth,
+                    m_ResolveHeight,
+                    1.0f / Mathf.Max(1, m_ResolveWidth),
+                    1.0f / Mathf.Max(1, m_ResolveHeight)));
+            cmd.SetComputeIntParam(
+                m_ResolveCompute,
+                WriteDualSlabSidecarId,
+                m_RequiresDualSlabSidecar ? 1 : 0);
+            cmd.SetComputeIntParam(
+                m_ResolveCompute,
+                WriteSubstrateClosureBufferId,
+                writeSubstrate ? 1 : 0);
+
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutGBuffer0Id, m_GBuffer0.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutGBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutGBuffer2Id, m_GBuffer2.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutGBuffer3Id, m_GBuffer3.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutGBuffer4Id, m_GBuffer4.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutLayerAux0Id, m_LayerAux0.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferKernel, OutLayerAux1Id, m_LayerAux1.innerHandle);
+            if (writeSubstrate)
+            {
+                cmd.SetComputeTextureParam(
+                    m_ResolveCompute,
+                    m_ResolveVisibilityBufferKernel,
+                    OutSubstrateClosureBufferId,
+                    m_SubstrateClosureBufferHandle);
+            }
+            else
+            {
+                cmd.SetComputeTextureParam(
+                    m_ResolveCompute,
+                    m_ResolveVisibilityBufferKernel,
+                    OutSubstrateClosureBufferId,
+                    VividSubstrateMaterialFrameData.GetOrCreateDummyClosureBuffer());
+            }
+
+            int dispatchX = Mathf.Max(1, (m_ResolveWidth + ComputeResolveGroupSize - 1) / ComputeResolveGroupSize);
+            int dispatchY = Mathf.Max(1, (m_ResolveHeight + ComputeResolveGroupSize - 1) / ComputeResolveGroupSize);
+            cmd.DispatchCompute(
+                m_ResolveCompute,
+                m_ResolveVisibilityBufferKernel,
+                dispatchX,
+                dispatchY,
+                1);
+
+            if (writeSubstrate)
+                m_SubstrateFrameData.ClosureBufferHistory?.MarkWritten();
         }
 
         private static void ConfigurePassOwnedTarget(

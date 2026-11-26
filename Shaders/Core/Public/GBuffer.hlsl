@@ -3,6 +3,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BuiltinData.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 #define VIVID_GBUFFER_MATERIAL_STANDARD  0u
@@ -179,7 +180,7 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
     surfaceData = SanitizeVividGBufferSurfaceData(surfaceData);
 
     VividGBufferFragmentOutput output;
-    output.rt0 = float4(surfaceData.baseColor, EncodeVividMaterialFeatureId(surfaceData.materialFeatures));
+    output.rt0 = float4(LinearToSRGB(surfaceData.baseColor), EncodeVividMaterialFeatureId(surfaceData.materialFeatures));
     output.rt1 = float4(
         EncodeVividNormalOct(surfaceData.normalWS),
         surfaceData.linearRoughness,
@@ -197,7 +198,7 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
 VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, float4 rt2, float4 rt3, float4 rt4)
 {
     VividGBufferSurfaceData surfaceData;
-    surfaceData.baseColor = saturate(rt0.rgb);
+    surfaceData.baseColor = SRGBToLinear(saturate(rt0.rgb));
     surfaceData.materialFeatures = DecodeVividMaterialFeatures(rt0.a);
     surfaceData.normalWS = DecodeVividNormalOct(rt1.xy);
     surfaceData.linearRoughness = SanitizeLinearRoughness(rt1.z);

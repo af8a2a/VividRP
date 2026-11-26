@@ -1,14 +1,14 @@
 #pragma use_dxc
 #pragma kernel ClearDeferredLit
-#pragma kernel DeferredLit_Variant0
-#pragma kernel DeferredLit_Variant1
-#pragma kernel DeferredLit_Variant2
-#pragma kernel DeferredLit_Variant3
+#pragma kernel DeferredLit_Variant0 VIVID_DEFERRED_TIER_0
+#pragma kernel DeferredLit_Variant1 VIVID_DEFERRED_TIER_1
+#pragma kernel DeferredLit_Variant2 VIVID_DEFERRED_TIER_2
+#pragma kernel DeferredLit_Variant3 VIVID_DEFERRED_TIER_3
 #pragma kernel ClearDeferredLitSdfSource VIVID_SSGI_SOURCE
-#pragma kernel DeferredLitSdfSourceVariant0 VIVID_SSGI_SOURCE
-#pragma kernel DeferredLitSdfSourceVariant1 VIVID_SSGI_SOURCE
-#pragma kernel DeferredLitSdfSourceVariant2 VIVID_SSGI_SOURCE
-#pragma kernel DeferredLitSdfSourceVariant3 VIVID_SSGI_SOURCE
+#pragma kernel DeferredLitSdfSourceVariant0 VIVID_SSGI_SOURCE VIVID_DEFERRED_TIER_0
+#pragma kernel DeferredLitSdfSourceVariant1 VIVID_SSGI_SOURCE VIVID_DEFERRED_TIER_1
+#pragma kernel DeferredLitSdfSourceVariant2 VIVID_SSGI_SOURCE VIVID_DEFERRED_TIER_2
+#pragma kernel DeferredLitSdfSourceVariant3 VIVID_SSGI_SOURCE VIVID_DEFERRED_TIER_3
 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"

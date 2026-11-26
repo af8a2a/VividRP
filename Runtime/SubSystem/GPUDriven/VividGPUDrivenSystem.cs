@@ -293,6 +293,33 @@ namespace VividRP.Runtime.GPUDriven
             return false;
         }
 
+        internal bool RequiresSubstrateBufferForMainView()
+        {
+            if (!SceneData.HasSubstrateMaterial())
+                return false;
+
+            VividPrimitiveDrawSet drawSet = m_CurrentMainViewDrawSet;
+            if (drawSet?.IsBuilt != true)
+                return true;
+
+            var visibleInstanceIndices = drawSet.LegacyInstanceIndices;
+            for (var drawIndex = 0;
+                 drawIndex < visibleInstanceIndices.Length;
+                 drawIndex++)
+            {
+                uint instanceIndex = visibleInstanceIndices[drawIndex];
+                if (instanceIndex >= (uint) SceneData.Instances.Count)
+                    continue;
+
+                uint materialIndex =
+                    SceneData.Instances[(int) instanceIndex].MaterialIndex;
+                if (SceneData.RequiresSubstrateBuffer(materialIndex))
+                    return true;
+            }
+
+            return false;
+        }
+
         public bool IsAvailable => m_TextureBackend.IsAvailable;
 
         public string UnavailableReason => m_TextureBackend.UnavailableReason;
@@ -442,6 +469,12 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (material != null)
                 CoreUtils.SetKeyword(material, VirtualTextureBackendKeyword, UsesVirtualTexture);
+        }
+
+        internal void ConfigureTextureBackendKeyword(ComputeShader computeShader)
+        {
+            if (computeShader != null)
+                CoreUtils.SetKeyword(computeShader, VirtualTextureBackendKeyword, UsesVirtualTexture);
         }
 
         internal static bool ScheduleCullForCamera(Camera camera, int frameIndex)
@@ -1141,7 +1174,9 @@ namespace VividRP.Runtime.GPUDriven
                     scheduledStaticShadowDrawSet,
                     scheduledDynamicShadowDrawSet,
                     requiresDualSlabSidecar:
-                        gpuDrivenSystem.RequiresDualSlabSidecarForMainView());
+                        gpuDrivenSystem.RequiresDualSlabSidecarForMainView(),
+                    requiresSubstrateBuffer:
+                        gpuDrivenSystem.RequiresSubstrateBufferForMainView());
                 PassRecorder.SetGPUDrivenOcclusionFrameData(
                     occlusionCullingEnabled,
                     hasOcclusionHistory,

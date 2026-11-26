@@ -50,7 +50,7 @@ namespace VividRP.Editor.Tests
             Assert.That(colorEntries.Select(entry => entry.Access), Is.All.EqualTo(AccessFlags.ReadWrite));
             Assert.That(colorEntries.Select(entry => entry.AttachmentIndex), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
             Assert.That(colorEntries.Select(entry => entry.Texture.desc.ClearBuffer), Is.All.EqualTo(false));
-            Assert.That(colorEntries[0].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(colorEntries[0].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(colorEntries[1].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(colorEntries[2].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(colorEntries[3].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));

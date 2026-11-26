@@ -3,13 +3,15 @@
 
 #include "AutoExposure.hlsl"
 #include "SurfaceSummaryGBuffer.hlsl"
+#include "VividSubstrateBuffer.hlsl"
 #include "VividSimpleSlabDirectLighting.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
 #include "VividOpenPBROpaqueDeferredLighting.hlsl"
 
 // Shared 2D Deferred input contract for compute and retained raster entrypoints.
-// GBuffer contains Surface Summary, never a legacy material ID. Sidecar stores
-// either Dual Slab or native OpenPBR data, selected by the explicit class.
+// GBuffer contains TopLayer Surface Summary, never a legacy material ID.
+// Substrate Closure Buffer stores authoritative OpenPBR/multi-closure payloads;
+// LayerAux sidecar remains as legacy DualSlab/fallback storage.
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
@@ -17,6 +19,7 @@ Texture2D<float4> _GBuffer3;
 Texture2D<float4> _DiffuseIrradiance;
 Texture2D<float4> _LayerAux0;
 Texture2D<float4> _LayerAux1;
+Texture2DArray<uint> _SubstrateClosureBuffer;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _GTAOTexture;
@@ -25,6 +28,7 @@ Texture2D<float4> _ScreenSpaceReflectionTexture;
 uint _ScreenSpaceReflectionEnabled;
 uint _VividSlabLutReady;
 uint _VividOpenPBRLutsReady;
+uint _SubstrateClosureBufferEnabled;
 
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
 #include "VividBentNormalPacking.hlsl"
@@ -232,16 +236,35 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
 {
     result = (VividSimpleSlabDeferredLighting)0;
     diffuseBounce = 0.0;
-    uint width, height, auxWidth, auxHeight, aux1Width, aux1Height;
-    _GBuffer0.GetDimensions(width, height);
-    _LayerAux0.GetDimensions(auxWidth, auxHeight);
-    _LayerAux1.GetDimensions(aux1Width, aux1Height);
-    if (_VividOpenPBRLutsReady == 0u || width != auxWidth || height != auxHeight
-        || width != aux1Width || height != aux1Height)
+    if (_VividOpenPBRLutsReady == 0u)
         return false;
+
     VividOpenPBROpaqueInputs inputs;
-    if (!VividTryUnpackOpenPBROpaqueGBuffer(summary, _DiffuseIrradiance.Load(int3(pixelCoord, 0)),
-        _LayerAux0.Load(int3(pixelCoord, 0)), _LayerAux1.Load(int3(pixelCoord, 0)), inputs))
+    bool loadedInputs = false;
+    if (_SubstrateClosureBufferEnabled != 0u)
+    {
+        loadedInputs = VividTryLoadSubstrateOpenPBROpaqueSingle(
+            _SubstrateClosureBuffer,
+            pixelCoord,
+            inputs);
+    }
+    if (!loadedInputs)
+    {
+        uint width, height, auxWidth, auxHeight, aux1Width, aux1Height;
+        _GBuffer0.GetDimensions(width, height);
+        _LayerAux0.GetDimensions(auxWidth, auxHeight);
+        _LayerAux1.GetDimensions(aux1Width, aux1Height);
+        if (width != auxWidth || height != auxHeight
+            || width != aux1Width || height != aux1Height)
+            return false;
+        loadedInputs = VividTryUnpackOpenPBROpaqueGBuffer(
+            summary,
+            _DiffuseIrradiance.Load(int3(pixelCoord, 0)),
+            _LayerAux0.Load(int3(pixelCoord, 0)),
+            _LayerAux1.Load(int3(pixelCoord, 0)),
+            inputs);
+    }
+    if (!loadedInputs)
         return false;
     OpenPBR_ResolvedInputs resolved;
     if (!VividTryResolveOpenPBROpaqueInputs(inputs, 0u, resolved))
@@ -611,6 +634,22 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     return result;
 }
 
+// Compile-time tile tier specialization for DeferredLit compute kernels:
+//   Tier 0 (VIVID_DEFERRED_TIER_0): FastSlab only (minimal VGPR footprint)
+//   Tier 1 (VIVID_DEFERRED_TIER_1): FastSlab + OpenPBR Single Simple
+//   Tier 2 (VIVID_DEFERRED_TIER_2): FastSlab + OpenPBR Single + DualSlab
+//   Tier 3 (default):               Full catch-all (Multi-Closure / Error fallback)
+#if defined(VIVID_DEFERRED_TIER_0)
+    #define VIVID_DEFERRED_ENABLE_OPENPBR 0
+    #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 0
+#elif defined(VIVID_DEFERRED_TIER_1)
+    #define VIVID_DEFERRED_ENABLE_OPENPBR 1
+    #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 0
+#else
+    #define VIVID_DEFERRED_ENABLE_OPENPBR 1
+    #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 1
+#endif
+
 // Non-sky pixels only. Returns complete pre-exposed lighting (including emission).
 // Compute tile scheduling and raster geometry remain the caller's responsibility.
 float3 VividEvaluateDeferredSurfacePixel(
@@ -628,9 +667,14 @@ float3 VividEvaluateDeferredSurfacePixel(
         || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_UNLIT)
         return emission;
 
-    if (deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
-        && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB
-        && deferredExportClass != VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+    bool supportedClass = deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB;
+    #if VIVID_DEFERRED_ENABLE_OPENPBR
+        supportedClass = supportedClass || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE;
+    #endif
+    #if VIVID_DEFERRED_ENABLE_DUAL_SLAB
+        supportedClass = supportedClass || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB;
+    #endif
+    if (!supportedClass)
     {
         debugLighting = float4(1.0, 0.0, 1.0, 1.0);
         return VividApplyPreExposure(float3(1.0, 0.0, 1.0));
@@ -649,6 +693,7 @@ float3 VividEvaluateDeferredSurfacePixel(
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     VividSimpleSlabDeferredLighting lightLoopOutput;
     float3 nativeDiffuseBounce = 0.0;
+    #if VIVID_DEFERRED_ENABLE_OPENPBR && VIVID_DEFERRED_ENABLE_DUAL_SLAB
     UNITY_BRANCH
     if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
     {
@@ -680,6 +725,30 @@ float3 VividEvaluateDeferredSurfacePixel(
             pixelCoord,
             positionWS);
     }
+    #elif VIVID_DEFERRED_ENABLE_OPENPBR
+    UNITY_BRANCH
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+    {
+        if (!TryEvaluateDeferredOpenPBROpaqueLighting(summary, pixelCoord, positionWS,
+                lightLoopOutput, nativeDiffuseBounce))
+        {
+            debugLighting = float4(1.0, 0.0, 1.0, 1.0);
+            return VividApplyPreExposure(float3(1.0, 0.0, 1.0));
+        }
+    }
+    else
+    {
+        lightLoopOutput = EvaluateDeferredFastSlabLighting(
+            summary,
+            pixelCoord,
+            positionWS);
+    }
+    #else
+    lightLoopOutput = EvaluateDeferredFastSlabLighting(
+        summary,
+        pixelCoord,
+        positionWS);
+    #endif
     bounceSource += deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE
         ? nativeDiffuseBounce
         : max(lightLoopOutput.diffuseLighting - lightLoopOutput.indirectDiffuseLighting, 0.0);

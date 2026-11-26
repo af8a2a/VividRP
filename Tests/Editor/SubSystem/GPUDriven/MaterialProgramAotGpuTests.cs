@@ -429,8 +429,9 @@ namespace VividRP.Editor.Tests
                 RenderTexture gbuffer0Capture = TrackObject(CreateRenderTexture(
                     width,
                     height,
-                    GraphicsFormat.R8G8B8A8_SRGB,
-                    "RenderGraphGBuffer0Capture"));
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    "RenderGraphGBuffer0Capture",
+                    enableRandomWrite: true));
                 RenderTexture lightingCapture = TrackObject(CreateRenderTexture(
                     width,
                     height,
@@ -802,7 +803,7 @@ namespace VividRP.Editor.Tests
                 RenderTexture gbuffer0 = TrackObject(CreateRenderTexture(
                     width,
                     height,
-                    GraphicsFormat.R8G8B8A8_SRGB,
+                    GraphicsFormat.R8G8B8A8_UNorm,
                     "GBuffer0"));
                 RenderTexture gbuffer1 = TrackObject(CreateRenderTexture(
                     width,
@@ -827,7 +828,7 @@ namespace VividRP.Editor.Tests
                 RenderTexture layerAux0 = TrackObject(CreateRenderTexture(
                     width,
                     height,
-                    GraphicsFormat.R8G8B8A8_SRGB,
+                    GraphicsFormat.R8G8B8A8_UNorm,
                     "LayerAux0"));
                 RenderTexture layerAux1 = TrackObject(CreateRenderTexture(
                     width,

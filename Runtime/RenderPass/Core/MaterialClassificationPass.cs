@@ -18,6 +18,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int SubstrateClosureBufferId = Shader.PropertyToID("_SubstrateClosureBuffer");
+        private static readonly int SubstrateClosureBufferEnabledId = Shader.PropertyToID("_SubstrateClosureBufferEnabled");
         private static readonly int ClassificationWidthId = Shader.PropertyToID("_ClassificationWidth");
         private static readonly int ClassificationHeightId = Shader.PropertyToID("_ClassificationHeight");
         private static readonly int MaterialTileCountId = Shader.PropertyToID("_MaterialTileCount");
@@ -72,10 +74,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private GraphicsBuffer m_MaterialTileFeatureFlagsBuffer;
         private GraphicsBuffer m_MaterialFeatureTileListBuffer;
         private GraphicsBuffer m_MaterialFeatureIndirectArgsBuffer;
+        private TextureHandle m_SubstrateClosureBufferHandle;
+        private bool m_HasSubstrateClosureBuffer;
 
         public MaterialClassificationPass()
         {
-            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
+            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
 
@@ -129,6 +133,13 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeStructuredBuffer(m_MaterialFeatureTileList, m_MaterialTileCount * DeferredVariantCount, sizeof(uint));
             ResizeIndirectArgsBuffer(m_MaterialFeatureIndirectArgs);
             EnsureImportedBuffers();
+
+            m_HasSubstrateClosureBuffer = VividSubstrateMaterialFrameData.ImportClosureBufferOrDummyForPass(
+                this,
+                frameData,
+                m_ClassificationWidth,
+                m_ClassificationHeight,
+                out m_SubstrateClosureBufferHandle);
         }
 
         public override void Record(ComputePassContext context)
@@ -155,6 +166,19 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ClassificationCompute, m_SelectedClassifyDeferredExportsKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ClassificationCompute, m_SelectedClassifyDeferredExportsKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_ClassificationCompute, m_SelectedClassifyDeferredExportsKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            bool bindSubstrate = m_HasSubstrateClosureBuffer && m_SubstrateClosureBufferHandle.IsValid();
+            cmd.SetComputeIntParam(
+                m_ClassificationCompute,
+                SubstrateClosureBufferEnabledId,
+                bindSubstrate ? 1 : 0);
+            if (m_SubstrateClosureBufferHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_ClassificationCompute,
+                    m_SelectedClassifyDeferredExportsKernel,
+                    SubstrateClosureBufferId,
+                    m_SubstrateClosureBufferHandle);
+            }
             cmd.SetComputeBufferParam(
                 m_ClassificationCompute,
                 m_SelectedClassifyDeferredExportsKernel,
@@ -194,6 +218,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             ReleaseImportedBuffers();
+            m_SubstrateClosureBufferHandle = default;
+            m_HasSubstrateClosureBuffer = false;
             m_ClassificationCompute = null;
             m_ClearDeferredVariantArgsKernel = -1;
             m_ClassifyDeferredExportsKernel = -1;

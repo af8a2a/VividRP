@@ -24,7 +24,7 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Depth", "GBuffer0", "GBuffer1" }));
             Assert.That(
                 textureEntries.Single(entry => entry.Name == "GBuffer0").Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+                Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(
                 textureEntries.Single(entry => entry.Name == "GBuffer1").Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));

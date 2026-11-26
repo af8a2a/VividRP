@@ -169,9 +169,30 @@ namespace VividRP.Runtime.GPUDriven
 
             VividMaterialProgramData program = m_MaterialPrograms[(int) programIndex];
             return program.Version == GPUDrivenMaterialCompiler.ProgramVersion
-                // The existing sidecar ports also store native OpenPBR inputs.
                 && (program.SurfaceProgramID == VividMaterialSurfaceProgramID.DualSlab
                     || program.SurfaceProgramID == VividMaterialSurfaceProgramID.OpenPBROpaque);
+        }
+
+        internal bool RequiresSubstrateBuffer(uint materialIndex)
+        {
+            if (materialIndex >= (uint) m_MaterialRuntimeHeaders.Count)
+                return false;
+
+            VividMaterialRuntimeHeader runtimeHeader =
+                m_MaterialRuntimeHeaders[(int) materialIndex];
+            if ((runtimeHeader.Flags & VividMaterialRuntimeFlags.Unlit) != 0
+                || runtimeHeader.ProgramID == VividMaterialProgramID.Invalid)
+            {
+                return false;
+            }
+
+            uint programIndex = (uint) runtimeHeader.ProgramID;
+            if (programIndex >= (uint) m_MaterialPrograms.Count)
+                return false;
+
+            VividMaterialProgramData program = m_MaterialPrograms[(int) programIndex];
+            return program.Version == GPUDrivenMaterialCompiler.ProgramVersion
+                && program.SurfaceProgramID == VividMaterialSurfaceProgramID.OpenPBROpaque;
         }
 
         internal bool HasDualSlabSidecarMaterial()
@@ -181,6 +202,19 @@ namespace VividRP.Runtime.GPUDriven
                  materialIndex++)
             {
                 if (RequiresDualSlabSidecar(materialIndex))
+                    return true;
+            }
+
+            return false;
+        }
+
+        internal bool HasSubstrateMaterial()
+        {
+            for (uint materialIndex = 0u;
+                 materialIndex < (uint) m_MaterialRuntimeHeaders.Count;
+                 materialIndex++)
+            {
+                if (RequiresSubstrateBuffer(materialIndex))
                     return true;
             }
 

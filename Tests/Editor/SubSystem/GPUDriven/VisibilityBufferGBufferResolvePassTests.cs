@@ -56,31 +56,38 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(GraphicsFormat.R16G16_SFloat));
             Assert.That(gbuffer0Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer0Entry.AttachmentIndex, Is.EqualTo(0));
-            Assert.That(gbuffer0Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(gbuffer0Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(gbuffer0Entry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(gbuffer1Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer1Entry.AttachmentIndex, Is.EqualTo(1));
             Assert.That(gbuffer1Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
+            Assert.That(gbuffer1Entry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(gbuffer2Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer2Entry.AttachmentIndex, Is.EqualTo(2));
             Assert.That(gbuffer2Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(gbuffer2Entry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(gbuffer3Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer3Entry.AttachmentIndex, Is.EqualTo(3));
             Assert.That(gbuffer3Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(gbuffer3Entry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(diffuseIrradianceEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(diffuseIrradianceEntry.AttachmentIndex, Is.EqualTo(4));
             Assert.That(
                 diffuseIrradianceEntry.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(diffuseIrradianceEntry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(layerAux0Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(layerAux0Entry.AttachmentIndex, Is.EqualTo(5));
             Assert.That(
                 layerAux0Entry.Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+                Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(layerAux0Entry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(layerAux1Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(layerAux1Entry.AttachmentIndex, Is.EqualTo(6));
             Assert.That(
                 layerAux1Entry.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(layerAux1Entry.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(gbuffer0Entry.Texture.desc.ClearBuffer, Is.True);
             Assert.That(gbuffer1Entry.Texture.desc.ClearBuffer, Is.True);
             Assert.That(gbuffer2Entry.Texture.desc.ClearBuffer, Is.True);
@@ -137,7 +144,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(gbuffer0Texture.desc.Width, Is.EqualTo(1600));
             Assert.That(gbuffer0Texture.desc.Height, Is.EqualTo(900));
-            Assert.That(gbuffer0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(gbuffer0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(gbuffer0Texture.desc.ClearBuffer, Is.True);
             Assert.That(gbuffer0Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(diffuseIrradianceTexture.desc.Width, Is.EqualTo(1600));
@@ -153,7 +160,7 @@ namespace VividRP.Editor.Tests
             Assert.That(layerAux0Texture.desc.Height, Is.EqualTo(900));
             Assert.That(
                 layerAux0Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+                Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(layerAux1Texture.desc.Width, Is.EqualTo(1600));
             Assert.That(layerAux1Texture.desc.Height, Is.EqualTo(900));
             Assert.That(

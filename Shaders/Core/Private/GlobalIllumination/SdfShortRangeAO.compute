@@ -464,6 +464,6 @@ void AccumulateBentNormal(uint3 id : SV_DispatchThreadID)
     float3 bent = dot(current.xyz, current.xyz) > 1e-8 ? normalize(current.xyz) : normal;
     _SdfBentOutput[id.xy] = float4(bent * visibility, age);
     float4 lighting = _SdfDiffuseOutput[id.xy];
-    float3 albedo = min(saturate(_SdfDiffuseGBuffer0.Load(int3(id.xy, 0)).rgb), 0.5);
+    float3 albedo = min(VividDecodeSurfaceSummaryDiffuseAlbedo(_SdfDiffuseGBuffer0.Load(int3(id.xy, 0)).rgb), 0.5);
     _SdfDiffuseOutput[id.xy] = float4(lighting.rgb * GTAOMultiBounce(visibility, albedo), lighting.a);
 }

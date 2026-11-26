@@ -1,0 +1,614 @@
+#pragma use_dxc
+#pragma kernel ResolveVisibilityBuffer
+#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+#pragma multi_compile_local _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBROpaqueGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSubstrateBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividPostSurfaceSummary.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+    #define VIVID_VT_ENABLE_FEEDBACK_RW_COMPUTE 1
+#else
+    #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+#endif
+#include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
+
+#define VIVID_RESOLVE_GROUP_SIZE 8u
+
+TYPED_TEXTURE2D(float2, _VisibilityBuffer);
+TEXTURE2D(_VisibilityBufferAttributes0);
+TEXTURE2D(_VisibilityBufferAttributes1);
+TEXTURE2D(_VisibilityBufferBarycentrics);
+
+StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
+ByteAddressBuffer _SharedIndexBuffer;
+
+float4 _VisibilityBufferScaleBias;
+float4 _VisibilityBufferAttributes0ScaleBias;
+float4 _VisibilityBufferAttributes1ScaleBias;
+float4 _VisibilityBufferBarycentricsScaleBias;
+float4 _ResolveOutputSize; // xy = width, height; zw = 1/width, 1/height
+uint _WriteDualSlabSidecar;
+uint _WriteSubstrateClosureBuffer;
+
+RWTexture2D<float4> _OutGBuffer0;
+RWTexture2D<float4> _OutGBuffer1;
+RWTexture2D<float4> _OutGBuffer2;
+RWTexture2D<float4> _OutGBuffer3;
+RWTexture2D<float4> _OutGBuffer4;
+RWTexture2D<float4> _OutLayerAux0;
+RWTexture2D<float4> _OutLayerAux1;
+RWTexture2DArray<uint> _OutSubstrateClosureBuffer;
+
+struct InterpolatedUV
+{
+    float2 uv;
+    float2 ddx;
+    float2 ddy;
+};
+
+struct TriangleData
+{
+    VividInstanceData instanceData;
+    VividMaterialData materialData;
+    uint materialRuntimeFlags;
+    uint isDualSlab;
+    uint materialProgramFailed;
+    uint materialProgramID;
+    VividMaterialRuntimeHeader materialRuntimeHeader;
+    VividMaterialProgramData materialProgramData;
+    VividMeshletVertex vertex0;
+    VividMeshletVertex vertex1;
+    VividMeshletVertex vertex2;
+    float3 positionWS0;
+    float3 positionWS1;
+    float3 positionWS2;
+};
+
+float2 ApplyScaleBias(float2 uv, float4 scaleBias)
+{
+    return uv * scaleBias.xy + scaleBias.zw;
+}
+
+uint PullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
+{
+    const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
+    const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
+    const uint shiftAmount = (absoluteIndexID % 4u) * 8u;
+    return (packedIndices >> shiftAmount) & 0xFFu;
+}
+
+VividMeshletVertex PullVertex(const VividDecodedMeshlet meshlet, const uint index)
+{
+    return _SharedVertexBuffer[meshlet.VertexOffset + index];
+}
+
+float3 GetPositionOS(const VividMeshletVertex vertex)
+{
+    return DecodeVividMeshletPosition(vertex);
+}
+
+InterpolatedUV InterpolateUV(
+    const VividBarycentricDerivatives barycentric,
+    const VividMeshletVertex vertex0,
+    const VividMeshletVertex vertex1,
+    const VividMeshletVertex vertex2)
+{
+    const float3 u = InterpolateWithBarycentric(
+        barycentric,
+        DecodeVividMeshletUV(vertex0).x,
+        DecodeVividMeshletUV(vertex1).x,
+        DecodeVividMeshletUV(vertex2).x);
+    const float3 v = InterpolateWithBarycentric(
+        barycentric,
+        DecodeVividMeshletUV(vertex0).y,
+        DecodeVividMeshletUV(vertex1).y,
+        DecodeVividMeshletUV(vertex2).y);
+
+    InterpolatedUV result;
+    result.uv = float2(u.x, v.x);
+    result.ddx = float2(u.y, v.y);
+    result.ddy = float2(u.z, v.z);
+    return result;
+}
+
+float3 TransformInstanceObjectToWorldDir(float3 dirOS, float4x4 objectToWorldMatrix, bool doNormalize = true)
+{
+    float3 dirWS = mul((float3x3)objectToWorldMatrix, dirOS);
+    return doNormalize ? SafeNormalize(dirWS) : dirWS;
+}
+
+float3 TransformInstanceObjectToWorldNormal(float3 normalOS, float4x4 worldToObjectMatrix, bool doNormalize = true)
+{
+    float3 normalWS = mul(normalOS, (float3x3)worldToObjectMatrix);
+    return doNormalize ? SafeNormalize(normalWS) : normalWS;
+}
+
+float GetInstanceOddNegativeScaleSign(const VividInstanceData instanceData)
+{
+    return (instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u ? -1.0f : 1.0f;
+}
+
+float3x3 CreateInstanceTangentToWorld(float3 normalWS, float3 tangentWS, float tangentSign)
+{
+    float3 bitangentWS = cross(normalWS, tangentWS) * tangentSign;
+    return float3x3(tangentWS, bitangentWS, normalWS);
+}
+
+float3 EvaluateAOTSlabNormalWS(
+    const VividAOTSurfaceSlabValues slab,
+    const float3 fallbackNormalWS)
+{
+    const float normalLengthSq = dot(slab.NormalWS, slab.NormalWS);
+    const float3 normalWS = normalLengthSq > 1e-8f
+        ? slab.NormalWS * rsqrt(normalLengthSq)
+        : fallbackNormalWS;
+    if (slab.HasNormal == 0u)
+        return normalWS;
+
+    const float tangentLengthSq = dot(slab.TangentWS.xyz, slab.TangentWS.xyz);
+    if (tangentLengthSq <= 1e-8f)
+        return normalWS;
+
+    const float3 tangentWS = slab.TangentWS.xyz * rsqrt(tangentLengthSq);
+    const float3x3 tangentToWorld = CreateInstanceTangentToWorld(
+        normalWS,
+        tangentWS,
+        slab.TangentWS.w);
+    return TransformTangentToWorld(slab.NormalTS, tangentToWorld, true);
+}
+
+float ComputeDoubleSidedNormalFlipSign(const TriangleData triangleData)
+{
+    const uint rendererListID = GetRendererListID(triangleData.instanceData, triangleData.materialData);
+    if ((rendererListID & VIVIDRENDERERLISTID_CULL_OFF) == 0u)
+        return 1.0f;
+
+    const float3 autoNormalWS = cross(
+        SafeNormalize(triangleData.positionWS0 - triangleData.positionWS1),
+        SafeNormalize(triangleData.positionWS2 - triangleData.positionWS0));
+    float3 viewRayDirectionWS = GetViewForwardDir(UNITY_MATRIX_V);
+    if (unity_OrthoParams.w == 0.0f)
+    {
+        const float3 triangleCenterWS = (
+            triangleData.positionWS0
+            + triangleData.positionWS1
+            + triangleData.positionWS2) / 3.0f;
+        const float3 cameraToTriangleWS = triangleCenterWS - _WorldSpaceCameraPos;
+        if (dot(cameraToTriangleWS, cameraToTriangleWS) > 1e-8f)
+            viewRayDirectionWS = cameraToTriangleWS;
+    }
+
+    return dot(autoNormalWS, viewRayDirectionWS) < 0.0f ? -1.0f : 1.0f;
+}
+
+bool TryLoadVisibilityValue(
+    float2 screenUV,
+    out VividVisibilityBufferValue visibilityBufferValue)
+{
+    float2 visibilityUv = ApplyScaleBias(screenUV, _VisibilityBufferScaleBias);
+    uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
+    if (!IsPackedVisibilityBufferValueValid(packedValue))
+    {
+        visibilityBufferValue = (VividVisibilityBufferValue)0;
+        return false;
+    }
+
+    visibilityBufferValue = UnpackVisibilityBufferValue(packedValue);
+    return true;
+}
+
+TriangleData LoadTriangleData(VividVisibilityBufferValue visibilityBufferValue)
+{
+    TriangleData result;
+    result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
+    result.materialData = (VividMaterialData)0;
+    result.isDualSlab = 0u;
+    result.materialRuntimeFlags = 0u;
+    result.materialProgramID = VIVIDMATERIALPROGRAMID_INVALID;
+    result.materialProgramFailed = 1u;
+    result.materialRuntimeHeader = (VividMaterialRuntimeHeader)0;
+    result.materialProgramData = (VividMaterialProgramData)0;
+    VividMaterialRuntimeHeader runtimeHeader;
+    VividMaterialProgramData programData;
+    const uint programStatus = VividGetMaterialProgramStatus(
+        result.instanceData.MaterialIndex,
+        runtimeHeader,
+        programData);
+    bool loadedMaterialProgram = false;
+    if (programStatus == VIVID_MATERIAL_PROGRAM_KNOWN)
+    {
+        result.materialProgramID = runtimeHeader.ProgramID;
+        result.materialRuntimeHeader = runtimeHeader;
+        result.materialProgramData = programData;
+        loadedMaterialProgram = programData.ParameterLayoutID
+                == VIVIDMATERIALPARAMETERLAYOUTID_GENERIC_PARAMETER_LANES
+            && programData.ResourceLayoutID
+                == VIVIDMATERIALRESOURCELAYOUTID_GENERIC_RESOURCE_RECORDS
+            && (programData.SurfaceProgramID
+                    == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB
+                || programData.SurfaceProgramID
+                    == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB
+                || programData.SurfaceProgramID
+                    == VIVIDMATERIALSURFACEPROGRAMID_OPEN_PBROPAQUE);
+        result.isDualSlab = loadedMaterialProgram
+            && programData.SurfaceProgramID == VIVIDMATERIALSURFACEPROGRAMID_DUAL_SLAB
+            ? 1u
+            : 0u;
+        if (result.instanceData.MaterialIndex < _MaterialDataCount)
+        {
+            result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
+        }
+        result.materialProgramFailed = loadedMaterialProgram ? 0u : 1u;
+        result.materialRuntimeFlags = loadedMaterialProgram ? runtimeHeader.Flags : 0u;
+    }
+    const VividDecodedMeshlet meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
+
+    const uint3 indices = uint3(
+        PullIndex(meshlet, visibilityBufferValue.IndexID + 0u),
+        PullIndex(meshlet, visibilityBufferValue.IndexID + 1u),
+        PullIndex(meshlet, visibilityBufferValue.IndexID + 2u));
+
+    result.vertex0 = PullVertex(meshlet, indices.x);
+    result.vertex1 = PullVertex(meshlet, indices.y);
+    result.vertex2 = PullVertex(meshlet, indices.z);
+
+    result.positionWS0 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex0));
+    result.positionWS1 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex1));
+    result.positionWS2 = TransformPosition(result.instanceData.ObjectToWorldMatrix, GetPositionOS(result.vertex2));
+    return result;
+}
+
+void ResolveSurfaceData(
+    const TriangleData triangleData,
+    const VividBarycentricDerivatives barycentric,
+    const InterpolatedUV visibilityUV,
+    const float4 positionCS,
+    out VividSurfaceSummaryData surfaceData,
+    out VividDualSlabLayerData dualSlabLayerData,
+    out VividOpenPBROpaqueInputs nativeInputs)
+{
+    nativeInputs = (VividOpenPBROpaqueInputs)0;
+    const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
+    const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
+        SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex0)),
+        triangleData.instanceData.WorldToObjectMatrix);
+    const float3 vertexNormalWS1 = normalFlipSign * TransformInstanceObjectToWorldNormal(
+        SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex1)),
+        triangleData.instanceData.WorldToObjectMatrix);
+    const float3 vertexNormalWS2 = normalFlipSign * TransformInstanceObjectToWorldNormal(
+        SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex2)),
+        triangleData.instanceData.WorldToObjectMatrix);
+    const VividBarycentricDerivatives barycentricVertexNormalWS =
+        InterpolateWithBarycentric(
+            barycentric,
+            vertexNormalWS0,
+            vertexNormalWS1,
+            vertexNormalWS2);
+    const float3 geometryNormalWS = SafeNormalize(barycentricVertexNormalWS.lambda);
+    const float3 positionWS = InterpolateWithBarycentricNoDerivatives(
+        barycentric,
+        triangleData.positionWS0,
+        triangleData.positionWS1,
+        triangleData.positionWS2);
+
+    const float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
+        barycentric,
+        DecodeVividMeshletTangent(triangleData.vertex0),
+        DecodeVividMeshletTangent(triangleData.vertex1),
+        DecodeVividMeshletTangent(triangleData.vertex2));
+    float3 tangentWS = TransformInstanceObjectToWorldDir(
+        tangentOS.xyz,
+        triangleData.instanceData.ObjectToWorldMatrix,
+        false);
+    const float tangentLengthSq = dot(tangentWS, tangentWS);
+    float4 geometryTangentWS = 0.0f;
+    if (tangentLengthSq > 1e-8f)
+    {
+        tangentWS *= rsqrt(tangentLengthSq);
+        geometryTangentWS = float4(
+            tangentWS,
+            tangentOS.w
+                * GetInstanceOddNegativeScaleSign(triangleData.instanceData)
+                * normalFlipSign);
+    }
+
+    VividAOTSurfaceContext aotContext;
+    aotContext.UV0 = visibilityUV.uv;
+    aotContext.UV0Ddx = visibilityUV.ddx;
+    aotContext.UV0Ddy = visibilityUV.ddy;
+    aotContext.GeometryNormalWS = geometryNormalWS;
+    aotContext.GeometryTangentWS = geometryTangentWS;
+    aotContext.PositionCS = positionCS;
+
+    VividAOTDeferredExportContract deferredExportContract = (VividAOTDeferredExportContract)0;
+    VividAOTSurfaceProgramOutput aotSurfaceOutput = (VividAOTSurfaceProgramOutput)0;
+    bool dispatchedAOTSurface = false;
+    if (triangleData.materialProgramID != VIVIDMATERIALPROGRAMID_INVALID
+        && triangleData.materialProgramFailed == 0u)
+    {
+        dispatchedAOTSurface = VividTryEvaluateAOTSurfaceProgram(
+            triangleData.materialRuntimeHeader,
+            triangleData.materialProgramData,
+            aotContext,
+            deferredExportContract,
+            aotSurfaceOutput);
+    }
+
+    if (dispatchedAOTSurface
+        && VividIsAOTDeferredExportContractSupported(deferredExportContract)
+        && deferredExportContract.NativePayloadAbi
+            == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_OPENPBR_OPAQUE_V1
+        && aotSurfaceOutput.Profile == VIVID_AOT_SURFACE_PROFILE_OPENPBR_OPAQUE
+        && VividCanStoreOpenPBROpaqueGBuffer(aotSurfaceOutput.OpenPBROpaque)
+        && (triangleData.materialRuntimeFlags & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) == 0u)
+    {
+        nativeInputs = aotSurfaceOutput.OpenPBROpaque;
+        surfaceData = VividBuildOpenPBROpaqueSummary(nativeInputs);
+        dualSlabLayerData = (VividDualSlabLayerData)0;
+        return;
+    }
+
+    const bool supportedDeferredExport = dispatchedAOTSurface
+        && VividIsAOTDeferredExportContractSupported(deferredExportContract)
+        && deferredExportContract.NativePayloadAbi
+            == VIVID_AOT_DEFERRED_EXPORT_NATIVE_PAYLOAD_ABI_NONE
+        && aotSurfaceOutput.Profile == VIVID_AOT_SURFACE_PROFILE_SLAB
+        && deferredExportContract.SurfaceSummaryAbi
+            == VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION
+        && (deferredExportContract.DualSlabSidecarAbi
+                == VIVID_AOT_DEFERRED_EXPORT_SIDECAR_ABI_NONE
+            || deferredExportContract.DualSlabSidecarAbi
+                == VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION);
+    const bool expectsDualTopology = deferredExportContract.Topology
+        != VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_NONE;
+    const uint expectedLayerOperator = deferredExportContract.Topology;
+    const bool evaluatedAOTSurface = supportedDeferredExport
+        && (triangleData.isDualSlab != 0u) == expectsDualTopology
+        && aotSurfaceOutput.ClosureCount == deferredExportContract.ExpectedClosureCount
+        && aotSurfaceOutput.LayerOperator == expectedLayerOperator;
+    const bool supportsLit = VividAOTDeferredExportHasShadingModel(
+        deferredExportContract,
+        VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_STANDARD_LIT);
+    const bool supportsUnlit = VividAOTDeferredExportHasShadingModel(
+        deferredExportContract,
+        VIVID_AOT_DEFERRED_EXPORT_SHADING_MODEL_UNLIT);
+    const bool runtimeRequestsUnlit =
+        (triangleData.materialRuntimeFlags & VIVIDMATERIALRUNTIMEFLAGS_UNLIT) != 0u;
+    const bool invalidRuntimeUnlit = runtimeRequestsUnlit && !supportsUnlit;
+    const bool failedAOTSurface = triangleData.materialProgramFailed != 0u
+        || !evaluatedAOTSurface
+        || invalidRuntimeUnlit;
+    const bool isUnlit = !failedAOTSurface
+        && supportsUnlit
+        && (!supportsLit || runtimeRequestsUnlit);
+    const bool hasVisibleTopLayer = !failedAOTSurface
+        && expectsDualTopology
+        && saturate(aotSurfaceOutput.LayerWeight) > VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT;
+    const bool exportDualSlab = !isUnlit
+        && hasVisibleTopLayer
+        && deferredExportContract.LitClass == VIVID_AOT_DEFERRED_EXPORT_LIT_CLASS_DUAL_SLAB
+        && deferredExportContract.DualSlabSidecarAbi == VIVID_DUAL_SLAB_LAYER_SIDECAR_ABI_VERSION
+        && VividAOTDeferredExportHasPayload(
+            deferredExportContract,
+            VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_DUAL_SLAB_SIDECAR)
+        && VividAOTDeferredExportHasPolicy(
+            deferredExportContract,
+            VIVID_AOT_DEFERRED_EXPORT_POLICY_FAST_SLAB_WHEN_SIDECAR_EMPTY);
+
+    float3 baseColor;
+    float3 evaluatedAOTNormalWS = geometryNormalWS;
+    float perceptualRoughness;
+    float metallic;
+    float ambientOcclusion;
+
+    UNITY_BRANCH
+    if (failedAOTSurface)
+    {
+        baseColor = float3(1.0f, 0.0f, 1.0f);
+        evaluatedAOTNormalWS = geometryNormalWS;
+        perceptualRoughness = 1.0f;
+        metallic = 0.0f;
+        ambientOcclusion = 1.0f;
+    }
+    else
+    {
+        baseColor = aotSurfaceOutput.BaseSlab.BaseColor.rgb;
+        evaluatedAOTNormalWS = EvaluateAOTSlabNormalWS(aotSurfaceOutput.BaseSlab, geometryNormalWS);
+        perceptualRoughness = aotSurfaceOutput.BaseSlab.PerceptualRoughness;
+        metallic = aotSurfaceOutput.BaseSlab.Metallic;
+        ambientOcclusion = aotSurfaceOutput.BaseSlab.AmbientOcclusion;
+        if (hasVisibleTopLayer
+            && VividAOTDeferredExportHasPayload(
+                deferredExportContract,
+                VIVID_AOT_DEFERRED_EXPORT_PAYLOAD_SHARED_NORMAL_AO))
+        {
+            const float layerWeight = saturate(aotSurfaceOutput.LayerWeight);
+            const float3 topNormalWS = EvaluateAOTSlabNormalWS(aotSurfaceOutput.TopSlab, geometryNormalWS);
+            evaluatedAOTNormalWS = SafeNormalize(lerp(evaluatedAOTNormalWS, topNormalWS, layerWeight));
+            ambientOcclusion = lerp(ambientOcclusion, aotSurfaceOutput.TopSlab.AmbientOcclusion, layerWeight);
+        }
+    }
+
+    const float3 normalWS = evaluatedAOTNormalWS;
+    const bool hasDiffuseIrradiance = !failedAOTSurface
+        && !isUnlit
+        && VividAOTDeferredExportHasPolicy(
+            deferredExportContract,
+            VIVID_AOT_DEFERRED_EXPORT_POLICY_DYNAMIC_DIFFUSE_IRRADIANCE)
+        && VividHasProbeVolumeGI();
+    const bool receiveSSR = VividAOTDeferredExportHasPolicy(
+        deferredExportContract,
+        VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_SSR_ON_FAST_SLAB);
+    const bool receiveDecals = VividAOTDeferredExportHasPolicy(
+        deferredExportContract,
+        VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS);
+    const float3 diffuseIrradiance = hasDiffuseIrradiance
+        ? SampleVividProbeVolume(
+            positionWS,
+            normalWS,
+            GetWorldSpaceNormalizeViewDir(positionWS),
+            0xFFFFFFFFu)
+        : 0.0f;
+
+    VividPostSurfaceSummaryInput postSurfaceInput = (VividPostSurfaceSummaryInput)0;
+    postSurfaceInput.baseColor = baseColor;
+    postSurfaceInput.topBaseColor = aotSurfaceOutput.TopSlab.BaseColor.rgb;
+    postSurfaceInput.normalWS = normalWS;
+    postSurfaceInput.perceptualRoughness = perceptualRoughness;
+    postSurfaceInput.metallic = metallic;
+    postSurfaceInput.ambientOcclusion = ambientOcclusion;
+    postSurfaceInput.emissive = aotSurfaceOutput.Emission;
+    postSurfaceInput.diffuseIrradiance = diffuseIrradiance;
+    postSurfaceInput.topPerceptualRoughness = aotSurfaceOutput.TopSlab.PerceptualRoughness;
+    postSurfaceInput.topMetallic = aotSurfaceOutput.TopSlab.Metallic;
+    postSurfaceInput.layerWeight = aotSurfaceOutput.LayerWeight;
+    postSurfaceInput.failedSurface = failedAOTSurface ? 1u : 0u;
+    postSurfaceInput.unlitSurface = isUnlit ? 1u : 0u;
+    postSurfaceInput.hasVisibleTopLayer = hasVisibleTopLayer ? 1u : 0u;
+    postSurfaceInput.exportDualSlab = exportDualSlab ? 1u : 0u;
+    postSurfaceInput.horizontalMix =
+        deferredExportContract.Topology == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_HORIZONTAL_MIX ? 1u : 0u;
+    postSurfaceInput.verticalLayer =
+        deferredExportContract.Topology == VIVID_AOT_DEFERRED_EXPORT_TOPOLOGY_VERTICAL_LAYER ? 1u : 0u;
+    postSurfaceInput.hasDiffuseIrradiance = hasDiffuseIrradiance ? 1u : 0u;
+    postSurfaceInput.receiveSSR = receiveSSR ? 1u : 0u;
+    postSurfaceInput.receiveDecals = receiveDecals ? 1u : 0u;
+
+    VividPostSurfaceSummaryOutput postSurfaceOutput = VividPostSurfaceSummary(postSurfaceInput);
+    surfaceData = postSurfaceOutput.surfaceData;
+    dualSlabLayerData = postSurfaceOutput.dualSlabLayerData;
+}
+
+void WriteEmptyPixel(uint2 pixelCoord)
+{
+    _OutGBuffer0[pixelCoord] = 0.0f;
+    _OutGBuffer1[pixelCoord] = 0.0f;
+    _OutGBuffer2[pixelCoord] = 0.0f;
+    _OutGBuffer3[pixelCoord] = 0.0f;
+    _OutGBuffer4[pixelCoord] = 0.0f;
+    if (_WriteDualSlabSidecar != 0u)
+    {
+        _OutLayerAux0[pixelCoord] = 0.0f;
+        _OutLayerAux1[pixelCoord] = 0.0f;
+    }
+    if (_WriteSubstrateClosureBuffer != 0u)
+    {
+        VividWriteSubstrateEmpty(_OutSubstrateClosureBuffer, pixelCoord);
+    }
+}
+
+[numthreads(VIVID_RESOLVE_GROUP_SIZE, VIVID_RESOLVE_GROUP_SIZE, 1)]
+void ResolveVisibilityBuffer(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (pixelCoord.x >= (uint)_ResolveOutputSize.x || pixelCoord.y >= (uint)_ResolveOutputSize.y)
+        return;
+
+    float2 screenUV = (float2(pixelCoord) + 0.5f) * _ResolveOutputSize.zw;
+    VividVisibilityBufferValue visibilityBufferValue;
+    if (!TryLoadVisibilityValue(screenUV, visibilityBufferValue))
+    {
+        WriteEmptyPixel(pixelCoord);
+        return;
+    }
+
+    TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
+    const float4 clipPosition0 = TransformWorldToHClip(triangleData.positionWS0);
+    const float4 clipPosition1 = TransformWorldToHClip(triangleData.positionWS1);
+    const float4 clipPosition2 = TransformWorldToHClip(triangleData.positionWS2);
+    const float4 positionCS = float4(float2(pixelCoord) + 0.5f, 0.0f, 1.0f);
+    float2 pixelNdc = positionCS.xy * _ResolveOutputSize.zw * 2.0f - 1.0f;
+    #ifdef UNITY_UV_STARTS_AT_TOP
+    pixelNdc.y *= -1.0f;
+    #endif
+    const VividBarycentricDerivatives barycentric = CalculateFullBarycentric(
+        clipPosition0,
+        clipPosition1,
+        clipPosition2,
+        pixelNdc,
+        _ResolveOutputSize.zw);
+    const InterpolatedUV interpolatedUV = InterpolateUV(
+        barycentric,
+        triangleData.vertex0,
+        triangleData.vertex1,
+        triangleData.vertex2);
+
+    VividSurfaceSummaryData surfaceData;
+    VividDualSlabLayerData dualSlabLayerData;
+    VividOpenPBROpaqueInputs nativeInputs;
+    ResolveSurfaceData(
+        triangleData,
+        barycentric,
+        interpolatedUV,
+        positionCS,
+        surfaceData,
+        dualSlabLayerData,
+        nativeInputs);
+
+    const uint exportClass = VividGetDeferredExportClass(surfaceData.deferredExportHeader);
+    if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+    {
+        // Keep TopLayer Summary (RT0..3) backward-compatible for Lumen GI/Reflections and debug views.
+        // Authoritative OpenPBR payload is written into the Substrate Closure Buffer.
+        VividSurfaceSummaryGBufferOutput packedSummary = VividPackOpenPBROpaqueGBuffer(nativeInputs);
+        _OutGBuffer0[pixelCoord] = packedSummary.rt0;
+        _OutGBuffer1[pixelCoord] = packedSummary.rt1;
+        _OutGBuffer2[pixelCoord] = packedSummary.rt2;
+        _OutGBuffer3[pixelCoord] = packedSummary.rt3;
+        _OutGBuffer4[pixelCoord] = packedSummary.rt4;
+
+        if (_WriteSubstrateClosureBuffer != 0u)
+        {
+            uint headerFlags = any(nativeInputs.emissionLuminance * nativeInputs.emissionColor > 0.0f)
+                ? VIVID_SUBSTRATE_FLAG_HAS_EMISSION
+                : 0u;
+            VividWriteSubstrateOpenPBROpaqueSingle(
+                _OutSubstrateClosureBuffer,
+                pixelCoord,
+                nativeInputs,
+                headerFlags);
+        }
+        if (_WriteDualSlabSidecar != 0u)
+        {
+            VividDualSlabLayerSidecarOutput sidecar = VividPackOpenPBROpaqueSidecar(nativeInputs);
+            _OutLayerAux0[pixelCoord] = sidecar.rt0;
+            _OutLayerAux1[pixelCoord] = sidecar.rt1;
+        }
+        return;
+    }
+
+    VividSurfaceSummaryGBufferOutput packedCore = VividPackSurfaceSummaryGBuffer(surfaceData);
+    _OutGBuffer0[pixelCoord] = packedCore.rt0;
+    _OutGBuffer1[pixelCoord] = packedCore.rt1;
+    _OutGBuffer2[pixelCoord] = packedCore.rt2;
+    _OutGBuffer3[pixelCoord] = packedCore.rt3;
+    _OutGBuffer4[pixelCoord] = packedCore.rt4;
+
+    if (_WriteSubstrateClosureBuffer != 0u)
+    {
+        VividWriteSubstrateEmpty(_OutSubstrateClosureBuffer, pixelCoord);
+    }
+
+    if (_WriteDualSlabSidecar != 0u)
+    {
+        if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
+        {
+            VividDualSlabLayerSidecarOutput sidecar = VividPackDualSlabLayerSidecar(dualSlabLayerData);
+            _OutLayerAux0[pixelCoord] = sidecar.rt0;
+            _OutLayerAux1[pixelCoord] = sidecar.rt1;
+        }
+        else
+        {
+            _OutLayerAux0[pixelCoord] = 0.0f;
+            _OutLayerAux1[pixelCoord] = 0.0f;
+        }
+    }
+}

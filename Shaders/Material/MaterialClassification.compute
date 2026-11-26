@@ -14,6 +14,7 @@
 #define BUILD_INDIRECT_THREADS 64
 #define VIVID_MATERIAL_CLASSIFY_THREAD_COUNT (CLASSIFY_TILE_SIZE * CLASSIFY_TILE_SIZE)
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSubstrateBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
 #define VIVID_DEFERRED_VARIANT_COUNT 4
@@ -43,6 +44,7 @@
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float> _DepthTexture;
+Texture2DArray<uint> _SubstrateClosureBuffer;
 
 RWStructuredBuffer<uint> _MaterialTileFeatureFlags;
 RWStructuredBuffer<uint> _MaterialFeatureTileList;
@@ -52,6 +54,7 @@ uint _ClassificationWidth;
 uint _ClassificationHeight;
 uint _MaterialTileCount;
 uint _MaterialTileCountX;
+uint _SubstrateClosureBufferEnabled;
 
 #if VIVID_MATERIAL_USE_WAVE_INTRINSICS
 groupshared uint gs_TileWaveMasks[VIVID_MATERIAL_WAVES_PER_CLASSIFY_GROUP];
@@ -72,11 +75,11 @@ uint GetDeferredClassOneHot(uint deferredExportClass)
         return 0u;
     }
 
-    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB
-        || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_FAST_SLAB)
         return VIVID_DEFERRED_CLASS_BIT_FAST_SLAB;
 
-    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_GENERAL_SLAB)
+    if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_GENERAL_SLAB
+        || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
         return VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB;
 
     if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB)
@@ -447,6 +450,15 @@ void ClassifyDeferredExportsInternal(
                 : VIVID_DEFERRED_EXPORT_CLASS_ERROR;
             uint deferredExportClass = VividGetDeferredExportClass(deferredExportHeader);
             deferredClassOneHot = GetDeferredClassOneHot(deferredExportClass);
+            if (_SubstrateClosureBufferEnabled != 0u
+                && (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE
+                    || deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_CATCH_ALL))
+            {
+                uint substrateHeader = _SubstrateClosureBuffer.Load(int4(pixelCoord, 0, 0));
+                uint substrateClassBit = VividGetSubstrateTileClassBit(substrateHeader);
+                if (substrateClassBit != 0u)
+                    deferredClassOneHot = substrateClassBit;
+            }
         }
     }
 

@@ -17,7 +17,14 @@ TEXTURE2D(_VTPhysicalCache3);
 SAMPLER(sampler_VTPhysicalCache);
 float4 _VTLayerFallbacks[4];
 
-#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW_COMPUTE)
+#ifndef VIVID_VT_ENABLE_FEEDBACK_RW
+#define VIVID_VT_ENABLE_FEEDBACK_RW 1
+#endif
+globallycoherent RWStructuredBuffer<uint4> _VTFeedbackRequests;
+RWStructuredBuffer<uint> _VTFeedbackCounter;
+globallycoherent RWStructuredBuffer<uint4> _VTFeedbackResidentHash;
+#elif defined(VIVID_VT_ENABLE_FEEDBACK_RW)
 globallycoherent RWStructuredBuffer<uint4> _VTFeedbackRequests : register(u5);
 RWStructuredBuffer<uint> _VTFeedbackCounter : register(u6);
 globallycoherent RWStructuredBuffer<uint4> _VTFeedbackResidentHash : register(u7);

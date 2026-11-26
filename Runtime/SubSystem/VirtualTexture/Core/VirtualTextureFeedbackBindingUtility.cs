@@ -112,6 +112,33 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal static bool BindFeedbackComputeTargets(
+            CommandBuffer cmd,
+            ComputeShader computeShader,
+            int kernelIndex,
+            in VirtualTextureSpaceBinding binding)
+        {
+            if (cmd == null || computeShader == null || kernelIndex < 0 || !binding.HasFeedback)
+                return false;
+
+            cmd.SetComputeBufferParam(
+                computeShader,
+                kernelIndex,
+                VirtualTextureShaderIDs._VTFeedbackRequests,
+                binding.FeedbackRequests);
+            cmd.SetComputeBufferParam(
+                computeShader,
+                kernelIndex,
+                VirtualTextureShaderIDs._VTFeedbackCounter,
+                binding.FeedbackCounter);
+            cmd.SetComputeBufferParam(
+                computeShader,
+                kernelIndex,
+                VirtualTextureShaderIDs._VTFeedbackResidentHash,
+                binding.FeedbackResidentHash);
+            return true;
+        }
+
         private static void CopyMipOffsets(int[] source, float[] destination)
         {
             if (source == null || destination == null)

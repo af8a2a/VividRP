@@ -18,6 +18,7 @@ namespace VividRP.Runtime
         public GraphicsBuffer visibleMeshletRenderRequestsBuffer;
         public GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer;
         public bool requiresDualSlabSidecar;
+        public bool requiresSubstrateBuffer;
         public bool occlusionCullingEnabled;
         public bool occlusionHistoryValid;
         public bool occlusionObservationMode;
@@ -38,6 +39,7 @@ namespace VividRP.Runtime
             visibleMeshletRenderRequestsBuffer = null;
             visibleMeshletIndirectDrawArgsBuffer = null;
             requiresDualSlabSidecar = false;
+            requiresSubstrateBuffer = false;
             primitiveDrawSet = null;
             primitiveShadowDrawSet = null;
             staticPrimitiveShadowDrawSet = null;

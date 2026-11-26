@@ -52,6 +52,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SdfScreenSourceGeometryId = Shader.PropertyToID("_SdfScreenSourceGeometry");
         private static readonly int LayerAux0Id = Shader.PropertyToID("_LayerAux0");
         private static readonly int LayerAux1Id = Shader.PropertyToID("_LayerAux1");
+        private static readonly int SubstrateClosureBufferId = Shader.PropertyToID("_SubstrateClosureBuffer");
+        private static readonly int SubstrateClosureBufferEnabledId = Shader.PropertyToID("_SubstrateClosureBufferEnabled");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int GTAOTextureId = Shader.PropertyToID("_GTAOTexture");
@@ -208,6 +210,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureHandle m_LumenReflections;
         private TextureHandle m_SdfScreenSourceRadiance;
         private TextureHandle m_SdfScreenSourceGeometry;
+        private TextureHandle m_SubstrateClosureBufferHandle;
+        private bool m_HasSubstrateClosureBuffer;
         private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1 };
         private int m_LightingWidth = 1;
         private int m_LightingHeight = 1;
@@ -267,7 +271,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(profilerName);
 
-            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
+            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateInput("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
@@ -281,7 +285,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RealtimeDiffuseGI = m_LocalRealtimeDiffuseGI;
             m_LocalLayerAux0 = RenderGraphTexture.CreateColorTarget(
                 "LayerAux0",
-                GraphicsFormat.R8G8B8A8_SRGB);
+                GraphicsFormat.R8G8B8A8_UNorm);
             m_LocalLayerAux0.desc.ClearBuffer = true;
             m_LocalLayerAux0.desc.ClearColor = Color.clear;
             m_LocalLayerAux0.desc.FilterMode = FilterMode.Point;
@@ -409,6 +413,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SdfScreenSource?.radiance, 0, AccessFlags.Write);
             m_SdfScreenSourceGeometry = CameraHistoryRenderGraphBridge.ImportForPass(this,
                 m_SdfScreenSource?.geometry, 0, AccessFlags.Write);
+            m_HasSubstrateClosureBuffer = VividSubstrateMaterialFrameData.ImportClosureBufferOrDummyForPass(
+                this,
+                frameData,
+                width,
+                height,
+                out m_SubstrateClosureBufferHandle);
 
             m_GBuffer0.Resize(width, height);
             m_GBuffer1.Resize(width, height);
@@ -476,6 +486,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DeferredLitCompute = null;
             m_ClearDeferredLitKernel = -1;
             m_ClearSdfScreenSourceKernel = -1;
+            m_SubstrateClosureBufferHandle = default;
+            m_HasSubstrateClosureBuffer = false;
             ResetDeferredLitVariantKernels();
             m_ScreenSpaceReflectionTexture = m_LocalScreenSpaceReflectionTexture;
             m_FrameContextScreenSpaceReflectionTexture = null;
@@ -568,6 +580,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 LayerAux1Id,
                 m_LayerAux1,
                 m_LocalLayerAux1);
+            bool bindSubstrate = m_HasSubstrateClosureBuffer && m_SubstrateClosureBufferHandle.IsValid();
+            cmd.SetComputeIntParam(
+                m_DeferredLitCompute,
+                SubstrateClosureBufferEnabledId,
+                bindSubstrate ? 1 : 0);
+            if (m_SubstrateClosureBufferHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    SubstrateClosureBufferId,
+                    m_SubstrateClosureBufferHandle);
+            }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             if (ReferenceEquals(m_DirectionalShadowTexture, m_LocalDirectionalShadowTexture)
                 || m_DirectionalShadowTexture == null

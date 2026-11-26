@@ -2,6 +2,7 @@
 #define VIVIDRP_SURFACE_SUMMARY_GBUFFER_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 #define VIVID_SURFACE_SUMMARY_GBUFFER_ABI_VERSION 1u
@@ -24,6 +25,7 @@
 // from the encoded DeferredExportClass values above.
 #define VIVID_DEFERRED_CLASS_BIT_FAST_SLAB (1u << 0)
 #define VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB (1u << 1)
+#define VIVID_DEFERRED_CLASS_BIT_OPENPBR_SINGLE VIVID_DEFERRED_CLASS_BIT_GENERAL_SLAB
 #define VIVID_DEFERRED_CLASS_BIT_DUAL_SLAB (1u << 2)
 #define VIVID_DEFERRED_CLASS_BIT_CATCH_ALL (1u << 3)
 
@@ -35,16 +37,17 @@
 #define VIVID_DEFERRED_EXPORT_HEADER_MASK 0xFFu
 
 // Surface Summary GBuffer ABI:
-// RT0 (R8G8B8A8_SRGB)       : DiffuseAlbedo.rgb + DeferredExportHeader.a
-// RT1 (A2B10G10R10_UNORM)   : Octahedral Normal.xy + PerceptualRoughness.z + ABI tag.a
-// RT2 (R8G8B8A8_UNORM)      : SqrtEncodedSpecularF0.rgb + AmbientOcclusion.a
-// RT3 (B10G11R11_UFLOAT)    : Emissive.rgb
-// RT4 / DiffuseIrradiance   : DiffuseIrradiance.rgb
+// RT0 (R8G8B8A8_UNORM, sRGB) : LinearToSRGB(DiffuseAlbedo.rgb) + DeferredExportHeader.a
+// RT1 (A2B10G10R10_UNORM)    : Octahedral Normal.xy + PerceptualRoughness.z + ABI tag.a
+// RT2 (R8G8B8A8_UNORM)       : SqrtEncodedSpecularF0.rgb + AmbientOcclusion.a
+// RT3 (B10G11R11_UFLOAT)     : Emissive.rgb
+// RT4 / DiffuseIrradiance    : DiffuseIrradiance.rgb
 // Optional Dual Slab sidecar:
-// Logical RT5 / LayerAux0 (R8G8B8A8_SRGB) : TopDiffuseAlbedo.rgb + LayerWeight.a
-// Logical RT6 / LayerAux1 (R8G8B8A8_UNORM): SqrtEncodedTopSpecularF0.rgb + TopPerceptualRoughness.a
-// The sidecar is emitted by a separate two-MRT draw as SV_Target0/1 so the
-// core draw can retain VT feedback UAV slots u5-u7.
+// Logical RT5 / LayerAux0 (R8G8B8A8_UNORM, sRGB) : LinearToSRGB(TopDiffuseAlbedo.rgb) + LayerWeight.a
+// Logical RT6 / LayerAux1 (R8G8B8A8_UNORM)       : SqrtEncodedTopSpecularF0.rgb + TopPerceptualRoughness.a
+// Single-pass Compute VisibilityBuffer Resolve writes RT0-RT4 (TopLayer Summary),
+// the Substrate Closure Buffer (RWTexture2DArray<uint>), and optional Dual Slab
+// sidecar UAVs in one dispatch without MRT/UAV slot collisions.
 // The top slab shares the core surface normal. The vertical-layer operator is
 // encoded by VIVID_DEFERRED_EXPORT_FLAG_VERTICAL_LAYER in the core header.
 
@@ -192,6 +195,16 @@ float3 VividDecodeSurfaceSummaryNormal(float2 encodedNormal)
         UnpackNormalOctQuadEncode(octahedralNormal));
 }
 
+float3 VividEncodeSurfaceSummaryDiffuseAlbedo(float3 diffuseAlbedo)
+{
+    return LinearToSRGB(saturate(diffuseAlbedo));
+}
+
+float3 VividDecodeSurfaceSummaryDiffuseAlbedo(float3 encodedDiffuseAlbedo)
+{
+    return SRGBToLinear(saturate(encodedDiffuseAlbedo));
+}
+
 float3 VividEncodeSurfaceSummarySpecularF0(float3 specularF0)
 {
     return sqrt(saturate(specularF0));
@@ -216,7 +229,9 @@ VividDualSlabLayerData VividSanitizeDualSlabLayerData(
 float4 VividPackDualSlabLayerAux0(VividDualSlabLayerData layerData)
 {
     layerData = VividSanitizeDualSlabLayerData(layerData);
-    return float4(layerData.diffuseAlbedo, layerData.layerWeight);
+    return float4(
+        VividEncodeSurfaceSummaryDiffuseAlbedo(layerData.diffuseAlbedo),
+        layerData.layerWeight);
 }
 
 float4 VividPackDualSlabLayerAux1(VividDualSlabLayerData layerData)
@@ -232,7 +247,7 @@ VividDualSlabLayerData VividUnpackDualSlabLayerSidecar(
     float4 layerAux1)
 {
     VividDualSlabLayerData layerData;
-    layerData.diffuseAlbedo = saturate(layerAux0.rgb);
+    layerData.diffuseAlbedo = VividDecodeSurfaceSummaryDiffuseAlbedo(layerAux0.rgb);
     layerData.layerWeight = saturate(layerAux0.a);
     layerData.specularF0 = VividDecodeSurfaceSummarySpecularF0(
         layerAux1.rgb);
@@ -279,7 +294,7 @@ VividSurfaceSummaryGBufferOutput VividPackSurfaceSummaryGBuffer(
 
     VividSurfaceSummaryGBufferOutput output;
     output.rt0 = float4(
-        surfaceData.diffuseAlbedo,
+        VividEncodeSurfaceSummaryDiffuseAlbedo(surfaceData.diffuseAlbedo),
         VividEncodeDeferredExportHeader(surfaceData.deferredExportHeader));
     output.rt1 = float4(
         VividEncodeSurfaceSummaryNormal(surfaceData.normalWS),
@@ -312,7 +327,7 @@ VividSurfaceSummaryData VividUnpackSurfaceSummaryGBuffer(
 {
     bool isValidABI = VividIsSurfaceSummaryGBufferABIValid(rt1.a);
     VividSurfaceSummaryData surfaceData;
-    surfaceData.diffuseAlbedo = saturate(rt0.rgb);
+    surfaceData.diffuseAlbedo = VividDecodeSurfaceSummaryDiffuseAlbedo(rt0.rgb);
     surfaceData.deferredExportHeader = isValidABI
         ? VividDecodeDeferredExportHeader(rt0.a)
         : VIVID_DEFERRED_EXPORT_CLASS_ERROR;

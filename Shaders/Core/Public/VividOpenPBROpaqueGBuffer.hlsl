@@ -53,7 +53,7 @@ VividSurfaceSummaryGBufferOutput VividPackOpenPBROpaqueGBuffer(VividOpenPBROpaqu
 VividDualSlabLayerSidecarOutput VividPackOpenPBROpaqueSidecar(VividOpenPBROpaqueInputs inputs)
 {
     VividDualSlabLayerSidecarOutput output;
-    output.rt0 = float4(inputs.baseColor, inputs.baseWeight);
+    output.rt0 = float4(VividEncodeSurfaceSummaryDiffuseAlbedo(inputs.baseColor), inputs.baseWeight);
     output.rt1 = float4(inputs.specularColor, inputs.specularWeight);
     return output;
 }
@@ -62,7 +62,7 @@ bool VividTryUnpackOpenPBROpaqueGBuffer(VividSurfaceSummaryData summary,
     float4 nativeParameters, float4 aux0, float4 aux1, out VividOpenPBROpaqueInputs inputs)
 {
     inputs = (VividOpenPBROpaqueInputs)0;
-    inputs.baseColor = aux0.rgb;
+    inputs.baseColor = VividDecodeSurfaceSummaryDiffuseAlbedo(aux0.rgb);
     inputs.baseWeight = aux0.a;
     inputs.specularColor = aux1.rgb;
     inputs.specularWeight = aux1.a;

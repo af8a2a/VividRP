@@ -121,11 +121,11 @@ namespace VividRP.Editor.Tests
             var diffuseIrradianceTexture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer4");
             var layerAux0Texture = GetFieldValue<RenderGraphTexture>(pass, "m_LayerAux0");
             var layerAux1Texture = GetFieldValue<RenderGraphTexture>(pass, "m_LayerAux1");
-            Assert.That(gbuffer0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(gbuffer0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(gbuffer1Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(gbuffer2Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(diffuseIrradianceTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
-            Assert.That(layerAux0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+            Assert.That(layerAux0Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(layerAux1Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
 
             var skyCubemap = GetFieldValue<RenderGraphTexture>(pass, "m_SkyIBLCubemap");

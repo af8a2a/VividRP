@@ -24,7 +24,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "#define VIVID_SURFACE_SUMMARY_GBUFFER_ABI_TAG 3u",
                 source);
-            StringAssert.Contains("RT0 (R8G8B8A8_SRGB)", source);
+            StringAssert.Contains("RT0 (R8G8B8A8_UNORM, sRGB)", source);
             StringAssert.Contains("RT1 (A2B10G10R10_UNORM)", source);
             StringAssert.Contains("RT2 (R8G8B8A8_UNORM)", source);
             StringAssert.Contains("RT3 (B10G11R11_UFLOAT)", source);
@@ -33,6 +33,8 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("VividPackSurfaceSummaryGBuffer(", source);
             StringAssert.Contains("VividUnpackSurfaceSummaryGBuffer(", source);
             StringAssert.Contains("VividSanitizeSurfaceSummaryData(", source);
+            StringAssert.Contains("VividEncodeSurfaceSummaryDiffuseAlbedo(", source);
+            StringAssert.Contains("VividDecodeSurfaceSummaryDiffuseAlbedo(", source);
             StringAssert.Contains("VividEncodeSurfaceSummarySpecularF0(", source);
             StringAssert.Contains("VividDecodeSurfaceSummarySpecularF0(", source);
             StringAssert.Contains("sqrt(saturate(specularF0))", source);
@@ -41,7 +43,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("surfaceData.ambientOcclusion", source);
             StringAssert.Contains("surfaceData.diffuseIrradiance", source);
             StringAssert.Contains(
-                "output.rt0=float4(surfaceData.diffuseAlbedo,"
+                "output.rt0=float4(VividEncodeSurfaceSummaryDiffuseAlbedo(surfaceData.diffuseAlbedo),"
                 + "VividEncodeDeferredExportHeader(surfaceData.deferredExportHeader));",
                 compactSource);
             StringAssert.Contains(
@@ -137,7 +139,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains(
                 "#define VIVID_DUAL_SLAB_LAYER_SIDECAR_MIN_WEIGHT (0.5f / 255.0f)",
                 source);
-            StringAssert.Contains("RT5 / LayerAux0 (R8G8B8A8_SRGB)", source);
+            StringAssert.Contains("RT5 / LayerAux0 (R8G8B8A8_UNORM, sRGB)", source);
             StringAssert.Contains("RT6 / LayerAux1 (R8G8B8A8_UNORM)", source);
             StringAssert.Contains("VividDualSlabLayerData", source);
             StringAssert.Contains("VividPackDualSlabLayerAux0(", source);
@@ -149,7 +151,7 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("float4 rt0 : SV_Target0;", source);
             StringAssert.Contains("float4 rt1 : SV_Target1;", source);
             StringAssert.Contains(
-                "returnfloat4(layerData.diffuseAlbedo,layerData.layerWeight);",
+                "returnfloat4(VividEncodeSurfaceSummaryDiffuseAlbedo(layerData.diffuseAlbedo),layerData.layerWeight);",
                 compactSource);
             StringAssert.Contains(
                 "returnfloat4(VividEncodeSurfaceSummarySpecularF0(" +

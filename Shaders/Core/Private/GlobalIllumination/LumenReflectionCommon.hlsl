@@ -474,7 +474,7 @@ FLumenReflectionMaterial ReadLumenReflectionMaterial(uint2 ScreenCoord, bool bAp
     Mat.WorldNormal = VividDecodeSurfaceSummaryNormal(rt1.xy);
     Mat.Roughness = saturate(rt1.z);
     Mat.TopLayerRoughness = Mat.Roughness;
-    Mat.DiffuseAlbedo = rt0.rgb;
+    Mat.DiffuseAlbedo = VividDecodeSurfaceSummaryDiffuseAlbedo(rt0.rgb);
 
     if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_DUAL_SLAB && _LumenReflectionHasDualSlabSidecar != 0u)
     {

@@ -97,6 +97,8 @@ namespace VividRP.Runtime
                     s_FrameData.Get<VividLumenIndirectDiffuseFrameData>().Reset();
                 if (s_FrameData.Contains<VividGlobalSdfFrameData>())
                     s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
+                if (s_FrameData.Contains<VividSubstrateMaterialFrameData>())
+                    s_FrameData.Get<VividSubstrateMaterialFrameData>().Reset();
             }
 
             VividRenderingData renderingData;
@@ -249,12 +251,14 @@ namespace VividRP.Runtime
             PrimitiveScene.VividPrimitiveDrawSet primitiveShadowDrawSet = null,
             PrimitiveScene.VividPrimitiveDrawSet staticPrimitiveShadowDrawSet = null,
             PrimitiveScene.VividPrimitiveDrawSet dynamicPrimitiveShadowDrawSet = null,
-            bool requiresDualSlabSidecar = false)
+            bool requiresDualSlabSidecar = false,
+            bool requiresSubstrateBuffer = false)
         {
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = visibleMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
             gpuDrivenFrameData.requiresDualSlabSidecar = requiresDualSlabSidecar;
+            gpuDrivenFrameData.requiresSubstrateBuffer = requiresSubstrateBuffer;
             gpuDrivenFrameData.primitiveDrawSet = primitiveDrawSet;
             gpuDrivenFrameData.primitiveShadowDrawSet = primitiveShadowDrawSet;
             gpuDrivenFrameData.staticPrimitiveShadowDrawSet = staticPrimitiveShadowDrawSet;
@@ -447,6 +451,8 @@ namespace VividRP.Runtime
             ClearFrameImportedHandles();
             s_RenderedPreImageEffectGizmosInGraph = false;
         }
+
+        internal static bool HasActiveRenderGraph => s_CurrentRenderGraph != null;
 
         /// <summary>
         /// Imports an external RTHandle for a specific pass during Prepare().

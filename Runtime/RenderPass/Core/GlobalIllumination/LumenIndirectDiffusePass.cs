@@ -535,6 +535,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OpenPbrParametersId = Shader.PropertyToID("_SdfOpenPbrParameters");
         private static readonly int OpenPbrAux0Id = Shader.PropertyToID("_SdfOpenPbrAux0");
         private static readonly int OpenPbrAux1Id = Shader.PropertyToID("_SdfOpenPbrAux1");
+        private static readonly int SubstrateClosureBufferId = Shader.PropertyToID("_SdfSubstrateClosureBuffer");
+        private static readonly int SubstrateClosureBufferEnabledId = Shader.PropertyToID("_SdfSubstrateClosureBufferEnabled");
         private static readonly int RestirSpatialId = Shader.PropertyToID("_SdfRestirSpatial");
         private static readonly int RestirVarianceId = Shader.PropertyToID("_SdfRestirVariance");
         private static readonly int RestirPreviousVarianceId = Shader.PropertyToID("_SdfRestirPreviousVariance");
@@ -563,7 +565,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_Depth = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
 
         [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
+        private RenderGraphTexture m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
 
         [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
@@ -1002,6 +1004,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_NearOcclusion;
         private bool m_RestirOpenPbrDiffuse;
         private int m_OpenPbrResolveKernel = -1;
+        private TextureHandle m_SubstrateClosureBufferHandle;
+        private bool m_HasSubstrateClosureBuffer;
         private int m_FarKernel = -1, m_NearOcclusionKernel = -1;
         private HistoryState m_State;
         private Matrix4x4 m_ViewProjection, m_InverseViewProjection;
@@ -1434,6 +1438,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarPending = m_FarClear = false;
             m_NearOcclusion = default;
             m_RestirOpenPbrDiffuse = false;
+            m_SubstrateClosureBufferHandle = default;
+            m_HasSubstrateClosureBuffer = false;
             m_SkyTexture = default;
             m_SkyTraceDistance = 0f;
             m_SkyContentHash = 0;
@@ -1520,9 +1526,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 && 2 * CoreUtils.DivRoundUp(m_Height, RestirPixelSpacing) <= SystemInfo.maxTextureSize;
             m_RestirGather = m_RestirPixelIntegration
                 || (legacyGather && canRestir && m_TraceMode == LumenIndirectDiffuseTraceMode.SdfOnly);
+            m_HasSubstrateClosureBuffer = VividSubstrateMaterialFrameData.ImportClosureBufferOrDummyForPass(
+                this,
+                frameData,
+                m_Width,
+                m_Height,
+                out m_SubstrateClosureBufferHandle);
+            bool hasOpenPbrInputs = m_HasSubstrateClosureBuffer
+                || (CoversReceiver(m_OpenPbrParameters) && CoversReceiver(m_OpenPbrAux0) && CoversReceiver(m_OpenPbrAux1));
             m_RestirOpenPbrDiffuse = m_RestirPixelIntegration && m_OpenPbrResolveKernel >= 0
-                && settings.restirOpenPbrDiffuse.value && CoversReceiver(m_OpenPbrParameters)
-                && CoversReceiver(m_OpenPbrAux0) && CoversReceiver(m_OpenPbrAux1)
+                && settings.restirOpenPbrDiffuse.value && hasOpenPbrInputs
                 && PipelineResourceManager.Get<VividRPCoreResources>()?.OpenPBRLuts?.IsReady == true;
             m_AdaptiveProbes &= !m_RestirPixelIntegration;
             m_DirectionalProbes = useSettings && !m_RestirPixelIntegration && (!legacyGather || settings.directionalScreenProbes.value);
@@ -2166,8 +2179,10 @@ namespace VividRP.Runtime.RenderPass.Core
             bool compositeBent = pixelTemporal && m_BentComposite && m_BentNormalHistory != null
                 && m_PreviousBentNormal.innerHandle.IsValid() && m_CurrentBentNormal.innerHandle.IsValid()
                 && m_LumenBentNormal.innerHandle.IsValid();
-            m_RestirOpenPbrDiffuse &= m_OpenPbrParameters?.innerHandle.IsValid() == true
-                && m_OpenPbrAux0?.innerHandle.IsValid() == true && m_OpenPbrAux1?.innerHandle.IsValid() == true;
+            bool hasOpenPbrHandles = (m_HasSubstrateClosureBuffer && m_SubstrateClosureBufferHandle.IsValid())
+                || (m_OpenPbrParameters?.innerHandle.IsValid() == true
+                    && m_OpenPbrAux0?.innerHandle.IsValid() == true && m_OpenPbrAux1?.innerHandle.IsValid() == true);
+            m_RestirOpenPbrDiffuse &= hasOpenPbrHandles;
             hasHistory &= m_State.HasScreenRays == useScreenRays && m_State.PixelTemporal == pixelTemporal
                 && m_State.RestirOpenPbrDiffuse == m_RestirOpenPbrDiffuse
                 && m_State.CorrectReceiverSelfHits == correctReceiver && m_State.ScreenCardLighting == screenCardLighting
@@ -4036,9 +4051,18 @@ namespace VividRP.Runtime.RenderPass.Core
             BindScreenTraceHistory(cmd, m_GatherCompute, kernel, repairScreenRays, black);
             if (m_RestirOpenPbrDiffuse)
             {
-                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrParametersId, m_OpenPbrParameters.innerHandle);
-                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrAux0Id, m_OpenPbrAux0.innerHandle);
-                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrAux1Id, m_OpenPbrAux1.innerHandle);
+                bool bindSubstrate = m_HasSubstrateClosureBuffer && m_SubstrateClosureBufferHandle.IsValid();
+                cmd.SetComputeIntParam(m_GatherCompute, SubstrateClosureBufferEnabledId, bindSubstrate ? 1 : 0);
+                if (m_SubstrateClosureBufferHandle.IsValid())
+                {
+                    cmd.SetComputeTextureParam(m_GatherCompute, kernel, SubstrateClosureBufferId, m_SubstrateClosureBufferHandle);
+                }
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrParametersId,
+                    m_OpenPbrParameters?.innerHandle.IsValid() == true ? m_OpenPbrParameters.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrAux0Id,
+                    m_OpenPbrAux0?.innerHandle.IsValid() == true ? m_OpenPbrAux0.innerHandle : black);
+                cmd.SetComputeTextureParam(m_GatherCompute, kernel, OpenPbrAux1Id,
+                    m_OpenPbrAux1?.innerHandle.IsValid() == true ? m_OpenPbrAux1.innerHandle : black);
             }
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, GeometryId, m_Geometry.innerHandle);
             cmd.SetComputeTextureParam(m_GatherCompute, kernel, PlacementId, placement);

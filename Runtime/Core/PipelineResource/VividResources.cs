@@ -189,6 +189,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/VisibilityBufferGBufferResolve.compute")]
+        public ComputeShader VisibilityBufferGBufferResolveCompute;
+
         [VividResourcePath("Shaders/Material/Archived/Experimental/Closure/ExperimentalClosureClassification")]
         public ComputeShader ExperimentalClosureClassificationCompute;
 

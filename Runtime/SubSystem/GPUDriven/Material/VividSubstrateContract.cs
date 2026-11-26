@@ -65,6 +65,14 @@ namespace VividRP.Runtime.GPUDriven
         internal uint AbiVersion;
     }
 
+    internal struct VividSubstrateOperatorDesc
+    {
+        internal VividSubstrateTopologyOp OpKind;
+        internal float Weight;
+        internal float OpticalThickness;
+        internal float3 TransmittanceColorSrgb;
+    }
+
     /// <summary>
     /// Frozen Substrate Closure Buffer ABI v1 contract shared between C# and HLSL
     /// (Shaders/Core/Public/VividSubstrateBuffer.hlsl).
@@ -84,6 +92,36 @@ namespace VividRP.Runtime.GPUDriven
         internal const int HeaderSliceCount = 1;
         internal const int OpenPBRCoreUintCount = 5;
         internal const int OpenPBROpaqueSingleTotalSlices = HeaderSliceCount + OpenPBRCoreUintCount; // 6 uints = 24 B/px
+
+        // Phase 2.1 optional single-closure extension slice counts (written in canonical bit order: Coat -> Fuzz -> Anisotropy)
+        internal const int CoatBaseExtUintCount = 2;      // weight/rough/darkening/ior + coatColor/flags
+        internal const int CoatDualNormalExtUintCount = 3; // + independent 16x16 octahedral coat normal
+        internal const int FuzzExtUintCount = 2;           // fuzzColor/weight + fuzzRoughness
+        internal const int AnisotropyExtUintCount = 2;     // aniso/rotation/handedness + 16x16 octahedral tangent
+        internal const int SingleComplexMaxTotalSlices =
+            HeaderSliceCount + OpenPBRCoreUintCount + CoatDualNormalExtUintCount + FuzzExtUintCount + AnisotropyExtUintCount; // 13 uints = 52 B/px <= 64 B/px
+
+        internal const uint CoatFlagIndependentNormal = 1u << 0;
+        internal const uint AnisoFlagNegativeHandedness = 1u << 0;
+
+        // Phase 2.2 Multi-Closure operator word layout (1 uint per binary operator, up to 3 operators for 4 closures)
+        // Bits [0..1]:   opKind (1 = HorizontalMix, 2 = VerticalLayer)
+        // Bits [2..9]:   weight (UNorm8: blend factor or VerticalLayer coverage)
+        // Bits [10..16]: opticalThickness (UNorm7 mapped to [0, MaxOpticalThickness])
+        // Bits [17..31]: transmittanceColor (sRGB RGB555: R 17..21, G 22..26, B 27..31)
+        internal const int MaxOperatorsPerPixel = MaxClosuresPerPixel - 1; // 3
+        internal const int OperatorWordUintCount = 1;
+        internal const float MaxOpticalThickness = 4.0f;
+        internal const int OpKindShift = 0;
+        internal const uint OpKindMask = 0x3u;
+        internal const int OpWeightShift = 2;
+        internal const uint OpWeightMask = 0xFFu;
+        internal const int OpThicknessShift = 10;
+        internal const uint OpThicknessMask = 0x7Fu;
+        internal const int OpTransRShift = 17;
+        internal const int OpTransGShift = 22;
+        internal const int OpTransBShift = 27;
+        internal const uint OpTransChannelMask = 0x1Fu;
 
         internal const GraphicsFormat ClosureBufferFormat = GraphicsFormat.R32_UInt;
         internal const TextureDimension ClosureBufferDimension = TextureDimension.Tex2DArray;
@@ -189,6 +227,97 @@ namespace VividRP.Runtime.GPUDriven
         {
             float range = OpenPBROpaqueContract.MaximumSpecularIor - OpenPBROpaqueContract.MinimumSpecularIor;
             return OpenPBROpaqueContract.MinimumSpecularIor + UnpackUNorm(quantized & SpecularIorMask, SpecularIorMask) * range;
+        }
+
+        internal static uint PackCoatIor8(float coatIor)
+        {
+            float range = OpenPBROpaqueContract.MaximumSpecularIor - OpenPBROpaqueContract.MinimumSpecularIor;
+            float normalized = (coatIor - OpenPBROpaqueContract.MinimumSpecularIor) / range;
+            return PackUNorm(normalized, 0xFFu);
+        }
+
+        internal static float UnpackCoatIor8(uint quantized)
+        {
+            float range = OpenPBROpaqueContract.MaximumSpecularIor - OpenPBROpaqueContract.MinimumSpecularIor;
+            return OpenPBROpaqueContract.MinimumSpecularIor + UnpackUNorm(quantized & 0xFFu, 0xFFu) * range;
+        }
+
+        internal static int ComputeSingleClosureExtensionSlices(VividSubstrateFeatureMask features)
+        {
+            int slices = 0;
+            if ((features & VividSubstrateFeatureMask.Coat) != 0)
+            {
+                slices += (features & VividSubstrateFeatureMask.DualNormal) != 0
+                    ? CoatDualNormalExtUintCount
+                    : CoatBaseExtUintCount;
+            }
+            if ((features & VividSubstrateFeatureMask.Fuzz) != 0)
+                slices += FuzzExtUintCount;
+            if ((features & VividSubstrateFeatureMask.Anisotropy) != 0)
+                slices += AnisotropyExtUintCount;
+            return slices;
+        }
+
+        internal static int ComputeSingleClosureTotalSlices(VividSubstrateFeatureMask features)
+        {
+            return HeaderSliceCount + OpenPBRCoreUintCount + ComputeSingleClosureExtensionSlices(features);
+        }
+
+        internal static uint PackOperatorWord(in VividSubstrateOperatorDesc op)
+        {
+            uint opKind = ((uint)op.OpKind) & OpKindMask;
+            uint weightBits = PackUNorm(op.Weight, OpWeightMask);
+            uint thicknessBits = PackUNorm(op.OpticalThickness / MaxOpticalThickness, OpThicknessMask);
+            uint r5 = PackUNorm(op.TransmittanceColorSrgb.x, OpTransChannelMask);
+            uint g5 = PackUNorm(op.TransmittanceColorSrgb.y, OpTransChannelMask);
+            uint b5 = PackUNorm(op.TransmittanceColorSrgb.z, OpTransChannelMask);
+
+            return (opKind << OpKindShift)
+                | (weightBits << OpWeightShift)
+                | (thicknessBits << OpThicknessShift)
+                | (r5 << OpTransRShift)
+                | (g5 << OpTransGShift)
+                | (b5 << OpTransBShift);
+        }
+
+        internal static VividSubstrateOperatorDesc UnpackOperatorWord(uint word)
+        {
+            return new VividSubstrateOperatorDesc
+            {
+                OpKind = (VividSubstrateTopologyOp)((word >> OpKindShift) & OpKindMask),
+                Weight = UnpackUNorm((word >> OpWeightShift) & OpWeightMask, OpWeightMask),
+                OpticalThickness = UnpackUNorm((word >> OpThicknessShift) & OpThicknessMask, OpThicknessMask) * MaxOpticalThickness,
+                TransmittanceColorSrgb = new float3(
+                    UnpackUNorm((word >> OpTransRShift) & OpTransChannelMask, OpTransChannelMask),
+                    UnpackUNorm((word >> OpTransGShift) & OpTransChannelMask, OpTransChannelMask),
+                    UnpackUNorm((word >> OpTransBShift) & OpTransChannelMask, OpTransChannelMask)),
+            };
+        }
+
+        internal static int ComputeMultiClosureTotalSlices(int closureCount)
+        {
+            if (closureCount < 1)
+                return HeaderSliceCount;
+            int operatorCount = Math.Max(0, closureCount - 1);
+            return HeaderSliceCount
+                + operatorCount * OperatorWordUintCount
+                + closureCount * OpenPBRCoreUintCount;
+        }
+
+        internal static int ComputeMultiClosureTotalSlices(ReadOnlySpan<VividSubstrateFeatureMask> closureFeatures)
+        {
+            int count = closureFeatures.Length;
+            if (count < 1)
+                return HeaderSliceCount;
+            int total = HeaderSliceCount + Math.Max(0, count - 1) * OperatorWordUintCount;
+            for (int i = 0; i < count; i++)
+                total += OpenPBRCoreUintCount + ComputeSingleClosureExtensionSlices(closureFeatures[i]);
+            return total;
+        }
+
+        internal static bool FitsSliceBudget(int totalSlices, int budgetSlices = DefaultSliceCount)
+        {
+            return totalSlices >= HeaderSliceCount && totalSlices <= budgetSlices;
         }
     }
 }

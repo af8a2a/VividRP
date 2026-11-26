@@ -327,6 +327,280 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     return true;
 }
 
+bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
+    uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result,
+    out float3 diffuseBounce)
+{
+    result = (VividSimpleSlabDeferredLighting)0;
+    diffuseBounce = 0.0f;
+    if (_VividOpenPBRLutsReady == 0u || _SubstrateClosureBufferEnabled == 0u)
+        return false;
+
+    VividOpenPBRV2Inputs v2Inputs;
+    VividSubstratePixelHeader header;
+    if (!VividTryLoadSubstrateOpenPBRV2Single(_SubstrateClosureBuffer, pixelCoord, v2Inputs, header))
+        return false;
+
+    OpenPBR_ResolvedInputs resolved;
+    if (!VividTryResolveOpenPBRV2Inputs(v2Inputs, resolved))
+        return false;
+
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
+    float3 baseNormal = resolved.geometry_basis.n;
+    float3 coatNormal = resolved.geometry_coat_basis.n;
+    if (dot(baseNormal, viewDirectionWS) <= 0.0f
+        && (resolved.coat_weight <= 0.0f || dot(coatNormal, viewDirectionWS) <= 0.0f))
+        return true;
+
+    OpenPBR_PreparedBsdf prepared = VividPrepareOpenPBRV2(resolved, viewDirectionWS);
+    VividOpenPBRV2AlbedoComponents comp = VividEvaluateOpenPBRV2AlbedoComponents(
+        v2Inputs, resolved, prepared, viewDirectionWS);
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+    bool realtimeOpenPbrDiffuse = false;
+    #if defined(VIVID_REALTIME_DIFFUSE_GI)
+        realtimeOpenPbrDiffuse = _RealtimeOpenPbrDiffuse != 0u;
+    #endif
+    result = VividEvaluateOpenPBRV2Indirect(
+        v2Inputs, resolved, comp, lightLoop,
+        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion),
+        LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo), realtimeOpenPbrDiffuse,
+        LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular(),
+        LoadVividRealtimeLumenReflections(pixelCoord), VividHasRealtimeLumenReflections());
+
+    [loop]
+    for (uint i = 0u; i < _DirectionalLightCount; ++i)
+    {
+        DirectionalLightData light = GetDirectionalLight(i);
+        float shadow = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, i, light);
+        float3 lightDir = SafeNormalize(light.directionWS);
+        float3 radiance = max(light.color, 0.0f) * shadow;
+        if (dot(baseNormal, lightDir) > 0.0f || (resolved.coat_weight > 0.0f && dot(coatNormal, lightDir) > 0.0f))
+        {
+            diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(v2Inputs.core, lightDir, radiance);
+            VividAccumulateOpenPBROpaqueLight(
+                openpbr_scale_diffuse_specular(openpbr_eval(prepared, lightDir), radiance), result);
+        }
+    }
+    uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < punctualCount; ++i)
+    {
+        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        float3 direction;
+        float4 distances;
+        GetVividPunctualLightVectors(positionWS, light, direction, distances);
+        if (distances.y <= VIVID_SIMPLE_SLAB_MIN_PUNCTUAL_DISTANCE_SQ)
+            continue;
+        float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+            light, positionWS - light.positionWS, distances);
+        if (attenuation > 0.0f
+            && (dot(baseNormal, direction) > 0.0f || (resolved.coat_weight > 0.0f && dot(coatNormal, direction) > 0.0f)))
+        {
+            float3 radiance = max(light.color, 0.0f) * attenuation;
+            diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(v2Inputs.core, direction, radiance);
+            VividAccumulateOpenPBROpaqueLight(
+                openpbr_scale_diffuse_specular(openpbr_eval(prepared, direction), radiance), result);
+        }
+    }
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < areaCount; ++i)
+    {
+        float3 areaBounce;
+        VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBRV2AreaLight(
+            v2Inputs, resolved, comp, positionWS, viewDirectionWS,
+            VividLightingLoop::LoadAreaLight(lightLoop, i), areaBounce), result);
+        diffuseBounce += areaBounce;
+    }
+    return true;
+}
+
+// Phase 2.2 Tier 3 physical Multi-Closure evaluator (2..4 OpenPBR closures with independent
+// normals, HorizontalMix, and physical VerticalLayer Fresnel + Beer-Lambert attenuation).
+bool TryEvaluateDeferredSubstrateMultiClosureLighting(VividSurfaceSummaryData summary,
+    uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result,
+    out float3 diffuseBounce)
+{
+    result = (VividSimpleSlabDeferredLighting)0;
+    diffuseBounce = 0.0f;
+    if (_VividOpenPBRLutsReady == 0u || _SubstrateClosureBufferEnabled == 0u)
+        return false;
+
+    VividSubstratePixelHeader header;
+    VividOpenPBRV2Inputs closures[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    VividSubstrateOperatorDesc operators[VIVID_SUBSTRATE_MAX_OPERATORS_PER_PIXEL];
+    if (!VividTryLoadSubstrateMultiClosure(_SubstrateClosureBuffer, pixelCoord, header, closures, operators))
+        return false;
+
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
+    OpenPBR_ResolvedInputs resolvedList[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    OpenPBR_PreparedBsdf preparedList[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    VividOpenPBRV2AlbedoComponents compList[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    OpenPBR_DiffuseSpecular albedoList[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    bool closureFrontFacing[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+
+    [unroll]
+    for (uint c = 0u; c < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++c)
+    {
+        closureFrontFacing[c] = false;
+        albedoList[c] = openpbr_make_zero_diffuse_specular();
+        compList[c] = (VividOpenPBRV2AlbedoComponents)0;
+        resolvedList[c] = openpbr_make_default_resolved_inputs();
+        if (c < header.closureCount)
+        {
+            if (!VividTryResolveOpenPBRV2Inputs(closures[c], resolvedList[c]))
+                return false;
+            float3 n = resolvedList[c].geometry_basis.n;
+            float3 cn = resolvedList[c].geometry_coat_basis.n;
+            if (dot(n, viewDirectionWS) > 0.0f
+                || (resolvedList[c].coat_weight > 0.0f && dot(cn, viewDirectionWS) > 0.0f))
+            {
+                closureFrontFacing[c] = true;
+                preparedList[c] = VividPrepareOpenPBRV2(resolvedList[c], viewDirectionWS);
+                compList[c] = VividEvaluateOpenPBRV2AlbedoComponents(
+                    closures[c], resolvedList[c], preparedList[c], viewDirectionWS);
+                albedoList[c] = openpbr_make_diffuse_specular(
+                    compList[c].diffuse,
+                    compList[c].baseSpecular + compList[c].coatSpecular + compList[c].fuzzSpecular);
+            }
+        }
+    }
+
+    float3 viewWeights[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    float3 indirectDiffWeights[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    float3 indirectSpecWeights[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+    VividComputeMultiClosureIndirectWeights(
+        header.closureCount, closures, albedoList, operators, viewDirectionWS,
+        viewWeights, indirectDiffWeights, indirectSpecWeights);
+
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+    bool realtimeOpenPbrDiffuse = false;
+    #if defined(VIVID_REALTIME_DIFFUSE_GI)
+        realtimeOpenPbrDiffuse = _RealtimeOpenPbrDiffuse != 0u;
+    #endif
+    float4 realtimeDiffuseGI = LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo);
+    float4 realtimeRoughSpecular = LoadVividRealtimeRoughSpecular(pixelCoord);
+    bool hasRealtimeRoughSpecular = VividHasRealtimeRoughSpecular();
+    float3 lumenReflections = LoadVividRealtimeLumenReflections(pixelCoord);
+    bool hasLumenReflections = VividHasRealtimeLumenReflections();
+    float ao = saturate(summary.ambientOcclusion);
+
+    // 1. Indirect lighting accumulated across all closures with independent normals
+    [unroll]
+    for (uint c = 0u; c < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++c)
+    {
+        if (c < header.closureCount && closureFrontFacing[c])
+        {
+            bool isTopClosure = (c + 1u) == header.closureCount;
+            VividSimpleSlabDeferredLighting cIndirect = VividEvaluateOpenPBRV2Indirect(
+                closures[c], resolvedList[c], compList[c], lightLoop,
+                positionWS, viewDirectionWS, ao,
+                realtimeDiffuseGI, realtimeOpenPbrDiffuse,
+                realtimeRoughSpecular, hasRealtimeRoughSpecular,
+                lumenReflections, hasLumenReflections && isTopClosure);
+            float3 wDiff = indirectDiffWeights[c];
+            float3 wSpec = indirectSpecWeights[c];
+            result.indirectDiffuseLighting += cIndirect.indirectDiffuseLighting * wDiff;
+            result.indirectSpecularLighting += cIndirect.indirectSpecularLighting * wSpec;
+            result.diffuseLighting += cIndirect.diffuseLighting * wDiff;
+            result.specularLighting += cIndirect.specularLighting * wSpec;
+        }
+    }
+
+    // 2. Direct directional lights
+    [loop]
+    for (uint i = 0u; i < _DirectionalLightCount; ++i)
+    {
+        DirectionalLightData light = GetDirectionalLight(i);
+        float shadow = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, i, light);
+        float3 lightDir = SafeNormalize(light.directionWS);
+        float3 radiance = max(light.color, 0.0f) * shadow;
+        float3 directWeights[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+        VividComputeMultiClosureDirectWeights(
+            header.closureCount, closures, operators, viewWeights, lightDir, directWeights);
+
+        [unroll]
+        for (uint c = 0u; c < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++c)
+        {
+            if (c < header.closureCount && closureFrontFacing[c])
+            {
+                float3 n = resolvedList[c].geometry_basis.n;
+                float3 cn = resolvedList[c].geometry_coat_basis.n;
+                if (dot(n, lightDir) > 0.0f || (resolvedList[c].coat_weight > 0.0f && dot(cn, lightDir) > 0.0f))
+                {
+                    float3 wRad = radiance * directWeights[c];
+                    diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(closures[c].core, lightDir, wRad);
+                    VividAccumulateOpenPBROpaqueLight(
+                        openpbr_scale_diffuse_specular(openpbr_eval(preparedList[c], lightDir), wRad), result);
+                }
+            }
+        }
+    }
+
+    // 3. Direct punctual lights
+    uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < punctualCount; ++i)
+    {
+        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        float3 direction;
+        float4 distances;
+        GetVividPunctualLightVectors(positionWS, light, direction, distances);
+        if (distances.y <= VIVID_SIMPLE_SLAB_MIN_PUNCTUAL_DISTANCE_SQ)
+            continue;
+        float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+            light, positionWS - light.positionWS, distances);
+        if (attenuation <= 0.0f)
+            continue;
+        float3 radiance = max(light.color, 0.0f) * attenuation;
+        float3 directWeights[VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL];
+        VividComputeMultiClosureDirectWeights(
+            header.closureCount, closures, operators, viewWeights, direction, directWeights);
+
+        [unroll]
+        for (uint c = 0u; c < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++c)
+        {
+            if (c < header.closureCount && closureFrontFacing[c])
+            {
+                float3 n = resolvedList[c].geometry_basis.n;
+                float3 cn = resolvedList[c].geometry_coat_basis.n;
+                if (dot(n, direction) > 0.0f || (resolvedList[c].coat_weight > 0.0f && dot(cn, direction) > 0.0f))
+                {
+                    float3 wRad = radiance * directWeights[c];
+                    diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(closures[c].core, direction, wRad);
+                    VividAccumulateOpenPBROpaqueLight(
+                        openpbr_scale_diffuse_specular(openpbr_eval(preparedList[c], direction), wRad), result);
+                }
+            }
+        }
+    }
+
+    // 4. Area lights (LTC weighted by indirect diffuse/specular transmission weights)
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < areaCount; ++i)
+    {
+        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, i);
+        [unroll]
+        for (uint c = 0u; c < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++c)
+        {
+            if (c < header.closureCount && closureFrontFacing[c])
+            {
+                float3 areaBounce;
+                OpenPBR_DiffuseSpecular contrib = VividEvaluateOpenPBRV2AreaLight(
+                    closures[c], resolvedList[c], compList[c], positionWS, viewDirectionWS,
+                    areaLight, areaBounce);
+                contrib.diffuse *= indirectDiffWeights[c];
+                contrib.specular *= indirectSpecWeights[c];
+                VividAccumulateOpenPBROpaqueLight(contrib, result);
+                diffuseBounce += areaBounce * indirectDiffWeights[c];
+            }
+        }
+    }
+
+    return true;
+}
+
 VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
     VividSurfaceSummaryData summary, uint2 pixelCoord, float3 positionWS)
 {
@@ -637,16 +911,27 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
 // Compile-time tile tier specialization for DeferredLit compute kernels:
 //   Tier 0 (VIVID_DEFERRED_TIER_0): FastSlab only (minimal VGPR footprint)
 //   Tier 1 (VIVID_DEFERRED_TIER_1): FastSlab + OpenPBR Single Simple
-//   Tier 2 (VIVID_DEFERRED_TIER_2): FastSlab + OpenPBR Single + DualSlab
+//   Tier 2 (VIVID_DEFERRED_TIER_2): FastSlab + OpenPBR Single Simple/Complex (Coat/Fuzz/Aniso) + DualSlab
 //   Tier 3 (default):               Full catch-all (Multi-Closure / Error fallback)
 #if defined(VIVID_DEFERRED_TIER_0)
     #define VIVID_DEFERRED_ENABLE_OPENPBR 0
+    #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 0
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 0
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 0
 #elif defined(VIVID_DEFERRED_TIER_1)
     #define VIVID_DEFERRED_ENABLE_OPENPBR 1
+    #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 0
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 0
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 0
+#elif defined(VIVID_DEFERRED_TIER_2)
+    #define VIVID_DEFERRED_ENABLE_OPENPBR 1
+    #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 1
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 0
+    #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 1
 #else
     #define VIVID_DEFERRED_ENABLE_OPENPBR 1
+    #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 1
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 1
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 1
 #endif
 
@@ -697,8 +982,37 @@ float3 VividEvaluateDeferredSurfacePixel(
     UNITY_BRANCH
     if (deferredExportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)
     {
-        if (!TryEvaluateDeferredOpenPBROpaqueLighting(summary, pixelCoord, positionWS,
-                lightLoopOutput, nativeDiffuseBounce))
+        bool evaluatedOpenPbr = false;
+        #if VIVID_DEFERRED_ENABLE_OPENPBR_V2
+        if (_SubstrateClosureBufferEnabled != 0u)
+        {
+            VividSubstratePixelHeader subHeader = VividUnpackSubstratePixelHeader(
+                _SubstrateClosureBuffer.Load(int4(pixelCoord, 0, 0)));
+            if (subHeader.mode == VIVID_SUBSTRATE_MODE_SINGLE_COMPLEX)
+            {
+                evaluatedOpenPbr = TryEvaluateDeferredOpenPBRV2Lighting(
+                    summary, pixelCoord, positionWS, lightLoopOutput, nativeDiffuseBounce);
+            }
+            #if VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE
+            else if (subHeader.mode == VIVID_SUBSTRATE_MODE_MULTI_CLOSURE)
+            {
+                evaluatedOpenPbr = TryEvaluateDeferredSubstrateMultiClosureLighting(
+                    summary, pixelCoord, positionWS, lightLoopOutput, nativeDiffuseBounce);
+            }
+            #endif
+            else
+            {
+                evaluatedOpenPbr = TryEvaluateDeferredOpenPBROpaqueLighting(
+                    summary, pixelCoord, positionWS, lightLoopOutput, nativeDiffuseBounce);
+            }
+        }
+        else
+        #endif
+        {
+            evaluatedOpenPbr = TryEvaluateDeferredOpenPBROpaqueLighting(
+                summary, pixelCoord, positionWS, lightLoopOutput, nativeDiffuseBounce);
+        }
+        if (!evaluatedOpenPbr)
         {
             debugLighting = float4(1.0, 0.0, 1.0, 1.0);
             return VividApplyPreExposure(float3(1.0, 0.0, 1.0));

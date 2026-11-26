@@ -2,6 +2,7 @@
 #define VIVIDRP_OPENPBR_OPAQUE_DEFERRED_LIGHTING_INCLUDED
 
 #include "VividOpenPBROpaque.hlsl"
+#include "VividOpenPBRV2.hlsl"
 #include "VividOpenPBROpaqueGBuffer.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
 
@@ -122,6 +123,170 @@ OpenPBR_DiffuseSpecular VividEvaluateOpenPBROpaqueAreaLight(
     // shape approximation for EON and multiple scattering, not an OpenPBR fit.
     return openpbr_make_diffuse_specular(diffuse.rgb * diffuse.a * color * albedo.diffuse,
         specular.rgb * specular.a * color * albedo.specular);
+}
+
+VividSimpleSlabDeferredLighting VividEvaluateOpenPBRV2Indirect(
+    VividOpenPBRV2Inputs inputs,
+    OpenPBR_ResolvedInputs resolved,
+    VividOpenPBRV2AlbedoComponents comp,
+    VividLightingLoopContext lightLoop,
+    float3 positionWS,
+    float3 viewDirectionWS,
+    float ao,
+    float4 realtimeDiffuseGI,
+    bool realtimeOpenPbrDiffuse,
+    float4 realtimeRoughSpecular = 0.0f,
+    bool hasRealtimeRoughSpecular = false,
+    float3 lumenSpecular = 0.0f,
+    bool hasLumenSpecular = false)
+{
+    VividSimpleSlabDeferredLighting result = (VividSimpleSlabDeferredLighting)0;
+    float3 baseNormal = resolved.geometry_basis.n;
+    float3 coatNormal = resolved.geometry_coat_basis.n;
+
+    // Diffuse GI
+    float3 diffuse = realtimeDiffuseGI.rgb;
+    if (realtimeOpenPbrDiffuse)
+        diffuse *= VividOpenPBROpaqueDiffuseColor(inputs.core);
+    if (realtimeDiffuseGI.a < 1.0f)
+    {
+        bool allowAmbientFallback = VividAllowUnoccludedSkyFallback();
+        float3 fallback = VividHasProbeVolumeGI()
+            ? SampleVividProbeVolume(positionWS, baseNormal, viewDirectionWS, 0xFFFFFFFFu, allowAmbientFallback)
+            : (allowAmbientFallback ? VividSampleAmbientProbe(baseNormal) : 0.0f);
+        diffuse = lerp(realtimeOpenPbrDiffuse ? fallback * comp.diffuse : fallback,
+            diffuse, realtimeDiffuseGI.a);
+    }
+
+    // Base Specular IBL (with anisotropic bent normal when specular_anisotropy > 0)
+    float3 bentBaseNormal = VividComputeAnisotropicBentNormal(
+        resolved.geometry_basis,
+        viewDirectionWS,
+        resolved.specular_roughness_anisotropy,
+        resolved.specular_anisotropy_rotation_cos_sin);
+    float3 baseReflDir = GetSpecularDominantDir(
+        bentBaseNormal,
+        reflect(-viewDirectionWS, bentBaseNormal),
+        comp.adjustedBaseRoughness,
+        saturate(dot(bentBaseNormal, viewDirectionWS)));
+    bool coatOwnsLumenSpecular = hasLumenSpecular && resolved.coat_weight >= 0.5f;
+    float3 baseRadiance = VividSampleSimpleSlabEnvironment(
+        lightLoop,
+        positionWS,
+        bentBaseNormal,
+        baseReflDir,
+        comp.adjustedBaseRoughness,
+        realtimeRoughSpecular,
+        realtimeDiffuseGI.a,
+        hasRealtimeRoughSpecular,
+        lumenSpecular,
+        hasLumenSpecular && !coatOwnsLumenSpecular);
+    float3 specIndirect = baseRadiance * comp.baseSpecular;
+
+    // Independent Coat Specular IBL lobe
+    if (resolved.coat_weight > 0.0f)
+    {
+        float3 coatReflDir = GetSpecularDominantDir(
+            coatNormal,
+            reflect(-viewDirectionWS, coatNormal),
+            comp.adjustedCoatRoughness,
+            saturate(dot(coatNormal, viewDirectionWS)));
+        float3 coatRadiance = VividSampleSimpleSlabEnvironment(
+            lightLoop,
+            positionWS,
+            coatNormal,
+            coatReflDir,
+            comp.adjustedCoatRoughness,
+            realtimeRoughSpecular,
+            realtimeDiffuseGI.a,
+            hasRealtimeRoughSpecular,
+            lumenSpecular,
+            coatOwnsLumenSpecular);
+        specIndirect += coatRadiance * comp.coatSpecular;
+    }
+
+    // Fuzz (Sheen) indirect lobe (broad grazing retro-reflection / rough environment)
+    if (resolved.fuzz_weight > 0.0f)
+    {
+        float fuzzRough = max(resolved.fuzz_roughness, 0.5f);
+        float3 fuzzRadiance = VividSampleSimpleSlabEnvironment(
+            lightLoop,
+            positionWS,
+            baseNormal,
+            baseNormal,
+            fuzzRough,
+            realtimeRoughSpecular,
+            realtimeDiffuseGI.a,
+            hasRealtimeRoughSpecular,
+            0.0f,
+            false);
+        specIndirect += fuzzRadiance * comp.fuzzSpecular;
+    }
+
+    result.indirectDiffuseLighting = (realtimeOpenPbrDiffuse ? diffuse : diffuse * comp.diffuse) * ao;
+    result.indirectSpecularLighting = specIndirect * ao;
+    result.diffuseLighting = result.indirectDiffuseLighting;
+    result.specularLighting = result.indirectSpecularLighting;
+    return result;
+}
+
+OpenPBR_DiffuseSpecular VividEvaluateOpenPBRV2AreaLight(
+    VividOpenPBRV2Inputs inputs,
+    OpenPBR_ResolvedInputs resolved,
+    VividOpenPBRV2AlbedoComponents comp,
+    float3 positionWS,
+    float3 viewDirectionWS,
+    AreaLightData light,
+    out float3 diffuseBounce)
+{
+    diffuseBounce = 0.0f;
+    ApplyRectangularAreaLightBarnDoor(light, positionWS);
+    float intensity = EvaluateAreaLightIntensity(light, positionWS);
+    float3 baseNormal = resolved.geometry_basis.n;
+    float3 coatNormal = resolved.geometry_coat_basis.n;
+    float nDotV = dot(baseNormal, viewDirectionWS);
+    float coatNDotV = dot(coatNormal, viewDirectionWS);
+    if (intensity <= 0.0f || (nDotV <= 0.0f && coatNDotV <= 0.0f))
+        return openpbr_make_zero_diffuse_specular();
+
+    float3 color = max(light.color, 0.0f) * intensity;
+    bool rectangle = light.lightType == VIVID_AREA_LIGHT_TYPE_RECTANGLE;
+    float3 diffOut = 0.0f;
+    float3 specOut = 0.0f;
+
+    if (nDotV > 0.0f)
+    {
+        float3x3 basis = GetOrthoBasisViewNormal(viewDirectionWS, baseNormal, nDotV);
+        float3 center = mul(basis, light.positionWS - positionWS);
+        float3 right = mul(basis, light.rightWS);
+        float3 up = mul(basis, light.upWS);
+        float4 diffuse = EvaluateLTC_Area(rectangle, center, right, up,
+            light.width * 0.5f, light.height * 0.5f, float3x3(1,0,0,0,1,0,0,0,1));
+        float3x3 specularMatrix = SampleLtcMatrix(comp.adjustedBaseRoughness,
+            saturate(nDotV), VIVID_LTC_LIGHTING_MODEL_GGX);
+        float4 specular = EvaluateLTC_Area(rectangle, center, right, up,
+            light.width * 0.5f, light.height * 0.5f, transpose(specularMatrix));
+        diffuseBounce = diffuse.rgb * diffuse.a * color * saturate(VividOpenPBROpaqueDiffuseColor(inputs.core));
+        diffOut += diffuse.rgb * diffuse.a * color * comp.diffuse;
+        specOut += specular.rgb * specular.a * color * comp.baseSpecular;
+        if (resolved.fuzz_weight > 0.0f)
+            specOut += diffuse.rgb * diffuse.a * color * comp.fuzzSpecular;
+    }
+
+    if (resolved.coat_weight > 0.0f && coatNDotV > 0.0f)
+    {
+        float3x3 coatBasis = GetOrthoBasisViewNormal(viewDirectionWS, coatNormal, coatNDotV);
+        float3 coatCenter = mul(coatBasis, light.positionWS - positionWS);
+        float3 coatRight = mul(coatBasis, light.rightWS);
+        float3 coatUp = mul(coatBasis, light.upWS);
+        float3x3 coatMatrix = SampleLtcMatrix(comp.adjustedCoatRoughness,
+            saturate(coatNDotV), VIVID_LTC_LIGHTING_MODEL_GGX);
+        float4 coatSpec = EvaluateLTC_Area(rectangle, coatCenter, coatRight, coatUp,
+            light.width * 0.5f, light.height * 0.5f, transpose(coatMatrix));
+        specOut += coatSpec.rgb * coatSpec.a * color * comp.coatSpecular;
+    }
+
+    return openpbr_make_diffuse_specular(diffOut, specOut);
 }
 
 #endif

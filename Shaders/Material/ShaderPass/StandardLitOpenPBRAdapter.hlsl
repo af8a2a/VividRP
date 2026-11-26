@@ -1,7 +1,8 @@
 #ifndef VIVIDRP_STANDARD_LIT_OPENPBR_ADAPTER_INCLUDED
 #define VIVIDRP_STANDARD_LIT_OPENPBR_ADAPTER_INCLUDED
 
-#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl"
+#define VIVIDRP_STANDARD_LIT_TO_OPENPBR_CORE_ONLY 1
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingShadingNormal.hlsl"
 
 struct VividReferencedPathtracingMaterial
@@ -126,11 +127,6 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
             geometry.faceNormalWS,
             material.unadjustedShadingNormalWS);
 
-    OpenPBR_ResolvedInputs inputs = openpbr_make_default_resolved_inputs();
-    inputs.base_color = saturate(baseSample.rgb);
-    inputs.base_metalness = saturate(metallicSmoothness.x);
-    inputs.base_diffuse_roughness = saturate(1.0 - metallicSmoothness.y);
-    inputs.specular_roughness = max(1.0 - metallicSmoothness.y, 0.001);
     float geometryOpacity;
 #if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
     // Reuse the same stochastic base/opacity texel used by base color and
@@ -141,22 +137,21 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
         geometry.uv,
         baseTextureLod);
 #endif
-    inputs.geometry_opacity = geometryOpacity;
-    inputs.geometry_thin_walled = _ThinWalledTransmission > 0.5;
-    float specularIor = _SpecularIOR;
-    if (isnan(specularIor) || isinf(specularIor))
-        specularIor = 1.5;
-    inputs.specular_ior = clamp(specularIor, 1.0, 3.0);
-
+    VividStandardLitSurfaceParams standardLitParams = VividCreateDefaultStandardLitSurfaceParams();
+    standardLitParams.baseColor = baseSample.rgb;
+    standardLitParams.metallic = metallicSmoothness.x;
+    standardLitParams.smoothness = metallicSmoothness.y;
+    standardLitParams.specularIor = _SpecularIOR;
 #if defined(_CLEARCOAT)
-    inputs.coat_weight = saturate(_ClearCoatMask);
-    inputs.coat_roughness = max(1.0 - saturate(_ClearCoatSmoothness), 0.001);
-#else
-    inputs.coat_weight = 0.0;
+    standardLitParams.clearCoatMask = _ClearCoatMask;
+    standardLitParams.clearCoatSmoothness = _ClearCoatSmoothness;
 #endif
+    standardLitParams.emission = material.emission;
+    standardLitParams.geometryOpacity = geometryOpacity;
+    standardLitParams.geometryThinWalled = _ThinWalledTransmission > 0.5;
 
-    inputs.emission_luminance = any(material.emission > 0.0) ? 1.0 : 0.0;
-    inputs.emission_color = material.emission;
+    OpenPBR_ResolvedInputs inputs = openpbr_make_default_resolved_inputs();
+    VividStandardLitApplyCoreToOpenPBRResolved(standardLitParams, inputs);
     float subsurfaceWeight = _SubsurfaceWeight;
     if (isnan(subsurfaceWeight) || isinf(subsurfaceWeight))
         subsurfaceWeight = 0.0;

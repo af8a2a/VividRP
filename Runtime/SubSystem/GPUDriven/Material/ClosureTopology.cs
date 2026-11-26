@@ -23,6 +23,10 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal static ClosureTopologyBudget Prototype => new(2, 1);
 
+        internal static ClosureTopologyBudget SubstrateMultiClosure => new(
+            VividSubstrateContract.MaxClosuresPerPixel,
+            VividSubstrateContract.MaxOperatorsPerPixel);
+
         internal ClosureTopologyBudget(int maxClosureCount, int maxOperatorCount)
         {
             if (maxClosureCount < 1)
@@ -189,6 +193,16 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         internal bool IsWithinBudget => Budget.Allows(ClosureCount, OperatorCount);
+
+        internal int EstimateSubstrateSliceCount()
+        {
+            return VividSubstrateContract.ComputeMultiClosureTotalSlices(ClosureCount);
+        }
+
+        internal bool FitsSubstrateSliceBudget(int budgetSlices = VividSubstrateContract.MaxSliceCount)
+        {
+            return VividSubstrateContract.FitsSliceBudget(EstimateSubstrateSliceCount(), budgetSlices);
+        }
 
         private void Validate()
         {

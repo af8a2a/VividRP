@@ -1,8 +1,13 @@
 #ifndef VIVIDRP_STANDARD_LIT_TO_OPENPBR_INCLUDED
 #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_INCLUDED
 
+#if !defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY)
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl"
-#if !defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_CORE_ONLY)
+#endif
+#if defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY)
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBROpaqueGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSubstrateBuffer.hlsl"
+#elif !defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_CORE_ONLY)
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBRV2.hlsl"
 #endif
 
@@ -62,6 +67,7 @@ float VividSanitizeStandardLitSpecularIor(float rawIor)
         VIVID_STANDARD_LIT_MAX_SPECULAR_IOR);
 }
 
+#if !defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY)
 // Applies the canonical v1 StandardLit -> OpenPBR surface mapping directly onto
 // an OpenPBR_ResolvedInputs struct (used by Referenced Path Tracing & ground truth).
 void VividStandardLitApplyCoreToOpenPBRResolved(
@@ -96,6 +102,7 @@ void VividStandardLitApplyCoreToOpenPBRResolved(
     inputs.emission_luminance = any(cleanEmission > 0.0f) ? 1.0f : 0.0f;
     inputs.emission_color = cleanEmission;
 }
+#endif
 
 #if !defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_CORE_ONLY)
 // Converts StandardLit parameters into VividOpenPBRV2Inputs for Substrate Closure
@@ -134,6 +141,38 @@ VividOpenPBRV2Inputs VividStandardLitToOpenPBRV2Inputs(VividStandardLitSurfacePa
     v2.tangentWS = params.tangentWS;
     v2.tangentHandedness = params.tangentHandedness < 0.0f ? -1.0f : 1.0f;
     return v2;
+}
+
+// Builds a backward-compatible TopLayer Surface Summary for Lumen GI, Lumen Reflections,
+// SSR, and Deferred classification without pulling in Vendor OpenPBR LUTs.
+VividSurfaceSummaryData VividBuildStandardLitSubstrateTopLayerSummary(
+    VividOpenPBRV2Inputs v2Inputs,
+    float ambientOcclusion,
+    bool receiveSSR,
+    bool receiveDecals)
+{
+    VividSurfaceSummaryData summary = VividBuildOpenPBROpaqueSummary(v2Inputs.core);
+    if (v2Inputs.coatWeight > 0.0f)
+    {
+        float coatRough = saturate(v2Inputs.coatRoughness);
+        summary.perceptualRoughness = lerp(
+            summary.perceptualRoughness,
+            min(summary.perceptualRoughness, coatRough),
+            saturate(v2Inputs.coatWeight));
+        if (v2Inputs.hasIndependentCoatNormal != 0u && v2Inputs.coatWeight >= 0.5f)
+        {
+            summary.normalWS = VividSanitizeSurfaceSummaryNormal(v2Inputs.coatNormalWS);
+        }
+    }
+    summary.ambientOcclusion = saturate(ambientOcclusion);
+    summary.deferredExportHeader = VividBuildDeferredExportHeader(
+        VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE,
+        false,
+        false,
+        receiveSSR,
+        receiveDecals);
+    summary.diffuseIrradiance = 0.0f.xxx;
+    return summary;
 }
 #endif
 

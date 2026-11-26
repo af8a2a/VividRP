@@ -195,4 +195,62 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
     }
 }
 
+#if defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_INCLUDED)
+void ApplyVividGPUDrivenDecalsToStandardLitParams(
+    inout VividStandardLitSurfaceParams params,
+    bool receiveDecals,
+    float3 positionWS,
+    uint2 pixelCoord)
+{
+    if (!receiveDecals)
+        return;
+
+    VividClusteredLightCell decalCell = VividClusteredLighting::LoadDecalCell(pixelCoord, positionWS);
+    float3 positionWSDdx = ddx(positionWS);
+    float3 positionWSDdy = ddy(positionWS);
+
+    UNITY_LOOP
+    for (uint localIndex = 0u; localIndex < decalCell.count; localIndex++)
+    {
+        uint decalIndex = VividClusteredLighting::LoadLightIndex(decalCell, localIndex);
+        VividDecalClusterData decal = _DecalData[decalIndex];
+
+        VividDecalSampleContext sampleContext;
+        if (!TryCreateVividDecalSampleContext(decal, positionWS, positionWSDdx, positionWSDdy, sampleContext))
+            continue;
+
+        float volumeFade = ComputeVividDecalVolumeFade(decal, sampleContext.positionDS);
+        VividDecalBaseColorSample baseColor = SampleVividDecalBaseColor(
+            decal,
+            sampleContext.uv,
+            sampleContext.uvDdx,
+            sampleContext.uvDdy);
+        float decalOpacity = volumeFade * baseColor.opacity;
+
+        UNITY_BRANCH
+        if (decalOpacity <= 0.0f)
+            continue;
+
+        float surfacePerceptualRoughness = saturate(1.0f - saturate(params.smoothness));
+        float decalMetallic = SampleVividDecalMetallic(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
+        float decalPerceptualRoughness = SampleVividDecalPerceptualRoughness(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
+        float blendedPerceptualRoughness = lerp(surfacePerceptualRoughness, decalPerceptualRoughness, decalOpacity);
+
+        params.baseColor = lerp(params.baseColor, baseColor.color, decalOpacity);
+        params.metallic = lerp(params.metallic, decalMetallic, decalOpacity);
+        params.smoothness = saturate(1.0f - blendedPerceptualRoughness);
+        params.clearCoatMask *= saturate(1.0f - decalOpacity);
+
+        UNITY_BRANCH
+        if (decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
+        {
+            params.normalWS = normalize(lerp(
+                params.normalWS,
+                SampleVividDecalNormalWS(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy),
+                decalOpacity));
+        }
+    }
+}
+#endif
+
 #endif

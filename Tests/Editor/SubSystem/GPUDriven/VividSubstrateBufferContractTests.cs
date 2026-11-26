@@ -30,6 +30,14 @@ namespace VividRP.Editor.Tests
             "Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl";
         private const string StandardLitAdapterHlslPath =
             "Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl";
+        private const string StandardLitShaderPath =
+            "Shaders/Material/StandardLit/StandardLit.shader";
+        private const string StandardLitGBufferPassPath =
+            "Shaders/Material/StandardLit/StandardLitGBufferPass.hlsl";
+        private const string VividShaderPassGBufferPath =
+            "Shaders/Material/ShaderPass/VividShaderPassGBuffer.hlsl";
+        private const string GPUDrivenDecalGBufferPath =
+            "Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl";
 
         [Test]
         public void PixelHeader_PackUnpack_RoundTripsAllFieldsBitExactly()
@@ -301,8 +309,23 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("#define VIVID_STANDARD_LIT_TO_OPENPBR_VERSION 1u", stdLitMapSource);
             StringAssert.Contains("VividStandardLitApplyCoreToOpenPBRResolved(", stdLitMapSource);
             StringAssert.Contains("VividStandardLitToOpenPBRV2Inputs(", stdLitMapSource);
+            StringAssert.Contains("VividBuildStandardLitSubstrateTopLayerSummary(", stdLitMapSource);
             StringAssert.Contains("VividStandardLitToOpenPBR.hlsl", stdLitAdapterSource);
             StringAssert.Contains("VividStandardLitApplyCoreToOpenPBRResolved(", stdLitAdapterSource);
+
+            // Stage M2 raster StandardLit -> Substrate GBuffer + Decal contract
+            string stdLitShaderSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(StandardLitShaderPath));
+            string stdLitGBufferSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(StandardLitGBufferPassPath));
+            string vividPassGBufferSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(VividShaderPassGBufferPath));
+            string decalGBufferSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(GPUDrivenDecalGBufferPath));
+
+            StringAssert.Contains("#pragma require randomwrite", stdLitShaderSource);
+            StringAssert.Contains("#define VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT 1", stdLitGBufferSource);
+            StringAssert.Contains("RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u5);", vividPassGBufferSource);
+            StringAssert.Contains("VividWriteSubstrateOpenPBRV2Single(", vividPassGBufferSource);
+            StringAssert.Contains("VividBuildStandardLitSubstrateTopLayerSummary(", vividPassGBufferSource);
+            StringAssert.Contains("ApplyVividGPUDrivenDecalsToStandardLitParams(", vividPassGBufferSource);
+            StringAssert.Contains("void ApplyVividGPUDrivenDecalsToStandardLitParams(", decalGBufferSource);
         }
 
         [Test]

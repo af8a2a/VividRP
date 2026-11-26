@@ -7,11 +7,69 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
 
+#if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
+uint _WriteSubstrateClosureBuffer;
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u8);
+#else
+RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u5);
+#endif
+#endif
+
 VividPackedVaryingsMesh Vert(VividAttributesMesh input)
 {
     return PackVividVaryingsMesh(VividVertMesh(input));
 }
 
+#if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
+#if !defined(_ALPHATEST_ON)
+[earlydepthstencil]
+#endif
+VividSurfaceSummaryGBufferOutput FragGBuffer(VividPackedVaryingsMesh packedInput)
+{
+    UNITY_SETUP_INSTANCE_ID(packedInput);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(packedInput);
+
+    FragInputs input = UnpackVividVaryingsMeshToFragInputs(packedInput);
+    VividStandardLitSurfaceParams params;
+    float ambientOcclusion;
+    bool receiveSSR;
+    bool receiveDecals;
+    VividBuildStandardLitSubstrateSurface(
+        input,
+        params,
+        ambientOcclusion,
+        receiveSSR,
+        receiveDecals);
+
+    uint2 pixelCoord = (uint2)input.positionSS.xy;
+#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
+    ApplyVividGPUDrivenDecalsToStandardLitParams(params, receiveDecals, input.positionRWS, pixelCoord);
+#endif
+
+    VividOpenPBRV2Inputs v2Inputs = VividStandardLitToOpenPBRV2Inputs(params);
+    if (_WriteSubstrateClosureBuffer != 0u)
+    {
+        uint headerFlags = 0u;
+        if (receiveDecals)
+            headerFlags |= VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
+        if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))
+            headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+        VividWriteSubstrateOpenPBRV2Single(
+            _OutSubstrateClosureBuffer,
+            pixelCoord,
+            v2Inputs,
+            headerFlags);
+    }
+
+    VividSurfaceSummaryData summary = VividBuildStandardLitSubstrateTopLayerSummary(
+        v2Inputs,
+        ambientOcclusion,
+        receiveSSR,
+        receiveDecals);
+    return VividPackSurfaceSummaryGBuffer(summary);
+}
+#else
 VividGBufferFragmentOutput FragGBuffer(VividPackedVaryingsMesh packedInput)
 {
     UNITY_SETUP_INSTANCE_ID(packedInput);
@@ -24,6 +82,7 @@ VividGBufferFragmentOutput FragGBuffer(VividPackedVaryingsMesh packedInput)
 #endif
     return PackVividGBufferSurfaceData(surfaceData);
 }
+#endif
 
 half4 FragDebug(VividPackedVaryingsMesh packedInput) : SV_Target
 {

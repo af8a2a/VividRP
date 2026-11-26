@@ -8,6 +8,10 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/FragInputs.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
+#define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+#endif
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 #if defined(VIVIDRP_SHADERPASS_META)
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MetaPass.hlsl"
@@ -335,6 +339,53 @@ VividGBufferSurfaceData VividBuildGBufferSurfaceData(FragInputs input)
 {
     return BuildStandardLitSurfaceData(input);
 }
+
+#if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
+void VividBuildStandardLitSubstrateSurface(
+    FragInputs input,
+    out VividStandardLitSurfaceParams params,
+    out float ambientOcclusion,
+    out bool receiveSSR,
+    out bool receiveDecals)
+{
+    float2 uv = GetStandardLitBaseUV(input);
+    float4 baseSample = SampleBase(uv, input.positionSS);
+    ApplyAlphaClip(baseSample.a);
+
+    float metallic;
+    float smoothness;
+    SampleStandardLitPBR(
+        uv,
+        baseSample.a,
+        metallic,
+        smoothness,
+        ambientOcclusion);
+
+    params = VividCreateDefaultStandardLitSurfaceParams();
+    params.baseColor = baseSample.rgb;
+    params.metallic = metallic;
+    params.smoothness = smoothness;
+    params.specularIor = _SpecularIOR;
+#if defined(_CLEARCOAT)
+    params.clearCoatMask = saturate(_ClearCoatMask);
+    params.clearCoatSmoothness = saturate(_ClearCoatSmoothness);
+#else
+    params.clearCoatMask = 0.0f;
+    params.clearCoatSmoothness = 0.0f;
+#endif
+    params.normalWS = SampleNormalWS(input, uv);
+    params.coatNormalWS = params.normalWS;
+    params.hasIndependentCoatNormal = 0u;
+    params.tangentWS = input.tangentToWorld[0];
+    params.tangentHandedness = 1.0f;
+    params.emission = SampleEmission(uv);
+    params.geometryOpacity = saturate(baseSample.a);
+    params.geometryThinWalled = _ThinWalledTransmission > 0.5f;
+
+    receiveSSR = _ReceiveSSR > 0.5f;
+    receiveDecals = _ReceiveDecals > 0.5f;
+}
+#endif
 
 float3 VividGetDebugColor(FragInputs input)
 {

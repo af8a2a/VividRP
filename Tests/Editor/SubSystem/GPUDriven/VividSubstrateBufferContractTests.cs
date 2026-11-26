@@ -249,6 +249,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StageM3_GPUDrivenStandardLit_RequiresSubstrateBuffer_ZeroAllocation()
+        {
+            var scene = new VividGPUDrivenSceneData();
+            scene.MutableMaterialPrograms.Clear();
+            scene.MutableMaterialPrograms.Add(new VividMaterialProgramData
+            {
+                Version = GPUDrivenMaterialCompiler.ProgramVersion,
+                SurfaceProgramID = VividMaterialSurfaceProgramID.StandardSingleSlab,
+            });
+            scene.MutableMaterialRuntimeHeaders.Add(new VividMaterialRuntimeHeader
+            {
+                ProgramID = (VividMaterialProgramID) 0u,
+                Flags = VividMaterialRuntimeFlags.None,
+            });
+
+            // Warmup
+            for (int i = 0; i < 32; ++i)
+                scene.RequiresSubstrateBuffer(0u);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool requires = true;
+            for (int i = 0; i < 128; ++i)
+                requires &= scene.RequiresSubstrateBuffer(0u);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(requires, Is.True);
+            Assert.That(allocated, Is.Zero);
+            Assert.That(scene.HasSubstrateMaterial(), Is.True);
+
+            var unlitHeader = scene.MutableMaterialRuntimeHeaders[0];
+            unlitHeader.Flags = VividMaterialRuntimeFlags.Unlit;
+            scene.MutableMaterialRuntimeHeaders[0] = unlitHeader;
+            Assert.That(scene.RequiresSubstrateBuffer(0u), Is.False);
+            Assert.That(scene.HasSubstrateMaterial(), Is.False);
+        }
+
+        [Test]
         public void SubstrateBufferHlsl_MatchesCSharpContractAndSinglePassPipeline()
         {
             string substrateSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(SubstrateBufferHlslPath));
@@ -288,6 +325,9 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("RWTexture2DArray<uint> _OutSubstrateClosureBuffer;", resolveSource);
             StringAssert.Contains("VIVID_VT_ENABLE_FEEDBACK_RW_COMPUTE 1", resolveSource);
             StringAssert.Contains("VividWriteSubstrateOpenPBROpaqueSingle(", resolveSource);
+            StringAssert.Contains("VividWriteSubstrateOpenPBRV2Single(", resolveSource);
+            StringAssert.Contains("VividStandardLitToOpenPBRV2Inputs(", resolveSource);
+            StringAssert.Contains("VividBuildStandardLitSubstrateTopLayerSummary(", resolveSource);
             StringAssert.Contains("VividWriteSubstrateEmpty(", resolveSource);
 
             StringAssert.Contains("Texture2DArray<uint> _SubstrateClosureBuffer;", classifySource);

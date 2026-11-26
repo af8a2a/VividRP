@@ -220,6 +220,11 @@ namespace VividRP.Runtime.GPUDriven
         public float AlphaClipThreshold;
         public uint Padding0;
         public uint Padding1;
+
+        public float SpecularIOR;
+        public float ClearCoatMask;
+        public float ClearCoatSmoothness;
+        public float Padding2;
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]

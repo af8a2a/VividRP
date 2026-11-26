@@ -10,6 +10,8 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividOpenPBROpaqueGBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSubstrateBuffer.hlsl"
+#define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividPostSurfaceSummary.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
@@ -294,9 +296,15 @@ void ResolveSurfaceData(
     const float4 positionCS,
     out VividSurfaceSummaryData surfaceData,
     out VividDualSlabLayerData dualSlabLayerData,
-    out VividOpenPBROpaqueInputs nativeInputs)
+    out VividOpenPBROpaqueInputs nativeInputs,
+    out VividOpenPBRV2Inputs substrateV2Inputs,
+    out uint substrateV2HeaderFlags,
+    out bool hasSubstrateV2)
 {
     nativeInputs = (VividOpenPBROpaqueInputs)0;
+    substrateV2Inputs = VividCreateDefaultOpenPBRV2Inputs();
+    substrateV2HeaderFlags = 0u;
+    hasSubstrateV2 = false;
     const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
     const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
         SafeNormalize(DecodeVividMeshletNormal(triangleData.vertex0)),
@@ -471,6 +479,51 @@ void ResolveSurfaceData(
     const bool receiveDecals = VividAOTDeferredExportHasPolicy(
         deferredExportContract,
         VIVID_AOT_DEFERRED_EXPORT_POLICY_RECEIVE_DECALS);
+
+    // Stage M3: Hard-cut GPUDriven StandardLit (StandardSingleSlab) to Substrate / OpenPBR 1.1.
+    // Plain StandardLit (no ClearCoat) writes SINGLE_SIMPLE (24 B/px -> Tier 1);
+    // ClearCoat > 0 writes SINGLE_COMPLEX (32 B/px -> Tier 2).
+    const bool routeStandardLitToSubstrate = !failedAOTSurface
+        && !isUnlit
+        && !exportDualSlab
+        && triangleData.materialProgramData.SurfaceProgramID
+            == VIVIDMATERIALSURFACEPROGRAMID_STANDARD_SINGLE_SLAB;
+    if (routeStandardLitToSubstrate)
+    {
+        VividStandardLitSurfaceParams stdParams = VividCreateDefaultStandardLitSurfaceParams();
+        stdParams.baseColor = baseColor;
+        stdParams.metallic = metallic;
+        stdParams.smoothness = saturate(1.0f - saturate(perceptualRoughness));
+        stdParams.specularIor = triangleData.materialData.SpecularIOR > 0.0f
+            ? triangleData.materialData.SpecularIOR
+            : 1.5f;
+        stdParams.clearCoatMask = saturate(triangleData.materialData.ClearCoatMask);
+        stdParams.clearCoatSmoothness = saturate(triangleData.materialData.ClearCoatSmoothness);
+        stdParams.normalWS = normalWS;
+        stdParams.coatNormalWS = normalWS;
+        stdParams.hasIndependentCoatNormal = 0u;
+        stdParams.tangentWS = dot(geometryTangentWS.xyz, geometryTangentWS.xyz) > 1e-8f
+            ? geometryTangentWS.xyz
+            : float3(1.0f, 0.0f, 0.0f);
+        stdParams.tangentHandedness = geometryTangentWS.w < 0.0f ? -1.0f : 1.0f;
+        stdParams.emission = max(aotSurfaceOutput.Emission, 0.0f);
+
+        substrateV2Inputs = VividStandardLitToOpenPBRV2Inputs(stdParams);
+        surfaceData = VividBuildStandardLitSubstrateTopLayerSummary(
+            substrateV2Inputs,
+            ambientOcclusion,
+            receiveSSR,
+            receiveDecals);
+        substrateV2HeaderFlags = 0u;
+        if (receiveDecals)
+            substrateV2HeaderFlags |= VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
+        if (any(substrateV2Inputs.core.emissionLuminance * substrateV2Inputs.core.emissionColor > 0.0f))
+            substrateV2HeaderFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+        hasSubstrateV2 = true;
+        dualSlabLayerData = (VividDualSlabLayerData)0;
+        return;
+    }
+
     const float3 diffuseIrradiance = hasDiffuseIrradiance
         ? SampleVividProbeVolume(
             positionWS,
@@ -552,6 +605,9 @@ void ResolvePixelVisibility(uint2 pixelCoord, VividVisibilityBufferValue visibil
     VividSurfaceSummaryData surfaceData;
     VividDualSlabLayerData dualSlabLayerData;
     VividOpenPBROpaqueInputs nativeInputs;
+    VividOpenPBRV2Inputs substrateV2Inputs;
+    uint substrateV2HeaderFlags;
+    bool hasSubstrateV2;
     ResolveSurfaceData(
         triangleData,
         barycentric,
@@ -559,7 +615,35 @@ void ResolvePixelVisibility(uint2 pixelCoord, VividVisibilityBufferValue visibil
         positionCS,
         surfaceData,
         dualSlabLayerData,
-        nativeInputs);
+        nativeInputs,
+        substrateV2Inputs,
+        substrateV2HeaderFlags,
+        hasSubstrateV2);
+
+    if (hasSubstrateV2)
+    {
+        VividSurfaceSummaryGBufferOutput packedSummary = VividPackSurfaceSummaryGBuffer(surfaceData);
+        _OutGBuffer0[pixelCoord] = packedSummary.rt0;
+        _OutGBuffer1[pixelCoord] = packedSummary.rt1;
+        _OutGBuffer2[pixelCoord] = packedSummary.rt2;
+        _OutGBuffer3[pixelCoord] = packedSummary.rt3;
+        _OutGBuffer4[pixelCoord] = packedSummary.rt4;
+
+        if (_WriteSubstrateClosureBuffer != 0u)
+        {
+            VividWriteSubstrateOpenPBRV2Single(
+                _OutSubstrateClosureBuffer,
+                pixelCoord,
+                substrateV2Inputs,
+                substrateV2HeaderFlags);
+        }
+        if (_WriteDualSlabSidecar != 0u)
+        {
+            _OutLayerAux0[pixelCoord] = 0.0f;
+            _OutLayerAux1[pixelCoord] = 0.0f;
+        }
+        return;
+    }
 
     const uint exportClass = VividGetDeferredExportClass(surfaceData.deferredExportHeader);
     if (exportClass == VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE)

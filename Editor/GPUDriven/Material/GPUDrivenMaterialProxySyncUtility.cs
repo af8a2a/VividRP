@@ -80,7 +80,9 @@ namespace VividRP.Editor.GPUDriven
         private static readonly int s_RoughnessMapId = Shader.PropertyToID("_RoughnessMap");
         private static readonly int s_EmissionMapId = Shader.PropertyToID("_EmissionMap");
         private static readonly int s_OcclusionMapId = Shader.PropertyToID("_OcclusionMap");
+        private static readonly int s_SpecularIORId = Shader.PropertyToID("_SpecularIOR");
         private static readonly int s_ClearCoatMaskId = Shader.PropertyToID("_ClearCoatMask");
+        private static readonly int s_ClearCoatSmoothnessId = Shader.PropertyToID("_ClearCoatSmoothness");
         private static readonly int s_SmoothnessTextureChannelId = Shader.PropertyToID("_SmoothnessTextureChannel");
 
         public static GPUDrivenMaterialProxySyncResult SyncFromSourceMaterial(this GPUDrivenMaterialProxy materialProxy)
@@ -156,6 +158,10 @@ namespace VividRP.Editor.GPUDriven
             materialProxy.MaskMode = sourceTextures.MaskMode;
             materialProxy.Metallic = GetFloat(sourceMaterial, s_MetallicId, 0.0f);
             materialProxy.Roughness = 1.0f - Mathf.Clamp01(GetFloat(sourceMaterial, s_SmoothnessId, 0.5f));
+            materialProxy.SpecularIOR = Mathf.Clamp(GetFloat(sourceMaterial, s_SpecularIORId, 1.5f), 1.0f, 3.0f);
+            float clearCoatMask = GetFloat(sourceMaterial, s_ClearCoatMaskId, 0.0f);
+            materialProxy.ClearCoatMask = clearCoatMask > EnabledThreshold ? Mathf.Clamp01(clearCoatMask) : 0.0f;
+            materialProxy.ClearCoatSmoothness = Mathf.Clamp01(GetFloat(sourceMaterial, s_ClearCoatSmoothnessId, 1.0f));
             materialProxy.MetallicRemap = GetRemap(
                 sourceMaterial,
                 s_MetallicRemapMinId,
@@ -282,11 +288,6 @@ namespace VividRP.Editor.GPUDriven
             if (HasTexture(sourceMaterial, s_OcclusionMapId))
             {
                 warnings.Add("_OcclusionMap is not consumed by the V1 GPUDriven StandardLit path.");
-            }
-
-            if (Mathf.Abs(GetFloat(sourceMaterial, s_ClearCoatMaskId, 0.0f)) > EnabledThreshold)
-            {
-                warnings.Add("_ClearCoatMask is not consumed by the V1 GPUDriven StandardLit path.");
             }
 
             if (GetFloat(sourceMaterial, s_SmoothnessTextureChannelId, 0.0f) > 0.5f)

@@ -534,7 +534,9 @@ namespace VividRP.Editor.Tests
 
                 PassRecorder.SetGPUDrivenFrameData(
                     visibleRequests,
-                    indirectDrawArgs);
+                    indirectDrawArgs,
+                    requiresSubstrateBuffer: true);
+                VividPreIntegratedFGDSystem.BindOpenPBRLuts(commandBuffer);
                 BindProductionPixelLoopGlobals(
                     commandBuffer,
                     instanceBuffer,
@@ -598,14 +600,14 @@ namespace VividRP.Editor.Tests
                 featureFlagsBuffer.GetData(featureFlags);
                 tileListBuffer.GetData(tileList);
                 indirectArgsBuffer.GetData(indirectArgs);
-                Assert.That(featureFlags, Is.EqualTo(new uint[] { 1u }));
-                Assert.That(tileList[0], Is.EqualTo(0u));
+                Assert.That(featureFlags, Is.EqualTo(new uint[] { 2u }));
+                Assert.That(tileList[1], Is.EqualTo(0u));
                 Assert.That(
                     indirectArgs,
                     Is.EqualTo(new uint[]
                     {
-                        1u, 1u, 1u, 0u,
                         0u, 1u, 1u, 0u,
+                        1u, 1u, 1u, 0u,
                         0u, 1u, 1u, 0u,
                         0u, 1u, 1u, 0u,
                     }));
@@ -621,10 +623,10 @@ namespace VividRP.Editor.Tests
                     TextureFormat.RGBAFloat));
                 AssertDeferredExportHeader(
                     gbuffer0Readback.GetPixel(4, 4),
-                    0xC2,
-                    "Production Visibility and Resolve must emit the StandardLit Deferred Export header.");
+                    0xC6,
+                    "Production Visibility and Resolve must emit the StandardLit Substrate Deferred Export header.");
                 // Clear alone only writes emission and zero debug. The lit case
-                // therefore proves that the classified FastSlab dispatch ran.
+                // therefore proves that the classified Substrate Tier 1 dispatch ran.
                 AssertColor(
                     lightingReadback.GetPixel(4, 4),
                     new Color(
@@ -632,7 +634,7 @@ namespace VividRP.Editor.Tests
                         (emission.g + (environmentLighting ? environmentRadiance.g : 0.0f)) * preExposure,
                         (emission.b + (environmentLighting ? environmentRadiance.b : 0.0f)) * preExposure,
                         1.0f),
-                    "Production Deferred must add native Slab environment lighting to emission exactly once.");
+                    "Production Deferred must add Substrate OpenPBR environment lighting to emission exactly once.");
                 AssertColor(
                     debugReadback.GetPixel(4, 4),
                     new Color(

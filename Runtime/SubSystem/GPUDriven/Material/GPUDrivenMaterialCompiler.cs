@@ -1183,6 +1183,10 @@ namespace VividRP.Runtime.GPUDriven
                 AlphaClipThreshold = materialProxy.AlphaClip ? materialProxy.Cutoff : 0.0f,
                 Padding0 = (uint) materialProxy.MaskMode,
                 Padding1 = 0u,
+                SpecularIOR = materialProxy.SpecularIOR > 0.0f ? materialProxy.SpecularIOR : 1.5f,
+                ClearCoatMask = Mathf.Clamp01(materialProxy.ClearCoatMask),
+                ClearCoatSmoothness = Mathf.Clamp01(materialProxy.ClearCoatSmoothness),
+                Padding2 = 0.0f,
             };
         }
 

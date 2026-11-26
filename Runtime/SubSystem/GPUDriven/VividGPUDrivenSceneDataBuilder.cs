@@ -31,6 +31,9 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_AlphaClipPropertyId = Shader.PropertyToID("_AlphaClip");
         private static readonly int s_CutoffPropertyId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullPropertyId = Shader.PropertyToID("_Cull");
+        private static readonly int s_SpecularIORPropertyId = Shader.PropertyToID("_SpecularIOR");
+        private static readonly int s_ClearCoatMaskPropertyId = Shader.PropertyToID("_ClearCoatMask");
+        private static readonly int s_ClearCoatSmoothnessPropertyId = Shader.PropertyToID("_ClearCoatSmoothness");
         private const string StandardLitShaderName = "VividRP/Material/StandardLit";
         private const string SimpleForwardShaderName = "VividRP/Material/SimpleForward";
         private static readonly EntityIdComparer s_EntityIdComparer = new();
@@ -2017,6 +2020,12 @@ namespace VividRP.Runtime.GPUDriven
                 AlphaClipThreshold = GetAlphaClipThreshold(material),
                 Padding0 = (uint) GetMaskMode(material),
                 Padding1 = 0,
+                SpecularIOR = Mathf.Clamp(GetFloat(material, s_SpecularIORPropertyId, 1.5f), 1.0f, 3.0f),
+                ClearCoatMask = GetFloat(material, s_ClearCoatMaskPropertyId, 0.0f) > 0.001f
+                    ? Mathf.Clamp01(GetFloat(material, s_ClearCoatMaskPropertyId, 0.0f))
+                    : 0.0f,
+                ClearCoatSmoothness = Mathf.Clamp01(GetFloat(material, s_ClearCoatSmoothnessPropertyId, 1.0f)),
+                Padding2 = 0.0f,
             };
         }
 
@@ -2051,6 +2060,10 @@ namespace VividRP.Runtime.GPUDriven
                     ? (uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
                     : (uint) GPUDrivenMaterialMaskMode.None,
                 Padding1 = usesLayerBlend ? terrainMaterialIndex : 0u,
+                SpecularIOR = 1.5f,
+                ClearCoatMask = 0.0f,
+                ClearCoatSmoothness = 0.0f,
+                Padding2 = 0.0f,
             };
         }
 
@@ -2080,6 +2093,10 @@ namespace VividRP.Runtime.GPUDriven
                 AlphaClipThreshold = 0.0f,
                 Padding0 = (uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness,
                 Padding1 = usesTerrainRVT ? terrainRVTRecordIndex : 0u,
+                SpecularIOR = 1.5f,
+                ClearCoatMask = 0.0f,
+                ClearCoatSmoothness = 0.0f,
+                Padding2 = 0.0f,
             };
         }
 

@@ -256,6 +256,10 @@ struct VividMaterialData
     float AlphaClipThreshold;
     uint Padding0;
     uint Padding1;
+    float SpecularIOR;
+    float ClearCoatMask;
+    float ClearCoatSmoothness;
+    float Padding2;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMaterialProgramData

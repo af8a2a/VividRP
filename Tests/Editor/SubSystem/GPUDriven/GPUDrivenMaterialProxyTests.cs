@@ -535,13 +535,13 @@ namespace VividRP.Editor.Tests
                 string[] warnings = material.CollectUnsupportedWarnings();
                 string warningText = string.Join("\n", warnings);
 
-                Assert.That(warnings, Has.Length.GreaterThanOrEqualTo(6));
+                Assert.That(warnings, Has.Length.GreaterThanOrEqualTo(5));
                 Assert.That(warningText, Does.Contain("_OpacityMap"));
                 Assert.That(warningText, Does.Contain("_MetallicGlossMap"));
                 Assert.That(warningText, Does.Contain("_RoughnessMap"));
                 Assert.That(warningText, Does.Contain("_EmissionMap"));
                 Assert.That(warningText, Does.Contain("_OcclusionMap"));
-                Assert.That(warningText, Does.Contain("_ClearCoatMask"));
+                Assert.That(warningText, Does.Not.Contain("_ClearCoatMask"));
                 Assert.That(warningText, Does.Contain("_SmoothnessTextureChannel"));
             }
             finally
@@ -574,6 +574,56 @@ namespace VividRP.Editor.Tests
                 if (occlusionMap != null)
                 {
                     Object.DestroyImmediate(occlusionMap);
+                }
+            }
+        }
+
+        [Test]
+        public void SyncFromSourceMaterial_SyncsSpecularIorAndClearCoatIntoCompiledMaterialData()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            Material material = null;
+            GPUDrivenMaterialProxy proxy = null;
+            try
+            {
+                material = new Material(shader);
+                material.SetFloat("_SpecularIOR", 1.72f);
+                material.SetFloat("_ClearCoatMask", 0.65f);
+                material.SetFloat("_ClearCoatSmoothness", 0.85f);
+
+                proxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                GPUDrivenMaterialProxySyncResult syncResult = proxy.SyncFromSourceMaterial(
+                    material,
+                    GPUDrivenMaterialProxyTextureMode.Bindless,
+                    recordUndo: false,
+                    saveAsset: false);
+
+                Assert.That(syncResult.Success, Is.True);
+                Assert.That(proxy.SpecularIOR, Is.EqualTo(1.72f).Within(1e-4f));
+                Assert.That(proxy.ClearCoatMask, Is.EqualTo(0.65f).Within(1e-4f));
+                Assert.That(proxy.ClearCoatSmoothness, Is.EqualTo(0.85f).Within(1e-4f));
+
+                GPUDrivenCompiledMaterialInstance compiled =
+                    GPUDrivenMaterialCompiler.CompileStandardSingleSlab(proxy, 0u, 0u);
+                Assert.That(compiled.LegacyMaterialData.SpecularIOR, Is.EqualTo(1.72f).Within(1e-4f));
+                Assert.That(compiled.LegacyMaterialData.ClearCoatMask, Is.EqualTo(0.65f).Within(1e-4f));
+                Assert.That(compiled.LegacyMaterialData.ClearCoatSmoothness, Is.EqualTo(0.85f).Within(1e-4f));
+            }
+            finally
+            {
+                if (proxy != null)
+                {
+                    Object.DestroyImmediate(proxy);
+                }
+
+                if (material != null)
+                {
+                    Object.DestroyImmediate(material);
                 }
             }
         }

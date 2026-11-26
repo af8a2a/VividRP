@@ -177,6 +177,15 @@ namespace VividRP.Runtime.GPUDriven
         [SerializeField]
         private float m_Roughness = 0.5f;
 
+        [SerializeField, Range(1.0f, 3.0f)]
+        private float m_SpecularIOR = 1.5f;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_ClearCoatMask;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_ClearCoatSmoothness = 1.0f;
+
         [SerializeField]
         private Vector2 m_MetallicRemap = new(0.0f, 1.0f);
 
@@ -404,6 +413,24 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_Roughness;
             set => SetValue(ref m_Roughness, value);
+        }
+
+        public float SpecularIOR
+        {
+            get => m_SpecularIOR;
+            set => SetValue(ref m_SpecularIOR, Mathf.Clamp(value, 1.0f, 3.0f));
+        }
+
+        public float ClearCoatMask
+        {
+            get => m_ClearCoatMask;
+            set => SetValue(ref m_ClearCoatMask, Mathf.Clamp01(value));
+        }
+
+        public float ClearCoatSmoothness
+        {
+            get => m_ClearCoatSmoothness;
+            set => SetValue(ref m_ClearCoatSmoothness, Mathf.Clamp01(value));
         }
 
         public Vector2 MetallicRemap

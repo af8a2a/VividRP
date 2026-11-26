@@ -35,6 +35,9 @@ namespace VividRP.Runtime.GPUDriven
         Dot = 11,
         Normalize = 12,
         Compare = 13,
+        TernarySameNumeric = 14,
+        UnpackNormal = 15,
+        Noise2D = 16,
     }
 
     internal enum MaterialOpcodePayloadKind
@@ -269,6 +272,72 @@ namespace VividRP.Runtime.GPUDriven
                         2,
                         MaterialOpcodeSignatureKind.Compare,
                         MaterialOpcodePayloadKind.Comparison,
+                        MaterialOpcodeFlags.Arithmetic);
+                    return true;
+                case MaterialValueOpcode.Abs:
+                    info = CreateUnaryArithmetic(opcode, "abs");
+                    return true;
+                case MaterialValueOpcode.Sin:
+                    info = CreateUnaryArithmetic(opcode, "sin");
+                    return true;
+                case MaterialValueOpcode.Cos:
+                    info = CreateUnaryArithmetic(opcode, "cos");
+                    return true;
+                case MaterialValueOpcode.Floor:
+                    info = CreateUnaryArithmetic(opcode, "floor");
+                    return true;
+                case MaterialValueOpcode.Frac:
+                    info = CreateUnaryArithmetic(opcode, "frac");
+                    return true;
+                case MaterialValueOpcode.Sqrt:
+                    info = CreateUnaryArithmetic(opcode, "sqrt");
+                    return true;
+                case MaterialValueOpcode.Pow:
+                    info = CreateBinaryArithmetic(opcode, "pow", commutative: false);
+                    return true;
+                case MaterialValueOpcode.Clamp:
+                    info = Create(
+                        opcode,
+                        "clamp",
+                        3,
+                        MaterialOpcodeSignatureKind.TernarySameNumeric,
+                        MaterialOpcodePayloadKind.None,
+                        MaterialOpcodeFlags.Arithmetic);
+                    return true;
+                case MaterialValueOpcode.Smoothstep:
+                    info = Create(
+                        opcode,
+                        "smoothstep",
+                        3,
+                        MaterialOpcodeSignatureKind.TernarySameNumeric,
+                        MaterialOpcodePayloadKind.None,
+                        MaterialOpcodeFlags.Arithmetic);
+                    return true;
+                case MaterialValueOpcode.UnpackNormal:
+                    info = Create(
+                        opcode,
+                        "unpack_normal",
+                        2,
+                        MaterialOpcodeSignatureKind.UnpackNormal,
+                        MaterialOpcodePayloadKind.None,
+                        MaterialOpcodeFlags.Arithmetic);
+                    return true;
+                case MaterialValueOpcode.ValueNoise2D:
+                    info = Create(
+                        opcode,
+                        "value_noise_2d",
+                        2,
+                        MaterialOpcodeSignatureKind.Noise2D,
+                        MaterialOpcodePayloadKind.None,
+                        MaterialOpcodeFlags.Arithmetic);
+                    return true;
+                case MaterialValueOpcode.GradientNoise2D:
+                    info = Create(
+                        opcode,
+                        "gradient_noise_2d",
+                        2,
+                        MaterialOpcodeSignatureKind.Noise2D,
+                        MaterialOpcodePayloadKind.None,
                         MaterialOpcodeFlags.Arithmetic);
                     return true;
                 default:
@@ -780,7 +849,7 @@ namespace VividRP.Runtime.GPUDriven
                         $"Stage LIR node %{nodeIndex} has invalid source provenance %{node.SourceNodeIndex}.");
                 }
 
-                if ((uint) node.Opcode > (uint) MaterialStageLIROpcode.Compare
+                if ((uint) node.Opcode > (uint) MaterialStageLIROpcode.GradientNoise2D
                     || !IsKnownType(node.Type))
                 {
                     AddNodeError(
@@ -1189,11 +1258,65 @@ namespace VividRP.Runtime.GPUDriven
                     break;
                 case MaterialStageLIROpcode.Saturate:
                 case MaterialStageLIROpcode.OneMinus:
+                case MaterialStageLIROpcode.Abs:
+                case MaterialStageLIROpcode.Sin:
+                case MaterialStageLIROpcode.Cos:
+                case MaterialStageLIROpcode.Floor:
+                case MaterialStageLIROpcode.Frac:
+                case MaterialStageLIROpcode.Sqrt:
                     VerifyStageLIRUnarySameNumeric(
                         stageLIR,
                         node,
                         nodeIndex,
                         diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Pow:
+                    VerifyStageLIRBinarySameNumeric(
+                        stageLIR,
+                        node,
+                        nodeIndex,
+                        diagnostics);
+                    break;
+                case MaterialStageLIROpcode.Clamp:
+                case MaterialStageLIROpcode.Smoothstep:
+                {
+                    MaterialValueType t0 = GetStageLIROperandType(stageLIR, node, 0);
+                    MaterialValueType t1 = GetStageLIROperandType(stageLIR, node, 1);
+                    MaterialValueType t2 = GetStageLIROperandType(stageLIR, node, 2);
+                    if (!IsNumericType(t0) || t0 != t1 || t0 != t2)
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"ternary numeric operands must match, got {t0}, {t1}, {t2}.");
+                    }
+                    else
+                    {
+                        RequireStageLIRResultType(node, nodeIndex, t0, diagnostics);
+                    }
+                    break;
+                }
+                case MaterialStageLIROpcode.UnpackNormal:
+                {
+                    MaterialValueType sampleType = GetStageLIROperandType(stageLIR, node, 0);
+                    if (sampleType != MaterialValueType.Float3 && sampleType != MaterialValueType.Float4)
+                    {
+                        AddStageLIRNodeError(
+                            diagnostics,
+                            node,
+                            nodeIndex,
+                            $"unpack_normal operand 0 must be Float3 or Float4, got {sampleType}.");
+                    }
+                    RequireStageLIROperandType(stageLIR, node, nodeIndex, 1, MaterialValueType.Float, diagnostics);
+                    RequireStageLIRResultType(node, nodeIndex, MaterialValueType.Float3, diagnostics);
+                    break;
+                }
+                case MaterialStageLIROpcode.ValueNoise2D:
+                case MaterialStageLIROpcode.GradientNoise2D:
+                    RequireStageLIROperandType(stageLIR, node, nodeIndex, 0, MaterialValueType.Float2, diagnostics);
+                    RequireStageLIROperandType(stageLIR, node, nodeIndex, 1, MaterialValueType.Float, diagnostics);
+                    RequireStageLIRResultType(node, nodeIndex, MaterialValueType.Float, diagnostics);
                     break;
                 case MaterialStageLIROpcode.Dot:
                     VerifyStageLIRDot(stageLIR, node, nodeIndex, diagnostics);
@@ -2253,6 +2376,45 @@ namespace VividRP.Runtime.GPUDriven
                     break;
                 case MaterialOpcodeSignatureKind.Compare:
                     VerifyCompare(values, node, nodeIndex, diagnostics);
+                    break;
+                case MaterialOpcodeSignatureKind.TernarySameNumeric:
+                {
+                    MaterialValueType t0 = GetOperandType(values, node, 0);
+                    MaterialValueType t1 = GetOperandType(values, node, 1);
+                    MaterialValueType t2 = GetOperandType(values, node, 2);
+                    if (!IsNumericType(t0))
+                        AddOperandTypeError(diagnostics, nodeIndex, 0, "numeric", t0);
+                    if (!IsNumericType(t1))
+                        AddOperandTypeError(diagnostics, nodeIndex, 1, "numeric", t1);
+                    if (!IsNumericType(t2))
+                        AddOperandTypeError(diagnostics, nodeIndex, 2, "numeric", t2);
+                    if (t0 != t1 || t0 != t2)
+                    {
+                        AddNodeError(
+                            diagnostics,
+                            MaterialIRDiagnosticCodes.OperandTypeMismatch,
+                            nodeIndex,
+                            $"Ternary operands must match, got {t0}, {t1}, and {t2}.");
+                    }
+                    else if (IsNumericType(t0))
+                    {
+                        RequireResultType(node, nodeIndex, t0, diagnostics);
+                    }
+                    break;
+                }
+                case MaterialOpcodeSignatureKind.UnpackNormal:
+                {
+                    MaterialValueType sampleType = GetOperandType(values, node, 0);
+                    if (sampleType != MaterialValueType.Float3 && sampleType != MaterialValueType.Float4)
+                        AddOperandTypeError(diagnostics, nodeIndex, 0, "Float3 or Float4", sampleType);
+                    RequireOperandType(values, node, nodeIndex, 1, MaterialValueType.Float, diagnostics);
+                    RequireResultType(node, nodeIndex, MaterialValueType.Float3, diagnostics);
+                    break;
+                }
+                case MaterialOpcodeSignatureKind.Noise2D:
+                    RequireOperandType(values, node, nodeIndex, 0, MaterialValueType.Float2, diagnostics);
+                    RequireOperandType(values, node, nodeIndex, 1, MaterialValueType.Float, diagnostics);
+                    RequireResultType(node, nodeIndex, MaterialValueType.Float, diagnostics);
                     break;
                 default:
                     AddNodeError(
@@ -3646,16 +3808,28 @@ namespace VividRP.Runtime.GPUDriven
                 case MaterialStageLIROpcode.Max:
                 case MaterialStageLIROpcode.Dot:
                 case MaterialStageLIROpcode.Compare:
+                case MaterialStageLIROpcode.Pow:
+                case MaterialStageLIROpcode.UnpackNormal:
+                case MaterialStageLIROpcode.ValueNoise2D:
+                case MaterialStageLIROpcode.GradientNoise2D:
                     minimum = maximum = 2;
                     return;
                 case MaterialStageLIROpcode.Lerp:
                 case MaterialStageLIROpcode.Select:
+                case MaterialStageLIROpcode.Clamp:
+                case MaterialStageLIROpcode.Smoothstep:
                     minimum = maximum = 3;
                     return;
                 case MaterialStageLIROpcode.Swizzle:
                 case MaterialStageLIROpcode.Saturate:
                 case MaterialStageLIROpcode.OneMinus:
                 case MaterialStageLIROpcode.Normalize:
+                case MaterialStageLIROpcode.Abs:
+                case MaterialStageLIROpcode.Sin:
+                case MaterialStageLIROpcode.Cos:
+                case MaterialStageLIROpcode.Floor:
+                case MaterialStageLIROpcode.Frac:
+                case MaterialStageLIROpcode.Sqrt:
                     minimum = maximum = 1;
                     return;
                 case MaterialStageLIROpcode.Compose:

@@ -1539,6 +1539,18 @@ namespace VividRP.Runtime.GPUDriven
                     case MaterialStageLIROpcode.Dot:
                     case MaterialStageLIROpcode.Normalize:
                     case MaterialStageLIROpcode.Compare:
+                    case MaterialStageLIROpcode.Abs:
+                    case MaterialStageLIROpcode.Sin:
+                    case MaterialStageLIROpcode.Cos:
+                    case MaterialStageLIROpcode.Floor:
+                    case MaterialStageLIROpcode.Frac:
+                    case MaterialStageLIROpcode.Sqrt:
+                    case MaterialStageLIROpcode.Pow:
+                    case MaterialStageLIROpcode.Clamp:
+                    case MaterialStageLIROpcode.Smoothstep:
+                    case MaterialStageLIROpcode.UnpackNormal:
+                    case MaterialStageLIROpcode.ValueNoise2D:
+                    case MaterialStageLIROpcode.GradientNoise2D:
                         arithmeticNodes++;
                         break;
                 }

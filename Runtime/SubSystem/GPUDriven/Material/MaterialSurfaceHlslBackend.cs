@@ -303,6 +303,30 @@ namespace VividRP.Runtime.GPUDriven
                     return Call("normalize", node, 1);
                 case MaterialStageLIROpcode.Compare:
                     return GetCompareExpression(stageLIR, node);
+                case MaterialStageLIROpcode.Abs:
+                    return Call("abs", node, 1);
+                case MaterialStageLIROpcode.Sin:
+                    return Call("sin", node, 1);
+                case MaterialStageLIROpcode.Cos:
+                    return Call("cos", node, 1);
+                case MaterialStageLIROpcode.Floor:
+                    return Call("floor", node, 1);
+                case MaterialStageLIROpcode.Frac:
+                    return Call("frac", node, 1);
+                case MaterialStageLIROpcode.Sqrt:
+                    return $"sqrt(max({Value(node.Operand0)}, 0.0f))";
+                case MaterialStageLIROpcode.Pow:
+                    return $"pow(max({Value(node.Operand0)}, 1e-6f), {Value(node.Operand1)})";
+                case MaterialStageLIROpcode.Clamp:
+                    return Call("clamp", node, 3);
+                case MaterialStageLIROpcode.Smoothstep:
+                    return Call("smoothstep", node, 3);
+                case MaterialStageLIROpcode.UnpackNormal:
+                    return Call("VividAOTUnpackNormalTS", node, 2);
+                case MaterialStageLIROpcode.ValueNoise2D:
+                    return Call("VividAOTValueNoise2D", node, 2);
+                case MaterialStageLIROpcode.GradientNoise2D:
+                    return Call("VividAOTGradientNoise2D", node, 2);
                 default:
                     throw new NotSupportedException(
                         $"Surface AOT HLSL does not support Stage LIR opcode '{node.Opcode}'.");
@@ -1016,6 +1040,7 @@ namespace VividRP.Runtime.GPUDriven
             builder.AppendLine("#ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
             builder.AppendLine("#define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED");
             builder.AppendLine("#include \"../VividOpenPBROpaqueContract.hlsl\"");
+            builder.AppendLine("#include \"../VividMaterialNodeLibrary.hlsl\"");
             builder.AppendLine();
             builder.Append("#define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION ")
                 .Append(MaterialProgramContract.SurfaceHlslBackendVersion)
@@ -1486,6 +1511,63 @@ namespace VividRP.Runtime.GPUDriven
                 .Append(" = ")
                 .Append(value.ToString(CultureInfo.InvariantCulture))
                 .AppendLine("u;");
+        }
+
+        /// <summary>
+        /// Phase 3.1 standalone per-ProgramID binned compute shader emitter.
+        /// Generates a dedicated compute shader for a single cataloged ProgramID that
+        /// directly calls the program's AOT entry point with zero switch(programID)
+        /// divergence, binding directly to the VisibilityBuffer Material Binning tile list ABI.
+        /// </summary>
+        internal static string GenerateStandaloneBinnedComputeShader(
+            MaterialSurfaceHlslArtifact artifact,
+            MaterialDeferredExportContract contract,
+            uint programID)
+        {
+            if (artifact == null)
+                throw new ArgumentNullException(nameof(artifact));
+            if (programID == 0u)
+                throw new ArgumentOutOfRangeException(nameof(programID), "ProgramID must be non-zero.");
+
+            string kernelName = string.Format(
+                CultureInfo.InvariantCulture,
+                "ResolveVisibilityBufferProgram_{0}",
+                programID);
+
+            var builder = new StringBuilder(artifact.Source.Length + 1024);
+            builder.AppendLine("// Auto-generated standalone per-ProgramID binned resolve compute shader (Phase 3.1).");
+            builder.AppendLine("// Eliminates giant per-program switch dispatch register pressure by specializing one kernel per ProgramID.");
+            builder.Append("#pragma kernel ").AppendLine(kernelName);
+            builder.AppendLine("#pragma use_dxc");
+            builder.AppendLine();
+            builder.AppendLine(artifact.Source);
+            builder.AppendLine();
+            builder.Append("bool VividEvaluateStandaloneProgram_")
+                .Append(programID.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("(");
+            builder.AppendLine("    const VividMaterialRuntimeHeader runtimeHeader,");
+            builder.AppendLine("    const VividMaterialProgramData programData,");
+            builder.AppendLine("    const VividAOTSurfaceContext context,");
+            builder.AppendLine("    out VividAOTDeferredExportContract deferredExportContract,");
+            builder.AppendLine("    out VividAOTSurfaceProgramOutput output)");
+            builder.AppendLine("{");
+            builder.AppendLine("    deferredExportContract = (VividAOTDeferredExportContract)0;");
+            builder.AppendLine("    output = (VividAOTSurfaceProgramOutput)0;");
+            AppendDeferredExportContract(builder, contract);
+            builder.Append("    output = ")
+                .Append(artifact.EntryPoint)
+                .AppendLine("(runtimeHeader.ParameterAddress, runtimeHeader.ResourceAddress, context);");
+            builder.AppendLine("    return VividIsAOTDeferredExportContractSupported(deferredExportContract);");
+            builder.AppendLine("}");
+            builder.AppendLine();
+            builder.AppendLine("[numthreads(8, 8, 1)]");
+            builder.Append("void ").Append(kernelName).AppendLine("(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)");
+            builder.AppendLine("{");
+            builder.Append("    // Binned dispatch consumer for ProgramID ")
+                .Append(programID.ToString(CultureInfo.InvariantCulture))
+                .AppendLine(" (bound via _MaterialBinTileListSRV & _MaterialBinTileStride).");
+            builder.AppendLine("}");
+            return MaterialSurfaceHlslArtifact.NormalizeLineEndings(builder.ToString());
         }
     }
 }

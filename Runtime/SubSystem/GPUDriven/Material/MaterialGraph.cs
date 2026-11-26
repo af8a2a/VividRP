@@ -29,6 +29,18 @@ namespace VividRP.Runtime.GPUDriven
         Dot = 20,
         Normalize = 21,
         Compare = 22,
+        Abs = 23,
+        Sin = 24,
+        Cos = 25,
+        Floor = 26,
+        Frac = 27,
+        Sqrt = 28,
+        Pow = 29,
+        Clamp = 30,
+        Smoothstep = 31,
+        UnpackNormal = 32,
+        ValueNoise2D = 33,
+        GradientNoise2D = 34,
     }
 
     internal enum MaterialGraphClosureOpcode
@@ -471,6 +483,156 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGraphValue value)
         {
             return AddUnary(nodeId, MaterialGraphValueOpcode.Normalize, value);
+        }
+
+        internal MaterialGraphValue Abs(string nodeId, MaterialGraphValue value)
+            => AddUnary(nodeId, MaterialGraphValueOpcode.Abs, value);
+
+        internal MaterialGraphValue Sin(string nodeId, MaterialGraphValue value)
+            => AddUnary(nodeId, MaterialGraphValueOpcode.Sin, value);
+
+        internal MaterialGraphValue Cos(string nodeId, MaterialGraphValue value)
+            => AddUnary(nodeId, MaterialGraphValueOpcode.Cos, value);
+
+        internal MaterialGraphValue Floor(string nodeId, MaterialGraphValue value)
+            => AddUnary(nodeId, MaterialGraphValueOpcode.Floor, value);
+
+        internal MaterialGraphValue Frac(string nodeId, MaterialGraphValue value)
+            => AddUnary(nodeId, MaterialGraphValueOpcode.Frac, value);
+
+        internal MaterialGraphValue Sqrt(string nodeId, MaterialGraphValue value)
+            => AddUnary(nodeId, MaterialGraphValueOpcode.Sqrt, value);
+
+        internal MaterialGraphValue Pow(string nodeId, MaterialGraphValue left, MaterialGraphValue right)
+            => AddBinary(nodeId, MaterialGraphValueOpcode.Pow, left, right);
+
+        internal MaterialGraphValue Clamp(
+            string nodeId,
+            MaterialGraphValue value,
+            MaterialGraphValue minValue,
+            MaterialGraphValue maxValue)
+        {
+            return AddValue(
+                nodeId,
+                MaterialGraphValueOpcode.Clamp,
+                operands: new[] { value, minValue, maxValue });
+        }
+
+        internal MaterialGraphValue Smoothstep(
+            string nodeId,
+            MaterialGraphValue edge0,
+            MaterialGraphValue edge1,
+            MaterialGraphValue value)
+        {
+            return AddValue(
+                nodeId,
+                MaterialGraphValueOpcode.Smoothstep,
+                operands: new[] { edge0, edge1, value });
+        }
+
+        internal MaterialGraphValue UnpackNormal(
+            string nodeId,
+            MaterialGraphValue packedNormal,
+            MaterialGraphValue strength)
+        {
+            return AddBinary(nodeId, MaterialGraphValueOpcode.UnpackNormal, packedNormal, strength);
+        }
+
+        internal MaterialGraphValue ValueNoise2D(
+            string nodeId,
+            MaterialGraphValue uv,
+            MaterialGraphValue scale)
+        {
+            return AddBinary(nodeId, MaterialGraphValueOpcode.ValueNoise2D, uv, scale);
+        }
+
+        internal MaterialGraphValue GradientNoise2D(
+            string nodeId,
+            MaterialGraphValue uv,
+            MaterialGraphValue scale)
+        {
+            return AddBinary(nodeId, MaterialGraphValueOpcode.GradientNoise2D, uv, scale);
+        }
+
+        internal MaterialGraphValue Remap(
+            string nodeId,
+            MaterialGraphValue value,
+            MaterialGraphValue inMin,
+            MaterialGraphValue inMax,
+            MaterialGraphValue outMin,
+            MaterialGraphValue outMax)
+        {
+            MaterialGraphValue numerator = Subtract(nodeId + ".Num", value, inMin);
+            MaterialGraphValue denominator = Subtract(nodeId + ".Den", inMax, inMin);
+            MaterialGraphValue t = Saturate(nodeId + ".T", Divide(nodeId + ".Div", numerator, denominator));
+            return Lerp(nodeId, outMin, outMax, t);
+        }
+
+        /// <summary>
+        /// Phase 3.3 compile-time Subgraph flattening: recursively inlines a value subgraph
+        /// rooted at <paramref name="outputValueNodeId"/> into this MaterialGraph, substituting
+        /// any named Parameter nodes matching <paramref name="parameterBindings"/> with caller values
+        /// and detecting cyclic references cleanly.
+        /// </summary>
+        internal MaterialGraphValue InlineValueSubgraph(
+            string instanceNodeId,
+            MaterialGraph subgraph,
+            string outputValueNodeId,
+            IReadOnlyDictionary<string, MaterialGraphValue> parameterBindings = null)
+        {
+            if (string.IsNullOrEmpty(instanceNodeId))
+                throw new ArgumentException("Subgraph instance node ID is required.", nameof(instanceNodeId));
+            if (subgraph == null)
+                throw new ArgumentNullException(nameof(subgraph));
+            if (ReferenceEquals(this, subgraph))
+                throw new InvalidOperationException($"Subgraph '{instanceNodeId}' cannot recursively reference its own host graph.");
+            if (string.IsNullOrEmpty(outputValueNodeId)
+                || !subgraph.m_ValueNodes.TryGetValue(outputValueNodeId, out _))
+            {
+                throw new ArgumentException($"Subgraph output value node '{outputValueNodeId}' was not found.", nameof(outputValueNodeId));
+            }
+
+            var memo = new Dictionary<string, MaterialGraphValue>(StringComparer.Ordinal);
+            var visiting = new HashSet<string>(StringComparer.Ordinal);
+            return InlineNode(outputValueNodeId, isRoot: true);
+
+            MaterialGraphValue InlineNode(string subNodeId, bool isRoot)
+            {
+                if (memo.TryGetValue(subNodeId, out MaterialGraphValue cached))
+                    return cached;
+                if (!visiting.Add(subNodeId))
+                    throw new InvalidOperationException($"Subgraph '{instanceNodeId}' contains a cycle at node '{subNodeId}'.");
+                if (!subgraph.m_ValueNodes.TryGetValue(subNodeId, out MaterialGraphValueNode subNode))
+                    throw new ArgumentException($"Subgraph node '{subNodeId}' is missing.", nameof(subNodeId));
+
+                if (subNode.Opcode == MaterialGraphValueOpcode.Parameter
+                    && parameterBindings != null
+                    && !string.IsNullOrEmpty(subNode.ParameterDeclaration.Symbol)
+                    && parameterBindings.TryGetValue(subNode.ParameterDeclaration.Symbol, out MaterialGraphValue bound))
+                {
+                    visiting.Remove(subNodeId);
+                    memo[subNodeId] = bound;
+                    return bound;
+                }
+
+                var mappedOperands = new MaterialGraphValue[subNode.Operands.Count];
+                for (int i = 0; i < subNode.Operands.Count; i++)
+                    mappedOperands[i] = InlineNode(subNode.Operands[i].NodeId, isRoot: false);
+
+                string targetId = isRoot ? instanceNodeId : $"{instanceNodeId}::{subNodeId}";
+                MaterialGraphValue emitted = AddValue(
+                    targetId,
+                    subNode.Opcode,
+                    subNode.ConstantType,
+                    subNode.Constant,
+                    subNode.Semantic,
+                    subNode.ParameterDeclaration,
+                    subNode.ResourceDeclaration,
+                    mappedOperands);
+                visiting.Remove(subNodeId);
+                memo[subNodeId] = emitted;
+                return emitted;
+            }
         }
 
         internal MaterialGraphValue Lerp(

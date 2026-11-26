@@ -1,5 +1,8 @@
 #pragma use_dxc
 #pragma kernel ResolveVisibilityBuffer
+#pragma kernel ClearMaterialBinningArgs
+#pragma kernel BinVisibilityTilesByProgram
+#pragma kernel ResolveVisibilityBufferBinned
 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 #pragma multi_compile_local _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
 
@@ -21,6 +24,24 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
 #define VIVID_RESOLVE_GROUP_SIZE 8u
+
+// Phase 3.1 Per-ProgramID Material Tile Binning contract (matches VividMaterialBinningContract.cs)
+#define VIVID_MATERIAL_BIN_EMPTY 0u
+#define VIVID_MATERIAL_BIN_FIRST_PROGRAM 1u
+#define VIVID_MATERIAL_BIN_MAX_DIRECT_PROGRAMS 64u
+#define VIVID_MATERIAL_BIN_OVERFLOW 65u
+#define VIVID_MATERIAL_BIN_TOTAL_COUNT 66u
+#define VIVID_MATERIAL_BIN_INDIRECT_ARGS_STRIDE 3u
+
+uint _MaterialBinTileStride;
+uint _TargetMaterialBin;
+RWStructuredBuffer<uint> _MaterialBinTileList;
+RWStructuredBuffer<uint> _MaterialBinIndirectArgs;
+StructuredBuffer<uint> _MaterialBinTileListSRV;
+
+groupshared uint s_TileBinMask0;
+groupshared uint s_TileBinMask1;
+groupshared uint s_TileBinMask2;
 
 TYPED_TEXTURE2D(float2, _VisibilityBuffer);
 TEXTURE2D(_VisibilityBufferAttributes0);
@@ -505,21 +526,8 @@ void WriteEmptyPixel(uint2 pixelCoord)
     }
 }
 
-[numthreads(VIVID_RESOLVE_GROUP_SIZE, VIVID_RESOLVE_GROUP_SIZE, 1)]
-void ResolveVisibilityBuffer(uint3 dispatchThreadId : SV_DispatchThreadID)
+void ResolvePixelVisibility(uint2 pixelCoord, VividVisibilityBufferValue visibilityBufferValue)
 {
-    uint2 pixelCoord = dispatchThreadId.xy;
-    if (pixelCoord.x >= (uint)_ResolveOutputSize.x || pixelCoord.y >= (uint)_ResolveOutputSize.y)
-        return;
-
-    float2 screenUV = (float2(pixelCoord) + 0.5f) * _ResolveOutputSize.zw;
-    VividVisibilityBufferValue visibilityBufferValue;
-    if (!TryLoadVisibilityValue(screenUV, visibilityBufferValue))
-    {
-        WriteEmptyPixel(pixelCoord);
-        return;
-    }
-
     TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
     const float4 clipPosition0 = TransformWorldToHClip(triangleData.positionWS0);
     const float4 clipPosition1 = TransformWorldToHClip(triangleData.positionWS1);
@@ -611,4 +619,149 @@ void ResolveVisibilityBuffer(uint3 dispatchThreadId : SV_DispatchThreadID)
             _OutLayerAux1[pixelCoord] = 0.0f;
         }
     }
+}
+
+uint ClassifyVisibilityPixelMaterialBin(uint2 pixelCoord, out VividVisibilityBufferValue visibilityBufferValue, out bool hasVisibility)
+{
+    float2 screenUV = (float2(pixelCoord) + 0.5f) * _ResolveOutputSize.zw;
+    hasVisibility = TryLoadVisibilityValue(screenUV, visibilityBufferValue);
+    if (!hasVisibility)
+        return VIVID_MATERIAL_BIN_EMPTY;
+
+    VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
+    VividMaterialRuntimeHeader runtimeHeader;
+    VividMaterialProgramData programData;
+    const uint programStatus = VividGetMaterialProgramStatus(
+        instanceData.MaterialIndex,
+        runtimeHeader,
+        programData);
+    if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN || runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)
+        return VIVID_MATERIAL_BIN_OVERFLOW;
+
+    if (runtimeHeader.ProgramID <= VIVID_MATERIAL_BIN_MAX_DIRECT_PROGRAMS)
+        return runtimeHeader.ProgramID;
+
+    return VIVID_MATERIAL_BIN_OVERFLOW;
+}
+
+[numthreads(VIVID_RESOLVE_GROUP_SIZE, VIVID_RESOLVE_GROUP_SIZE, 1)]
+void ResolveVisibilityBuffer(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (pixelCoord.x >= (uint)_ResolveOutputSize.x || pixelCoord.y >= (uint)_ResolveOutputSize.y)
+        return;
+
+    float2 screenUV = (float2(pixelCoord) + 0.5f) * _ResolveOutputSize.zw;
+    VividVisibilityBufferValue visibilityBufferValue;
+    if (!TryLoadVisibilityValue(screenUV, visibilityBufferValue))
+    {
+        WriteEmptyPixel(pixelCoord);
+        return;
+    }
+
+    ResolvePixelVisibility(pixelCoord, visibilityBufferValue);
+}
+
+[numthreads(64, 1, 1)]
+void ClearMaterialBinningArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint bin = dispatchThreadId.x;
+    if (bin >= VIVID_MATERIAL_BIN_TOTAL_COUNT)
+        return;
+
+    uint baseOffset = bin * VIVID_MATERIAL_BIN_INDIRECT_ARGS_STRIDE;
+    _MaterialBinIndirectArgs[baseOffset + 0u] = 0u;
+    _MaterialBinIndirectArgs[baseOffset + 1u] = 1u;
+    _MaterialBinIndirectArgs[baseOffset + 2u] = 1u;
+}
+
+[numthreads(VIVID_RESOLVE_GROUP_SIZE, VIVID_RESOLVE_GROUP_SIZE, 1)]
+void BinVisibilityTilesByProgram(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint groupIndex : SV_GroupIndex,
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (groupIndex == 0u)
+    {
+        s_TileBinMask0 = 0u;
+        s_TileBinMask1 = 0u;
+        s_TileBinMask2 = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (pixelCoord.x < (uint)_ResolveOutputSize.x && pixelCoord.y < (uint)_ResolveOutputSize.y)
+    {
+        VividVisibilityBufferValue visValue;
+        bool hasVis;
+        uint bin = ClassifyVisibilityPixelMaterialBin(pixelCoord, visValue, hasVis);
+        if (bin < 32u)
+            InterlockedOr(s_TileBinMask0, 1u << bin);
+        else if (bin < 64u)
+            InterlockedOr(s_TileBinMask1, 1u << (bin - 32u));
+        else
+            InterlockedOr(s_TileBinMask2, 1u << (bin - 64u));
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint packedTile = (groupId.y << 16u) | (groupId.x & 0xFFFFu);
+    // Threads 0..63 test bins 0..63; threads 0..1 also test bins 64..65 (overflow).
+    if (groupIndex < 32u)
+    {
+        if ((s_TileBinMask0 & (1u << groupIndex)) != 0u)
+        {
+            uint slot;
+            InterlockedAdd(_MaterialBinIndirectArgs[groupIndex * VIVID_MATERIAL_BIN_INDIRECT_ARGS_STRIDE], 1u, slot);
+            _MaterialBinTileList[groupIndex * _MaterialBinTileStride + slot] = packedTile;
+        }
+    }
+    else
+    {
+        uint bit = groupIndex - 32u;
+        if ((s_TileBinMask1 & (1u << bit)) != 0u)
+        {
+            uint slot;
+            InterlockedAdd(_MaterialBinIndirectArgs[groupIndex * VIVID_MATERIAL_BIN_INDIRECT_ARGS_STRIDE], 1u, slot);
+            _MaterialBinTileList[groupIndex * _MaterialBinTileStride + slot] = packedTile;
+        }
+    }
+
+    if (groupIndex < (VIVID_MATERIAL_BIN_TOTAL_COUNT - 64u))
+    {
+        uint hiBin = 64u + groupIndex;
+        if ((s_TileBinMask2 & (1u << groupIndex)) != 0u)
+        {
+            uint slot;
+            InterlockedAdd(_MaterialBinIndirectArgs[hiBin * VIVID_MATERIAL_BIN_INDIRECT_ARGS_STRIDE], 1u, slot);
+            _MaterialBinTileList[hiBin * _MaterialBinTileStride + slot] = packedTile;
+        }
+    }
+}
+
+[numthreads(VIVID_RESOLVE_GROUP_SIZE, VIVID_RESOLVE_GROUP_SIZE, 1)]
+void ResolveVisibilityBufferBinned(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint packedTile = _MaterialBinTileListSRV[_TargetMaterialBin * _MaterialBinTileStride + groupId.x];
+    uint2 tileCoord = uint2(packedTile & 0xFFFFu, packedTile >> 16u);
+    uint2 pixelCoord = tileCoord * VIVID_RESOLVE_GROUP_SIZE + groupThreadId.xy;
+    if (pixelCoord.x >= (uint)_ResolveOutputSize.x || pixelCoord.y >= (uint)_ResolveOutputSize.y)
+        return;
+
+    VividVisibilityBufferValue visValue;
+    bool hasVis;
+    uint bin = ClassifyVisibilityPixelMaterialBin(pixelCoord, visValue, hasVis);
+    if (bin != _TargetMaterialBin)
+        return;
+
+    if (_TargetMaterialBin == VIVID_MATERIAL_BIN_EMPTY)
+    {
+        WriteEmptyPixel(pixelCoord);
+        return;
+    }
+
+    ResolvePixelVisibility(pixelCoord, visValue);
 }

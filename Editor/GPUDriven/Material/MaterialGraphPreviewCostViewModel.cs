@@ -176,7 +176,7 @@ namespace VividRP.Editor.GPUDriven
             }
 
             MaterialGraphCostMetric[] metrics = programDiagnostics != null
-                ? CreateMetrics(programDiagnostics)
+                ? CreateMetrics(programDiagnostics, result.Program?.Module ?? result.Module)
                 : Array.Empty<MaterialGraphCostMetric>();
             MaterialGraphStageCostSummary[] stages = programDiagnostics != null
                 ? CreateStageSummaries(programDiagnostics.Cost)
@@ -260,10 +260,15 @@ namespace VividRP.Editor.GPUDriven
         }
 
         private static MaterialGraphCostMetric[] CreateMetrics(
-            MaterialProgramDiagnostics diagnostics)
+            MaterialProgramDiagnostics diagnostics,
+            MaterialIRModule module)
         {
             MaterialProgramCost cost = diagnostics.Cost;
             MaterialProgramCostBudget budget = diagnostics.Budget;
+            int substrateBytesPerPixel = module != null
+                ? module.Topology.EstimateSubstrateSliceCount() * VividSubstrateContract.BytesPerSlice
+                : VividSubstrateContract.ComputeMultiClosureTotalSlices(cost.ClosureCount)
+                    * VividSubstrateContract.BytesPerSlice;
             return new[]
             {
                 new MaterialGraphCostMetric(
@@ -298,6 +303,10 @@ namespace VividRP.Editor.GPUDriven
                     "Closure operators",
                     cost.OperatorCount,
                     budget.MaxOperators),
+                new MaterialGraphCostMetric(
+                    "Substrate bytes/px",
+                    substrateBytesPerPixel,
+                    VividSubstrateContract.DefaultBytesPerPixel),
                 new MaterialGraphCostMetric(
                     "Parameter bytes",
                     cost.ParameterBytes,

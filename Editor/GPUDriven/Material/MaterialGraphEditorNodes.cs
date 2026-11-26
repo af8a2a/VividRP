@@ -31,6 +31,12 @@ namespace VividRP.Editor.GPUDriven
         Normalize = 2,
         Ddx = 3,
         Ddy = 4,
+        Abs = 5,
+        Sin = 6,
+        Cos = 7,
+        Floor = 8,
+        Frac = 9,
+        Sqrt = 10,
     }
 
     internal enum MaterialGraphBinaryOperator
@@ -42,6 +48,13 @@ namespace VividRP.Editor.GPUDriven
         Min = 4,
         Max = 5,
         Dot = 6,
+        Pow = 7,
+    }
+
+    internal enum MaterialGraphNoiseMode
+    {
+        Value = 0,
+        Gradient = 1,
     }
 
     internal enum MaterialGraphSwizzle
@@ -357,6 +370,147 @@ namespace VividRP.Editor.GPUDriven
         {
             return GetOptionValue(this, SwizzleOptionName, MaterialGraphSwizzle.X);
         }
+    }
+
+    [Serializable]
+    [Node("Material/Texture", "", "Normal Map Decode")]
+    internal sealed class MaterialNormalMapDecodeNode : MaterialGraphEditorNode
+    {
+        internal const string NormalMapPortName = "NormalMap";
+        internal const string StrengthPortName = "Strength";
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(NormalMapPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(StrengthPortName).Build();
+            AddValueOutput(context);
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Math", "", "Clamp")]
+    internal sealed class MaterialClampNode : MaterialGraphEditorNode
+    {
+        internal const string InputPortName = "In";
+        internal const string MinPortName = "Min";
+        internal const string MaxPortName = "Max";
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(InputPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(MinPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(MaxPortName).Build();
+            AddValueOutput(context);
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Math", "", "Smoothstep")]
+    internal sealed class MaterialSmoothstepNode : MaterialGraphEditorNode
+    {
+        internal const string Edge0PortName = "Edge0";
+        internal const string Edge1PortName = "Edge1";
+        internal const string InputPortName = "In";
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(Edge0PortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(Edge1PortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(InputPortName).Build();
+            AddValueOutput(context);
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Math", "", "Remap")]
+    internal sealed class MaterialRemapNode : MaterialGraphEditorNode
+    {
+        internal const string InputPortName = "In";
+        internal const string InMinPortName = "InMin";
+        internal const string InMaxPortName = "InMax";
+        internal const string OutMinPortName = "OutMin";
+        internal const string OutMaxPortName = "OutMax";
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(InputPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(InMinPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(InMaxPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(OutMinPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(OutMaxPortName).Build();
+            AddValueOutput(context);
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Procedural", "", "Noise 2D")]
+    internal sealed class MaterialNoise2DNode : MaterialGraphEditorNode
+    {
+        internal const string ModeOptionName = "Mode";
+        internal const string UVPortName = "UV";
+        internal const string ScalePortName = "Scale";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<MaterialGraphNoiseMode>(ModeOptionName)
+                .WithDefaultValue(MaterialGraphNoiseMode.Value);
+        }
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(UVPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(ScalePortName).Build();
+            AddValueOutput(context);
+        }
+
+        internal MaterialGraphNoiseMode GetMode()
+        {
+            return GetOptionValue(this, ModeOptionName, MaterialGraphNoiseMode.Value);
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Utility", "", "Subgraph Output")]
+    internal sealed class MaterialSubgraphOutputNode : MaterialGraphEditorNode
+    {
+        internal const string InputPortName = "In";
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(InputPortName).Build();
+        }
+    }
+
+    [Serializable]
+    [Node("Material/Utility", "", "Subgraph Reference")]
+    internal sealed class MaterialSubgraphNode : MaterialGraphEditorNode
+    {
+        internal const string SubgraphPathOptionName = "SubgraphAssetPath";
+        internal const string InputASymbolOptionName = "InputASymbol";
+        internal const string InputBSymbolOptionName = "InputBSymbol";
+        internal const string InputAPortName = "InputA";
+        internal const string InputBPortName = "InputB";
+
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            context.AddOption<string>(SubgraphPathOptionName)
+                .WithDefaultValue(string.Empty);
+            context.AddOption<string>(InputASymbolOptionName)
+                .WithDefaultValue("InputA");
+            context.AddOption<string>(InputBSymbolOptionName)
+                .WithDefaultValue("InputB");
+        }
+
+        protected override void OnDefinePorts(IPortDefinitionContext context)
+        {
+            context.AddInputPort<MaterialGraphValuePort>(InputAPortName).Build();
+            context.AddInputPort<MaterialGraphValuePort>(InputBPortName).Build();
+            AddValueOutput(context);
+        }
+
+        internal string GetSubgraphAssetPath() => GetOptionValue(this, SubgraphPathOptionName, string.Empty);
+        internal string GetInputASymbol() => GetOptionValue(this, InputASymbolOptionName, "InputA");
+        internal string GetInputBSymbol() => GetOptionValue(this, InputBSymbolOptionName, "InputB");
     }
 
     [Serializable]

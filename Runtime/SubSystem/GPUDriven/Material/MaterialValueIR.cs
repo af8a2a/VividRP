@@ -38,6 +38,18 @@ namespace VividRP.Runtime.GPUDriven
         Dot = 19,
         Normalize = 20,
         Compare = 21,
+        Abs = 22,
+        Sin = 23,
+        Cos = 24,
+        Floor = 25,
+        Frac = 26,
+        Sqrt = 27,
+        Pow = 28,
+        Clamp = 29,
+        Smoothstep = 30,
+        UnpackNormal = 31,
+        ValueNoise2D = 32,
+        GradientNoise2D = 33,
     }
 
     internal enum MaterialExternalInput
@@ -547,6 +559,144 @@ namespace VividRP.Runtime.GPUDriven
         {
             ValidateValue(value, nameof(value));
             return EmitUnary(MaterialValueOpcode.Normalize, value);
+        }
+
+        internal MaterialValue Abs(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Abs, value);
+        }
+
+        internal MaterialValue Sin(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Sin, value);
+        }
+
+        internal MaterialValue Cos(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Cos, value);
+        }
+
+        internal MaterialValue Floor(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Floor, value);
+        }
+
+        internal MaterialValue Frac(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Frac, value);
+        }
+
+        internal MaterialValue Sqrt(MaterialValue value)
+        {
+            ValidateValue(value, nameof(value));
+            return EmitUnary(MaterialValueOpcode.Sqrt, value);
+        }
+
+        internal MaterialValue Pow(MaterialValue left, MaterialValue right)
+        {
+            ValidateBinaryOperands(left, right);
+            return EmitBinary(MaterialValueOpcode.Pow, left, right);
+        }
+
+        internal MaterialValue Clamp(MaterialValue value, MaterialValue minValue, MaterialValue maxValue)
+        {
+            ValidateValue(value, nameof(value));
+            ValidateValue(minValue, nameof(minValue));
+            ValidateValue(maxValue, nameof(maxValue));
+            MaterialValueType type = GetNode(value).Type;
+            if (GetNode(minValue).Type != type || GetNode(maxValue).Type != type)
+                throw new ArgumentException("Clamp operands must have matching numeric types.");
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Clamp,
+                type,
+                default,
+                default,
+                value.Index,
+                minValue.Index,
+                maxValue.Index,
+                InvalidOperand));
+        }
+
+        internal MaterialValue Smoothstep(MaterialValue edge0, MaterialValue edge1, MaterialValue value)
+        {
+            ValidateValue(edge0, nameof(edge0));
+            ValidateValue(edge1, nameof(edge1));
+            ValidateValue(value, nameof(value));
+            MaterialValueType type = GetNode(value).Type;
+            if (GetNode(edge0).Type != type || GetNode(edge1).Type != type)
+                throw new ArgumentException("Smoothstep operands must have matching numeric types.");
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.Smoothstep,
+                type,
+                default,
+                default,
+                edge0.Index,
+                edge1.Index,
+                value.Index,
+                InvalidOperand));
+        }
+
+        internal MaterialValue UnpackNormal(MaterialValue packedNormal, MaterialValue strength)
+        {
+            ValidateValue(packedNormal, nameof(packedNormal));
+            ValidateValue(strength, nameof(strength));
+            MaterialValueType sampleType = GetNode(packedNormal).Type;
+            if (sampleType != MaterialValueType.Float3 && sampleType != MaterialValueType.Float4)
+                throw new ArgumentException($"UnpackNormal expects Float3 or Float4 packed normal, got {sampleType}.");
+            if (GetNode(strength).Type != MaterialValueType.Float)
+                throw new ArgumentException("UnpackNormal strength must be Float.");
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.UnpackNormal,
+                MaterialValueType.Float3,
+                default,
+                default,
+                packedNormal.Index,
+                strength.Index,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue ValueNoise2D(MaterialValue uv, MaterialValue scale)
+        {
+            ValidateValue(uv, nameof(uv));
+            ValidateValue(scale, nameof(scale));
+            if (GetNode(uv).Type != MaterialValueType.Float2)
+                throw new ArgumentException("ValueNoise2D UV must be Float2.");
+            if (GetNode(scale).Type != MaterialValueType.Float)
+                throw new ArgumentException("ValueNoise2D scale must be Float.");
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.ValueNoise2D,
+                MaterialValueType.Float,
+                default,
+                default,
+                uv.Index,
+                scale.Index,
+                InvalidOperand,
+                InvalidOperand));
+        }
+
+        internal MaterialValue GradientNoise2D(MaterialValue uv, MaterialValue scale)
+        {
+            ValidateValue(uv, nameof(uv));
+            ValidateValue(scale, nameof(scale));
+            if (GetNode(uv).Type != MaterialValueType.Float2)
+                throw new ArgumentException("GradientNoise2D UV must be Float2.");
+            if (GetNode(scale).Type != MaterialValueType.Float)
+                throw new ArgumentException("GradientNoise2D scale must be Float.");
+            return Emit(new MaterialValueNode(
+                MaterialValueOpcode.GradientNoise2D,
+                MaterialValueType.Float,
+                default,
+                default,
+                uv.Index,
+                scale.Index,
+                InvalidOperand,
+                InvalidOperand));
         }
 
         internal MaterialValue Dot(MaterialValue left, MaterialValue right)

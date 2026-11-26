@@ -55,6 +55,18 @@ namespace VividRP.Runtime.GPUDriven
         Dot = 17,
         Normalize = 18,
         Compare = 19,
+        Abs = 20,
+        Sin = 21,
+        Cos = 22,
+        Floor = 23,
+        Frac = 24,
+        Sqrt = 25,
+        Pow = 26,
+        Clamp = 27,
+        Smoothstep = 28,
+        UnpackNormal = 29,
+        ValueNoise2D = 30,
+        GradientNoise2D = 31,
     }
 
     internal enum MaterialDerivativeLegalizationRule
@@ -154,6 +166,18 @@ namespace VividRP.Runtime.GPUDriven
                 case MaterialValueOpcode.Dot:
                 case MaterialValueOpcode.Normalize:
                 case MaterialValueOpcode.Compare:
+                case MaterialValueOpcode.Abs:
+                case MaterialValueOpcode.Sin:
+                case MaterialValueOpcode.Cos:
+                case MaterialValueOpcode.Floor:
+                case MaterialValueOpcode.Frac:
+                case MaterialValueOpcode.Sqrt:
+                case MaterialValueOpcode.Pow:
+                case MaterialValueOpcode.Clamp:
+                case MaterialValueOpcode.Smoothstep:
+                case MaterialValueOpcode.UnpackNormal:
+                case MaterialValueOpcode.ValueNoise2D:
+                case MaterialValueOpcode.GradientNoise2D:
                     result = AreOperandsUniform(values, node, states)
                         ? MaterialStageUniformity.Uniform
                         : MaterialStageUniformity.Varying;
@@ -1317,6 +1341,18 @@ namespace VividRP.Runtime.GPUDriven
                 case MaterialValueOpcode.Dot: return MaterialStageLIROpcode.Dot;
                 case MaterialValueOpcode.Normalize: return MaterialStageLIROpcode.Normalize;
                 case MaterialValueOpcode.Compare: return MaterialStageLIROpcode.Compare;
+                case MaterialValueOpcode.Abs: return MaterialStageLIROpcode.Abs;
+                case MaterialValueOpcode.Sin: return MaterialStageLIROpcode.Sin;
+                case MaterialValueOpcode.Cos: return MaterialStageLIROpcode.Cos;
+                case MaterialValueOpcode.Floor: return MaterialStageLIROpcode.Floor;
+                case MaterialValueOpcode.Frac: return MaterialStageLIROpcode.Frac;
+                case MaterialValueOpcode.Sqrt: return MaterialStageLIROpcode.Sqrt;
+                case MaterialValueOpcode.Pow: return MaterialStageLIROpcode.Pow;
+                case MaterialValueOpcode.Clamp: return MaterialStageLIROpcode.Clamp;
+                case MaterialValueOpcode.Smoothstep: return MaterialStageLIROpcode.Smoothstep;
+                case MaterialValueOpcode.UnpackNormal: return MaterialStageLIROpcode.UnpackNormal;
+                case MaterialValueOpcode.ValueNoise2D: return MaterialStageLIROpcode.ValueNoise2D;
+                case MaterialValueOpcode.GradientNoise2D: return MaterialStageLIROpcode.GradientNoise2D;
                 default:
                     throw new InvalidOperationException(
                         $"Verified source opcode {opcode} has no Stage LIR mapping.");

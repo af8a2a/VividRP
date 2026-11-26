@@ -91,6 +91,48 @@ namespace VividRP.Editor.GPUDriven
                         GetValueInput(graph, swizzle, MaterialSwizzleNode.InputPortName),
                         GetSwizzleMask(swizzle.GetSwizzle()));
                     return;
+                case MaterialNormalMapDecodeNode normalDecode:
+                    graph.UnpackNormal(
+                        nodeId,
+                        GetValueInput(graph, normalDecode, MaterialNormalMapDecodeNode.NormalMapPortName),
+                        GetValueInputOrDefault(graph, normalDecode, MaterialNormalMapDecodeNode.StrengthPortName, 1.0f));
+                    return;
+                case MaterialClampNode clamp:
+                    graph.Clamp(
+                        nodeId,
+                        GetValueInput(graph, clamp, MaterialClampNode.InputPortName),
+                        GetValueInput(graph, clamp, MaterialClampNode.MinPortName),
+                        GetValueInput(graph, clamp, MaterialClampNode.MaxPortName));
+                    return;
+                case MaterialSmoothstepNode smoothstep:
+                    graph.Smoothstep(
+                        nodeId,
+                        GetValueInput(graph, smoothstep, MaterialSmoothstepNode.Edge0PortName),
+                        GetValueInput(graph, smoothstep, MaterialSmoothstepNode.Edge1PortName),
+                        GetValueInput(graph, smoothstep, MaterialSmoothstepNode.InputPortName));
+                    return;
+                case MaterialRemapNode remap:
+                    graph.Remap(
+                        nodeId,
+                        GetValueInput(graph, remap, MaterialRemapNode.InputPortName),
+                        GetValueInput(graph, remap, MaterialRemapNode.InMinPortName),
+                        GetValueInput(graph, remap, MaterialRemapNode.InMaxPortName),
+                        GetValueInput(graph, remap, MaterialRemapNode.OutMinPortName),
+                        GetValueInput(graph, remap, MaterialRemapNode.OutMaxPortName));
+                    return;
+                case MaterialNoise2DNode noise2D:
+                {
+                    MaterialGraphValue uv = GetValueInput(graph, noise2D, MaterialNoise2DNode.UVPortName);
+                    MaterialGraphValue scale = GetValueInputOrDefault(graph, noise2D, MaterialNoise2DNode.ScalePortName, 8.0f);
+                    if (noise2D.GetMode() == MaterialGraphNoiseMode.Gradient)
+                        graph.GradientNoise2D(nodeId, uv, scale);
+                    else
+                        graph.ValueNoise2D(nodeId, uv, scale);
+                    return;
+                }
+                case MaterialSubgraphNode subgraphNode:
+                    AddSubgraph(graph, nodeId, subgraphNode);
+                    return;
                 case MaterialStandardSlabNode slab:
                     graph.Slab(
                         nodeId,
@@ -233,6 +275,24 @@ namespace VividRP.Editor.GPUDriven
                 case MaterialGraphUnaryOperator.Ddy:
                     graph.Ddy(nodeId, input);
                     break;
+                case MaterialGraphUnaryOperator.Abs:
+                    graph.Abs(nodeId, input);
+                    break;
+                case MaterialGraphUnaryOperator.Sin:
+                    graph.Sin(nodeId, input);
+                    break;
+                case MaterialGraphUnaryOperator.Cos:
+                    graph.Cos(nodeId, input);
+                    break;
+                case MaterialGraphUnaryOperator.Floor:
+                    graph.Floor(nodeId, input);
+                    break;
+                case MaterialGraphUnaryOperator.Frac:
+                    graph.Frac(nodeId, input);
+                    break;
+                case MaterialGraphUnaryOperator.Sqrt:
+                    graph.Sqrt(nodeId, input);
+                    break;
                 default:
                     throw new NotSupportedException(
                         $"Material unary operator '{node.GetOperator()}' is not supported.");
@@ -275,10 +335,54 @@ namespace VividRP.Editor.GPUDriven
                 case MaterialGraphBinaryOperator.Dot:
                     graph.Dot(nodeId, left, right);
                     break;
+                case MaterialGraphBinaryOperator.Pow:
+                    graph.Pow(nodeId, left, right);
+                    break;
                 default:
                     throw new NotSupportedException(
                         $"Material binary operator '{node.GetOperator()}' is not supported.");
             }
+        }
+
+        private static void AddSubgraph(
+            RuntimeMaterialGraph graph,
+            string nodeId,
+            MaterialSubgraphNode node)
+        {
+            string assetPath = node.GetSubgraphAssetPath();
+            if (string.IsNullOrEmpty(assetPath))
+                throw new InvalidOperationException("Subgraph Reference node requires a SubgraphAssetPath.");
+
+            var subEditorGraph = GraphDatabase.LoadGraph<MaterialGraphEditorGraph>(assetPath);
+            if (subEditorGraph == null)
+                throw new InvalidOperationException($"Subgraph asset '{assetPath}' could not be loaded.");
+
+            var subRuntimeGraph = new RuntimeMaterialGraph();
+            string subOutputSourceId = null;
+            foreach (INode subNode in subEditorGraph.GetNodes())
+            {
+                if (subNode is MaterialSubgraphOutputNode subOutput)
+                {
+                    INode connected = GetConnectedNode(subOutput, MaterialSubgraphOutputNode.InputPortName);
+                    subOutputSourceId = connected != null ? GetNodeId(connected) : null;
+                    continue;
+                }
+                if (subNode is MaterialSubgraphNode)
+                    throw new InvalidOperationException("Nested MaterialSubgraphNode recursion is not supported in v1.");
+                AddNode(subRuntimeGraph, subNode, GetNodeId(subNode));
+            }
+            if (string.IsNullOrEmpty(subOutputSourceId))
+                throw new InvalidOperationException($"Subgraph '{assetPath}' has no connected MaterialSubgraphOutputNode.");
+
+            var bindings = new System.Collections.Generic.Dictionary<string, MaterialGraphValue>(StringComparer.Ordinal);
+            MaterialGraphValue inputA = GetValueInput(graph, node, MaterialSubgraphNode.InputAPortName);
+            if (inputA.IsValid && !string.IsNullOrEmpty(node.GetInputASymbol()))
+                bindings[node.GetInputASymbol()] = inputA;
+            MaterialGraphValue inputB = GetValueInput(graph, node, MaterialSubgraphNode.InputBPortName);
+            if (inputB.IsValid && !string.IsNullOrEmpty(node.GetInputBSymbol()))
+                bindings[node.GetInputBSymbol()] = inputB;
+
+            graph.InlineValueSubgraph(nodeId, subRuntimeGraph, subOutputSourceId, bindings);
         }
 
         private static MaterialGraphValue GetValueInput(

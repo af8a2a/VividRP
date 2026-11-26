@@ -444,6 +444,30 @@ namespace VividRP.Runtime.GPUDriven
                         return m_Values.Dot(operands[0], operands[1]);
                     case MaterialGraphValueOpcode.Normalize:
                         return m_Values.Normalize(operands[0]);
+                    case MaterialGraphValueOpcode.Abs:
+                        return m_Values.Abs(operands[0]);
+                    case MaterialGraphValueOpcode.Sin:
+                        return m_Values.Sin(operands[0]);
+                    case MaterialGraphValueOpcode.Cos:
+                        return m_Values.Cos(operands[0]);
+                    case MaterialGraphValueOpcode.Floor:
+                        return m_Values.Floor(operands[0]);
+                    case MaterialGraphValueOpcode.Frac:
+                        return m_Values.Frac(operands[0]);
+                    case MaterialGraphValueOpcode.Sqrt:
+                        return m_Values.Sqrt(operands[0]);
+                    case MaterialGraphValueOpcode.Pow:
+                        return m_Values.Pow(operands[0], operands[1]);
+                    case MaterialGraphValueOpcode.Clamp:
+                        return m_Values.Clamp(operands[0], operands[1], operands[2]);
+                    case MaterialGraphValueOpcode.Smoothstep:
+                        return m_Values.Smoothstep(operands[0], operands[1], operands[2]);
+                    case MaterialGraphValueOpcode.UnpackNormal:
+                        return m_Values.UnpackNormal(operands[0], operands[1]);
+                    case MaterialGraphValueOpcode.ValueNoise2D:
+                        return m_Values.ValueNoise2D(operands[0], operands[1]);
+                    case MaterialGraphValueOpcode.GradientNoise2D:
+                        return m_Values.GradientNoise2D(operands[0], operands[1]);
                     case MaterialGraphValueOpcode.Lerp:
                         return m_Values.Lerp(operands[0], operands[1], operands[2]);
                     case MaterialGraphValueOpcode.Select:
@@ -919,8 +943,23 @@ namespace VividRP.Runtime.GPUDriven
                 case MaterialGraphValueOpcode.Saturate:
                 case MaterialGraphValueOpcode.OneMinus:
                 case MaterialGraphValueOpcode.Normalize:
+                case MaterialGraphValueOpcode.Abs:
+                case MaterialGraphValueOpcode.Sin:
+                case MaterialGraphValueOpcode.Cos:
+                case MaterialGraphValueOpcode.Floor:
+                case MaterialGraphValueOpcode.Frac:
+                case MaterialGraphValueOpcode.Sqrt:
                 case MaterialGraphValueOpcode.Swizzle:
                     return "In";
+                case MaterialGraphValueOpcode.Clamp:
+                    return new[] { "In", "Min", "Max" }[operandIndex];
+                case MaterialGraphValueOpcode.Smoothstep:
+                    return new[] { "Edge0", "Edge1", "In" }[operandIndex];
+                case MaterialGraphValueOpcode.UnpackNormal:
+                    return operandIndex == 0 ? "NormalMap" : "Strength";
+                case MaterialGraphValueOpcode.ValueNoise2D:
+                case MaterialGraphValueOpcode.GradientNoise2D:
+                    return operandIndex == 0 ? "UV" : "Scale";
                 case MaterialGraphValueOpcode.Lerp:
                     return new[] { "A", "B", "T" }[operandIndex];
                 case MaterialGraphValueOpcode.Select:

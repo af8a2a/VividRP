@@ -161,6 +161,7 @@ VividEvaluatedSlabSurface VividEvaluateSlabSurfaceGrad(
         slabData.Metallic);
 }
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividMaterialNodeLibrary.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl"
 
 #endif // VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED

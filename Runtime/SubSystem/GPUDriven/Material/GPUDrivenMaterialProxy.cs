@@ -128,6 +128,9 @@ namespace VividRP.Runtime.GPUDriven
         private Material m_SourceMaterial;
 
         [SerializeField]
+        private GPUDrivenMaterialProxy m_ParentProxy;
+
+        [SerializeField]
         private MaterialGraphImportAsset m_MaterialGraph;
 
         [SerializeField]
@@ -210,16 +213,105 @@ namespace VividRP.Runtime.GPUDriven
         [HideInInspector]
         private uint m_Revision = 1;
 
+        private const int MaxParentChainDepth = 16;
+
         public Material SourceMaterial
         {
             get => m_SourceMaterial;
             set => SetValue(ref m_SourceMaterial, value);
         }
 
+        public GPUDrivenMaterialProxy ParentProxy
+        {
+            get => m_ParentProxy;
+            set
+            {
+                if (value != null && WouldCreateParentCycle(value))
+                {
+                    throw new InvalidOperationException(
+                        $"Assigning '{value.name}' as parent of '{name}' would create a material instance inheritance cycle.");
+                }
+                SetValue(ref m_ParentProxy, value);
+            }
+        }
+
         public MaterialGraphImportAsset MaterialGraph
         {
             get => m_MaterialGraph;
             set => SetValue(ref m_MaterialGraph, value);
+        }
+
+        public MaterialGraphImportAsset EffectiveMaterialGraph
+        {
+            get
+            {
+                GPUDrivenMaterialProxy current = this;
+                for (int depth = 0; current != null && depth < MaxParentChainDepth; depth++)
+                {
+                    if (current.m_MaterialGraph != null)
+                        return current.m_MaterialGraph;
+                    current = current.m_ParentProxy;
+                    if (ReferenceEquals(current, this))
+                        break;
+                }
+                return null;
+            }
+        }
+
+        public uint EffectiveRevision
+        {
+            get
+            {
+                unchecked
+                {
+                    uint combined = m_Revision;
+                    GPUDrivenMaterialProxy current = m_ParentProxy;
+                    for (int depth = 0; current != null && depth < MaxParentChainDepth; depth++)
+                    {
+                        if (ReferenceEquals(current, this))
+                            break;
+                        combined = (combined * 397u) ^ current.m_Revision;
+                        current = current.m_ParentProxy;
+                    }
+                    return combined == 0u ? 1u : combined;
+                }
+            }
+        }
+
+        public bool WouldCreateParentCycle(GPUDrivenMaterialProxy candidateParent)
+        {
+            GPUDrivenMaterialProxy current = candidateParent;
+            for (int depth = 0; current != null && depth < MaxParentChainDepth; depth++)
+            {
+                if (ReferenceEquals(current, this))
+                    return true;
+                current = current.m_ParentProxy;
+            }
+            return false;
+        }
+
+        public bool HasLocalParameterOverride(string symbol)
+        {
+            if (string.IsNullOrEmpty(symbol) || m_ParameterOverrides == null)
+                return false;
+            for (int i = 0; i < m_ParameterOverrides.Count; i++)
+            {
+                if (string.Equals(m_ParameterOverrides[i].Symbol, symbol, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        public bool HasLocalTextureOverride(string symbol)
+        {
+            if (string.IsNullOrEmpty(symbol) || m_TextureOverrides == null)
+                return false;
+            for (int i = 0; i < m_TextureOverrides.Count; i++)
+            {
+                if (string.Equals(m_TextureOverrides[i].Symbol, symbol, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
         }
 
         public GPUDrivenMaterialProxyModel Model
@@ -516,30 +608,47 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialParameterDeclaration declaration,
             out Vector4 value)
         {
-            if (m_ParameterOverrides != null)
+            return TryGetParameterOverrideWithSource(in declaration, out value, out _);
+        }
+
+        internal bool TryGetParameterOverrideWithSource(
+            in MaterialParameterDeclaration declaration,
+            out Vector4 value,
+            out bool isInherited)
+        {
+            GPUDrivenMaterialProxy current = this;
+            for (int depth = 0; current != null && depth < MaxParentChainDepth; depth++)
             {
-                for (int i = 0; i < m_ParameterOverrides.Count; i++)
+                if (current.m_ParameterOverrides != null)
                 {
-                    GPUDrivenMaterialParameterOverride item =
-                        m_ParameterOverrides[i];
-                    if (!string.Equals(
-                            item.Symbol,
-                            declaration.Symbol,
-                            StringComparison.Ordinal))
+                    for (int i = 0; i < current.m_ParameterOverrides.Count; i++)
                     {
-                        continue;
+                        GPUDrivenMaterialParameterOverride item =
+                            current.m_ParameterOverrides[i];
+                        if (!string.Equals(
+                                item.Symbol,
+                                declaration.Symbol,
+                                StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                        if (!Matches(item.Type, declaration.Type))
+                        {
+                            throw new InvalidOperationException(
+                                $"Material parameter override '{item.Symbol}' is {item.Type}, but the compiled graph requires {declaration.Type}.");
+                        }
+                        value = item.Value;
+                        isInherited = depth > 0;
+                        return true;
                     }
-                    if (!Matches(item.Type, declaration.Type))
-                    {
-                        throw new InvalidOperationException(
-                            $"Material parameter override '{item.Symbol}' is {item.Type}, but the compiled graph requires {declaration.Type}.");
-                    }
-                    value = item.Value;
-                    return true;
                 }
+                current = current.m_ParentProxy;
+                if (ReferenceEquals(current, this))
+                    break;
             }
 
             value = default;
+            isInherited = false;
             return false;
         }
 
@@ -547,29 +656,47 @@ namespace VividRP.Runtime.GPUDriven
             in MaterialResourceDeclaration declaration,
             out GPUDrivenMaterialTextureOverride value)
         {
+            return TryGetTextureOverrideWithSource(in declaration, out value, out _);
+        }
+
+        internal bool TryGetTextureOverrideWithSource(
+            in MaterialResourceDeclaration declaration,
+            out GPUDrivenMaterialTextureOverride value,
+            out bool isInherited)
+        {
             if (declaration.Type != MaterialValueType.Texture2D)
             {
                 throw new InvalidOperationException(
                     $"Material resource '{declaration.Symbol}' is not Texture2D.");
             }
-            if (m_TextureOverrides != null)
+
+            GPUDrivenMaterialProxy current = this;
+            for (int depth = 0; current != null && depth < MaxParentChainDepth; depth++)
             {
-                for (int i = 0; i < m_TextureOverrides.Count; i++)
+                if (current.m_TextureOverrides != null)
                 {
-                    GPUDrivenMaterialTextureOverride item = m_TextureOverrides[i];
-                    if (!string.Equals(
-                            item.Symbol,
-                            declaration.Symbol,
-                            StringComparison.Ordinal))
+                    for (int i = 0; i < current.m_TextureOverrides.Count; i++)
                     {
-                        continue;
+                        GPUDrivenMaterialTextureOverride item = current.m_TextureOverrides[i];
+                        if (!string.Equals(
+                                item.Symbol,
+                                declaration.Symbol,
+                                StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                        value = item;
+                        isInherited = depth > 0;
+                        return true;
                     }
-                    value = item;
-                    return true;
                 }
+                current = current.m_ParentProxy;
+                if (ReferenceEquals(current, this))
+                    break;
             }
 
             value = default;
+            isInherited = false;
             return false;
         }
 

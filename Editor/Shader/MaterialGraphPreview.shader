@@ -219,6 +219,7 @@ Shader "Hidden/VividRP/Editor/Material Graph Preview"
                 return result;
             }
 
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividMaterialNodeLibrary.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl"
 
             VividMaterialData CreateSingleSlabParameters()

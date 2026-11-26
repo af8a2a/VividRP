@@ -3,6 +3,7 @@
 #ifndef VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #define VIVID_MATERIAL_SURFACE_AOT_GENERATED_INCLUDED
 #include "../VividOpenPBROpaqueContract.hlsl"
+#include "../VividMaterialNodeLibrary.hlsl"
 
 #define VIVID_MATERIAL_SURFACE_HLSL_BACKEND_VERSION 9u
 

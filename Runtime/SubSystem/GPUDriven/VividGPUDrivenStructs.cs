@@ -107,6 +107,7 @@ namespace VividRP.Runtime.GPUDriven
         StandardSingleSlab = 0,
         DualSlab = 1,
         OpenPBROpaque = 2,
+        DynamicSlab = 3,
     }
 
     [GenerateHLSL(PackingRules.Exact)]

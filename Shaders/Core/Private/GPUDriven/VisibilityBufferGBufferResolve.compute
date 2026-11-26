@@ -722,7 +722,8 @@ uint ClassifyVisibilityPixelMaterialBin(uint2 pixelCoord, out VividVisibilityBuf
     if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN || runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)
         return VIVID_MATERIAL_BIN_OVERFLOW;
 
-    if (runtimeHeader.ProgramID <= VIVID_MATERIAL_BIN_MAX_DIRECT_PROGRAMS)
+    if (runtimeHeader.ProgramID >= VIVID_MATERIAL_BIN_FIRST_PROGRAM
+        && runtimeHeader.ProgramID <= VIVID_MATERIAL_BIN_MAX_DIRECT_PROGRAMS)
         return runtimeHeader.ProgramID;
 
     return VIVID_MATERIAL_BIN_OVERFLOW;

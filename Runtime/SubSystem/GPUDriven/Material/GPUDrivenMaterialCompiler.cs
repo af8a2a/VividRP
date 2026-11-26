@@ -411,7 +411,7 @@ namespace VividRP.Runtime.GPUDriven
                 }
             }
 
-            MaterialGraphImportAsset graph = materialProxy.MaterialGraph;
+            MaterialGraphImportAsset graph = materialProxy.EffectiveMaterialGraph;
             if (graph == null)
             {
                 MaterialProgramCatalog.ManifestEntry builtinProgram =

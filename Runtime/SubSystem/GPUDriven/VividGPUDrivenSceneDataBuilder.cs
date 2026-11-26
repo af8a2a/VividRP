@@ -1530,6 +1530,57 @@ namespace VividRP.Runtime.GPUDriven
                         textureBackend);
                     sceneData.MutableDualSlabMaterials.Add(
                         compiledMaterial.DualSlabMaterialData);
+                    sceneData.MutableMaterialParameterLanes.AddRange(
+                        compiledMaterial.ParameterLanes);
+                    int appendedResourceRecordCount = sceneData.MaterialResourceCount
+                        - (int) resourceBindingAddress;
+                    int requiredResourceRecordCount =
+                        compiledMaterial.ProgramBinding.ResourceCount;
+                    if (appendedResourceRecordCount != requiredResourceRecordCount)
+                    {
+                        throw new InvalidOperationException(
+                            $"Material program '{compiledMaterial.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
+                    }
+                    materialData = compiledMaterial.LegacyMaterialData;
+                    runtimeHeader = compiledMaterial.RuntimeHeader;
+                }
+                else if (materialProxy.EffectiveMaterialGraph == null
+                    && materialProxy.SourceMaterial != null
+                    && VividSlabProgramRegistry.TryGetDescriptor(
+                        materialProxy.SourceMaterial.shader,
+                        out VividSlabProgramDescriptor proxySlabDescriptor)
+                    && proxySlabDescriptor.IsGPUDrivenResolveReady)
+                {
+                    VividMaterialProgramID dynamicProgramId =
+                        sceneData.RegisterDynamicSlabProgram(proxySlabDescriptor);
+                    VividSurfaceBindingData baseBinding =
+                        textureBackend.CreateSurfaceBinding(
+                            ExtractSurfaceTextures(materialProxy, textureBackend));
+                    sceneData.MutableSurfaceBindings.Add(baseBinding);
+                    materialData = CreateMaterialData(materialProxy.SourceMaterial, surfaceBindingIndex);
+                    proxySlabDescriptor.PackParameterLanes(
+                        materialProxy.SourceMaterial,
+                        materialProxy,
+                        sceneData.MutableMaterialParameterLanes);
+                    AppendDynamicSlabMaterialResources(
+                        sceneData,
+                        proxySlabDescriptor,
+                        materialProxy.SourceMaterial,
+                        materialProxy,
+                        materialData,
+                        baseBinding,
+                        textureBackend);
+                    runtimeHeader = new VividMaterialRuntimeHeader
+                    {
+                        ProgramID = dynamicProgramId,
+                        ParameterAddress = parameterLaneAddress,
+                        ResourceBindingAddress = resourceBindingAddress,
+                        Flags = materialProxy.AlphaClip
+                            ? VividMaterialRuntimeFlags.AlphaClip
+                            : VividMaterialRuntimeFlags.None,
+                    };
+                    if (materialProxy.DisableLighting)
+                        runtimeHeader.Flags |= VividMaterialRuntimeFlags.Unlit;
                 }
                 else
                 {
@@ -1550,20 +1601,20 @@ namespace VividRP.Runtime.GPUDriven
                         baseBinding,
                         default,
                         textureBackend);
+                    sceneData.MutableMaterialParameterLanes.AddRange(
+                        compiledMaterial.ParameterLanes);
+                    int appendedResourceRecordCount = sceneData.MaterialResourceCount
+                        - (int) resourceBindingAddress;
+                    int requiredResourceRecordCount =
+                        compiledMaterial.ProgramBinding.ResourceCount;
+                    if (appendedResourceRecordCount != requiredResourceRecordCount)
+                    {
+                        throw new InvalidOperationException(
+                            $"Material program '{compiledMaterial.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
+                    }
+                    materialData = compiledMaterial.LegacyMaterialData;
+                    runtimeHeader = compiledMaterial.RuntimeHeader;
                 }
-                sceneData.MutableMaterialParameterLanes.AddRange(
-                    compiledMaterial.ParameterLanes);
-                int appendedResourceRecordCount = sceneData.MaterialResourceCount
-                    - (int) resourceBindingAddress;
-                int requiredResourceRecordCount =
-                    compiledMaterial.ProgramBinding.ResourceCount;
-                if (appendedResourceRecordCount != requiredResourceRecordCount)
-                {
-                    throw new InvalidOperationException(
-                        $"Material program '{compiledMaterial.ProgramID}' requires {requiredResourceRecordCount} resource records, but the material compiler appended {appendedResourceRecordCount}.");
-                }
-                materialData = compiledMaterial.LegacyMaterialData;
-                runtimeHeader = compiledMaterial.RuntimeHeader;
             }
             else
             {
@@ -1571,7 +1622,43 @@ namespace VividRP.Runtime.GPUDriven
                 VividSurfaceBindingData baseBinding =
                     textureBackend.CreateSurfaceBinding(ExtractSurfaceTextures(material));
                 sceneData.MutableSurfaceBindings.Add(baseBinding);
-                if (IsStandardLitShader(material != null ? material.shader : null))
+                if (material != null
+                    && VividSlabProgramRegistry.TryGetDescriptor(
+                        material.shader,
+                        out VividSlabProgramDescriptor directSlabDescriptor)
+                    && directSlabDescriptor.IsGPUDrivenResolveReady)
+                {
+                    VividMaterialProgramID dynamicProgramId =
+                        sceneData.RegisterDynamicSlabProgram(directSlabDescriptor);
+                    directSlabDescriptor.PackParameterLanes(
+                        material,
+                        null,
+                        sceneData.MutableMaterialParameterLanes);
+                    AppendDynamicSlabMaterialResources(
+                        sceneData,
+                        directSlabDescriptor,
+                        material,
+                        null,
+                        materialData,
+                        baseBinding,
+                        textureBackend);
+                    VividMaterialRuntimeFlags flags = VividMaterialRuntimeFlags.None;
+                    if (materialData.AlphaClipThreshold > 0.0f
+                        || (materialData.RendererListID & VividRendererListID.AlphaTest) != 0)
+                    {
+                        flags |= VividMaterialRuntimeFlags.AlphaClip;
+                    }
+                    if ((materialData.MaterialFlags & VividMaterialFlags.Unlit) != 0)
+                        flags |= VividMaterialRuntimeFlags.Unlit;
+                    runtimeHeader = new VividMaterialRuntimeHeader
+                    {
+                        ProgramID = dynamicProgramId,
+                        ParameterAddress = parameterLaneAddress,
+                        ResourceBindingAddress = resourceBindingAddress,
+                        Flags = flags,
+                    };
+                }
+                else if (IsStandardLitShader(material != null ? material.shader : null))
                 {
                     GPUDrivenCompiledMaterialInstance compiledMaterial =
                         GPUDrivenMaterialCompiler.CompileStandardSingleSlab(
@@ -1616,6 +1703,76 @@ namespace VividRP.Runtime.GPUDriven
 
             // The material CRC covers the texture binding. The emission tint can also depend on its texel.
             return unchecked((uint) material.ComputeCRC() * 16777619u ^ GPUDrivenMaterialCompiler.GetEmissionTexelRevision(material));
+        }
+
+        private static void AppendDynamicSlabMaterialResources(
+            VividGPUDrivenSceneData sceneData,
+            VividSlabProgramDescriptor descriptor,
+            Material sourceMaterial,
+            GPUDrivenMaterialProxy overrideProxy,
+            in VividMaterialData materialData,
+            in VividSurfaceBindingData fallbackSurfaceBinding,
+            IGPUDrivenTextureBackend textureBackend)
+        {
+            IReadOnlyList<VividSlabResourceSlot> resources = descriptor.Resources;
+            for (int i = 0; i < resources.Count; i++)
+            {
+                VividSlabResourceSlot slot = resources[i];
+                MaterialTextureSampleClass sampleClass = slot.SampleKind switch
+                {
+                    VividSlabTextureSampleKind.Normal => MaterialTextureSampleClass.Normal,
+                    VividSlabTextureSampleKind.Mask => MaterialTextureSampleClass.Mask,
+                    VividSlabTextureSampleKind.Raw => MaterialTextureSampleClass.Raw,
+                    _ => MaterialTextureSampleClass.Color,
+                };
+
+                var decl = new MaterialResourceDeclaration(
+                    slot.Symbol,
+                    MaterialValueType.Texture2D,
+                    sampleClass);
+
+                VividSurfaceBindingData resolvedBinding = fallbackSurfaceBinding;
+                float4 tilingOffset = materialData.TextureTilingOffset;
+
+                if (overrideProxy != null
+                    && overrideProxy.TryGetTextureOverride(in decl, out GPUDrivenMaterialTextureOverride texOverride))
+                {
+                    GPUDrivenSurfaceTextureSet texSet = CreateAuthoredOverrideTextureSet(
+                        in decl,
+                        in texOverride,
+                        textureBackend);
+                    resolvedBinding = textureBackend.CreateSurfaceBinding(texSet);
+                    tilingOffset = new float4(
+                        texOverride.TilingOffset.x,
+                        texOverride.TilingOffset.y,
+                        texOverride.TilingOffset.z,
+                        texOverride.TilingOffset.w);
+                }
+                else if (sourceMaterial != null)
+                {
+                    int propId = slot.PropertyId;
+                    if (propId != 0 && sourceMaterial.HasProperty(propId))
+                    {
+                        Texture tex = sourceMaterial.GetTexture(propId);
+                        if (tex is Texture2D tex2D)
+                        {
+                            GPUDrivenSurfaceTextureSet texSet = CreateGenericOverrideTextureSet(
+                                sampleClass,
+                                tex2D);
+                            resolvedBinding = textureBackend.CreateSurfaceBinding(texSet);
+                        }
+                        Vector2 scale = sourceMaterial.GetTextureScale(propId);
+                        Vector2 offset = sourceMaterial.GetTextureOffset(propId);
+                        tilingOffset = new float4(scale.x, scale.y, offset.x, offset.y);
+                    }
+                }
+
+                VividMaterialResourceData resourceRecord = CreateGenericMaterialResource(
+                    materialData,
+                    resolvedBinding);
+                resourceRecord.TextureTilingOffset = tilingOffset;
+                sceneData.MutableMaterialResources.Add(resourceRecord);
+            }
         }
 
         private static void AppendGenericMaterialResources(
@@ -2208,9 +2365,9 @@ namespace VividRP.Runtime.GPUDriven
             unchecked
             {
                 uint hash = 2166136261u;
-                hash = (hash ^ materialProxy.Revision) * 16777619u;
+                hash = (hash ^ materialProxy.EffectiveRevision) * 16777619u;
                 MaterialGraphImportAsset materialGraph =
-                    materialProxy.MaterialGraph;
+                    materialProxy.EffectiveMaterialGraph;
                 hash = (hash ^ GetObjectRevisionId(materialGraph)) * 16777619u;
                 hash = (hash ^ (materialGraph != null
                     ? materialGraph.ContentVersion

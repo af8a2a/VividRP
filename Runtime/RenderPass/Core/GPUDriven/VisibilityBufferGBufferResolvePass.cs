@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -775,6 +776,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_ResolveCompute, m_BinVisibilityTilesByProgramKernel, tileCountX, tileCountY, 1);
 
             // 3. Bind outputs once for ResolveVisibilityBufferBinned, then DispatchIndirect per active bin
+            bool hasVtBinding = false;
+            VirtualTextureSpaceBinding vtBinding = default;
             if (system?.UsesVirtualTexture == true)
             {
                 if (GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
@@ -785,8 +788,9 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_VirtualTextureLayerFallbacks,
                         m_FrameIndex,
                         Mathf.RoundToInt(m_VirtualTextureFeedbackSampleRate),
-                        out VirtualTextureSpaceBinding vtBinding))
+                        out vtBinding))
                 {
+                    hasVtBinding = true;
                     VirtualTextureFeedbackBindingUtility.BindFeedbackComputeTargets(
                         cmd,
                         m_ResolveCompute,
@@ -794,6 +798,10 @@ namespace VividRP.Runtime.RenderPass.Core
                         vtBinding);
                 }
             }
+
+            RenderTargetIdentifier substrateOutputId = writeSubstrate
+                ? (RenderTargetIdentifier)m_SubstrateClosureBufferHandle
+                : (RenderTargetIdentifier)VividSubstrateMaterialFrameData.GetOrCreateDummyClosureBuffer();
 
             cmd.SetComputeTextureParam(m_ResolveCompute, m_ResolveVisibilityBufferBinnedKernel, VisibilityBufferId, visibilityTexture);
             cmd.SetComputeBufferParam(m_ResolveCompute, m_ResolveVisibilityBufferBinnedKernel, MaterialBinTileListSRVId, m_MaterialBinTileListBuffer);
@@ -808,14 +816,58 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResolveCompute,
                 m_ResolveVisibilityBufferBinnedKernel,
                 OutSubstrateClosureBufferId,
-                writeSubstrate
-                    ? (RenderTargetIdentifier)m_SubstrateClosureBufferHandle
-                    : (RenderTargetIdentifier)VividSubstrateMaterialFrameData.GetOrCreateDummyClosureBuffer());
+                substrateOutputId);
+
+            IReadOnlyList<VividDynamicSlabProgramBinding> dynamicPrograms =
+                system?.SceneData?.DynamicSlabPrograms;
+            Vector4 visibilityScaleBias = m_VisibilityBuffer.innerHandle.GetScaleBias();
+            var resolveOutputSize = new Vector4(
+                m_ResolveWidth,
+                m_ResolveHeight,
+                1.0f / Mathf.Max(1, m_ResolveWidth),
+                1.0f / Mathf.Max(1, m_ResolveHeight));
 
             // Dispatch Empty bin (0), direct ProgramID bins (1..MaxDirectProgramBins), and Overflow bin (65).
-            // GPU skips bins with tileCount == 0 via DispatchIndirect at near-zero cost.
+            // Dynamic *.slab.shader bins dispatch their own standalone ComputeShader (zero switch divergence).
             for (int binIndex = 0; binIndex < VividMaterialBinningContract.TotalBinCount; binIndex++)
             {
+                if (TryFindDynamicSlabProgramForBin(
+                        dynamicPrograms,
+                        binIndex,
+                        out VividDynamicSlabProgramBinding dynamicBinding))
+                {
+                    ComputeShader slabCs = dynamicBinding.ComputeShader;
+                    int slabKernel = dynamicBinding.KernelIndex;
+                    system?.ConfigureTextureBackendKeyword(slabCs);
+                    if (hasVtBinding)
+                    {
+                        VirtualTextureFeedbackBindingUtility.BindFeedbackComputeTargets(
+                            cmd,
+                            slabCs,
+                            slabKernel,
+                            vtBinding);
+                    }
+                    cmd.SetComputeVectorParam(slabCs, VisibilityBufferScaleBiasId, visibilityScaleBias);
+                    cmd.SetComputeVectorParam(slabCs, ResolveOutputSizeId, resolveOutputSize);
+                    cmd.SetComputeIntParam(slabCs, MaterialBinTileStrideId, m_MaterialBinTileStride);
+                    cmd.SetComputeIntParam(slabCs, TargetMaterialBinId, binIndex);
+                    cmd.SetComputeIntParam(slabCs, WriteSubstrateClosureBufferId, writeSubstrate ? 1 : 0);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, VisibilityBufferId, visibilityTexture);
+                    cmd.SetComputeBufferParam(slabCs, slabKernel, MaterialBinTileListSRVId, m_MaterialBinTileListBuffer);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer0Id, m_GBuffer0.innerHandle);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer1Id, m_GBuffer1.innerHandle);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer2Id, m_GBuffer2.innerHandle);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer3Id, m_GBuffer3.innerHandle);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer4Id, m_GBuffer4.innerHandle);
+                    cmd.SetComputeTextureParam(slabCs, slabKernel, OutSubstrateClosureBufferId, substrateOutputId);
+                    cmd.DispatchCompute(
+                        slabCs,
+                        slabKernel,
+                        m_MaterialBinIndirectArgsBuffer,
+                        (uint)VividMaterialBinningContract.GetIndirectArgsByteOffset(binIndex));
+                    continue;
+                }
+
                 cmd.SetComputeIntParam(m_ResolveCompute, TargetMaterialBinId, binIndex);
                 cmd.DispatchCompute(
                     m_ResolveCompute,
@@ -823,6 +875,32 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_MaterialBinIndirectArgsBuffer,
                     (uint)VividMaterialBinningContract.GetIndirectArgsByteOffset(binIndex));
             }
+        }
+
+        private static bool TryFindDynamicSlabProgramForBin(
+            IReadOnlyList<VividDynamicSlabProgramBinding> dynamicPrograms,
+            int binIndex,
+            out VividDynamicSlabProgramBinding binding)
+        {
+            if (dynamicPrograms != null
+                && binIndex >= VividMaterialBinningContract.FirstDirectProgramBinIndex
+                && binIndex <= VividMaterialBinningContract.MaxDirectProgramBins)
+            {
+                for (int i = 0; i < dynamicPrograms.Count; i++)
+                {
+                    VividDynamicSlabProgramBinding candidate = dynamicPrograms[i];
+                    if ((int)(uint)candidate.ProgramID == binIndex
+                        && candidate.ComputeShader != null
+                        && candidate.KernelIndex >= 0)
+                    {
+                        binding = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            binding = default;
+            return false;
         }
 
         private static void ConfigurePassOwnedTarget(

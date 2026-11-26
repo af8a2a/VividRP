@@ -39,6 +39,32 @@ namespace VividRP.Runtime.GPUDriven
         internal VividGPUDrivenInstanceSourceFlags Flags { get; }
     }
 
+    internal readonly struct VividDynamicSlabProgramBinding
+    {
+        internal VividDynamicSlabProgramBinding(
+            VividMaterialProgramID programID,
+            ComputeShader computeShader,
+            int kernelIndex,
+            int parameterStrideInWords,
+            int resourceCount,
+            VividSlabProgramDescriptor descriptor)
+        {
+            ProgramID = programID;
+            ComputeShader = computeShader;
+            KernelIndex = kernelIndex;
+            ParameterStrideInWords = parameterStrideInWords;
+            ResourceCount = resourceCount;
+            Descriptor = descriptor;
+        }
+
+        internal VividMaterialProgramID ProgramID { get; }
+        internal ComputeShader ComputeShader { get; }
+        internal int KernelIndex { get; }
+        internal int ParameterStrideInWords { get; }
+        internal int ResourceCount { get; }
+        internal VividSlabProgramDescriptor Descriptor { get; }
+    }
+
     public sealed class VividGPUDrivenSceneData
     {
         private readonly List<VividInstanceData> m_Instances = new();
@@ -51,6 +77,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMaterialRuntimeHeader> m_MaterialRuntimeHeaders = new();
         private readonly List<VividMaterialProgramData> m_MaterialPrograms = new(
             GPUDrivenMaterialCompiler.CreateRuntimeProgramTable());
+        private readonly List<VividDynamicSlabProgramBinding> m_DynamicSlabPrograms = new();
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
         private readonly List<VividTerrainLayerGPUData> m_TerrainLayers = new();
@@ -83,6 +110,65 @@ namespace VividRP.Runtime.GPUDriven
             m_MaterialRuntimeHeaders;
 
         public IReadOnlyList<VividMaterialProgramData> MaterialPrograms => m_MaterialPrograms;
+
+        internal IReadOnlyList<VividDynamicSlabProgramBinding> DynamicSlabPrograms =>
+            m_DynamicSlabPrograms;
+
+        internal bool TryGetDynamicSlabProgram(
+            VividMaterialProgramID programID,
+            out VividDynamicSlabProgramBinding binding)
+        {
+            for (int i = 0; i < m_DynamicSlabPrograms.Count; i++)
+            {
+                if (m_DynamicSlabPrograms[i].ProgramID == programID)
+                {
+                    binding = m_DynamicSlabPrograms[i];
+                    return true;
+                }
+            }
+            binding = default;
+            return false;
+        }
+
+        internal VividMaterialProgramID RegisterDynamicSlabProgram(
+            VividSlabProgramDescriptor descriptor)
+        {
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+
+            for (int i = 0; i < m_DynamicSlabPrograms.Count; i++)
+            {
+                if (ReferenceEquals(m_DynamicSlabPrograms[i].Descriptor, descriptor))
+                    return m_DynamicSlabPrograms[i].ProgramID;
+            }
+
+            uint programIndex = (uint)m_MaterialPrograms.Count;
+            var programID = (VividMaterialProgramID)programIndex;
+            m_MaterialPrograms.Add(new VividMaterialProgramData
+            {
+                Version = GPUDrivenMaterialCompiler.ProgramVersion,
+                CoverageProgramID = VividMaterialCoverageProgramID.BaseColorAlpha,
+                SurfaceProgramID = VividMaterialSurfaceProgramID.DynamicSlab,
+                TransportProgramID = VividMaterialTransportProgramID.None,
+                ParameterLayoutID = VividMaterialParameterLayoutID.GenericParameterLanes,
+                ResourceLayoutID = VividMaterialResourceLayoutID.GenericResourceRecords,
+                CapabilityFlags = VividMaterialProgramCapabilities.None,
+                ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
+            });
+
+            ComputeShader cs = descriptor.ResolveComputeShader;
+            int kernelIndex = cs != null && cs.HasKernel(descriptor.ResolveKernelName)
+                ? cs.FindKernel(descriptor.ResolveKernelName)
+                : -1;
+            m_DynamicSlabPrograms.Add(new VividDynamicSlabProgramBinding(
+                programID,
+                cs,
+                kernelIndex,
+                descriptor.ParameterStrideInWords,
+                descriptor.ResourceCount,
+                descriptor));
+            return programID;
+        }
 
         public IReadOnlyList<VividSurfaceBindingData> SurfaceBindings => m_SurfaceBindings;
 
@@ -193,7 +279,8 @@ namespace VividRP.Runtime.GPUDriven
             VividMaterialProgramData program = m_MaterialPrograms[(int) programIndex];
             return program.Version == GPUDrivenMaterialCompiler.ProgramVersion
                 && (program.SurfaceProgramID == VividMaterialSurfaceProgramID.OpenPBROpaque
-                    || program.SurfaceProgramID == VividMaterialSurfaceProgramID.StandardSingleSlab);
+                    || program.SurfaceProgramID == VividMaterialSurfaceProgramID.StandardSingleSlab
+                    || program.SurfaceProgramID == VividMaterialSurfaceProgramID.DynamicSlab);
         }
 
         internal bool HasDualSlabSidecarMaterial()
@@ -311,6 +398,7 @@ namespace VividRP.Runtime.GPUDriven
             m_MaterialRuntimeHeaders.Clear();
             m_MaterialPrograms.Clear();
             m_MaterialPrograms.AddRange(runtimePrograms);
+            m_DynamicSlabPrograms.Clear();
         }
 
         internal int AddMaterial(
@@ -349,12 +437,27 @@ namespace VividRP.Runtime.GPUDriven
                         nameof(runtimeHeader));
                 }
 
-                MaterialProgramRuntimeBinding programBinding =
-                    GPUDrivenMaterialCompiler.GetRuntimeProgramBinding(
-                        runtimeHeader.ProgramID);
                 uint parameterLaneAddress = runtimeHeader.ParameterAddress;
-                uint parameterLaneCount =
-                    (uint) (programBinding.ParameterStrideInWords / 4);
+                uint parameterLaneCount;
+                uint resourceRecordCount;
+                if (TryGetDynamicSlabProgram(
+                        runtimeHeader.ProgramID,
+                        out VividDynamicSlabProgramBinding dynamicBinding))
+                {
+                    parameterLaneCount = (uint)((dynamicBinding.ParameterStrideInWords + 3) / 4);
+                    resourceRecordCount = (uint)dynamicBinding.ResourceCount;
+                    shadowResourceCount = dynamicBinding.ResourceCount;
+                }
+                else
+                {
+                    MaterialProgramRuntimeBinding programBinding =
+                        GPUDrivenMaterialCompiler.GetRuntimeProgramBinding(
+                            runtimeHeader.ProgramID);
+                    parameterLaneCount =
+                        (uint) (programBinding.ParameterStrideInWords / 4);
+                    resourceRecordCount = (uint) programBinding.ResourceCount;
+                    shadowResourceCount = programBinding.ResourceCount;
+                }
                 if (parameterLaneAddress > (uint) m_MaterialParameterLanes.Count
                     || parameterLaneCount
                         > (uint) m_MaterialParameterLanes.Count - parameterLaneAddress)
@@ -365,8 +468,6 @@ namespace VividRP.Runtime.GPUDriven
                 }
 
                 uint resourceBindingAddress = runtimeHeader.ResourceBindingAddress;
-                uint resourceRecordCount = (uint) programBinding.ResourceCount;
-                shadowResourceCount = programBinding.ResourceCount;
                 if (resourceBindingAddress > (uint) m_MaterialResources.Count
                     || resourceRecordCount
                         > (uint) m_MaterialResources.Count - resourceBindingAddress)

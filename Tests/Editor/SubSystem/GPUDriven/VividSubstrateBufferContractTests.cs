@@ -218,6 +218,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StageM1_SharedSubstrateLifecycle_ContractAndFrameDataReset()
+        {
+            Assert.That(VividSubstrateContract.RasterClosureBufferUavSlot, Is.EqualTo(5));
+            Assert.That(VividSubstrateContract.RasterClosureBufferVtCoexistUavSlot, Is.EqualTo(8));
+            Assert.That(VividSubstrateContract.ClearClosureHeadersKernelName, Is.EqualTo("ClearSubstrateClosureHeaders"));
+
+            var frameData = new VividSubstrateMaterialFrameData
+            {
+                Width = 1280,
+                Height = 720,
+                SliceCount = 16,
+                HasSubstrateContent = true,
+                HeadersClearedThisFrame = true,
+                WriterCount = 2,
+            };
+            frameData.Reset();
+            Assert.That(frameData.HasSubstrateContent, Is.False);
+            Assert.That(frameData.HeadersClearedThisFrame, Is.False);
+            Assert.That(frameData.WriterCount, Is.EqualTo(0));
+            Assert.That(frameData.IsValid, Is.False);
+        }
+
+        [Test]
         public void SubstrateBufferHlsl_MatchesCSharpContractAndSinglePassPipeline()
         {
             string substrateSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(SubstrateBufferHlslPath));
@@ -261,6 +284,8 @@ namespace VividRP.Editor.Tests
 
             StringAssert.Contains("Texture2DArray<uint> _SubstrateClosureBuffer;", classifySource);
             StringAssert.Contains("VividGetSubstrateTileClassBit(", classifySource);
+            StringAssert.Contains("#pragma kernel ClearSubstrateClosureHeaders", classifySource);
+            StringAssert.Contains("RWTexture2DArray<uint> _OutSubstrateClosureBuffer;", classifySource);
 
             StringAssert.Contains("#pragma kernel DeferredLit_Variant0 VIVID_DEFERRED_TIER_0", deferredLitSource);
             StringAssert.Contains("#pragma kernel DeferredLit_Variant1 VIVID_DEFERRED_TIER_1", deferredLitSource);
@@ -284,6 +309,7 @@ namespace VividRP.Editor.Tests
         public void Prepare_ResolveClassificationDeferred_ZeroManagedAllocation_WithSubstrateFrameData()
         {
             var resolvePass = new VisibilityBufferGBufferResolvePass();
+            var gbufferPass = new GBufferPass();
             var classifyPass = new MaterialClassificationPass();
             var deferredPass = new DeferredLightingPass();
             try
@@ -298,6 +324,7 @@ namespace VividRP.Editor.Tests
 
                 // Warmup
                 resolvePass.Prepare(frameData);
+                gbufferPass.Prepare(frameData);
                 classifyPass.Prepare(frameData);
                 deferredPass.Prepare(frameData);
 
@@ -305,6 +332,7 @@ namespace VividRP.Editor.Tests
                 for (int i = 0; i < 32; ++i)
                 {
                     resolvePass.Prepare(frameData);
+                    gbufferPass.Prepare(frameData);
                     classifyPass.Prepare(frameData);
                     deferredPass.Prepare(frameData);
                 }
@@ -314,6 +342,7 @@ namespace VividRP.Editor.Tests
             finally
             {
                 resolvePass.Dispose();
+                gbufferPass.Dispose();
                 classifyPass.Dispose();
                 deferredPass.Dispose();
             }

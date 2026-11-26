@@ -126,6 +126,13 @@ namespace VividRP.Runtime.GPUDriven
         internal const GraphicsFormat ClosureBufferFormat = GraphicsFormat.R32_UInt;
         internal const TextureDimension ClosureBufferDimension = TextureDimension.Tex2DArray;
 
+        // Stage M1 Raster GBufferPass UAV slot contract (MRT0..4 occupy slots 0..4).
+        // Slot 5 is the standard GBufferPass UAV slot; slot 8 is reserved when VirtualTexture
+        // feedback UAVs (u5..u7) coexist in the same raster shader pass (D3D12).
+        internal const int RasterClosureBufferUavSlot = 5;
+        internal const int RasterClosureBufferVtCoexistUavSlot = 8;
+        internal const string ClearClosureHeadersKernelName = "ClearSubstrateClosureHeaders";
+
         // Slice 0 Pixel Header bit layout (32 bits total)
         internal const int HeaderModeShift = 0;
         internal const uint HeaderModeMask = 0xFu;

@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -41,6 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ClusterNearClipId = Shader.PropertyToID("_ClusterNearClip");
         private static readonly int ClusterFarClipId = Shader.PropertyToID("_ClusterFarClip");
         private static readonly int ClusterIsOrthographicId = Shader.PropertyToID("_ClusterIsOrthographic");
+        private static readonly int WriteSubstrateClosureBufferId = Shader.PropertyToID("_WriteSubstrateClosureBuffer");
         private static readonly VividLightData.DecalClusterData[] s_DefaultDecalBufferData =
         {
             new()
@@ -129,6 +131,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_ClusterScale;
         private float m_ClusterBase = LightGridPass.ClusterLogBase;
         private int m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
+
+        [SerializeField, Range(VividSubstrateContract.OpenPBROpaqueSingleTotalSlices, VividSubstrateContract.MaxSliceCount)]
+        private int m_SubstrateSliceBudget = VividSubstrateContract.DefaultSliceCount;
+
+        private ComputeShader m_MaterialClassificationCompute;
+        private int m_ClearSubstrateClosureHeadersKernel = -1;
+        private VividSubstrateMaterialFrameData m_SubstrateFrameData;
+        private TextureHandle m_SubstrateClosureBufferHandle;
+
         public GBufferPass()
         {
             m_RenderList = new RenderGraphRenderList
@@ -155,12 +166,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
-            m_GBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
+            m_GBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBufferDepth = RenderGraphTexture.CreateDepthTarget("GBufferDepth");
         }
 
         public override void Create()
         {
+            var coreResources = PipelineResourceManager.Get<VividRPCoreResources>();
+            m_MaterialClassificationCompute = coreResources?.MaterialClassificationCompute;
+            m_ClearSubstrateClosureHeadersKernel = m_MaterialClassificationCompute != null
+                && m_MaterialClassificationCompute.HasKernel(VividSubstrateContract.ClearClosureHeadersKernelName)
+                ? m_MaterialClassificationCompute.FindKernel(VividSubstrateContract.ClearClosureHeadersKernelName)
+                : -1;
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -193,6 +210,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
             UpdateRenderListShaderTags(frameData);
             PrepareClusteredDecalParameters(frameData, width, height);
+
+            VividSubstrateMaterialFrameData.EnsureAllocatedForWrite(
+                this,
+                frameData,
+                cameraData,
+                width,
+                height,
+                m_SubstrateSliceBudget,
+                out m_SubstrateFrameData,
+                out m_SubstrateClosureBufferHandle,
+                out _);
         }
 
         public override void Record(UnsafePassContext context)
@@ -201,15 +229,46 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var nativeCmd = context.GetNativeCommandBuffer();
+            bool bindSubstrateUav = m_SubstrateClosureBufferHandle.IsValid()
+                && m_SubstrateFrameData != null
+                && m_SubstrateFrameData.HasSubstrateContent;
+
+            if (bindSubstrateUav)
+            {
+                VividSubstrateMaterialFrameData.ClearHeadersIfNeeded(
+                    nativeCmd,
+                    m_SubstrateFrameData,
+                    m_MaterialClassificationCompute,
+                    m_ClearSubstrateClosureHeadersKernel,
+                    m_SubstrateClosureBufferHandle);
+            }
+
             BindGBufferTargets(nativeCmd);
+            nativeCmd.SetGlobalInt(WriteSubstrateClosureBufferId, bindSubstrateUav ? 1 : 0);
+            if (bindSubstrateUav)
+            {
+                nativeCmd.SetRandomWriteTarget(
+                    VividSubstrateContract.RasterClosureBufferUavSlot,
+                    m_SubstrateClosureBufferHandle);
+            }
             ApplyClusteredDecalProperties(nativeCmd);
 
             if (m_RenderList != null && m_RenderList.IsValid)
                 nativeCmd.DrawRendererList(m_RenderList);
+
+            if (bindSubstrateUav)
+            {
+                nativeCmd.ClearRandomWriteTargets();
+                m_SubstrateFrameData.ClosureBufferHistory?.MarkWritten();
+            }
         }
 
         public override void Dispose()
         {
+            m_MaterialClassificationCompute = null;
+            m_ClearSubstrateClosureHeadersKernel = -1;
+            m_SubstrateFrameData = null;
+            m_SubstrateClosureBufferHandle = default;
             m_ResolvedDecalDataBuffer = m_LocalDecalDataBuffer;
             m_ResolvedLayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_ResolvedLayeredLightListBuffer = m_LocalLayeredLightListBuffer;

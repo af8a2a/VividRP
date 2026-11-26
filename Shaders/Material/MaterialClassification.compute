@@ -7,6 +7,7 @@
 #pragma kernel BuildDeferredVariantIndirectArgsWave64 VIVID_MATERIAL_WAVE_64
 #pragma kernel ClearDualSlabSidecarDrawArgs
 #pragma kernel ClassifyDualSlabSidecarTiles
+#pragma kernel ClearSubstrateClosureHeaders
 #pragma use_dxc
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_WAVE_32 UNITY_DEVICE_SUPPORTS_WAVE_64
 
@@ -45,6 +46,7 @@ Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float> _DepthTexture;
 Texture2DArray<uint> _SubstrateClosureBuffer;
+RWTexture2DArray<uint> _OutSubstrateClosureBuffer;
 
 RWStructuredBuffer<uint> _MaterialTileFeatureFlags;
 RWStructuredBuffer<uint> _MaterialFeatureTileList;
@@ -522,4 +524,15 @@ void BuildDeferredVariantIndirectArgsWave64(
     uint groupIndex : SV_GroupIndex)
 {
     BuildDeferredVariantIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
+}
+
+// Stage M1 lightweight Slice 0 clear: zeroes only the 32-bit Substrate Pixel Header slice
+// (mode == VIVID_SUBSTRATE_MODE_EMPTY) before the first raster writer of the frame.
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void ClearSubstrateClosureHeaders(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _ClassificationWidth || dispatchThreadId.y >= _ClassificationHeight)
+        return;
+
+    VividWriteSubstrateEmpty(_OutSubstrateClosureBuffer, dispatchThreadId.xy);
 }

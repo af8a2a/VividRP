@@ -564,7 +564,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_SubstrateClosureBufferHandle = default;
             m_SubstrateFrameData = frameData.GetOrCreate<VividSubstrateMaterialFrameData>();
-            m_SubstrateFrameData.Reset();
 
             bool allocateSubstrateBuffer = m_ResolveCompute != null
                 && m_ResolveVisibilityBufferKernel >= 0
@@ -573,34 +572,16 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!allocateSubstrateBuffer)
                 return;
 
-            var cameraHistory = cameraData.camera.GetVividCameraHistory();
-            if (!cameraHistory.IsFrameActive)
-                return;
-
-            int sliceCount = VividSubstrateContract.ClampSliceCount(m_SubstrateSliceBudget);
-            var descriptor = VividSubstrateMaterialFrameData.CreateClosureBufferDescriptor(
+            VividSubstrateMaterialFrameData.EnsureAllocatedForWrite(
+                this,
+                frameData,
+                cameraData,
                 width,
                 height,
-                sliceCount);
-            CameraHistoryTexture history = cameraHistory.GetOrCreateTexture(
-                VividSubstrateMaterialFrameData.ClosureBufferHistoryId,
-                1,
-                descriptor);
-            TextureHandle handle = CameraHistoryRenderGraphBridge.ImportForPass(
-                this,
-                history,
-                0,
-                AccessFlags.Write);
-            if (!handle.IsValid())
-                return;
-
-            m_SubstrateClosureBufferHandle = handle;
-            m_SubstrateFrameData.ClosureBufferHistory = history;
-            m_SubstrateFrameData.ClosureBufferHandle = handle;
-            m_SubstrateFrameData.Width = width;
-            m_SubstrateFrameData.Height = height;
-            m_SubstrateFrameData.SliceCount = sliceCount;
-            m_SubstrateFrameData.HasSubstrateContent = true;
+                m_SubstrateSliceBudget,
+                out m_SubstrateFrameData,
+                out m_SubstrateClosureBufferHandle,
+                out _);
         }
 
         private bool CanUseSinglePassComputeResolve()
@@ -728,7 +709,10 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             if (writeSubstrate)
+            {
+                m_SubstrateFrameData.HeadersClearedThisFrame = true;
                 m_SubstrateFrameData.ClosureBufferHistory?.MarkWritten();
+            }
         }
 
         private bool CanUseMaterialBinning()

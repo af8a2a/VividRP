@@ -202,7 +202,7 @@ float3 VividEncodeSurfaceSummaryDiffuseAlbedo(float3 diffuseAlbedo)
 
 float3 VividDecodeSurfaceSummaryDiffuseAlbedo(float3 encodedDiffuseAlbedo)
 {
-    return SRGBToLinear(saturate(encodedDiffuseAlbedo));
+    return saturate(SRGBToLinear(saturate(encodedDiffuseAlbedo)));
 }
 
 float3 VividEncodeSurfaceSummarySpecularF0(float3 specularF0)

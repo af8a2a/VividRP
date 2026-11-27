@@ -396,7 +396,9 @@ bool VividTryUnpackSubstrateOpenPBRCoreWords(
 
     inputs = (VividOpenPBROpaqueInputs)0;
     inputs.baseWeight = closureHeader.baseWeight;
-    inputs.baseColor = SRGBToLinear(baseAndDiffRough.rgb);
+    // Clamp GPU pow/exp2 rounding on sRGB == 1.0 (e.g. 1.0000001f) back into [0, 1]
+    // so OpenPBR unit-input validation never rejects saturated color channels.
+    inputs.baseColor = saturate(SRGBToLinear(baseAndDiffRough.rgb));
     inputs.baseDiffuseRoughness = baseAndDiffRough.a;
     inputs.specularColor = specAndWeight.rgb;
     inputs.specularWeight = specAndWeight.a;
@@ -625,7 +627,7 @@ bool VividTryLoadSubstrateOpenPBRClosureAt(
         inputs.coatDarkening = VividSubstrateUnpackUNorm((coat0 >> 16u) & 0xFFu, 0xFFu);
         inputs.coatIor = VividSubstrateUnpackCoatIor8((coat0 >> 24u) & 0xFFu);
         float4 coatColorAndFlags = VividSubstrateUnpackRGBA8(coat1);
-        inputs.coatColor = SRGBToLinear(coatColorAndFlags.rgb);
+        inputs.coatColor = saturate(SRGBToLinear(coatColorAndFlags.rgb));
         uint coatFlags = (coat1 >> 24u) & 0xFFu;
         if ((coatFlags & VIVID_SUBSTRATE_COAT_FLAG_INDEPENDENT_NORMAL) != 0u)
         {
@@ -643,7 +645,7 @@ bool VividTryLoadSubstrateOpenPBRClosureAt(
         uint fuzz0 = closureBuffer.Load(int4(pixelCoord, (int)(sliceCursor++), 0));
         uint fuzz1 = closureBuffer.Load(int4(pixelCoord, (int)(sliceCursor++), 0));
         float4 fuzzColorAndWeight = VividSubstrateUnpackRGBA8(fuzz0);
-        inputs.fuzzColor = SRGBToLinear(fuzzColorAndWeight.rgb);
+        inputs.fuzzColor = saturate(SRGBToLinear(fuzzColorAndWeight.rgb));
         inputs.fuzzWeight = fuzzColorAndWeight.a;
         inputs.fuzzRoughness = VividSubstrateUnpackUNorm(fuzz1 & 0xFFu, 0xFFu);
     }
@@ -728,7 +730,7 @@ VividSubstrateOperatorDesc VividUnpackSubstrateOperatorWord(uint word)
         VividSubstrateUnpackUNorm((word >> VIVID_SUBSTRATE_OP_TRANS_R_SHIFT) & VIVID_SUBSTRATE_OP_TRANS_CHANNEL_MASK, VIVID_SUBSTRATE_OP_TRANS_CHANNEL_MASK),
         VividSubstrateUnpackUNorm((word >> VIVID_SUBSTRATE_OP_TRANS_G_SHIFT) & VIVID_SUBSTRATE_OP_TRANS_CHANNEL_MASK, VIVID_SUBSTRATE_OP_TRANS_CHANNEL_MASK),
         VividSubstrateUnpackUNorm((word >> VIVID_SUBSTRATE_OP_TRANS_B_SHIFT) & VIVID_SUBSTRATE_OP_TRANS_CHANNEL_MASK, VIVID_SUBSTRATE_OP_TRANS_CHANNEL_MASK));
-    op.transmittanceColor = SRGBToLinear(srgbTrans);
+    op.transmittanceColor = saturate(SRGBToLinear(srgbTrans));
     return op;
 }
 

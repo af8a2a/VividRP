@@ -277,6 +277,28 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             BindBvhNodes(cmd, shader, kernel);
         }
 
+        internal static void BindFallback(
+            ComputeCommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            TextureHandle fallback3D,
+            BufferHandle fallbackBuffer)
+        {
+            if (fallback3D.IsValid())
+                cmd.SetComputeTextureParam(shader, kernel, BrickAtlasId, fallback3D);
+            cmd.SetComputeVectorParam(shader, BrickAtlasSizeId, Vector4.zero);
+            cmd.SetComputeIntParam(shader, NodeCountId, 0);
+            if (fallbackBuffer.IsValid())
+            {
+                cmd.SetComputeBufferParam(shader, kernel, VoxelsId, fallbackBuffer);
+                cmd.SetComputeBufferParam(shader, kernel, FieldsId, fallbackBuffer);
+                cmd.SetComputeBufferParam(shader, kernel, InstancesId, fallbackBuffer);
+                cmd.SetComputeBufferParam(shader, kernel, TraceInstancesId, fallbackBuffer);
+                cmd.SetComputeBufferParam(shader, kernel, LeafInstancesId, fallbackBuffer);
+                cmd.SetComputeBufferParam(shader, kernel, NodesId, fallbackBuffer);
+            }
+        }
+
         internal void BindBvhNodes(ComputeCommandBuffer cmd, ComputeShader shader, int kernel)
         {
             cmd.SetComputeBufferParam(shader, kernel, NodesId, m_NodeBuffer);

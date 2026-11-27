@@ -198,7 +198,7 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
 VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, float4 rt2, float4 rt3, float4 rt4)
 {
     VividGBufferSurfaceData surfaceData;
-    surfaceData.baseColor = SRGBToLinear(saturate(rt0.rgb));
+    surfaceData.baseColor = saturate(SRGBToLinear(saturate(rt0.rgb)));
     surfaceData.materialFeatures = DecodeVividMaterialFeatures(rt0.a);
     surfaceData.normalWS = DecodeVividNormalOct(rt1.xy);
     surfaceData.linearRoughness = SanitizeLinearRoughness(rt1.z);

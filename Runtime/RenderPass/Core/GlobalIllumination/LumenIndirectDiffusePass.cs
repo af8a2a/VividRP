@@ -592,6 +592,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_GlobalFallback = CreateGlobalFallback();
 
+        [RenderGraphResource(Name = "Surface Cache Array Fallback", Access = AccessFlags.Read)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_SurfaceCacheArrayFallback = CreateSurfaceCacheArrayFallback();
+
         [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_Output = CreateOutput("Realtime Diffuse GI", ProbeFormat);
 
@@ -4843,6 +4847,24 @@ namespace VividRP.Runtime.RenderPass.Core
                     BindFinalLighting(cmd, shader, kernel, m_CardFinalAtlas, black);
                 }
             }
+            else
+            {
+                BufferHandle fallbackBuffer = m_MeshCardGrid.IsValid() ? m_MeshCardGrid.innerHandle : default;
+                VividMeshSdfGpuScene.BindFallback(cmd, shader, kernel, m_GlobalFallback.innerHandle, fallbackBuffer);
+                if (fallbackBuffer.IsValid())
+                {
+                    cmd.SetComputeBufferParam(shader, kernel, SurfaceId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, LocalCardTableId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, RadiosityWorkId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, FinalLightingOrderId, fallbackBuffer);
+                }
+                cmd.SetComputeIntParam(shader, FinalLightingCardCountId, 0);
+                cmd.SetComputeVectorParam(shader, FinalLightingLayoutId, Vector4.zero);
+                TextureHandle fallbackArray = m_SurfaceCacheArrayFallback.innerHandle;
+                cmd.SetComputeTextureParam(shader, kernel, CardAlbedoDepthId, fallbackArray);
+                cmd.SetComputeTextureParam(shader, kernel, CardNormalCoverageId, fallbackArray);
+                cmd.SetComputeTextureParam(shader, kernel, FinalLightingAtlasId, black);
+            }
         }
 
         internal void BindGlobalSdfForReflections(ComputeCommandBuffer cmd, ComputeShader shader, int kernel, bool useGlobalClipmap)
@@ -4965,6 +4987,15 @@ namespace VividRP.Runtime.RenderPass.Core
             var texture = RenderGraphTexture.CreateOutput("Unused Global SDF Binding", GraphicsFormat.R32_SFloat);
             texture.Resize(1, 1);
             texture.desc.Dimension = TextureDimension.Tex3D;
+            return texture;
+        }
+
+        private static RenderGraphTexture CreateSurfaceCacheArrayFallback()
+        {
+            var texture = RenderGraphTexture.CreateOutput("Unused Surface Cache Array Binding", GraphicsFormat.R8G8B8A8_UNorm);
+            texture.Resize(1, 1);
+            texture.desc.Dimension = TextureDimension.Tex2DArray;
+            texture.desc.Slices = 1;
             return texture;
         }
     }

@@ -18,6 +18,8 @@ namespace VividRP.Editor.Tests
             "Shaders/Material/Samples/SubstrateMultiClosurePoC.slab.shader";
         private const string ClearCoatDualNormalSampleRelativePath =
             "Shaders/Material/Samples/ClearCoatDualNormal.slab.shader";
+        private const string FabricSlabRelativePath =
+            "Shaders/Material/Fabric/FabricSlab.slab.shader";
         private const string BaseTemplateRelativePath =
             "Shaders/Material/Templates/SubstrateOpaque.slab.template";
         private const string StandardLitRelativePath =
@@ -170,6 +172,49 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("v2.coatNormalWS", assembled.RasterShaderSource);
             StringAssert.Contains("v2.hasIndependentCoatNormal", assembled.ComputeResolveSource);
             StringAssert.Contains("v2.coatNormalWS", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+        }
+
+        [Test]
+        public void Assemble_FabricSlab_SupportsCottonWoolSilkThreadMapDoubleSidedAndZeroSwitchCompute()
+        {
+            string fabricPath = VividPackagePathUtility.GetPreferredAssetPath(FabricSlabRelativePath);
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                fabricPath,
+                File.ReadAllText(fabricPath),
+                templatePath,
+                File.ReadAllText(templatePath),
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.ShaderName, Is.EqualTo("VividRP/Material/FabricSlab"));
+            Assert.That(assembled.HasCustomSurfaceHook, Is.True);
+            Assert.That(assembled.HasCustomCoverage, Is.False);
+            Assert.That(assembled.IsMultiClosure, Is.False);
+            Assert.That(
+                assembled.EstimatedSubstrateBytesPerPixel,
+                Is.GreaterThanOrEqualTo(
+                    VividSubstrateContract.ComputeSingleClosureTotalSlices(
+                        VividSubstrateFeatureMask.OpenPBROpaque
+                        | VividSubstrateFeatureMask.Fuzz
+                        | VividSubstrateFeatureMask.Anisotropy)
+                    * VividSubstrateContract.BytesPerSlice));
+
+            StringAssert.Contains("Cull [_Cull]", assembled.RasterShaderSource);
+            StringAssert.Contains("FRONT_FACE_SEMANTIC", assembled.RasterShaderSource);
+            StringAssert.Contains("[earlydepthstencil]", assembled.RasterShaderSource);
+            StringAssert.Contains("_FabricType", assembled.RasterShaderSource);
+            StringAssert.Contains("_ThreadMap", assembled.RasterShaderSource);
+            StringAssert.Contains("_FuzzMap", assembled.RasterShaderSource);
+            StringAssert.Contains("_SheenColor", assembled.RasterShaderSource);
+            StringAssert.Contains("_Anisotropy", assembled.RasterShaderSource);
+            StringAssert.Contains("CustomEditor \"VividRP.Editor.FabricShaderGUI\"", assembled.RasterShaderSource);
+            StringAssert.Contains("VividFabricParamsToOpenPBRV2Inputs(", assembled.RasterShaderSource);
+            StringAssert.Contains("VividFabricParamsToOpenPBRV2Inputs(", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
         }

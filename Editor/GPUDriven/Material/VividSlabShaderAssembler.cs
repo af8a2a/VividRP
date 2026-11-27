@@ -331,8 +331,11 @@ namespace VividRP.Editor.GPUDriven
                 }
                 if (userSurfaceHook.IndexOf("fuzzWeight", StringComparison.Ordinal) >= 0)
                     hookFeatures |= VividSubstrateFeatureMask.Fuzz;
-                if (userSurfaceHook.IndexOf("specularAnisotropy", StringComparison.Ordinal) >= 0)
+                if (userSurfaceHook.IndexOf("specularAnisotropy", StringComparison.Ordinal) >= 0
+                    || userSurfaceHook.IndexOf("VividFabricParamsToOpenPBRV2Inputs", StringComparison.Ordinal) >= 0)
+                {
                     hookFeatures |= VividSubstrateFeatureMask.Anisotropy;
+                }
 
                 estimatedBytes = Math.Max(
                     estimatedBytes,

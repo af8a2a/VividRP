@@ -1,0 +1,93 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: LookDev_Fabric_ShotSilk
+  m_Shader: {fileID: -6465566751694194690, guid: cc1801863471a1348baaf702064c70aa, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 1
+  m_CustomRenderQueue: 2000
+  stringTagMap:
+    RenderType: Opaque
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FuzzMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ThreadMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 60, y: 60}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaClip: 0
+    - _Anisotropy: -0.68
+    - _AnisotropyRotation: 0
+    - _BumpScale: 1
+    - _Cull: 0
+    - _Cutoff: 0.5
+    - _DiffuseRoughness: 0.45
+    - _FabricSheen: 1
+    - _FabricType: 1
+    - _FuzzDetailStrength: 0.15
+    - _FuzzMapUVScale: 8
+    - _FuzzRoughness: 0.44
+    - _FuzzWeight: 0.48
+    - _OcclusionStrength: 1
+    - _ProceduralWeaveScale: 120
+    - _ProceduralWeaveStrength: 0.18
+    - _ReceiveDecals: 1
+    - _ReceiveSSR: 0
+    - _ReceiveShadows: 1
+    - _SilkSpecularBoost: 0.9
+    - _Smoothness: 0.72
+    - _SurfaceInputs: 1
+    - _SurfaceOptions: 1
+    - _ThreadAOStrength: 0.5
+    - _ThreadDetail: 1
+    - _ThreadNormalStrength: 0.6
+    - _ThreadSmoothnessScale: 0.2
+    - _UseFuzzMap: 0
+    - _UseProceduralWeave: 1
+    - _UseThreadMap: 0
+    m_Colors:
+    - _BaseColor: {r: 0.075, g: 0.21, b: 0.44, a: 1}
+    - _Color: {r: 0.07499998, g: 0.20999995, b: 0.43999997, a: 1}
+    - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
+    - _SheenColor: {r: 0.88, g: 0.24, b: 0.28, a: 1}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1

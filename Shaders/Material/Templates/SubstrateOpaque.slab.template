@@ -25,7 +25,7 @@ SubShader
         Blend One Zero
         ZWrite On
         ZTest LEqual
-        Cull Back
+        Cull [_Cull]
         ColorMask 0
 
         HLSLPROGRAM
@@ -134,7 +134,7 @@ SubShader
 
         ZWrite On
         ZTest LEqual
-        Cull Back
+        Cull [_Cull]
         ColorMask 0
 
         HLSLPROGRAM
@@ -244,7 +244,7 @@ SubShader
         Blend One Zero
         ZWrite Off
         ZTest Equal
-        Cull Back
+        Cull [_Cull]
 
         HLSLPROGRAM
         #pragma target 5.0
@@ -325,16 +325,19 @@ SubShader
         }
 
         VIVID_SLAB_EARLY_DEPTH_ATTR
-        VividSurfaceSummaryGBufferOutput FragSlabGBuffer(Varyings input)
+        VividSurfaceSummaryGBufferOutput FragSlabGBuffer(
+            Varyings input,
+            FRONT_FACE_TYPE frontFace : FRONT_FACE_SEMANTIC)
         {
+            float normalFlipSign = IS_FRONT_VFACE(frontFace, 1.0f, -1.0f);
             VividSlabEvalContext ctx;
             ctx.uv0 = input.uv0;
             ctx.uv0Ddx = ddx(input.uv0);
             ctx.uv0Ddy = ddy(input.uv0);
-            ctx.geometryNormalWS = SafeNormalize(input.normalWS);
+            ctx.geometryNormalWS = SafeNormalize(input.normalWS * normalFlipSign);
             ctx.geometryTangentWS = float4(
                 SafeNormalize(input.tangentWS.xyz),
-                input.tangentWS.w);
+                input.tangentWS.w * normalFlipSign);
             ctx.positionWS = input.positionWS;
             ctx.positionCS = input.positionCS;
             ctx.parameterAddress = 0u;
@@ -431,7 +434,7 @@ SubShader
         Blend One Zero
         ZWrite Off
         ZTest Equal
-        Cull Back
+        Cull [_Cull]
 
         HLSLPROGRAM
         #pragma target 5.0
@@ -515,16 +518,19 @@ SubShader
         }
 
         VIVID_SLAB_EARLY_DEPTH_ATTR
-        VividSurfaceSummaryGBufferOutput FragSlabGBufferDecal(Varyings input)
+        VividSurfaceSummaryGBufferOutput FragSlabGBufferDecal(
+            Varyings input,
+            FRONT_FACE_TYPE frontFace : FRONT_FACE_SEMANTIC)
         {
+            float normalFlipSign = IS_FRONT_VFACE(frontFace, 1.0f, -1.0f);
             VividSlabEvalContext ctx;
             ctx.uv0 = input.uv0;
             ctx.uv0Ddx = ddx(input.uv0);
             ctx.uv0Ddy = ddy(input.uv0);
-            ctx.geometryNormalWS = SafeNormalize(input.normalWS);
+            ctx.geometryNormalWS = SafeNormalize(input.normalWS * normalFlipSign);
             ctx.geometryTangentWS = float4(
                 SafeNormalize(input.tangentWS.xyz),
-                input.tangentWS.w);
+                input.tangentWS.w * normalFlipSign);
             ctx.positionWS = input.positionWS;
             ctx.positionCS = input.positionCS;
             ctx.parameterAddress = 0u;

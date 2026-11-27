@@ -19,6 +19,10 @@ namespace VividRP.Runtime.GPUDriven
 
         internal string ComputeEvaluateFunction { get; set; } = string.Empty;
 
+        internal bool IsMultiClosure { get; set; }
+
+        internal int ClosureCount { get; set; } = 1;
+
         internal int ParameterStrideInWords { get; set; }
 
         internal VividSlabParameterSlot[] ParameterSlots { get; set; } = Array.Empty<VividSlabParameterSlot>();
@@ -30,17 +34,35 @@ namespace VividRP.Runtime.GPUDriven
     }
 
     /// <summary>
-    /// Dual-target StageLIR -> HLSL backend for <c>*.slab.shader</c> (Phase S1).
-    /// Lowers a single <see cref="CompiledMaterialProgram"/> into:
-    /// <list type="bullet">
-    ///   <item>Raster HLSL reading <c>UnityPerMaterial</c> CBUFFER and <c>TEXTURE2D</c></item>
-    ///   <item>Standalone GPUDriven Compute HLSL reading <c>_MaterialParameterData</c> and
-    ///         VT-first / Bindless <c>VividSurfaceSampling.hlsl</c></item>
-    /// </list>
-    /// Both targets output identical <c>VividOpenPBRV2Inputs</c> into Substrate Closure Buffer.
+    /// Dual-target StageLIR -> HLSL backend for <c>*.slab.shader</c> (Phase S1 + S2).
+    /// Supports both single-closure (<c>OpenPBROpaque</c> / <c>SingleSlab</c>, Tier 1/2)
+    /// and Multi-Closure binary trees (<c>HorizontalMix</c> / <c>VerticalLayer</c>, up to
+    /// 4 closures / 3 operators -> Substrate Tier 3) across Raster and GPUDriven Compute.
     /// </summary>
     internal static class MaterialSlabHlslBackend
     {
+        private readonly struct FlattenedClosureLeaf
+        {
+            internal FlattenedClosureLeaf(ClosureExpressionNode node)
+            {
+                Node = node;
+            }
+
+            internal ClosureExpressionNode Node { get; }
+        }
+
+        private readonly struct FlattenedOperator
+        {
+            internal FlattenedOperator(ClosureExpressionOpcode opcode, MaterialValue weight)
+            {
+                Opcode = opcode;
+                Weight = weight;
+            }
+
+            internal ClosureExpressionOpcode Opcode { get; }
+            internal MaterialValue Weight { get; }
+        }
+
         internal static MaterialSlabHlslPayload Compile(CompiledMaterialProgram program)
         {
             if (program == null)
@@ -51,32 +73,75 @@ namespace VividRP.Runtime.GPUDriven
             MaterialGenericLayout genericLayout = program.Lowering.GenericLayout;
             MaterialIRVerifier.VerifyStageLIR(stageLIR).ThrowIfInvalid();
 
-            ClosureExpressionNode root = module.ClosureGraph.GetNode(module.SurfaceClosure);
-            if (root.Opcode != ClosureExpressionOpcode.OpenPBROpaque
-                && root.Opcode != ClosureExpressionOpcode.Slab)
+            var leaves = new List<FlattenedClosureLeaf>(VividSubstrateContract.MaxClosuresPerPixel);
+            var operators = new List<FlattenedOperator>(VividSubstrateContract.MaxOperatorsPerPixel);
+            FlattenClosureTree(module.ClosureGraph, module.SurfaceClosure.Index, leaves, operators);
+
+            if (leaves.Count == 0 || leaves.Count > VividSubstrateContract.MaxClosuresPerPixel)
             {
                 throw new NotSupportedException(
-                    $"Phase S1 Slab backend supports single-closure OpenPBROpaque and SingleSlab graphs (got '{root.Opcode}'). Multi-Closure is scheduled for Phase S2.");
+                    $"Substrate Slab backend supports 1..{VividSubstrateContract.MaxClosuresPerPixel} closures per pixel (got {leaves.Count}).");
+            }
+            if (operators.Count > VividSubstrateContract.MaxOperatorsPerPixel)
+            {
+                throw new NotSupportedException(
+                    $"Substrate Slab backend supports at most {VividSubstrateContract.MaxOperatorsPerPixel} closure operators (got {operators.Count}).");
             }
 
+            bool isMultiClosure = leaves.Count > 1;
             VividSlabParameterSlot[] paramSlots = BuildParameterSlots(genericLayout);
             VividSlabResourceSlot[] resSlots = BuildResourceSlots(genericLayout);
 
-            int estimatedBytes = module.Topology.EstimateSubstrateSliceCount()
-                * VividSubstrateContract.BytesPerSlice;
+            int estimatedSlices = isMultiClosure
+                ? VividSubstrateContract.ComputeMultiClosureTotalSlices(leaves.Count)
+                : module.Topology.EstimateSubstrateSliceCount();
+            int estimatedBytes = estimatedSlices * VividSubstrateContract.BytesPerSlice;
 
             return new MaterialSlabHlslPayload
             {
                 PropertiesBlock = BuildPropertiesBlock(paramSlots, resSlots),
                 RasterCBufferBlock = BuildRasterCBufferBlock(paramSlots, resSlots),
                 RasterTexturesBlock = BuildRasterTexturesBlock(resSlots),
-                RasterEvaluateFunction = EmitEvaluateFunction(module, stageLIR, genericLayout, isCompute: false),
-                ComputeEvaluateFunction = EmitEvaluateFunction(module, stageLIR, genericLayout, isCompute: true),
+                RasterEvaluateFunction = isMultiClosure
+                    ? EmitMultiClosureEvaluateFunction(module, stageLIR, genericLayout, leaves, operators, isCompute: false)
+                    : EmitSingleClosureEvaluateFunction(module, stageLIR, genericLayout, leaves[0].Node, isCompute: false),
+                ComputeEvaluateFunction = isMultiClosure
+                    ? EmitMultiClosureEvaluateFunction(module, stageLIR, genericLayout, leaves, operators, isCompute: true)
+                    : EmitSingleClosureEvaluateFunction(module, stageLIR, genericLayout, leaves[0].Node, isCompute: true),
+                IsMultiClosure = isMultiClosure,
+                ClosureCount = leaves.Count,
                 ParameterStrideInWords = genericLayout.ParameterStrideInWords,
                 ParameterSlots = paramSlots,
                 ResourceSlots = resSlots,
                 EstimatedSubstrateBytesPerPixel = estimatedBytes,
             };
+        }
+
+        private static void FlattenClosureTree(
+            ClosureExpressionGraph graph,
+            int nodeIndex,
+            List<FlattenedClosureLeaf> leaves,
+            List<FlattenedOperator> operators)
+        {
+            ClosureExpressionNode node = graph.Nodes[nodeIndex];
+            switch (node.Opcode)
+            {
+                case ClosureExpressionOpcode.OpenPBROpaque:
+                case ClosureExpressionOpcode.Slab:
+                    leaves.Add(new FlattenedClosureLeaf(node));
+                    return;
+
+                case ClosureExpressionOpcode.HorizontalMix:
+                case ClosureExpressionOpcode.VerticalLayer:
+                    FlattenClosureTree(graph, node.Operand0, leaves, operators);
+                    operators.Add(new FlattenedOperator(node.Opcode, node.Weight));
+                    FlattenClosureTree(graph, node.Operand1, leaves, operators);
+                    return;
+
+                default:
+                    throw new NotSupportedException(
+                        $"Unsupported closure opcode '{node.Opcode}' in Slab backend.");
+            }
         }
 
         internal static string ToShaderPropertyName(string symbol)
@@ -128,19 +193,23 @@ namespace VividRP.Runtime.GPUDriven
             switch (decl.Symbol)
             {
                 case "BaseWeight": return new Vector4(defaults.BaseWeight, 0f, 0f, 0f);
-                case "BaseColor": return new Vector4(defaults.BaseColor.x, defaults.BaseColor.y, defaults.BaseColor.z, 1f);
+                case "BaseColor":
+                case "TopBaseColor": return new Vector4(defaults.BaseColor.x, defaults.BaseColor.y, defaults.BaseColor.z, 1f);
                 case "BaseDiffuseRoughness": return new Vector4(defaults.BaseDiffuseRoughness, 0f, 0f, 0f);
                 case "BaseMetalness":
-                case "Metallic": return new Vector4(0f, 0f, 0f, 0f);
+                case "Metallic":
+                case "TopMetallic": return new Vector4(0f, 0f, 0f, 0f);
                 case "SpecularWeight": return new Vector4(defaults.SpecularWeight, 0f, 0f, 0f);
                 case "SpecularColor": return new Vector4(defaults.SpecularColor.x, defaults.SpecularColor.y, defaults.SpecularColor.z, 1f);
                 case "SpecularRoughness":
-                case "Roughness": return new Vector4(defaults.SpecularRoughness, 0f, 0f, 0f);
+                case "Roughness":
+                case "TopRoughness": return new Vector4(defaults.SpecularRoughness, 0f, 0f, 0f);
                 case "SpecularIor": return new Vector4(defaults.SpecularIor, 0f, 0f, 0f);
                 case "NormalWS": return new Vector4(defaults.NormalWS.x, defaults.NormalWS.y, defaults.NormalWS.z, 0f);
                 case "EmissionLuminance": return new Vector4(0f, 0f, 0f, 0f);
                 case "EmissionColor":
                 case "Emission": return new Vector4(0f, 0f, 0f, 1f);
+                case "LayerWeight": return new Vector4(0.5f, 0f, 0f, 0f);
                 case "AlphaClipThreshold": return new Vector4(0f, 0f, 0f, 0f);
                 default:
                     return decl.Type switch
@@ -251,10 +320,11 @@ namespace VividRP.Runtime.GPUDriven
             return sb.ToString().TrimEnd();
         }
 
-        private static string EmitEvaluateFunction(
+        private static string EmitSingleClosureEvaluateFunction(
             MaterialIRModule module,
             MaterialStageLIR stageLIR,
             MaterialGenericLayout genericLayout,
+            ClosureExpressionNode leaf,
             bool isCompute)
         {
             var sb = new StringBuilder(Math.Max(1536, stageLIR.NodeCount * 96));
@@ -265,7 +335,64 @@ namespace VividRP.Runtime.GPUDriven
             sb.AppendLine("{");
             sb.AppendLine("    v2Inputs = VividCreateDefaultOpenPBRV2Inputs();");
             sb.AppendLine("    ambientOcclusion = 1.0f;");
+            EmitStageLIRBody(sb, stageLIR, genericLayout, isCompute);
+            EmitClosureLeafAssignment(sb, module, stageLIR, leaf, "v2Inputs", includeEmission: true, leafTag: "0");
+            sb.AppendLine("}");
+            return sb.ToString();
+        }
 
+        private static string EmitMultiClosureEvaluateFunction(
+            MaterialIRModule module,
+            MaterialStageLIR stageLIR,
+            MaterialGenericLayout genericLayout,
+            List<FlattenedClosureLeaf> leaves,
+            List<FlattenedOperator> operators,
+            bool isCompute)
+        {
+            var sb = new StringBuilder(Math.Max(2048, stageLIR.NodeCount * 96 + leaves.Count * 512));
+            sb.AppendLine("#define VIVID_SLAB_MULTI_CLOSURE_OUTPUT 1");
+            sb.AppendLine("void VividSlabEvaluateMultiClosureGraphSurface(");
+            sb.AppendLine("    const VividSlabEvalContext ctx,");
+            sb.AppendLine("    out VividSlabMultiClosureOutput mcOutput)");
+            sb.AppendLine("{");
+            sb.AppendLine("    mcOutput = VividCreateDefaultSlabMultiClosureOutput();");
+            sb.Append("    mcOutput.closureCount = ").Append(leaves.Count.ToString(CultureInfo.InvariantCulture)).AppendLine("u;");
+            EmitStageLIRBody(sb, stageLIR, genericLayout, isCompute);
+
+            for (int i = 0; i < leaves.Count; i++)
+            {
+                string target = $"mcOutput.closures[{i.ToString(CultureInfo.InvariantCulture)}]";
+                EmitClosureLeafAssignment(
+                    sb,
+                    module,
+                    stageLIR,
+                    leaves[i].Node,
+                    target,
+                    includeEmission: i == 0,
+                    leafTag: i.ToString(CultureInfo.InvariantCulture));
+            }
+
+            for (int opIdx = 0; opIdx < operators.Count; opIdx++)
+            {
+                FlattenedOperator op = operators[opIdx];
+                string opKind = op.Opcode == ClosureExpressionOpcode.VerticalLayer
+                    ? "VIVID_SUBSTRATE_TOPOLOGY_VERTICAL_LAYER"
+                    : "VIVID_SUBSTRATE_TOPOLOGY_HORIZONTAL_MIX";
+                sb.Append("    mcOutput.operators[").Append(opIdx.ToString(CultureInfo.InvariantCulture))
+                    .Append("] = VividCreateDefaultSubstrateOperatorDesc(").Append(opKind)
+                    .Append(", saturate(").Append(Mapped(stageLIR, op.Weight)).AppendLine("));");
+            }
+
+            sb.AppendLine("}");
+            return sb.ToString();
+        }
+
+        private static void EmitStageLIRBody(
+            StringBuilder sb,
+            MaterialStageLIR stageLIR,
+            MaterialGenericLayout genericLayout,
+            bool isCompute)
+        {
             for (int nodeIndex = 0; nodeIndex < stageLIR.Nodes.Count; nodeIndex++)
             {
                 MaterialStageLIRNode node = stageLIR.Nodes[nodeIndex];
@@ -286,44 +413,53 @@ namespace VividRP.Runtime.GPUDriven
                     .Append(EmitNodeExpression(stageLIR, node, genericLayout, isCompute))
                     .AppendLine(";");
             }
+        }
 
-            ClosureExpressionNode root = module.ClosureGraph.GetNode(module.SurfaceClosure);
-            if (root.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
+        private static void EmitClosureLeafAssignment(
+            StringBuilder sb,
+            MaterialIRModule module,
+            MaterialStageLIR stageLIR,
+            ClosureExpressionNode leaf,
+            string targetVar,
+            bool includeEmission,
+            string leafTag)
+        {
+            if (leaf.Opcode == ClosureExpressionOpcode.OpenPBROpaque)
             {
-                ClosureOpenPBROpaqueExpression pbr = root.OpenPBROpaque;
-                sb.Append("    v2Inputs.core.baseWeight = saturate(").Append(Mapped(stageLIR, pbr.BaseWeight)).AppendLine(");");
-                sb.Append("    v2Inputs.core.baseColor = saturate(").Append(Mapped(stageLIR, pbr.BaseColor)).AppendLine(");");
-                sb.Append("    v2Inputs.core.baseDiffuseRoughness = saturate(").Append(Mapped(stageLIR, pbr.BaseDiffuseRoughness)).AppendLine(");");
-                sb.Append("    v2Inputs.core.baseMetalness = saturate(").Append(Mapped(stageLIR, pbr.BaseMetalness)).AppendLine(");");
-                sb.Append("    v2Inputs.core.specularWeight = saturate(").Append(Mapped(stageLIR, pbr.SpecularWeight)).AppendLine(");");
-                sb.Append("    v2Inputs.core.specularColor = saturate(").Append(Mapped(stageLIR, pbr.SpecularColor)).AppendLine(");");
-                sb.Append("    v2Inputs.core.specularRoughness = max(saturate(").Append(Mapped(stageLIR, pbr.SpecularRoughness)).AppendLine("), VIVID_STANDARD_LIT_MIN_ROUGHNESS);");
-                sb.Append("    v2Inputs.core.specularIor = VividSanitizeStandardLitSpecularIor(").Append(Mapped(stageLIR, pbr.SpecularIor)).AppendLine(");");
-                sb.Append("    v2Inputs.core.normalWS = VividSanitizeSurfaceSummaryNormal(").Append(Mapped(stageLIR, pbr.NormalWS)).AppendLine(");");
-                sb.Append("    v2Inputs.core.emissionLuminance = max(").Append(Mapped(stageLIR, pbr.EmissionLuminance)).AppendLine(", 0.0f);");
-                sb.Append("    v2Inputs.core.emissionColor = max(").Append(Mapped(stageLIR, pbr.EmissionColor)).AppendLine(", 0.0f);");
-                sb.AppendLine("    v2Inputs.coatNormalWS = v2Inputs.core.normalWS;");
-                sb.AppendLine("    v2Inputs.tangentWS = dot(ctx.geometryTangentWS.xyz, ctx.geometryTangentWS.xyz) > 1e-8f ? normalize(ctx.geometryTangentWS.xyz) : float3(1.0f, 0.0f, 0.0f);");
-                sb.AppendLine("    v2Inputs.tangentHandedness = ctx.geometryTangentWS.w < 0.0f ? -1.0f : 1.0f;");
+                ClosureOpenPBROpaqueExpression pbr = leaf.OpenPBROpaque;
+                sb.Append("    ").Append(targetVar).Append(".core.baseWeight = saturate(").Append(Mapped(stageLIR, pbr.BaseWeight)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.baseColor = saturate(").Append(Mapped(stageLIR, pbr.BaseColor)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.baseDiffuseRoughness = saturate(").Append(Mapped(stageLIR, pbr.BaseDiffuseRoughness)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.baseMetalness = saturate(").Append(Mapped(stageLIR, pbr.BaseMetalness)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.specularWeight = saturate(").Append(Mapped(stageLIR, pbr.SpecularWeight)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.specularColor = saturate(").Append(Mapped(stageLIR, pbr.SpecularColor)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.specularRoughness = max(saturate(").Append(Mapped(stageLIR, pbr.SpecularRoughness)).AppendLine("), VIVID_STANDARD_LIT_MIN_ROUGHNESS);");
+                sb.Append("    ").Append(targetVar).Append(".core.specularIor = VividSanitizeStandardLitSpecularIor(").Append(Mapped(stageLIR, pbr.SpecularIor)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.normalWS = VividSanitizeSurfaceSummaryNormal(").Append(Mapped(stageLIR, pbr.NormalWS)).AppendLine(");");
+                sb.Append("    ").Append(targetVar).Append(".core.emissionLuminance = max(").Append(Mapped(stageLIR, pbr.EmissionLuminance)).AppendLine(", 0.0f);");
+                sb.Append("    ").Append(targetVar).Append(".core.emissionColor = max(").Append(Mapped(stageLIR, pbr.EmissionColor)).AppendLine(", 0.0f);");
+                sb.Append("    ").Append(targetVar).Append(".coatNormalWS = ").Append(targetVar).AppendLine(".core.normalWS;");
+                sb.Append("    ").Append(targetVar).AppendLine(".tangentWS = dot(ctx.geometryTangentWS.xyz, ctx.geometryTangentWS.xyz) > 1e-8f ? normalize(ctx.geometryTangentWS.xyz) : float3(1.0f, 0.0f, 0.0f);");
+                sb.Append("    ").Append(targetVar).AppendLine(".tangentHandedness = ctx.geometryTangentWS.w < 0.0f ? -1.0f : 1.0f;");
             }
             else
             {
-                ClosureSlabExpression slab = root.Slab;
-                sb.AppendLine("    VividStandardLitSurfaceParams slabParams = VividCreateDefaultStandardLitSurfaceParams();");
-                sb.Append("    slabParams.baseColor = (").Append(Mapped(stageLIR, slab.BaseColor)).AppendLine(").rgb;");
-                sb.Append("    slabParams.smoothness = saturate(1.0f - saturate(").Append(Mapped(stageLIR, slab.Roughness)).AppendLine("));");
-                sb.Append("    slabParams.metallic = saturate(").Append(Mapped(stageLIR, slab.Metallic)).AppendLine(");");
-                sb.Append("    slabParams.normalWS = VividSanitizeSurfaceSummaryNormal(").Append(Mapped(stageLIR, slab.Normal)).AppendLine(");");
-                sb.AppendLine("    slabParams.coatNormalWS = slabParams.normalWS;");
-                sb.Append("    float4 slabTangent = ").Append(Mapped(stageLIR, slab.Tangent)).AppendLine(";");
-                sb.AppendLine("    slabParams.tangentWS = dot(slabTangent.xyz, slabTangent.xyz) > 1e-8f ? normalize(slabTangent.xyz) : float3(1.0f, 0.0f, 0.0f);");
-                sb.AppendLine("    slabParams.tangentHandedness = slabTangent.w < 0.0f ? -1.0f : 1.0f;");
-                sb.Append("    slabParams.emission = max(").Append(Mapped(stageLIR, module.Outputs.Emission)).AppendLine(", 0.0f);");
-                sb.AppendLine("    v2Inputs = VividStandardLitToOpenPBRV2Inputs(slabParams);");
+                ClosureSlabExpression slab = leaf.Slab;
+                string pVar = "slabParams_" + leafTag;
+                string tVar = "slabTangent_" + leafTag;
+                sb.Append("    VividStandardLitSurfaceParams ").Append(pVar).AppendLine(" = VividCreateDefaultStandardLitSurfaceParams();");
+                sb.Append("    ").Append(pVar).Append(".baseColor = (").Append(Mapped(stageLIR, slab.BaseColor)).AppendLine(").rgb;");
+                sb.Append("    ").Append(pVar).Append(".smoothness = saturate(1.0f - saturate(").Append(Mapped(stageLIR, slab.Roughness)).AppendLine("));");
+                sb.Append("    ").Append(pVar).Append(".metallic = saturate(").Append(Mapped(stageLIR, slab.Metallic)).AppendLine(");");
+                sb.Append("    ").Append(pVar).Append(".normalWS = VividSanitizeSurfaceSummaryNormal(").Append(Mapped(stageLIR, slab.Normal)).AppendLine(");");
+                sb.Append("    ").Append(pVar).Append(".coatNormalWS = ").Append(pVar).AppendLine(".normalWS;");
+                sb.Append("    float4 ").Append(tVar).Append(" = ").Append(Mapped(stageLIR, slab.Tangent)).AppendLine(";");
+                sb.Append("    ").Append(pVar).Append(".tangentWS = dot(").Append(tVar).Append(".xyz, ").Append(tVar).Append(".xyz) > 1e-8f ? normalize(").Append(tVar).AppendLine(".xyz) : float3(1.0f, 0.0f, 0.0f);");
+                sb.Append("    ").Append(pVar).Append(".tangentHandedness = ").Append(tVar).AppendLine(".w < 0.0f ? -1.0f : 1.0f;");
+                if (includeEmission)
+                    sb.Append("    ").Append(pVar).Append(".emission = max(").Append(Mapped(stageLIR, module.Outputs.Emission)).AppendLine(", 0.0f);");
+                sb.Append("    ").Append(targetVar).Append(" = VividStandardLitToOpenPBRV2Inputs(").Append(pVar).AppendLine(");");
             }
-
-            sb.AppendLine("}");
-            return sb.ToString();
         }
 
         private static void EmitTextureSample(

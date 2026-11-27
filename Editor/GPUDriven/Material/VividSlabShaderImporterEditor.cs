@@ -24,7 +24,7 @@ namespace VividRP.Editor.GPUDriven
             string assetPath = importer.assetPath;
             VividSlabProgramDescriptor descriptor = LoadDescriptor(assetPath);
 
-            EditorGUILayout.LabelField("VividRP Substrate Slab Shader (Phase S1)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("VividRP Substrate Slab Shader (Phase S2)", EditorStyles.boldLabel);
             using (new EditorGUI.DisabledScope(true))
             {
                 EditorGUILayout.TextField("Asset Path", assetPath);
@@ -38,8 +38,13 @@ namespace VividRP.Editor.GPUDriven
                         "Layout Summary",
                         $"{descriptor.Parameters.Count} params ({descriptor.ParameterLaneCount * 16} B), {descriptor.ResourceCount} textures, ~{descriptor.EstimatedSubstrateBytesPerPixel} B/px Substrate");
                     EditorGUILayout.TextField(
+                        "Substrate Closure",
+                        descriptor.IsMultiClosure
+                            ? $"Multi-Closure Tier 3 ({descriptor.ClosureCount} closures)"
+                            : "Single-Closure (Tier 1/2)");
+                    EditorGUILayout.TextField(
                         "Features",
-                        $"GraphSurface={descriptor.HasLinkedGraphSurface}, CustomPostHook={descriptor.HasCustomSurfaceHook}");
+                        $"GraphSurface={descriptor.HasLinkedGraphSurface}, PostHook={descriptor.HasCustomSurfaceHook}, CustomCoverage={descriptor.HasCustomCoverage}, WPO={descriptor.HasVertexOffset}, ProgVisRaster={descriptor.RequiresProgrammableVisibilityRaster}");
                     EditorGUILayout.TextField("Content Hash", $"0x{descriptor.SourceContentHash:X8}");
                     if (!string.IsNullOrEmpty(descriptor.BaseTemplateAssetPath))
                         EditorGUILayout.TextField("Base Template", descriptor.BaseTemplateAssetPath);

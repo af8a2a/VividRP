@@ -43,25 +43,31 @@ namespace VividRP.Runtime.GPUDriven
     {
         internal VividDynamicSlabProgramBinding(
             VividMaterialProgramID programID,
+            Shader rasterShader,
             ComputeShader computeShader,
             int kernelIndex,
             int parameterStrideInWords,
             int resourceCount,
+            bool requiresProgrammableVisibilityRaster,
             VividSlabProgramDescriptor descriptor)
         {
             ProgramID = programID;
+            RasterShader = rasterShader;
             ComputeShader = computeShader;
             KernelIndex = kernelIndex;
             ParameterStrideInWords = parameterStrideInWords;
             ResourceCount = resourceCount;
+            RequiresProgrammableVisibilityRaster = requiresProgrammableVisibilityRaster;
             Descriptor = descriptor;
         }
 
         internal VividMaterialProgramID ProgramID { get; }
+        internal Shader RasterShader { get; }
         internal ComputeShader ComputeShader { get; }
         internal int KernelIndex { get; }
         internal int ParameterStrideInWords { get; }
         internal int ResourceCount { get; }
+        internal bool RequiresProgrammableVisibilityRaster { get; }
         internal VividSlabProgramDescriptor Descriptor { get; }
     }
 
@@ -130,6 +136,16 @@ namespace VividRP.Runtime.GPUDriven
             return false;
         }
 
+        internal bool HasProgrammableVisibilityRasterPrograms()
+        {
+            for (int i = 0; i < m_DynamicSlabPrograms.Count; i++)
+            {
+                if (m_DynamicSlabPrograms[i].RequiresProgrammableVisibilityRaster)
+                    return true;
+            }
+            return false;
+        }
+
         internal VividMaterialProgramID RegisterDynamicSlabProgram(
             VividSlabProgramDescriptor descriptor)
         {
@@ -144,6 +160,12 @@ namespace VividRP.Runtime.GPUDriven
 
             uint programIndex = (uint)m_MaterialPrograms.Count;
             var programID = (VividMaterialProgramID)programIndex;
+            VividMaterialProgramCapabilities capabilities = VividMaterialProgramCapabilities.None;
+            if (descriptor.HasCustomCoverage)
+                capabilities |= VividMaterialProgramCapabilities.AlphaClip;
+            if (descriptor.RequiresProgrammableVisibilityRaster)
+                capabilities |= VividMaterialProgramCapabilities.ProgrammableRaster;
+
             m_MaterialPrograms.Add(new VividMaterialProgramData
             {
                 Version = GPUDrivenMaterialCompiler.ProgramVersion,
@@ -152,7 +174,7 @@ namespace VividRP.Runtime.GPUDriven
                 TransportProgramID = VividMaterialTransportProgramID.None,
                 ParameterLayoutID = VividMaterialParameterLayoutID.GenericParameterLanes,
                 ResourceLayoutID = VividMaterialResourceLayoutID.GenericResourceRecords,
-                CapabilityFlags = VividMaterialProgramCapabilities.None,
+                CapabilityFlags = capabilities,
                 ExecutionClass = VividMaterialExecutionClass.VisibilityDeferred,
             });
 
@@ -162,10 +184,12 @@ namespace VividRP.Runtime.GPUDriven
                 : -1;
             m_DynamicSlabPrograms.Add(new VividDynamicSlabProgramBinding(
                 programID,
+                descriptor.RasterShader,
                 cs,
                 kernelIndex,
                 descriptor.ParameterStrideInWords,
                 descriptor.ResourceCount,
+                descriptor.RequiresProgrammableVisibilityRaster,
                 descriptor));
             return programID;
         }

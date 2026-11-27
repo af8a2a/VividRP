@@ -68,6 +68,8 @@ uint VividEvaluateCoverageProgram(
 
     const VividMaterialProgramData programData =
         PullMaterialProgramData(runtimeHeader.ProgramID);
+    if (programData.SurfaceProgramID == VIVIDMATERIALSURFACEPROGRAMID_DYNAMIC_SLAB)
+        return VIVID_MATERIAL_COVERAGE_LEGACY_FALLBACK;
     if (!VividIsCoverageProgramCompatible(runtimeHeader, programData))
         return VIVID_MATERIAL_COVERAGE_KNOWN_FAILURE;
 

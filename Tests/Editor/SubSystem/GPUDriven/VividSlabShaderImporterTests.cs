@@ -14,6 +14,8 @@ namespace VividRP.Editor.Tests
     {
         private const string SampleSlabShaderRelativePath =
             "Shaders/Material/Samples/SubstratePoC.slab.shader";
+        private const string MultiClosureSampleSlabShaderRelativePath =
+            "Shaders/Material/Samples/SubstrateMultiClosurePoC.slab.shader";
         private const string BaseTemplateRelativePath =
             "Shaders/Material/Templates/SubstrateOpaque.slab.template";
         private const string StandardLitRelativePath =
@@ -276,6 +278,199 @@ namespace VividRP.Editor.Tests
                 stdLitImporter,
                 Is.Not.TypeOf<VividSlabShaderImporter>(),
                 "Regular .shader files must continue using Unity's built-in ShaderImporter.");
+        }
+
+        [Test]
+        public void DualTargetStageLIRBackend_LowersMultiClosureTreesToTier3RasterAndCompute()
+        {
+            CompiledMaterialProgram dualMix = BuildMultiClosureTestProgram(closureCount: 2);
+            MaterialSlabHlslPayload dualPayload = MaterialSlabHlslBackend.Compile(dualMix);
+            Assert.That(dualPayload.IsMultiClosure, Is.True);
+            Assert.That(dualPayload.ClosureCount, Is.EqualTo(2));
+            Assert.That(
+                dualPayload.EstimatedSubstrateBytesPerPixel,
+                Is.EqualTo(VividSubstrateContract.ComputeMultiClosureTotalSlices(2) * VividSubstrateContract.BytesPerSlice));
+            StringAssert.Contains("#define VIVID_SLAB_MULTI_CLOSURE_OUTPUT 1", dualPayload.RasterEvaluateFunction);
+            StringAssert.Contains("#define VIVID_SLAB_MULTI_CLOSURE_OUTPUT 1", dualPayload.ComputeEvaluateFunction);
+            StringAssert.Contains("VividSlabEvaluateMultiClosureGraphSurface(", dualPayload.RasterEvaluateFunction);
+            StringAssert.Contains("VividSlabEvaluateMultiClosureGraphSurface(", dualPayload.ComputeEvaluateFunction);
+            StringAssert.Contains("VIVID_SUBSTRATE_TOPOLOGY_HORIZONTAL_MIX", dualPayload.ComputeEvaluateFunction);
+
+            CompiledMaterialProgram triTree = BuildMultiClosureTestProgram(closureCount: 3);
+            MaterialSlabHlslPayload triPayload = MaterialSlabHlslBackend.Compile(triTree);
+            Assert.That(triPayload.IsMultiClosure, Is.True);
+            Assert.That(triPayload.ClosureCount, Is.EqualTo(3));
+            Assert.That(
+                triPayload.EstimatedSubstrateBytesPerPixel,
+                Is.EqualTo(VividSubstrateContract.ComputeMultiClosureTotalSlices(3) * VividSubstrateContract.BytesPerSlice));
+            StringAssert.Contains("mcOutput.closureCount = 3u;", triPayload.RasterEvaluateFunction);
+            StringAssert.Contains("mcOutput.closureCount = 3u;", triPayload.ComputeEvaluateFunction);
+            StringAssert.Contains("VIVID_SUBSTRATE_TOPOLOGY_HORIZONTAL_MIX", triPayload.ComputeEvaluateFunction);
+            StringAssert.Contains("VIVID_SUBSTRATE_TOPOLOGY_VERTICAL_LAYER", triPayload.ComputeEvaluateFunction);
+
+            string samplePath = VividPackagePathUtility.GetPreferredAssetPath(SampleSlabShaderRelativePath);
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                samplePath,
+                File.ReadAllText(samplePath),
+                templatePath,
+                File.ReadAllText(templatePath),
+                resolvedLinkedGraphPath: "TriClosure.vmatg",
+                compiledGraphProgram: triTree);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.IsMultiClosure, Is.True);
+            Assert.That(assembled.ClosureCount, Is.EqualTo(3));
+            StringAssert.Contains("VividWriteSubstrateMultiClosure(", assembled.RasterShaderSource);
+            StringAssert.Contains("VividWriteSubstrateMultiClosure(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VividBuildMultiClosureTopLayerSummary(", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
+        }
+
+        [Test]
+        public void Assemble_WithWpoAndCustomCoverage_DisablesEarlyDepthAndEnablesProgrammableVisibilityRaster()
+        {
+            string samplePath = VividPackagePathUtility.GetPreferredAssetPath(MultiClosureSampleSlabShaderRelativePath);
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            CompiledMaterialProgram openPbrProgram = BuildOpenPBROpaqueTestProgram();
+
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                samplePath,
+                File.ReadAllText(samplePath),
+                templatePath,
+                File.ReadAllText(templatePath),
+                resolvedLinkedGraphPath: "OpenPBROpaque.vmatg",
+                compiledGraphProgram: openPbrProgram);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.HasVertexOffset, Is.True);
+            Assert.That(assembled.HasCustomCoverage, Is.True);
+            Assert.That(assembled.HasCustomSurfaceHook, Is.True);
+            StringAssert.Contains("VividGBufferGPUDrivenDecal", assembled.RasterShaderSource);
+            StringAssert.Contains("VividVisibilityRaster", assembled.RasterShaderSource);
+            StringAssert.Contains("ApplyVividGPUDrivenDecalsToOpenPBRV2Inputs(", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabEvaluateVertexOffset(", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabEvaluateCoverage(", assembled.RasterShaderSource);
+            StringAssert.DoesNotContain("[earlydepthstencil]", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabEvaluateVertexOffset(", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+        }
+
+        [Test]
+        public void RegisterDynamicSlabProgram_WithProgrammableVisibilityRaster_SetsCapabilityFlags_ZeroAllocation()
+        {
+            VividSlabProgramDescriptor descriptor = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            try
+            {
+                descriptor.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: "VividRP/Material/TestProgrammable",
+                    baseTemplateAssetPath: string.Empty,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: 72,
+                    parameterStrideInWords: 4,
+                    parameters: Array.Empty<VividSlabParameterSlot>(),
+                    resources: Array.Empty<VividSlabResourceSlot>(),
+                    hasLinkedGraphSurface: true,
+                    hasCustomSurfaceHook: true,
+                    sourceContentHash: 0xABCDEF01u,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>(),
+                    isMultiClosure: true,
+                    closureCount: 3,
+                    hasCustomCoverage: true,
+                    hasVertexOffset: true);
+
+                Assert.That(descriptor.IsMultiClosure, Is.True);
+                Assert.That(descriptor.ClosureCount, Is.EqualTo(3));
+                Assert.That(descriptor.HasCustomCoverage, Is.True);
+                Assert.That(descriptor.HasVertexOffset, Is.True);
+                Assert.That(descriptor.RequiresProgrammableVisibilityRaster, Is.True);
+
+                var scene = new VividGPUDrivenSceneData();
+                VividMaterialProgramID programId = scene.RegisterDynamicSlabProgram(descriptor);
+                VividMaterialProgramData progData = scene.MaterialPrograms[(int)(uint)programId];
+                Assert.That(
+                    (progData.CapabilityFlags & VividMaterialProgramCapabilities.ProgrammableRaster) != 0,
+                    Is.True);
+                Assert.That(
+                    (progData.CapabilityFlags & VividMaterialProgramCapabilities.AlphaClip) != 0,
+                    Is.True);
+                Assert.That(scene.HasProgrammableVisibilityRasterPrograms(), Is.True);
+
+                for (int i = 0; i < 32; ++i)
+                {
+                    scene.HasProgrammableVisibilityRasterPrograms();
+                    scene.TryGetDynamicSlabProgram(programId, out _);
+                }
+
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                bool hasProg = true;
+                for (int i = 0; i < 128; ++i)
+                {
+                    hasProg &= scene.HasProgrammableVisibilityRasterPrograms();
+                    hasProg &= scene.TryGetDynamicSlabProgram(programId, out _);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+                Assert.That(hasProg, Is.True);
+                Assert.That(allocated, Is.Zero, "Programmable VisibilityRaster queries must allocate zero managed memory.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(descriptor);
+            }
+        }
+
+        private static CompiledMaterialProgram BuildMultiClosureTestProgram(int closureCount)
+        {
+            var values = new MaterialValueIR();
+            var closures = new ClosureExpressionGraph(values);
+            MaterialClosure slabA = closures.Slab(new ClosureSlabExpression(
+                values.Parameter(new MaterialParameterDeclaration("BaseColorA", MaterialValueType.Float3)),
+                values.Parameter(new MaterialParameterDeclaration("RoughnessA", MaterialValueType.Float)),
+                values.Parameter(new MaterialParameterDeclaration("MetallicA", MaterialValueType.Float)),
+                values.Constant(new float3(0.0f, 0.0f, 1.0f)),
+                values.Constant(new float3(1.0f, 0.0f, 0.0f)),
+                ClosureFeatureMask.None));
+            MaterialClosure slabB = closures.Slab(new ClosureSlabExpression(
+                values.Parameter(new MaterialParameterDeclaration("BaseColorB", MaterialValueType.Float3)),
+                values.Parameter(new MaterialParameterDeclaration("RoughnessB", MaterialValueType.Float)),
+                values.Parameter(new MaterialParameterDeclaration("MetallicB", MaterialValueType.Float)),
+                values.Constant(new float3(0.0f, 0.0f, 1.0f)),
+                values.Constant(new float3(1.0f, 0.0f, 0.0f)),
+                ClosureFeatureMask.None));
+            MaterialValue mixWeight = values.Parameter(new MaterialParameterDeclaration("MixWeight", MaterialValueType.Float));
+            MaterialClosure root = closures.HorizontalMix(slabA, slabB, mixWeight);
+
+            if (closureCount >= 3)
+            {
+                MaterialClosure slabC = closures.Slab(new ClosureSlabExpression(
+                    values.Parameter(new MaterialParameterDeclaration("BaseColorC", MaterialValueType.Float3)),
+                    values.Parameter(new MaterialParameterDeclaration("RoughnessC", MaterialValueType.Float)),
+                    values.Constant(0.0f),
+                    values.Constant(new float3(0.0f, 0.0f, 1.0f)),
+                    values.Constant(new float3(1.0f, 0.0f, 0.0f)),
+                    ClosureFeatureMask.None));
+                MaterialValue layerWeight = values.Parameter(new MaterialParameterDeclaration("LayerWeight", MaterialValueType.Float));
+                root = closures.VerticalLayer(root, slabC, layerWeight);
+            }
+
+            var module = new MaterialIRModule(
+                values,
+                new MaterialOutputRoots(
+                    values.Constant(1.0f),
+                    values.Constant(0.0f),
+                    values.Constant(new float3(0.0f))),
+                closures,
+                root,
+                ClosureTopologyBudget.SubstrateMultiClosure,
+                MaterialFeatureMask.None,
+                MaterialShadingModelMask.StandardLit);
+            return CompiledMaterialProgram.Compile(module, GPUDrivenMaterialCompiler.ProgramVersion);
         }
 
         private static CompiledMaterialProgram BuildOpenPBROpaqueTestProgram()

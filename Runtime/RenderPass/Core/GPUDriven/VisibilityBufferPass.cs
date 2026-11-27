@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -29,6 +30,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int SpdAtomicCounterCount = 6;
 
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
+        private static readonly int s_TargetSlabProgramId = Shader.PropertyToID("_TargetSlabProgramID");
         private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
         private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
@@ -108,8 +110,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultAttributes1;
         private readonly RenderGraphTexture m_DefaultBarycentrics;
         private readonly RenderGraphTexture m_DefaultDepth;
+        private sealed class ProgrammableSlabMaterialCache
+        {
+            public readonly Material[] CullMaterials = new Material[3];
+            public int VisibilityRasterPassIndex = -1;
+            public bool PassLookupAttempted;
+        }
+
         private readonly RenderTargetIdentifier[] m_ColorTargets = new RenderTargetIdentifier[4];
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
+        private readonly Dictionary<VividSlabProgramDescriptor, ProgrammableSlabMaterialCache> m_ProgrammableSlabMaterials = new();
         private readonly VividMeshShaderObject[] m_MeshShaderObjects = new VividMeshShaderObject[3];
         private readonly VividMeshShaderDispatch[] m_MeshShaderDispatchBatch =
             new VividMeshShaderDispatch[(int)VividRendererListID.Count];
@@ -458,6 +468,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Materials[materialIndex]);
                 m_Materials[materialIndex] = null;
             }
+            DisposeProgrammableSlabMaterials();
         }
 
         private void PrepareOcclusionResources(
@@ -826,6 +837,158 @@ namespace VividRP.Runtime.RenderPass.Core
                 virtualTextureReady,
                 virtualTextureBinding,
                 ref meshShaderDispatchCount);
+
+            if (system?.SceneData?.HasProgrammableVisibilityRasterPrograms() == true)
+            {
+                DrawProgrammableSlabVisibilityLists(
+                    cmd,
+                    visibleMeshletRenderRequestsBuffer,
+                    indirectArgsBuffer,
+                    system,
+                    virtualTextureReady,
+                    virtualTextureBinding);
+            }
+        }
+
+        private void DrawProgrammableSlabVisibilityLists(
+            CommandBuffer cmd,
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer,
+            GraphicsBuffer indirectArgsBuffer,
+            VividGPUDrivenSystem system,
+            bool virtualTextureReady,
+            in VirtualTextureSpaceBinding virtualTextureBinding)
+        {
+            IReadOnlyList<VividDynamicSlabProgramBinding> dynamicPrograms =
+                system.SceneData.DynamicSlabPrograms;
+            for (int i = 0; i < dynamicPrograms.Count; i++)
+            {
+                VividDynamicSlabProgramBinding binding = dynamicPrograms[i];
+                if (!binding.RequiresProgrammableVisibilityRaster
+                    || binding.RasterShader == null
+                    || binding.Descriptor == null)
+                {
+                    continue;
+                }
+
+                if (!virtualTextureReady && binding.Descriptor.HasCustomCoverage)
+                    continue;
+
+                for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
+                {
+                    VividRendererListID batchKey = (VividRendererListID)rendererListIndex;
+                    if (m_PrimitiveDrawSet?.IsBuilt == true)
+                    {
+                        if (!m_PrimitiveDrawSet.TryGetBucket(batchKey, out VividPrimitiveDrawBucket bucket)
+                            || bucket.DrawCount == 0u)
+                        {
+                            continue;
+                        }
+                    }
+                    else if (!system.IsMainViewRendererBatchActive(batchKey))
+                    {
+                        continue;
+                    }
+
+                    Material material = GetOrCreateProgrammableSlabMaterial(
+                        binding.Descriptor,
+                        binding.RasterShader,
+                        GetCullMode(batchKey),
+                        out int passIndex);
+                    if (material == null || passIndex < 0)
+                        continue;
+
+                    system.ConfigureTextureBackendKeyword(material);
+
+                    m_DrawProperties.Clear();
+                    m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
+                    m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, indirectArgsBuffer);
+                    m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
+                    m_DrawProperties.SetInteger(s_TargetSlabProgramId, (int)(uint)binding.ProgramID);
+                    if (system.UsesVirtualTexture && virtualTextureReady)
+                    {
+                        GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(
+                            m_DrawProperties,
+                            virtualTextureBinding,
+                            m_VirtualTextureSpaceParams,
+                            m_VirtualTextureMipOffsets,
+                            m_VirtualTextureLayerFallbacks,
+                            m_FrameIndex,
+                            m_VirtualTextureFrameData.AdaptiveMipBias);
+                    }
+
+                    cmd.DrawProceduralIndirect(
+                        Matrix4x4.identity,
+                        material,
+                        passIndex,
+                        MeshTopology.Triangles,
+                        indirectArgsBuffer,
+                        rendererListIndex * IndirectDrawArgsByteStride,
+                        m_DrawProperties);
+                }
+            }
+        }
+
+        private Material GetOrCreateProgrammableSlabMaterial(
+            VividSlabProgramDescriptor descriptor,
+            Shader rasterShader,
+            CullMode cullMode,
+            out int passIndex)
+        {
+            passIndex = -1;
+            if (descriptor == null || rasterShader == null)
+                return null;
+
+            if (!m_ProgrammableSlabMaterials.TryGetValue(descriptor, out ProgrammableSlabMaterialCache cache))
+            {
+                cache = new ProgrammableSlabMaterialCache();
+                m_ProgrammableSlabMaterials.Add(descriptor, cache);
+            }
+
+            int cullSlot = cullMode switch
+            {
+                CullMode.Off => 0,
+                CullMode.Front => 1,
+                _ => 2,
+            };
+
+            Material material = cache.CullMaterials[cullSlot];
+            if (material == null || material.shader != rasterShader)
+            {
+                if (material != null)
+                    CoreUtils.Destroy(material);
+                material = CoreUtils.CreateEngineMaterial(rasterShader);
+                material.SetFloat(s_CullId, (float)cullMode);
+                cache.CullMaterials[cullSlot] = material;
+                cache.VisibilityRasterPassIndex = material.FindPass("VividVisibilityRaster");
+                cache.PassLookupAttempted = true;
+            }
+            else if (!cache.PassLookupAttempted)
+            {
+                cache.VisibilityRasterPassIndex = material.FindPass("VividVisibilityRaster");
+                cache.PassLookupAttempted = true;
+            }
+
+            passIndex = cache.VisibilityRasterPassIndex;
+            return material;
+        }
+
+        private void DisposeProgrammableSlabMaterials()
+        {
+            foreach (KeyValuePair<VividSlabProgramDescriptor, ProgrammableSlabMaterialCache> kvp in m_ProgrammableSlabMaterials)
+            {
+                ProgrammableSlabMaterialCache cache = kvp.Value;
+                if (cache?.CullMaterials == null)
+                    continue;
+                for (int i = 0; i < cache.CullMaterials.Length; i++)
+                {
+                    if (cache.CullMaterials[i] != null)
+                    {
+                        CoreUtils.Destroy(cache.CullMaterials[i]);
+                        cache.CullMaterials[i] = null;
+                    }
+                }
+            }
+            m_ProgrammableSlabMaterials.Clear();
         }
 
         private static void QueueMeshShaderStateBoundary(CommandBuffer cmd)

@@ -46,6 +46,14 @@ namespace VividRP.Editor.GPUDriven
 
         internal bool HasCustomSurfaceHook { get; set; }
 
+        internal bool IsMultiClosure { get; set; }
+
+        internal int ClosureCount { get; set; } = 1;
+
+        internal bool HasCustomCoverage { get; set; }
+
+        internal bool HasVertexOffset { get; set; }
+
         internal uint SourceContentHash { get; set; }
 
         internal string[] Diagnostics { get; set; } = Array.Empty<string>();
@@ -53,7 +61,7 @@ namespace VividRP.Editor.GPUDriven
 
     /// <summary>
     /// Dual-target (Raster Shader + standalone GPUDriven ComputeShader) preprocessor and
-    /// assembler for <c>*.slab.shader</c> source files (Phase S1).
+    /// assembler for <c>*.slab.shader</c> source files (Phase S1 + S2).
     /// </summary>
     internal static class VividSlabShaderAssembler
     {
@@ -64,6 +72,9 @@ namespace VividRP.Editor.GPUDriven
         internal const string UserCBufferToken = "VIVID_SLAB_USER_CBUFFER";
         internal const string UserTexturesToken = "VIVID_SLAB_USER_TEXTURES";
         internal const string UserSurfaceHookToken = "VIVID_SLAB_USER_SURFACE_HOOK";
+        internal const string UserVertexHookToken = "VIVID_SLAB_USER_VERTEX_HOOK";
+        internal const string UserCoverageHookToken = "VIVID_SLAB_USER_COVERAGE_HOOK";
+        internal const string EarlyDepthAttrToken = "VIVID_SLAB_EARLY_DEPTH_ATTR";
         internal const string UseBaseSubShaderToken = "VIVID_SLAB_USE_BASE_SUBSHADER";
 
         private static readonly Regex s_BaseDirectiveRegex = new(
@@ -84,6 +95,14 @@ namespace VividRP.Editor.GPUDriven
 
         private static readonly Regex s_SurfaceHookRegex = new(
             @"^[ \t]*//[ \t]*@vivid-surface-begin[ \t]*\n([\s\S]*?)^[ \t]*//[ \t]*@vivid-surface-end[ \t]*$",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
+        private static readonly Regex s_VertexHookRegex = new(
+            @"^[ \t]*//[ \t]*@vivid-vertex-begin[ \t]*\n([\s\S]*?)^[ \t]*//[ \t]*@vivid-vertex-end[ \t]*$",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
+        private static readonly Regex s_CoverageHookRegex = new(
+            @"^[ \t]*//[ \t]*@vivid-coverage-begin[ \t]*\n([\s\S]*?)^[ \t]*//[ \t]*@vivid-coverage-end[ \t]*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
         private static readonly Regex s_UserCBufferRegex = new(
@@ -173,6 +192,16 @@ namespace VividRP.Editor.GPUDriven
                 s_SurfaceHookRegex,
                 normalizedSourcePath,
                 out bool hasCustomSurfaceHook);
+            string userVertexHook = ExtractAndStripBlock(
+                ref normalizedSource,
+                s_VertexHookRegex,
+                normalizedSourcePath,
+                out bool hasVertexOffset);
+            string userCoverageHook = ExtractAndStripBlock(
+                ref normalizedSource,
+                s_CoverageHookRegex,
+                normalizedSourcePath,
+                out bool hasCustomCoverage);
             string userCBuffer = ExtractAndStripBlock(
                 ref normalizedSource,
                 s_UserCBufferRegex,
@@ -187,6 +216,12 @@ namespace VividRP.Editor.GPUDriven
             string propertiesBlock = graphPayload != null
                 ? graphPayload.PropertiesBlock
                 : "// [VividSlab] No linked MaterialGraph properties.";
+            if (normalizedSource.Contains(UseBaseSubShaderToken)
+                && normalizedSource.IndexOf("_Cull", StringComparison.Ordinal) < 0
+                && propertiesBlock.IndexOf("_Cull", StringComparison.Ordinal) < 0)
+            {
+                propertiesBlock += "\n        [HideInInspector] _Cull(\"Cull\", Float) = 2";
+            }
             string rasterCBufferBlock = graphPayload != null
                 ? graphPayload.RasterCBufferBlock
                 : "// [VividSlab] No linked MaterialGraph CBUFFER fields.";
@@ -199,6 +234,9 @@ namespace VividRP.Editor.GPUDriven
             string computeEvaluateBlock = graphPayload != null
                 ? graphPayload.ComputeEvaluateFunction
                 : BuildDefaultComputeEvaluateFunction();
+            string earlyDepthAttr = hasCustomCoverage
+                ? "// [VividSlab] [earlydepthstencil] omitted when custom coverage clip is active."
+                : "[earlydepthstencil]";
 
             string rasterText = normalizedSource;
 
@@ -233,6 +271,12 @@ namespace VividRP.Editor.GPUDriven
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserTexturesToken, userTextures, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphEvaluateToken, rasterEvaluateBlock, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserSurfaceHookToken, userSurfaceHook, normalizedSourcePath);
+            rasterText = ReplaceTokenWithLineAnchor(rasterText, UserVertexHookToken, userVertexHook, normalizedSourcePath);
+            rasterText = ReplaceTokenWithLineAnchor(rasterText, UserCoverageHookToken, userCoverageHook, normalizedSourcePath);
+            rasterText = rasterText.Replace(EarlyDepthAttrToken, earlyDepthAttr);
+
+            bool isMultiClosure = graphPayload != null && graphPayload.IsMultiClosure;
+            int closureCount = graphPayload != null ? graphPayload.ClosureCount : 1;
 
             bool hasErrors = HasErrorDiagnostics(diagnostics);
             string computeSource = BuildStandaloneGPUDrivenComputeSource(
@@ -242,6 +286,7 @@ namespace VividRP.Editor.GPUDriven
                 compiledGraphProgram,
                 computeEvaluateBlock,
                 userSurfaceHook,
+                userVertexHook,
                 VividSlabProgramDescriptor.DefaultResolveKernelName);
 
             uint contentHash = ComputeFnv1a32(rasterText, computeSource);
@@ -249,7 +294,7 @@ namespace VividRP.Editor.GPUDriven
             int estimatedBytes = graphPayload != null
                 ? graphPayload.EstimatedSubstrateBytesPerPixel
                 : VividSubstrateContract.OpenPBROpaqueSingleTotalSlices * VividSubstrateContract.BytesPerSlice;
-            if (hasCustomSurfaceHook && userSurfaceHook.IndexOf("coatWeight", StringComparison.Ordinal) >= 0)
+            if (!isMultiClosure && hasCustomSurfaceHook && userSurfaceHook.IndexOf("coatWeight", StringComparison.Ordinal) >= 0)
             {
                 estimatedBytes = Math.Max(
                     estimatedBytes,
@@ -273,6 +318,10 @@ namespace VividRP.Editor.GPUDriven
                 ResourceSlots = graphPayload != null ? graphPayload.ResourceSlots : Array.Empty<VividSlabResourceSlot>(),
                 HasLinkedGraphSurface = graphPayload != null,
                 HasCustomSurfaceHook = hasCustomSurfaceHook,
+                IsMultiClosure = isMultiClosure,
+                ClosureCount = closureCount,
+                HasCustomCoverage = hasCustomCoverage,
+                HasVertexOffset = hasVertexOffset,
                 SourceContentHash = contentHash,
                 Diagnostics = diagnostics.ToArray(),
             };
@@ -388,7 +437,8 @@ namespace VividRP.Editor.GPUDriven
         /// <summary>
         /// Generates a standalone, per-material GPUDriven VisibilityBuffer Binned Resolve ComputeShader
         /// with zero switch(ProgramID) divergence, VT-first texture backend (+ experimental Bindless),
-        /// StageLIR graph evaluation + custom post-hook, and direct Substrate Closure Buffer output.
+        /// optional WPO vertex replay for exact barycentrics, StageLIR Single/Multi-Closure evaluation
+        /// + custom post-hook, and direct Substrate Closure Buffer output (Tier 1/2/3).
         /// </summary>
         private static string BuildStandaloneGPUDrivenComputeSource(
             string sourceAssetPath,
@@ -397,14 +447,15 @@ namespace VividRP.Editor.GPUDriven
             CompiledMaterialProgram compiledProgram,
             string computeEvaluateFunction,
             string userSurfaceHook,
+            string userVertexHook,
             string kernelName)
         {
             string graphSummary = compiledProgram != null
                 ? $"// Linked Graph: {linkedGraphPath} (Hash: {compiledProgram.CompiledHash})"
                 : "// Linked Graph: <none> (standalone Slab compute)";
 
-            var sb = new StringBuilder(6144);
-            sb.AppendLine("// <auto-generated by VividSlabShaderImporter (Phase S1)>");
+            var sb = new StringBuilder(8192);
+            sb.AppendLine("// <auto-generated by VividSlabShaderImporter (Phase S2)>");
             sb.Append("// Source: ").AppendLine(sourceAssetPath);
             sb.Append("// Shader: ").AppendLine(shaderName);
             sb.AppendLine(graphSummary);
@@ -452,6 +503,8 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("RWTexture2D<float4> _OutGBuffer4;");
             sb.AppendLine("RWTexture2DArray<uint> _OutSubstrateClosureBuffer;");
             sb.AppendLine();
+            sb.AppendLine(userVertexHook);
+            sb.AppendLine();
             sb.AppendLine(computeEvaluateFunction);
             sb.AppendLine();
             sb.AppendLine(userSurfaceHook);
@@ -497,9 +550,28 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    VividMeshletVertex v1 = _SharedVertexBuffer[meshlet.VertexOffset + i1];");
             sb.AppendLine("    VividMeshletVertex v2 = _SharedVertexBuffer[meshlet.VertexOffset + i2];");
             sb.AppendLine();
-            sb.AppendLine("    float3 posWS0 = TransformPosition(instanceData.ObjectToWorldMatrix, DecodeVividMeshletPosition(v0));");
-            sb.AppendLine("    float3 posWS1 = TransformPosition(instanceData.ObjectToWorldMatrix, DecodeVividMeshletPosition(v1));");
-            sb.AppendLine("    float3 posWS2 = TransformPosition(instanceData.ObjectToWorldMatrix, DecodeVividMeshletPosition(v2));");
+            sb.AppendLine("    float3 posOS0 = DecodeVividMeshletPosition(v0);");
+            sb.AppendLine("    float3 posOS1 = DecodeVividMeshletPosition(v1);");
+            sb.AppendLine("    float3 posOS2 = DecodeVividMeshletPosition(v2);");
+            sb.AppendLine("    float3 posWS0 = TransformPosition(instanceData.ObjectToWorldMatrix, posOS0);");
+            sb.AppendLine("    float3 posWS1 = TransformPosition(instanceData.ObjectToWorldMatrix, posOS1);");
+            sb.AppendLine("    float3 posWS2 = TransformPosition(instanceData.ObjectToWorldMatrix, posOS2);");
+            sb.AppendLine("    float3 nOS0 = SafeNormalize(DecodeVividMeshletNormal(v0));");
+            sb.AppendLine("    float3 nOS1 = SafeNormalize(DecodeVividMeshletNormal(v1));");
+            sb.AppendLine("    float3 nOS2 = SafeNormalize(DecodeVividMeshletNormal(v2));");
+            sb.AppendLine("    float3 n0 = SafeNormalize(mul(nOS0, (float3x3)instanceData.WorldToObjectMatrix));");
+            sb.AppendLine("    float3 n1 = SafeNormalize(mul(nOS1, (float3x3)instanceData.WorldToObjectMatrix));");
+            sb.AppendLine("    float3 n2 = SafeNormalize(mul(nOS2, (float3x3)instanceData.WorldToObjectMatrix));");
+            sb.AppendLine("    #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        VividSlabVertexContext vctx0 = { posOS0, posWS0, nOS0, n0, DecodeVividMeshletUV(v0), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress };");
+            sb.AppendLine("        VividSlabVertexContext vctx1 = { posOS1, posWS1, nOS1, n1, DecodeVividMeshletUV(v1), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress };");
+            sb.AppendLine("        VividSlabVertexContext vctx2 = { posOS2, posWS2, nOS2, n2, DecodeVividMeshletUV(v2), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress };");
+            sb.AppendLine("        posWS0 += VividSlabEvaluateVertexOffset(vctx0);");
+            sb.AppendLine("        posWS1 += VividSlabEvaluateVertexOffset(vctx1);");
+            sb.AppendLine("        posWS2 += VividSlabEvaluateVertexOffset(vctx2);");
+            sb.AppendLine("    }");
+            sb.AppendLine("    #endif");
             sb.AppendLine("    float4 posCS = float4(float2(pixelCoord) + 0.5f, 0.0f, 1.0f);");
             sb.AppendLine("    float2 pixelNdc = posCS.xy * _ResolveOutputSize.zw * 2.0f - 1.0f;");
             sb.AppendLine("    #ifdef UNITY_UV_STARTS_AT_TOP");
@@ -514,9 +586,6 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine();
             sb.AppendLine("    float3 uInterp = InterpolateWithBarycentric(bary, DecodeVividMeshletUV(v0).x, DecodeVividMeshletUV(v1).x, DecodeVividMeshletUV(v2).x);");
             sb.AppendLine("    float3 vInterp = InterpolateWithBarycentric(bary, DecodeVividMeshletUV(v0).y, DecodeVividMeshletUV(v1).y, DecodeVividMeshletUV(v2).y);");
-            sb.AppendLine("    float3 n0 = SafeNormalize(mul(SafeNormalize(DecodeVividMeshletNormal(v0)), (float3x3)instanceData.WorldToObjectMatrix));");
-            sb.AppendLine("    float3 n1 = SafeNormalize(mul(SafeNormalize(DecodeVividMeshletNormal(v1)), (float3x3)instanceData.WorldToObjectMatrix));");
-            sb.AppendLine("    float3 n2 = SafeNormalize(mul(SafeNormalize(DecodeVividMeshletNormal(v2)), (float3x3)instanceData.WorldToObjectMatrix));");
             sb.AppendLine("    float3 geometryNormalWS = SafeNormalize(InterpolateWithBarycentricNoDerivatives(bary, n0, n1, n2));");
             sb.AppendLine("    float4 tangentOS = InterpolateWithBarycentricNoDerivatives(bary, DecodeVividMeshletTangent(v0), DecodeVividMeshletTangent(v1), DecodeVividMeshletTangent(v2));");
             sb.AppendLine("    float3 tangentWS = mul((float3x3)instanceData.ObjectToWorldMatrix, tangentOS.xyz);");
@@ -534,28 +603,72 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    evalCtx.parameterAddress = runtimeHeader.ParameterAddress;");
             sb.AppendLine("    evalCtx.resourceAddress = runtimeHeader.ResourceBindingAddress;");
             sb.AppendLine();
-            sb.AppendLine("    VividOpenPBRV2Inputs v2Inputs;");
-            sb.AppendLine("    float ambientOcclusion = 1.0f;");
-            sb.AppendLine("    VividSlabEvaluateGraphSurface(evalCtx, v2Inputs, ambientOcclusion);");
-            sb.AppendLine("    #if defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)");
-            sb.AppendLine("        VividSlabPostEvaluateSurface(evalCtx, v2Inputs, ambientOcclusion);");
-            sb.AppendLine("    #endif");
-            sb.AppendLine();
-            sb.AppendLine("    VividSurfaceSummaryData summary = VividBuildStandardLitSubstrateTopLayerSummary(v2Inputs, ambientOcclusion, true, true);");
-            sb.AppendLine("    VividSurfaceSummaryGBufferOutput packedSummary = VividPackSurfaceSummaryGBuffer(summary);");
-            sb.AppendLine("    _OutGBuffer0[pixelCoord] = packedSummary.rt0;");
-            sb.AppendLine("    _OutGBuffer1[pixelCoord] = packedSummary.rt1;");
-            sb.AppendLine("    _OutGBuffer2[pixelCoord] = packedSummary.rt2;");
-            sb.AppendLine("    _OutGBuffer3[pixelCoord] = packedSummary.rt3;");
-            sb.AppendLine("    _OutGBuffer4[pixelCoord] = packedSummary.rt4;");
-            sb.AppendLine();
-            sb.AppendLine("    if (_WriteSubstrateClosureBuffer != 0u)");
+            sb.AppendLine("    #if defined(VIVID_SLAB_MULTI_CLOSURE_OUTPUT)");
             sb.AppendLine("    {");
-            sb.AppendLine("        uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;");
-            sb.AppendLine("        if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))");
-            sb.AppendLine("            headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;");
-            sb.AppendLine("        VividWriteSubstrateOpenPBRV2Single(_OutSubstrateClosureBuffer, pixelCoord, v2Inputs, headerFlags);");
+            sb.AppendLine("        VividSlabMultiClosureOutput mcOutput;");
+            sb.AppendLine("        VividSlabEvaluateMultiClosureGraphSurface(evalCtx, mcOutput);");
+            sb.AppendLine("        #if defined(VIVID_SLAB_HAS_CUSTOM_POST_MULTI_CLOSURE)");
+            sb.AppendLine("            VividSlabPostEvaluateMultiClosure(evalCtx, mcOutput);");
+            sb.AppendLine("        #elif defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)");
+            sb.AppendLine("            VividSlabPostEvaluateSurface(evalCtx, mcOutput.closures[0], mcOutput.ambientOcclusion);");
+            sb.AppendLine("        #endif");
+            sb.AppendLine();
+            sb.AppendLine("        VividSurfaceSummaryData summary = VividBuildMultiClosureTopLayerSummary(mcOutput, true, true);");
+            sb.AppendLine("        VividSurfaceSummaryGBufferOutput packedSummary = VividPackSurfaceSummaryGBuffer(summary);");
+            sb.AppendLine("        _OutGBuffer0[pixelCoord] = packedSummary.rt0;");
+            sb.AppendLine("        _OutGBuffer1[pixelCoord] = packedSummary.rt1;");
+            sb.AppendLine("        _OutGBuffer2[pixelCoord] = packedSummary.rt2;");
+            sb.AppendLine("        _OutGBuffer3[pixelCoord] = packedSummary.rt3;");
+            sb.AppendLine("        _OutGBuffer4[pixelCoord] = packedSummary.rt4;");
+            sb.AppendLine();
+            sb.AppendLine("        if (_WriteSubstrateClosureBuffer != 0u)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;");
+            sb.AppendLine("            [unroll]");
+            sb.AppendLine("            for (uint ci = 0u; ci < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++ci)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                if (ci < mcOutput.closureCount");
+            sb.AppendLine("                    && any(mcOutput.closures[ci].core.emissionLuminance * mcOutput.closures[ci].core.emissionColor > 0.0f))");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;");
+            sb.AppendLine("                }");
+            sb.AppendLine("            }");
+            sb.AppendLine("            VividWriteSubstrateMultiClosure(");
+            sb.AppendLine("                _OutSubstrateClosureBuffer,");
+            sb.AppendLine("                pixelCoord,");
+            sb.AppendLine("                mcOutput.closureCount,");
+            sb.AppendLine("                mcOutput.closures,");
+            sb.AppendLine("                mcOutput.operators,");
+            sb.AppendLine("                headerFlags,");
+            sb.AppendLine("                VIVID_SUBSTRATE_MAX_SLICE_COUNT);");
+            sb.AppendLine("        }");
             sb.AppendLine("    }");
+            sb.AppendLine("    #else");
+            sb.AppendLine("    {");
+            sb.AppendLine("        VividOpenPBRV2Inputs v2Inputs;");
+            sb.AppendLine("        float ambientOcclusion = 1.0f;");
+            sb.AppendLine("        VividSlabEvaluateGraphSurface(evalCtx, v2Inputs, ambientOcclusion);");
+            sb.AppendLine("        #if defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)");
+            sb.AppendLine("            VividSlabPostEvaluateSurface(evalCtx, v2Inputs, ambientOcclusion);");
+            sb.AppendLine("        #endif");
+            sb.AppendLine();
+            sb.AppendLine("        VividSurfaceSummaryData summary = VividBuildStandardLitSubstrateTopLayerSummary(v2Inputs, ambientOcclusion, true, true);");
+            sb.AppendLine("        VividSurfaceSummaryGBufferOutput packedSummary = VividPackSurfaceSummaryGBuffer(summary);");
+            sb.AppendLine("        _OutGBuffer0[pixelCoord] = packedSummary.rt0;");
+            sb.AppendLine("        _OutGBuffer1[pixelCoord] = packedSummary.rt1;");
+            sb.AppendLine("        _OutGBuffer2[pixelCoord] = packedSummary.rt2;");
+            sb.AppendLine("        _OutGBuffer3[pixelCoord] = packedSummary.rt3;");
+            sb.AppendLine("        _OutGBuffer4[pixelCoord] = packedSummary.rt4;");
+            sb.AppendLine();
+            sb.AppendLine("        if (_WriteSubstrateClosureBuffer != 0u)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;");
+            sb.AppendLine("            if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))");
+            sb.AppendLine("                headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;");
+            sb.AppendLine("            VividWriteSubstrateOpenPBRV2Single(_OutSubstrateClosureBuffer, pixelCoord, v2Inputs, headerFlags);");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine("    #endif");
             sb.AppendLine("}");
             return sb.ToString();
         }

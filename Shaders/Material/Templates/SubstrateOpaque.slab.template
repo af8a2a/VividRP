@@ -1,9 +1,13 @@
-// VividRP Substrate Opaque Base Template (Phase S1)
+// VividRP Substrate Opaque Base Template (Phase S1 + S2)
 // Referenced by *.slab.shader via:
 //   // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template"
 //
-// Expands PreDepth, ShadowCaster, VividGBuffer (Substrate UAV u5 + TopLayer Summary),
-// and VividGBufferGPUDrivenDecal while injecting MaterialGraph and custom surface hooks.
+// Expands:
+//   1. VividPreDepth (with optional @vivid-vertex-begin WPO & @vivid-coverage-begin AlphaClip)
+//   2. ShadowCaster  (with optional WPO & AlphaClip)
+//   3. VividGBuffer  (Single-Closure Tier 1/2 OR Multi-Closure Tier 3 Substrate UAV u5 + TopLayer Summary)
+//   4. VividGBufferGPUDrivenDecal (Clustered GPUDriven Decal pass -> Substrate UAV u5 + TopLayer Summary)
+//   5. VividVisibilityRaster (GPUDriven Programmable VisibilityBuffer raster for custom WPO / AlphaClip)
 SubShader
 {
     Tags
@@ -30,29 +34,93 @@ SubShader
         #pragma vertex VertSlabDepth
         #pragma fragment FragSlabDepth
 
+        #define VIVID_SLAB_TARGET_RASTER 1
         #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+
+        CBUFFER_START(UnityPerMaterial)
+            VIVID_SLAB_GRAPH_CBUFFER
+            VIVID_SLAB_USER_CBUFFER
+        CBUFFER_END
+
+        VIVID_SLAB_GRAPH_TEXTURES
+        VIVID_SLAB_USER_TEXTURES
+
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
 
         struct Attributes
         {
             float3 positionOS : POSITION;
+            float3 normalOS : NORMAL;
+            float4 tangentOS : TANGENT;
+            float2 uv0 : TEXCOORD0;
             UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
         struct Varyings
         {
             float4 positionCS : SV_POSITION;
+            float3 positionWS : TEXCOORD0;
+            float3 normalWS : TEXCOORD1;
+            float4 tangentWS : TEXCOORD2;
+            float2 uv0 : TEXCOORD3;
         };
 
         Varyings VertSlabDepth(Attributes input)
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
-            o.positionCS = TransformObjectToHClip(input.positionOS);
+            float3 positionWS = TransformObjectToWorld(input.positionOS);
+            float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                VividSlabVertexContext vctx;
+                vctx.positionOS = input.positionOS;
+                vctx.positionWS = positionWS;
+                vctx.normalOS = input.normalOS;
+                vctx.normalWS = normalWS;
+                vctx.uv0 = input.uv0;
+                vctx.parameterAddress = 0u;
+                vctx.resourceAddress = 0u;
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+            }
+            #endif
+            o.positionWS = positionWS;
+            o.positionCS = TransformWorldToHClip(positionWS);
+            o.normalWS = normalWS;
+            o.tangentWS = float4(
+                TransformObjectToWorldDir(input.tangentOS.xyz),
+                input.tangentOS.w * GetOddNegativeScale());
+            o.uv0 = input.uv0;
             return o;
         }
 
         void FragSlabDepth(Varyings input)
         {
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                VividSlabEvalContext ctx;
+                ctx.uv0 = input.uv0;
+                ctx.uv0Ddx = ddx(input.uv0);
+                ctx.uv0Ddy = ddy(input.uv0);
+                ctx.geometryNormalWS = SafeNormalize(input.normalWS);
+                ctx.geometryTangentWS = float4(
+                    SafeNormalize(input.tangentWS.xyz),
+                    input.tangentWS.w);
+                ctx.positionWS = input.positionWS;
+                ctx.positionCS = input.positionCS;
+                ctx.parameterAddress = 0u;
+                ctx.resourceAddress = 0u;
+
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
+            #endif
         }
         ENDHLSL
     }
@@ -73,29 +141,93 @@ SubShader
         #pragma vertex VertSlabShadow
         #pragma fragment FragSlabShadow
 
+        #define VIVID_SLAB_TARGET_RASTER 1
         #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+
+        CBUFFER_START(UnityPerMaterial)
+            VIVID_SLAB_GRAPH_CBUFFER
+            VIVID_SLAB_USER_CBUFFER
+        CBUFFER_END
+
+        VIVID_SLAB_GRAPH_TEXTURES
+        VIVID_SLAB_USER_TEXTURES
+
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
 
         struct Attributes
         {
             float3 positionOS : POSITION;
+            float3 normalOS : NORMAL;
+            float4 tangentOS : TANGENT;
+            float2 uv0 : TEXCOORD0;
             UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
         struct Varyings
         {
             float4 positionCS : SV_POSITION;
+            float3 positionWS : TEXCOORD0;
+            float3 normalWS : TEXCOORD1;
+            float4 tangentWS : TEXCOORD2;
+            float2 uv0 : TEXCOORD3;
         };
 
         Varyings VertSlabShadow(Attributes input)
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
-            o.positionCS = TransformObjectToHClip(input.positionOS);
+            float3 positionWS = TransformObjectToWorld(input.positionOS);
+            float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                VividSlabVertexContext vctx;
+                vctx.positionOS = input.positionOS;
+                vctx.positionWS = positionWS;
+                vctx.normalOS = input.normalOS;
+                vctx.normalWS = normalWS;
+                vctx.uv0 = input.uv0;
+                vctx.parameterAddress = 0u;
+                vctx.resourceAddress = 0u;
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+            }
+            #endif
+            o.positionWS = positionWS;
+            o.positionCS = TransformWorldToHClip(positionWS);
+            o.normalWS = normalWS;
+            o.tangentWS = float4(
+                TransformObjectToWorldDir(input.tangentOS.xyz),
+                input.tangentOS.w * GetOddNegativeScale());
+            o.uv0 = input.uv0;
             return o;
         }
 
         void FragSlabShadow(Varyings input)
         {
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                VividSlabEvalContext ctx;
+                ctx.uv0 = input.uv0;
+                ctx.uv0Ddx = ddx(input.uv0);
+                ctx.uv0Ddy = ddy(input.uv0);
+                ctx.geometryNormalWS = SafeNormalize(input.normalWS);
+                ctx.geometryTangentWS = float4(
+                    SafeNormalize(input.tangentWS.xyz),
+                    input.tangentWS.w);
+                ctx.positionWS = input.positionWS;
+                ctx.positionCS = input.positionCS;
+                ctx.parameterAddress = 0u;
+                ctx.resourceAddress = 0u;
+
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
+            #endif
         }
         ENDHLSL
     }
@@ -135,6 +267,8 @@ SubShader
         uint _WriteSubstrateClosureBuffer;
         RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u5);
 
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
         VIVID_SLAB_GRAPH_EVALUATE
         VIVID_SLAB_USER_SURFACE_HOOK
 
@@ -160,9 +294,24 @@ SubShader
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
-            o.positionWS = TransformObjectToWorld(input.positionOS);
-            o.positionCS = TransformWorldToHClip(o.positionWS);
-            o.normalWS = TransformObjectToWorldNormal(input.normalOS);
+            float3 positionWS = TransformObjectToWorld(input.positionOS);
+            float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                VividSlabVertexContext vctx;
+                vctx.positionOS = input.positionOS;
+                vctx.positionWS = positionWS;
+                vctx.normalOS = input.normalOS;
+                vctx.normalWS = normalWS;
+                vctx.uv0 = input.uv0;
+                vctx.parameterAddress = 0u;
+                vctx.resourceAddress = 0u;
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+            }
+            #endif
+            o.positionWS = positionWS;
+            o.positionCS = TransformWorldToHClip(positionWS);
+            o.normalWS = normalWS;
             o.tangentWS = float4(
                 TransformObjectToWorldDir(input.tangentOS.xyz),
                 input.tangentOS.w * GetOddNegativeScale());
@@ -170,7 +319,7 @@ SubShader
             return o;
         }
 
-        [earlydepthstencil]
+        VIVID_SLAB_EARLY_DEPTH_ATTR
         VividSurfaceSummaryGBufferOutput FragSlabGBuffer(Varyings input)
         {
             VividSlabEvalContext ctx;
@@ -186,32 +335,473 @@ SubShader
             ctx.parameterAddress = 0u;
             ctx.resourceAddress = 0u;
 
-            VividOpenPBRV2Inputs v2Inputs;
-            float ambientOcclusion = 1.0f;
-            VividSlabEvaluateGraphSurface(ctx, v2Inputs, ambientOcclusion);
-            #if defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)
-                VividSlabPostEvaluateSurface(ctx, v2Inputs, ambientOcclusion);
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
             #endif
 
             uint2 pixelCoord = (uint2)input.positionCS.xy;
-            if (_WriteSubstrateClosureBuffer != 0u)
+
+            #if defined(VIVID_SLAB_MULTI_CLOSURE_OUTPUT)
             {
-                uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
-                if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))
-                    headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
-                VividWriteSubstrateOpenPBRV2Single(
-                    _OutSubstrateClosureBuffer,
-                    pixelCoord,
+                VividSlabMultiClosureOutput mcOutput;
+                VividSlabEvaluateMultiClosureGraphSurface(ctx, mcOutput);
+                #if defined(VIVID_SLAB_HAS_CUSTOM_POST_MULTI_CLOSURE)
+                    VividSlabPostEvaluateMultiClosure(ctx, mcOutput);
+                #elif defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)
+                    VividSlabPostEvaluateSurface(ctx, mcOutput.closures[0], mcOutput.ambientOcclusion);
+                #endif
+
+                if (_WriteSubstrateClosureBuffer != 0u)
+                {
+                    uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
+                    [unroll]
+                    for (uint ci = 0u; ci < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++ci)
+                    {
+                        if (ci < mcOutput.closureCount
+                            && any(mcOutput.closures[ci].core.emissionLuminance * mcOutput.closures[ci].core.emissionColor > 0.0f))
+                        {
+                            headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+                        }
+                    }
+                    VividWriteSubstrateMultiClosure(
+                        _OutSubstrateClosureBuffer,
+                        pixelCoord,
+                        mcOutput.closureCount,
+                        mcOutput.closures,
+                        mcOutput.operators,
+                        headerFlags,
+                        VIVID_SUBSTRATE_MAX_SLICE_COUNT);
+                }
+
+                VividSurfaceSummaryData summary = VividBuildMultiClosureTopLayerSummary(
+                    mcOutput,
+                    true,
+                    true);
+                return VividPackSurfaceSummaryGBuffer(summary);
+            }
+            #else
+            {
+                VividOpenPBRV2Inputs v2Inputs;
+                float ambientOcclusion = 1.0f;
+                VividSlabEvaluateGraphSurface(ctx, v2Inputs, ambientOcclusion);
+                #if defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)
+                    VividSlabPostEvaluateSurface(ctx, v2Inputs, ambientOcclusion);
+                #endif
+
+                if (_WriteSubstrateClosureBuffer != 0u)
+                {
+                    uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
+                    if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))
+                        headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+                    VividWriteSubstrateOpenPBRV2Single(
+                        _OutSubstrateClosureBuffer,
+                        pixelCoord,
+                        v2Inputs,
+                        headerFlags);
+                }
+
+                VividSurfaceSummaryData summary = VividBuildStandardLitSubstrateTopLayerSummary(
                     v2Inputs,
-                    headerFlags);
+                    ambientOcclusion,
+                    true,
+                    true);
+                return VividPackSurfaceSummaryGBuffer(summary);
+            }
+            #endif
+        }
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "VividGBufferGPUDrivenDecal"
+        Tags { "LightMode" = "VividGBufferGPUDrivenDecal" }
+
+        Blend One Zero
+        ZWrite Off
+        ZTest Equal
+        Cull Back
+
+        HLSLPROGRAM
+        #pragma target 5.0
+        #pragma require randomwrite
+        #pragma use_dxc
+        #pragma multi_compile_instancing
+        #pragma vertex VertSlabGBufferDecal
+        #pragma fragment FragSlabGBufferDecal
+
+        #define VIVID_SLAB_TARGET_RASTER 1
+        #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+        #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
+
+        CBUFFER_START(UnityPerMaterial)
+            VIVID_SLAB_GRAPH_CBUFFER
+            VIVID_SLAB_USER_CBUFFER
+        CBUFFER_END
+
+        VIVID_SLAB_GRAPH_TEXTURES
+        VIVID_SLAB_USER_TEXTURES
+
+        uint _WriteSubstrateClosureBuffer;
+        RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u5);
+
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
+        VIVID_SLAB_GRAPH_EVALUATE
+        VIVID_SLAB_USER_SURFACE_HOOK
+
+        struct Attributes
+        {
+            float3 positionOS : POSITION;
+            float3 normalOS : NORMAL;
+            float4 tangentOS : TANGENT;
+            float2 uv0 : TEXCOORD0;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
+        };
+
+        struct Varyings
+        {
+            float4 positionCS : SV_POSITION;
+            float3 positionWS : TEXCOORD0;
+            float3 normalWS : TEXCOORD1;
+            float4 tangentWS : TEXCOORD2;
+            float2 uv0 : TEXCOORD3;
+        };
+
+        Varyings VertSlabGBufferDecal(Attributes input)
+        {
+            Varyings o;
+            UNITY_SETUP_INSTANCE_ID(input);
+            float3 positionWS = TransformObjectToWorld(input.positionOS);
+            float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                VividSlabVertexContext vctx;
+                vctx.positionOS = input.positionOS;
+                vctx.positionWS = positionWS;
+                vctx.normalOS = input.normalOS;
+                vctx.normalWS = normalWS;
+                vctx.uv0 = input.uv0;
+                vctx.parameterAddress = 0u;
+                vctx.resourceAddress = 0u;
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+            }
+            #endif
+            o.positionWS = positionWS;
+            o.positionCS = TransformWorldToHClip(positionWS);
+            o.normalWS = normalWS;
+            o.tangentWS = float4(
+                TransformObjectToWorldDir(input.tangentOS.xyz),
+                input.tangentOS.w * GetOddNegativeScale());
+            o.uv0 = input.uv0;
+            return o;
+        }
+
+        VIVID_SLAB_EARLY_DEPTH_ATTR
+        VividSurfaceSummaryGBufferOutput FragSlabGBufferDecal(Varyings input)
+        {
+            VividSlabEvalContext ctx;
+            ctx.uv0 = input.uv0;
+            ctx.uv0Ddx = ddx(input.uv0);
+            ctx.uv0Ddy = ddy(input.uv0);
+            ctx.geometryNormalWS = SafeNormalize(input.normalWS);
+            ctx.geometryTangentWS = float4(
+                SafeNormalize(input.tangentWS.xyz),
+                input.tangentWS.w);
+            ctx.positionWS = input.positionWS;
+            ctx.positionCS = input.positionCS;
+            ctx.parameterAddress = 0u;
+            ctx.resourceAddress = 0u;
+
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
+            #endif
+
+            uint2 pixelCoord = (uint2)input.positionCS.xy;
+
+            #if defined(VIVID_SLAB_MULTI_CLOSURE_OUTPUT)
+            {
+                VividSlabMultiClosureOutput mcOutput;
+                VividSlabEvaluateMultiClosureGraphSurface(ctx, mcOutput);
+                #if defined(VIVID_SLAB_HAS_CUSTOM_POST_MULTI_CLOSURE)
+                    VividSlabPostEvaluateMultiClosure(ctx, mcOutput);
+                #elif defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)
+                    VividSlabPostEvaluateSurface(ctx, mcOutput.closures[0], mcOutput.ambientOcclusion);
+                #endif
+
+                [unroll]
+                for (uint di = 0u; di < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++di)
+                {
+                    if (di < mcOutput.closureCount)
+                    {
+                        ApplyVividGPUDrivenDecalsToOpenPBRV2Inputs(
+                            mcOutput.closures[di],
+                            true,
+                            input.positionWS,
+                            pixelCoord);
+                    }
+                }
+
+                if (_WriteSubstrateClosureBuffer != 0u)
+                {
+                    uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
+                    [unroll]
+                    for (uint ci = 0u; ci < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++ci)
+                    {
+                        if (ci < mcOutput.closureCount
+                            && any(mcOutput.closures[ci].core.emissionLuminance * mcOutput.closures[ci].core.emissionColor > 0.0f))
+                        {
+                            headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+                        }
+                    }
+                    VividWriteSubstrateMultiClosure(
+                        _OutSubstrateClosureBuffer,
+                        pixelCoord,
+                        mcOutput.closureCount,
+                        mcOutput.closures,
+                        mcOutput.operators,
+                        headerFlags,
+                        VIVID_SUBSTRATE_MAX_SLICE_COUNT);
+                }
+
+                VividSurfaceSummaryData summary = VividBuildMultiClosureTopLayerSummary(
+                    mcOutput,
+                    true,
+                    true);
+                return VividPackSurfaceSummaryGBuffer(summary);
+            }
+            #else
+            {
+                VividOpenPBRV2Inputs v2Inputs;
+                float ambientOcclusion = 1.0f;
+                VividSlabEvaluateGraphSurface(ctx, v2Inputs, ambientOcclusion);
+                #if defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE)
+                    VividSlabPostEvaluateSurface(ctx, v2Inputs, ambientOcclusion);
+                #endif
+
+                ApplyVividGPUDrivenDecalsToOpenPBRV2Inputs(
+                    v2Inputs,
+                    true,
+                    input.positionWS,
+                    pixelCoord);
+
+                if (_WriteSubstrateClosureBuffer != 0u)
+                {
+                    uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
+                    if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))
+                        headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+                    VividWriteSubstrateOpenPBRV2Single(
+                        _OutSubstrateClosureBuffer,
+                        pixelCoord,
+                        v2Inputs,
+                        headerFlags);
+                }
+
+                VividSurfaceSummaryData summary = VividBuildStandardLitSubstrateTopLayerSummary(
+                    v2Inputs,
+                    ambientOcclusion,
+                    true,
+                    true);
+                return VividPackSurfaceSummaryGBuffer(summary);
+            }
+            #endif
+        }
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "VividVisibilityRaster"
+        Tags { "LightMode" = "VividVisibilityRaster" }
+
+        ZWrite On
+        ZTest LEqual
+        Cull [_Cull]
+
+        HLSLPROGRAM
+        #pragma target 5.0
+        #pragma vertex VertSlabVis
+        #pragma fragment FragSlabVis
+        #pragma use_dxc
+        #pragma require barycentrics
+        #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+
+        #define VIVID_SLAB_TARGET_VISIBILITY_RASTER 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+        #if !defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+        #endif
+        #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
+
+        #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
+        #include "UnityIndirect.cginc"
+
+        uint _TargetSlabProgramID;
+        StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
+        StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
+        ByteAddressBuffer _SharedIndexBuffer;
+
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
+
+        struct Attributes
+        {
+            uint vertexID : SV_VertexID;
+            uint instanceID : SV_InstanceID;
+        };
+
+        struct Varyings
+        {
+            float4 positionCS : SV_POSITION;
+            nointerpolation uint2 visibilityValue : TEXCOORD0;
+            float2 uv0 : TEXCOORD1;
+            float3 geometricNormalWS : TEXCOORD2;
+            float3 positionWS : TEXCOORD3;
+            float4 geometricTangentWS : TEXCOORD4;
+            nointerpolation uint2 materialAddrs : TEXCOORD5;
+        };
+
+        uint VividSlabVisPullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
+        {
+            const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
+            const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
+            const uint shiftAmount = (absoluteIndexID % 4u) * 8u;
+            return (packedIndices >> shiftAmount) & 0xFFu;
+        }
+
+        Varyings VertSlabVis(Attributes input)
+        {
+            InitIndirectDrawArgs(0);
+
+            Varyings output;
+            output.positionCS = float4(-2.0f, -2.0f, 0.0f, 1.0f);
+            output.visibilityValue = 0u;
+            output.uv0 = 0.0f;
+            output.geometricNormalWS = float3(0.0f, 0.0f, 1.0f);
+            output.positionWS = 0.0f;
+            output.geometricTangentWS = float4(1.0f, 0.0f, 0.0f, 1.0f);
+            output.materialAddrs = 0u;
+
+            const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
+            const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
+            const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
+            const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+
+            VividMaterialRuntimeHeader runtimeHeader;
+            VividMaterialProgramData programData;
+            const uint programStatus = VividGetMaterialProgramStatus(
+                instanceData.MaterialIndex,
+                runtimeHeader,
+                programData);
+            if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN
+                || runtimeHeader.ProgramID != _TargetSlabProgramID)
+            {
+                return output;
             }
 
-            VividSurfaceSummaryData summary = VividBuildStandardLitSubstrateTopLayerSummary(
-                v2Inputs,
-                ambientOcclusion,
-                true,
-                true);
-            return VividPackSurfaceSummaryGBuffer(summary);
+            const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+            const uint indexCount = meshlet.TriangleCount * 3u;
+            if (vertexID >= indexCount)
+                return output;
+
+            const uint vertexIndex = VividSlabVisPullIndex(meshlet, vertexID);
+            const VividDecodedMeshletVertex vertex = DecodeVividMeshletVertex(
+                _SharedVertexBuffer[meshlet.VertexOffset + vertexIndex]);
+
+            float3 positionWS = TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz);
+            float3 normalWS = SafeNormalize(mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                VividSlabVertexContext vctx;
+                vctx.positionOS = vertex.Position.xyz;
+                vctx.positionWS = positionWS;
+                vctx.normalOS = vertex.Normal.xyz;
+                vctx.normalWS = normalWS;
+                vctx.uv0 = vertex.UV.xy;
+                vctx.parameterAddress = runtimeHeader.ParameterAddress;
+                vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+            }
+            #endif
+
+            float3 tangentWS = mul((float3x3)instanceData.ObjectToWorldMatrix, vertex.Tangent.xyz);
+            float tangentSign = (instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u
+                ? -vertex.Tangent.w
+                : vertex.Tangent.w;
+
+            output.positionCS = TransformWorldToHClip(positionWS);
+            output.positionWS = positionWS;
+            output.geometricNormalWS = normalWS;
+            output.geometricTangentWS = dot(tangentWS, tangentWS) > 1e-8f
+                ? float4(normalize(tangentWS), tangentSign)
+                : float4(1.0f, 0.0f, 0.0f, 1.0f);
+
+            VividVisibilityBufferValue visibilityBufferValue;
+            visibilityBufferValue.InstanceID = renderRequest.InstanceID_LOD;
+            visibilityBufferValue.MeshletID = renderRequest.MeshletID;
+            visibilityBufferValue.IndexID = vertexID;
+            output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
+            output.uv0 = vertex.UV.xy;
+            output.materialAddrs = uint2(runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress);
+            return output;
+        }
+
+        VividVisibilityBufferFragmentOutput FragSlabVis(
+            Varyings input,
+            linear float3 barycentrics : SV_Barycentrics)
+        {
+            const float2 uv0Ddx = ddx(input.uv0);
+            const float2 uv0Ddy = ddy(input.uv0);
+
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                VividSlabEvalContext ctx;
+                ctx.uv0 = input.uv0;
+                ctx.uv0Ddx = uv0Ddx;
+                ctx.uv0Ddy = uv0Ddy;
+                ctx.geometryNormalWS = SafeNormalize(input.geometricNormalWS);
+                ctx.geometryTangentWS = float4(
+                    SafeNormalize(input.geometricTangentWS.xyz),
+                    input.geometricTangentWS.w);
+                ctx.positionWS = input.positionWS;
+                ctx.positionCS = input.positionCS;
+                ctx.parameterAddress = input.materialAddrs.x;
+                ctx.resourceAddress = input.materialAddrs.y;
+
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
+            #endif
+
+            return PackVividVisibilityBufferFragmentOutput(
+                input.visibilityValue,
+                input.uv0,
+                uv0Ddx,
+                uv0Ddy,
+                input.geometricNormalWS,
+                barycentrics);
         }
         ENDHLSL
     }

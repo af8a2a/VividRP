@@ -143,6 +143,7 @@ float SampleVividDecalPerceptualRoughness(VividDecalClusterData decal, float2 uv
     return perceptualRoughness;
 }
 
+#if defined(VIVID_MATERIALFEATURE_DECAL_RECEIVE)
 void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
     inout VividGBufferSurfaceData surfaceData,
     float3 positionWS,
@@ -194,6 +195,7 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
                 decalOpacity));
     }
 }
+#endif
 
 #if defined(VIVIDRP_STANDARD_LIT_TO_OPENPBR_INCLUDED)
 void ApplyVividGPUDrivenDecalsToStandardLitParams(
@@ -246,6 +248,62 @@ void ApplyVividGPUDrivenDecalsToStandardLitParams(
         {
             params.normalWS = normalize(lerp(
                 params.normalWS,
+                SampleVividDecalNormalWS(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy),
+                decalOpacity));
+        }
+    }
+}
+#endif
+
+#if defined(VIVIDRP_SUBSTRATE_BUFFER_INCLUDED)
+void ApplyVividGPUDrivenDecalsToOpenPBRV2Inputs(
+    inout VividOpenPBRV2Inputs v2Inputs,
+    bool receiveDecals,
+    float3 positionWS,
+    uint2 pixelCoord)
+{
+    if (!receiveDecals)
+        return;
+
+    VividClusteredLightCell decalCell = VividClusteredLighting::LoadDecalCell(pixelCoord, positionWS);
+    float3 positionWSDdx = ddx(positionWS);
+    float3 positionWSDdy = ddy(positionWS);
+
+    UNITY_LOOP
+    for (uint localIndex = 0u; localIndex < decalCell.count; localIndex++)
+    {
+        uint decalIndex = VividClusteredLighting::LoadLightIndex(decalCell, localIndex);
+        VividDecalClusterData decal = _DecalData[decalIndex];
+
+        VividDecalSampleContext sampleContext;
+        if (!TryCreateVividDecalSampleContext(decal, positionWS, positionWSDdx, positionWSDdy, sampleContext))
+            continue;
+
+        float volumeFade = ComputeVividDecalVolumeFade(decal, sampleContext.positionDS);
+        VividDecalBaseColorSample baseColor = SampleVividDecalBaseColor(
+            decal,
+            sampleContext.uv,
+            sampleContext.uvDdx,
+            sampleContext.uvDdy);
+        float decalOpacity = volumeFade * baseColor.opacity;
+
+        UNITY_BRANCH
+        if (decalOpacity <= 0.0f)
+            continue;
+
+        float decalMetallic = SampleVividDecalMetallic(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
+        float decalPerceptualRoughness = SampleVividDecalPerceptualRoughness(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
+
+        v2Inputs.core.baseColor = lerp(v2Inputs.core.baseColor, baseColor.color, decalOpacity);
+        v2Inputs.core.baseMetalness = lerp(v2Inputs.core.baseMetalness, decalMetallic, decalOpacity);
+        v2Inputs.core.specularRoughness = lerp(v2Inputs.core.specularRoughness, decalPerceptualRoughness, decalOpacity);
+        v2Inputs.coatWeight *= saturate(1.0f - decalOpacity);
+
+        UNITY_BRANCH
+        if (decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
+        {
+            v2Inputs.core.normalWS = normalize(lerp(
+                v2Inputs.core.normalWS,
                 SampleVividDecalNormalWS(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy),
                 decalOpacity));
         }

@@ -114,6 +114,18 @@ namespace VividRP.Runtime.GPUDriven
         private bool m_HasCustomSurfaceHook;
 
         [SerializeField]
+        private bool m_IsMultiClosure;
+
+        [SerializeField]
+        private int m_ClosureCount = 1;
+
+        [SerializeField]
+        private bool m_HasCustomCoverage;
+
+        [SerializeField]
+        private bool m_HasVertexOffset;
+
+        [SerializeField]
         private uint m_SourceContentHash;
 
         [SerializeField]
@@ -157,6 +169,17 @@ namespace VividRP.Runtime.GPUDriven
 
         public bool HasCustomSurfaceHook => m_HasCustomSurfaceHook;
 
+        public bool IsMultiClosure => m_IsMultiClosure;
+
+        public int ClosureCount => Mathf.Max(1, m_ClosureCount);
+
+        public bool HasCustomCoverage => m_HasCustomCoverage;
+
+        public bool HasVertexOffset => m_HasVertexOffset;
+
+        public bool RequiresProgrammableVisibilityRaster =>
+            m_HasCustomCoverage || m_HasVertexOffset;
+
         public uint SourceContentHash => m_SourceContentHash;
 
         public bool HasImportErrors => m_HasImportErrors;
@@ -187,7 +210,11 @@ namespace VividRP.Runtime.GPUDriven
             bool hasCustomSurfaceHook,
             uint sourceContentHash,
             bool hasImportErrors,
-            string[] diagnostics)
+            string[] diagnostics,
+            bool isMultiClosure = false,
+            int closureCount = 1,
+            bool hasCustomCoverage = false,
+            bool hasVertexOffset = false)
         {
             m_RasterShader = rasterShader;
             m_ResolveComputeShader = resolveComputeShader;
@@ -205,6 +232,10 @@ namespace VividRP.Runtime.GPUDriven
             m_Resources = resources ?? Array.Empty<VividSlabResourceSlot>();
             m_HasLinkedGraphSurface = hasLinkedGraphSurface;
             m_HasCustomSurfaceHook = hasCustomSurfaceHook;
+            m_IsMultiClosure = isMultiClosure;
+            m_ClosureCount = Mathf.Clamp(closureCount, 1, VividSubstrateContract.MaxClosuresPerPixel);
+            m_HasCustomCoverage = hasCustomCoverage;
+            m_HasVertexOffset = hasVertexOffset;
             m_SourceContentHash = sourceContentHash;
             m_HasImportErrors = hasImportErrors;
             m_Diagnostics = diagnostics ?? Array.Empty<string>();

@@ -163,6 +163,7 @@ namespace VividRP.Runtime.GPUDriven
         AlphaClip = 1 << 1,
         Unlit = 1 << 2,
         OpenPBROpaqueExport = 1 << 3,
+        ProgrammableRaster = 1 << 4,
     }
 
     [GenerateHLSL]

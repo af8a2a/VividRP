@@ -87,6 +87,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
                 const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+                VividMaterialRuntimeHeader runtimeHeader;
+                VividMaterialProgramData programData;
+                if (VividGetMaterialProgramStatus(instanceData.MaterialIndex, runtimeHeader, programData) == VIVID_MATERIAL_PROGRAM_KNOWN
+                    && (programData.CapabilityFlags & VIVIDMATERIALPROGRAMCAPABILITIES_PROGRAMMABLE_RASTER) != 0u)
+                {
+                    return output;
+                }
                 const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
                 const uint indexCount = meshlet.TriangleCount * 3u;
 

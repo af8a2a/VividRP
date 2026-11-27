@@ -572,7 +572,9 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("ApplyVividGPUDrivenDecalsToOpenPBRV2Inputs(", assembled.RasterShaderSource);
             StringAssert.Contains("VividSlabEvaluateVertexOffset(", assembled.RasterShaderSource);
             StringAssert.Contains("VividSlabEvaluateCoverage(", assembled.RasterShaderSource);
-            StringAssert.DoesNotContain("[earlydepthstencil]", assembled.RasterShaderSource);
+            // VividGBuffer runs with ZWrite Off + ZTest Equal after VividPreDepth coverage clip and
+            // writes _OutSubstrateClosureBuffer UAV, so [earlydepthstencil] must stay enabled.
+            StringAssert.Contains("[earlydepthstencil]", assembled.RasterShaderSource);
             StringAssert.Contains("VividSlabEvaluateVertexOffset(", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
         }

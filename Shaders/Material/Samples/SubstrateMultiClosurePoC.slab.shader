@@ -22,7 +22,8 @@ Shader "VividRP/Material/Samples/SubstrateMultiClosurePoC"
 
     // @vivid-coverage-begin
     // Programmable Coverage/AlphaClip runs identically in PreDepth, ShadowCaster,
-    // Raster GBuffer, and GPUDriven VividVisibilityRaster (automatically omits [earlydepthstencil]).
+    // MotionVectors, and GPUDriven VividVisibilityRaster; VividGBuffer relies on
+    // PreDepth + ZTest Equal + [earlydepthstencil] so occluded UAV writes never leak.
     #define VIVID_SLAB_HAS_CUSTOM_COVERAGE 1
     void VividSlabEvaluateCoverage(
         const VividSlabEvalContext ctx,

@@ -296,7 +296,9 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(FragInputs input)
 {
     float2 uv = GetStandardLitBaseUV(input);
     float4 baseSample = SampleBase(uv, input.positionSS);
+#if !defined(VIVIDRP_SHADERPASS_GBUFFER)
     ApplyAlphaClip(baseSample.a);
+#endif
 
     float metallic;
     float smoothness;
@@ -350,7 +352,9 @@ void VividBuildStandardLitSubstrateSurface(
 {
     float2 uv = GetStandardLitBaseUV(input);
     float4 baseSample = SampleBase(uv, input.positionSS);
+#if !defined(VIVIDRP_SHADERPASS_GBUFFER)
     ApplyAlphaClip(baseSample.a);
+#endif
 
     float metallic;
     float smoothness;

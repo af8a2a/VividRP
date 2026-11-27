@@ -22,7 +22,10 @@ VividPackedVaryingsMesh Vert(VividAttributesMesh input)
 }
 
 #if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
-#if !defined(_ALPHATEST_ON)
+// VividGBuffer uses ZTest Equal against VividPreDepth (which already evaluated _ALPHATEST_ON clip).
+// Keep [earlydepthstencil] enabled in GBuffer passes so occluded alpha-tested geometry cannot
+// overwrite foreground pixels in the _OutSubstrateClosureBuffer UAV via Late-Z execution.
+#if defined(VIVIDRP_SHADERPASS_GBUFFER) || !defined(_ALPHATEST_ON)
 [earlydepthstencil]
 #endif
 VividSurfaceSummaryGBufferOutput FragGBuffer(VividPackedVaryingsMesh packedInput)

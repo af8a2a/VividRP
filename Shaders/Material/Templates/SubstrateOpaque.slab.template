@@ -379,14 +379,9 @@ SubShader
             ctx.resourceAddress = 0u;
             ctx.materialIndex = 0u;
 
-            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE) && !defined(VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z)
-            {
-                float alpha = 1.0f;
-                float cutoff = 0.5f;
-                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
-                clip(alpha - cutoff);
-            }
-            #endif
+            // VividPreDepth already evaluated custom coverage + clip() and populated the depth buffer.
+            // VividGBuffer runs with ZWrite Off + ZTest Equal + [earlydepthstencil], so occluded
+            // fragments are rejected by hardware Early-Z BEFORE any _OutSubstrateClosureBuffer UAV write.
 
             uint2 pixelCoord = (uint2)input.positionCS.xy;
 
@@ -580,14 +575,9 @@ SubShader
             ctx.resourceAddress = 0u;
             ctx.materialIndex = 0u;
 
-            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE) && !defined(VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z)
-            {
-                float alpha = 1.0f;
-                float cutoff = 0.5f;
-                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
-                clip(alpha - cutoff);
-            }
-            #endif
+            // VividPreDepth already evaluated custom coverage + clip() and populated the depth buffer.
+            // VividGBuffer runs with ZWrite Off + ZTest Equal + [earlydepthstencil], so occluded
+            // fragments are rejected by hardware Early-Z BEFORE any _OutSubstrateClosureBuffer UAV write.
 
             uint2 pixelCoord = (uint2)input.positionCS.xy;
 

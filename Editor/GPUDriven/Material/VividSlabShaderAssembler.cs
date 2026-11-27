@@ -398,13 +398,15 @@ namespace VividRP.Editor.GPUDriven
                 : useStandardLitComputeSurface
                     ? BuildStandardLitComputeEvaluateFunction()
                     : BuildDefaultComputeEvaluateFunction();
-            bool usePreDepthEarlyZInGBuffer = hasCustomCoverage
+            bool usePreDepthEarlyZInMotion = hasCustomCoverage
                 && userCoverageHook.IndexOf("VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z", StringComparison.Ordinal) >= 0;
-            string earlyDepthAttr = hasCustomCoverage && !usePreDepthEarlyZInGBuffer
-                ? "// [VividSlab] [earlydepthstencil] omitted when custom coverage clip is active."
-                : "[earlydepthstencil]";
-            string motionZWrite = usePreDepthEarlyZInGBuffer ? "Off" : "On";
-            string motionZTest = usePreDepthEarlyZInGBuffer ? "Equal" : "LEqual";
+            // VividGBuffer and VividGBufferGPUDrivenDecal always run with ZWrite Off + ZTest Equal
+            // against VividPreDepth (which already clipped discarded custom-coverage fragments) and
+            // write to the _OutSubstrateClosureBuffer UAV. [earlydepthstencil] must remain enabled so
+            // occluded background geometry cannot execute Late-Z UAV writes over foreground pixels.
+            const string earlyDepthAttr = "[earlydepthstencil]";
+            string motionZWrite = usePreDepthEarlyZInMotion ? "Off" : "On";
+            string motionZTest = usePreDepthEarlyZInMotion ? "Equal" : "LEqual";
 
             string rasterText = normalizedSource;
 

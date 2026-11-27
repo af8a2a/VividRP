@@ -50,6 +50,9 @@ Material:
     - _FuzzRoughness: 0.46
     - _FuzzWeight: 0.85
     - _GravityStrength: 0.45
+    - _HybridMaxParallax: 3
+    - _HybridRaymarch: 1
+    - _HybridSteps: 4
     - _LengthVariance: 0.45
     - _ReceiveDecals: 0
     - _ReceiveSSR: 0
@@ -57,6 +60,7 @@ Material:
     - _RootAO: 0.16
     - _RootRoughness: 0.5
     - _ShellHeight: 0
+    - _ShellStep: 0.0435
     - _SpecularWeight: 0.65
     - _StrandColorVariance: 0.16
     - _StrandNormalStrength: 0.24

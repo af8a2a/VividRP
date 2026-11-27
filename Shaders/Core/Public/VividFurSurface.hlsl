@@ -200,6 +200,160 @@ VividFurStrandSample VividEvaluateFurProceduralStrands(
     return result;
 }
 
+struct VividFurHybridHit
+{
+    bool hit;
+    float hitShellHeight;
+    VividFurStrandSample strand;
+};
+
+// Maps a world-space tangent displacement into UV space using the screen-space 2x2 Jacobian
+// of (positionWS, uv0), working cleanly across arbitrary mesh scales, UV tilings, and shell bends.
+float2 VividFurProjectWorldDeltaToUV(
+    float3 deltaTangentWS,
+    float3 dPosDx,
+    float3 dPosDy,
+    float2 dUvDx,
+    float2 dUvDy)
+{
+    // Normalize pixel footprint vectors to O(1) so det is completely scale-invariant
+    // (at ~1m camera distance |dPosDx|^2 ~ 1e-6, so unnormalized det ~ 1e-12!).
+    float lenSqMax = max(dot(dPosDx, dPosDx), dot(dPosDy, dPosDy));
+    if (lenSqMax <= 1e-12f)
+        return 0.0f.xx;
+
+    float invScale = rsqrt(lenSqMax);
+    float3 pX = dPosDx * invScale;
+    float3 pY = dPosDy * invScale;
+    float3 deltaScaled = deltaTangentWS * invScale;
+
+    float a = dot(pX, pX);
+    float b = dot(pX, pY);
+    float c = dot(pY, pY);
+    float det = a * c - b * b;
+    if (det <= 1e-6f)
+        return 0.0f.xx;
+
+    float ux = dot(deltaScaled, pX);
+    float uy = dot(deltaScaled, pY);
+    float invDet = rcp(det);
+    float sx = (c * ux - b * uy) * invDet;
+    float sy = (a * uy - b * ux) * invDet;
+    return sx * dUvDx + sy * dUvDy;
+}
+
+// Hybrid Shells: marches along the view ray through a sparse volumetric slab [hTop - shellStep, hTop]
+// using stratified spatio-temporal IGN jitter. Preserves shell-level Early-Z in GBuffer & MotionVectors
+// while multiplying effective vertical slicing resolution by stepCount (e.g. 6 shells x 4 steps = 24 slices).
+VividFurHybridHit VividEvaluateFurHybridSlab(
+    float3 positionWS,
+    float3 geomNormalWS,
+    float3 cameraPosWS,
+    float2 uv0,
+    float2 uv0Ddx,
+    float2 uv0Ddy,
+    float2 uvTiling,
+    float density,
+    float shellHeightTop,
+    float shellStep,
+    float furLength,
+    float3 gravityWS,
+    float gravityStrength,
+    float strandThickness,
+    float strandTaper,
+    float lengthVariance,
+    float clumpStrength,
+    float densityMask,
+    float alphaCutoff,
+    float ditherStrength,
+    float ign,
+    int stepCount,
+    float maxParallaxScale)
+{
+    VividFurHybridHit hitResult;
+    hitResult.hit = false;
+    hitResult.hitShellHeight = saturate(shellHeightTop);
+    hitResult.strand.alpha = 0.0f;
+    hitResult.strand.strandOffsetTS = 0.0f.xx;
+    hitResult.strand.strandVariation = 0.5f;
+    hitResult.strand.tipFactor = 1.0f;
+
+    float hTop = saturate(shellHeightTop);
+    if (hTop <= 1e-4f)
+    {
+        hitResult.hit = true;
+        hitResult.hitShellHeight = 0.0f;
+        hitResult.strand = VividEvaluateFurProceduralStrands(
+            uv0, uvTiling, density, 0.0f, strandThickness, strandTaper, lengthVariance, clumpStrength, densityMask);
+        return hitResult;
+    }
+
+    float slabDeltaH = min(hTop, max(shellStep, 1e-4f));
+    float slabThicknessWS = slabDeltaH * max(furLength, 1e-4f);
+
+    float3 nWS = SafeNormalize(geomNormalWS);
+    float3 rayDirWS = SafeNormalize(positionWS - cameraPosWS);
+    float cosTheta = max(dot(-nWS, rayDirWS), rcp(max(maxParallaxScale, 1.0f)));
+    float slabRayDist = slabThicknessWS / cosTheta;
+
+    float3 rayDeltaWS = rayDirWS * slabRayDist;
+    float3 tangentRayDeltaWS = rayDeltaWS - nWS * dot(rayDeltaWS, nWS);
+
+    // Unwind quadratic gravity bend across the slab so raymarched strands curve identically to dense shells.
+    float3 bendDeltaWS = gravityWS * (2.0f * hTop * slabDeltaH * max(furLength, 0.0f) * max(gravityStrength, 0.0f));
+    float3 tangentBendDeltaWS = bendDeltaWS - nWS * dot(bendDeltaWS, nWS);
+
+    float3 dPosDx = ddx(positionWS);
+    float3 dPosDy = ddy(positionWS);
+    float2 uvDeltaPerSlab = VividFurProjectWorldDeltaToUV(
+        tangentRayDeltaWS + tangentBendDeltaWS,
+        dPosDx,
+        dPosDy,
+        uv0Ddx,
+        uv0Ddy);
+
+    // Clamp extreme grazing UV jumps at silhouette discontinuities.
+    float maxUvJump = 0.35f;
+    float uvJumpLenSq = dot(uvDeltaPerSlab, uvDeltaPerSlab);
+    if (uvJumpLenSq > maxUvJump * maxUvJump)
+        uvDeltaPerSlab *= maxUvJump * rsqrt(uvJumpLenSq);
+
+    int steps = clamp(stepCount, 1, 8);
+    float invSteps = rcp((float)steps);
+    float ignAlpha = frac(ign + 0.6180339887f);
+    float ditherCutoff = lerp(0.04f, 0.96f, ignAlpha);
+    float threshold = lerp(saturate(alphaCutoff), ditherCutoff, saturate(ditherStrength));
+
+    [loop]
+    for (int k = 0; k < steps; ++k)
+    {
+        float s = ((float)k + ign) * invSteps;
+        float hSample = max(hTop - slabDeltaH * s, 0.0f);
+        float2 uvSample = uv0 + uvDeltaPerSlab * s;
+
+        VividFurStrandSample sampleVal = VividEvaluateFurProceduralStrands(
+            uvSample,
+            uvTiling,
+            density,
+            hSample,
+            strandThickness,
+            strandTaper,
+            lengthVariance,
+            clumpStrength,
+            densityMask);
+
+        if (sampleVal.alpha >= threshold)
+        {
+            hitResult.hit = true;
+            hitResult.hitShellHeight = hSample;
+            hitResult.strand = sampleVal;
+            return hitResult;
+        }
+    }
+
+    return hitResult;
+}
+
 // Converts Fur shell parameters into OpenPBR V2 single-closure Substrate inputs
 // (EON diffuse + Keratin anisotropic specular + OpenPBR Disney LTC Fuzz rim).
 VividOpenPBRV2Inputs VividFurParamsToOpenPBRV2Inputs(VividFurSurfaceParams p, out float outAO)

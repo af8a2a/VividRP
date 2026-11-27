@@ -41,6 +41,9 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurStrands)] _AlphaCutoff("Base Alpha Cutoff", Range(0.01, 0.95)) = 0.35
         [Sub(FurStrands)] _DitherStrength("Tip Dither Blend (TAA)", Range(0.0, 1.0)) = 0.60
         [SubToggle(FurStrands, _)] _TemporalDither("Temporal IGN Jitter (TAA)", Float) = 1.0
+        [SubToggle(FurStrands, _)] _HybridRaymarch("Hybrid Slab Raymarch (4-8 Shells)", Float) = 0.0
+        [Sub(FurStrands)] _HybridSteps("Hybrid Raymarch Steps", Range(1.0, 8.0)) = 4.0
+        [Sub(FurStrands)] _HybridMaxParallax("Hybrid Max Grazing Parallax", Range(1.0, 5.0)) = 3.0
 
         [Main(FurShading, _, on, off)] _FurShading("Root-to-Tip & Substrate Shading", Float) = 1
         [Tex(FurShading)] _BaseMap("Base Albedo Map", 2D) = "white" {}
@@ -63,6 +66,7 @@ Shader "VividRP/Material/FurSlab"
 
         // Per-instance shell height h in [0, 1]; defaults to 0 (skin layer) when rendered non-instanced.
         [HideInInspector] _ShellHeight("Shell Height", Range(0.0, 1.0)) = 0.0
+        [HideInInspector] _ShellStep("Shell Height Step", Range(0.001, 1.0)) = 0.0435
     }
 
     // @vivid-cbuffer-begin
@@ -86,6 +90,9 @@ Shader "VividRP/Material/FurSlab"
     float _AlphaCutoff;
     float _DitherStrength;
     float _TemporalDither;
+    float _HybridRaymarch;
+    float _HybridSteps;
+    float _HybridMaxParallax;
     float4 _BaseMap_ST;
     float4 _RootColor;
     float4 _TipColor;
@@ -105,6 +112,7 @@ Shader "VividRP/Material/FurSlab"
     // @vivid-cbuffer-end
 
     // @vivid-instancing-begin
+    float _ShellStep;
     UNITY_INSTANCING_BUFFER_START(VividFurInstancedProps)
         UNITY_DEFINE_INSTANCED_PROP(float, _ShellHeight)
     UNITY_INSTANCING_BUFFER_END(VividFurInstancedProps)
@@ -187,6 +195,43 @@ Shader "VividRP/Material/FurSlab"
 
             float2 baseUv = ctx.uv0 * _BaseMap_ST.xy + _BaseMap_ST.zw;
             float densityMask = SAMPLE_TEXTURE2D(_FurMaskMap, sampler_FurMaskMap, baseUv).r;
+            float ign = VividFurInterleavedGradientNoise(
+                ctx.positionCS.xy,
+                _JitterParams.xy,
+                _TemporalDither > 0.5f);
+
+            if (_HybridRaymarch > 0.5f)
+            {
+                VividFurHybridHit hybridHit = VividEvaluateFurHybridSlab(
+                    ctx.positionWS,
+                    ctx.geometryNormalWS,
+                    _WorldSpaceCameraPos,
+                    ctx.uv0,
+                    ctx.uv0Ddx,
+                    ctx.uv0Ddy,
+                    _StrandTiling.xy,
+                    _FurDensity,
+                    h,
+                    _ShellStep,
+                    _FurLength,
+                    _GravityWS.xyz,
+                    _GravityStrength,
+                    _StrandThickness,
+                    _StrandTaper,
+                    _LengthVariance,
+                    _ClumpStrength,
+                    densityMask,
+                    _AlphaCutoff,
+                    _DitherStrength,
+                    ign,
+                    (int)round(_HybridSteps),
+                    _HybridMaxParallax);
+
+                alpha = hybridHit.hit ? 1.0f : 0.0f;
+                cutoff = 0.5f;
+                return;
+            }
+
             VividFurStrandSample strand = VividEvaluateFurProceduralStrands(
                 ctx.uv0,
                 _StrandTiling.xy,
@@ -199,10 +244,6 @@ Shader "VividRP/Material/FurSlab"
                 densityMask);
 
             alpha = strand.alpha;
-            float ign = VividFurInterleavedGradientNoise(
-                ctx.positionCS.xy,
-                _JitterParams.xy,
-                _TemporalDither > 0.5f);
             // Blend base alpha threshold with spatio-temporal IGN dither for soft TAA-reconstructed tips.
             float ditherCutoff = lerp(0.04f, 0.96f, ign);
             cutoff = lerp(saturate(_AlphaCutoff), ditherCutoff, saturate(_DitherStrength));
@@ -232,18 +273,73 @@ Shader "VividRP/Material/FurSlab"
             float3 baseTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUv).rgb;
             float4 maskSample = SAMPLE_TEXTURE2D(_FurMaskMap, sampler_FurMaskMap, baseUv);
 
-            VividFurStrandSample strand = VividEvaluateFurProceduralStrands(
-                ctx.uv0,
-                _StrandTiling.xy,
-                _FurDensity,
-                h,
-                _StrandThickness,
-                _StrandTaper,
-                _LengthVariance,
-                _ClumpStrength,
-                maskSample.r);
+            VividFurStrandSample strand;
+            float effectiveShellHeight = h;
+            if (_HybridRaymarch > 0.5f && h > 1e-4f)
+            {
+                float ign = VividFurInterleavedGradientNoise(
+                    ctx.positionCS.xy,
+                    _JitterParams.xy,
+                    _TemporalDither > 0.5f);
+                VividFurHybridHit hybridHit = VividEvaluateFurHybridSlab(
+                    ctx.positionWS,
+                    ctx.geometryNormalWS,
+                    _WorldSpaceCameraPos,
+                    ctx.uv0,
+                    ctx.uv0Ddx,
+                    ctx.uv0Ddy,
+                    _StrandTiling.xy,
+                    _FurDensity,
+                    h,
+                    _ShellStep,
+                    _FurLength,
+                    _GravityWS.xyz,
+                    _GravityStrength,
+                    _StrandThickness,
+                    _StrandTaper,
+                    _LengthVariance,
+                    _ClumpStrength,
+                    maskSample.r,
+                    _AlphaCutoff,
+                    _DitherStrength,
+                    ign,
+                    (int)round(_HybridSteps),
+                    _HybridMaxParallax);
 
-            fp.shellHeight = h;
+                if (hybridHit.hit)
+                {
+                    strand = hybridHit.strand;
+                    effectiveShellHeight = hybridHit.hitShellHeight;
+                }
+                else
+                {
+                    strand = VividEvaluateFurProceduralStrands(
+                        ctx.uv0,
+                        _StrandTiling.xy,
+                        _FurDensity,
+                        h,
+                        _StrandThickness,
+                        _StrandTaper,
+                        _LengthVariance,
+                        _ClumpStrength,
+                        maskSample.r);
+                }
+            }
+            else
+            {
+                strand = VividEvaluateFurProceduralStrands(
+                    ctx.uv0,
+                    _StrandTiling.xy,
+                    _FurDensity,
+                    h,
+                    _StrandThickness,
+                    _StrandTaper,
+                    _LengthVariance,
+                    _ClumpStrength,
+                    maskSample.r);
+            }
+
+            fp.shellHeight = effectiveShellHeight;
             fp.rootColor = saturate(_RootColor.rgb * baseTex);
             fp.tipColor = saturate(_TipColor.rgb * baseTex);
             fp.colorGradientPower = _ColorGradientPower;

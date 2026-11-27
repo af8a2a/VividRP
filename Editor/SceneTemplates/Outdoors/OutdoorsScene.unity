@@ -2212,7 +2212,7 @@ MonoBehaviour:
   m_SubMeshIndex: 0
   m_Material: {fileID: 2100000, guid: b47e99f48c4622e4a91fd28d8ee4632e, type: 2}
   m_DisableSiblingMeshRenderer: 1
-  m_ShellCount: 24
+  m_ShellCount: 8
   m_HeightDistributionPower: 1
   m_OutsideInOrder: 1
   m_EnableDistanceLod: 1

@@ -23,6 +23,7 @@ namespace VividRP.Runtime
         private const float k_MaxWindGustAmplitude = 1.45f; // sin(x) + 0.45 * sin(...) in VividFurSurface.hlsl
 
         private static readonly int s_ShellHeightId = Shader.PropertyToID("_ShellHeight");
+        private static readonly int s_ShellStepId = Shader.PropertyToID("_ShellStep");
         private static readonly int s_FurLengthId = Shader.PropertyToID("_FurLength");
         private static readonly int s_GravityWSId = Shader.PropertyToID("_GravityWS");
         private static readonly int s_GravityStrengthId = Shader.PropertyToID("_GravityStrength");
@@ -587,6 +588,7 @@ namespace VividRP.Runtime
 
             FillShellHeights(m_VisualShellHeights, shellCount, heightPower, outsideInOrder, 1.0f);
             m_VisualPropertyBlock.SetFloatArray(s_ShellHeightId, m_VisualShellHeights);
+            m_VisualPropertyBlock.SetFloat(s_ShellStepId, shellCount > 1 ? 1.0f / (shellCount - 1) : 1.0f);
             m_UploadedVisualShellCount = shellCount;
             m_UploadedVisualHeightPower = heightPower;
             m_UploadedVisualOutsideIn = outsideInOrder;
@@ -604,6 +606,7 @@ namespace VividRP.Runtime
 
             FillShellHeights(m_ShadowShellHeights, shellCount, heightPower, outsideInOrder, maxHeight);
             m_ShadowPropertyBlock.SetFloatArray(s_ShellHeightId, m_ShadowShellHeights);
+            m_ShadowPropertyBlock.SetFloat(s_ShellStepId, shellCount > 1 ? maxHeight / (shellCount - 1) : maxHeight);
             m_UploadedShadowShellCount = shellCount;
             m_UploadedShadowMaxHeight = maxHeight;
             m_UploadedShadowHeightPower = heightPower;

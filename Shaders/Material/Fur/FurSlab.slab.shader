@@ -39,7 +39,7 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurStrands)] _LengthVariance("Strand Length Variance", Range(0.0, 0.85)) = 0.45
         [Sub(FurStrands)] _ClumpStrength("Clump Strength", Range(0.0, 1.0)) = 0.35
         [Sub(FurStrands)] _AlphaCutoff("Base Alpha Cutoff", Range(0.01, 0.95)) = 0.35
-        [Sub(FurStrands)] _DitherStrength("Tip Dither Blend (TAA)", Range(0.0, 1.0)) = 0.85
+        [Sub(FurStrands)] _DitherStrength("Tip Dither Blend (TAA)", Range(0.0, 1.0)) = 0.60
         [SubToggle(FurStrands, _)] _TemporalDither("Temporal IGN Jitter (TAA)", Float) = 1.0
 
         [Main(FurShading, _, on, off)] _FurShading("Root-to-Tip & Substrate Shading", Float) = 1
@@ -166,9 +166,9 @@ Shader "VividRP/Material/FurSlab"
 
     // @vivid-coverage-begin
     #define VIVID_SLAB_HAS_CUSTOM_COVERAGE 1
-    // PreDepth, ShadowCaster, MotionVectors, and VisibilityRaster run clip(alpha - cutoff),
-    // while VividGBuffer relies on hardware [earlydepthstencil] + ZTest Equal against PreDepth
-    // to prevent overlapping shells from racing on the Substrate UAV and to cut inner-shell overdraw.
+    // PreDepth, ShadowCaster, and VisibilityRaster run clip(alpha - cutoff),
+    // while VividGBuffer and MotionVectors rely on hardware [earlydepthstencil] + ZTest Equal
+    // against PreDepth to eliminate overlapping-shell UAV races and cut inner-shell overdraw.
     #define VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z 1
 
     void VividSlabEvaluateCoverage(
@@ -215,6 +215,7 @@ Shader "VividRP/Material/FurSlab"
 
     // @vivid-surface-begin
     #define VIVID_SLAB_HAS_CUSTOM_POST_SURFACE 1
+    #define VIVID_SLAB_THIN_WALLED_TRANSMISSION 1
     void VividSlabPostEvaluateSurface(
         const VividSlabEvalContext ctx,
         inout VividOpenPBRV2Inputs v2,

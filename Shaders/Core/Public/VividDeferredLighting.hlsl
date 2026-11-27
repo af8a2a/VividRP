@@ -327,6 +327,38 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     return true;
 }
 
+// Thin-walled backlit transmission & terminator wrap approximation for fur/fuzz slabs
+// using the frozen Substrate header flag VIVID_SUBSTRATE_FLAG_THIN_WALLED (no ABI expansion).
+float3 EvaluateVividThinWalledTransmission(
+    VividOpenPBRV2Inputs v2Inputs,
+    float3 baseNormal,
+    float3 viewDirectionWS,
+    float3 lightDir,
+    float3 lightColor,
+    float shadow,
+    float ambientOcclusion)
+{
+    float ao = saturate(ambientOcclusion);
+    float tipTransmittance = saturate(v2Inputs.fuzzWeight) * ao * ao;
+    if (tipTransmittance <= 1e-4f)
+        return 0.0f.xxx;
+
+    float3 transColor = saturate(lerp(v2Inputs.core.baseColor, v2Inputs.fuzzColor, 0.45f));
+    float3 backHalf = SafeNormalize(lightDir + baseNormal * 0.35f);
+    float vDotBackL = saturate(dot(viewDirectionWS, -backHalf));
+    float ttLobe = pow(vDotBackL, 3.0f) * 0.85f + pow(vDotBackL, 12.0f) * 0.75f;
+
+    float NdotL = dot(baseNormal, lightDir);
+    float wrapNdotL = saturate((NdotL + 0.55f) / 1.55f);
+    float backWrap = max(wrapNdotL - max(NdotL, 0.0f), 0.0f);
+
+    // Unshadowed outer fur tips get full backlit transmission; self-shadowed coat tips retain
+    // subtle warm multiple-scattering penetration modulated by ao^2 so dense roots stay dark.
+    float shadowTransmission = lerp(0.16f, 1.0f, saturate(shadow));
+    float3 transRadiance = max(lightColor, 0.0f) * shadowTransmission * INV_PI;
+    return transRadiance * transColor * tipTransmittance * (backWrap * 0.65f + ttLobe * 0.55f);
+}
+
 bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
     uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result,
     out float3 diffuseBounce)
@@ -345,6 +377,9 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
     if (!VividTryResolveOpenPBRV2Inputs(v2Inputs, resolved))
         return false;
 
+    bool thinWalledTransmissive = (header.flags & VIVID_SUBSTRATE_FLAG_THIN_WALLED) != 0u;
+    float surfaceAO = saturate(summary.ambientOcclusion);
+
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
     float3 baseNormal = resolved.geometry_basis.n;
     float3 coatNormal = resolved.geometry_coat_basis.n;
@@ -362,7 +397,7 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
     #endif
     result = VividEvaluateOpenPBRV2Indirect(
         v2Inputs, resolved, comp, lightLoop,
-        positionWS, viewDirectionWS, saturate(summary.ambientOcclusion),
+        positionWS, viewDirectionWS, surfaceAO,
         LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo), realtimeOpenPbrDiffuse,
         LoadVividRealtimeRoughSpecular(pixelCoord), VividHasRealtimeRoughSpecular(),
         LoadVividRealtimeLumenReflections(pixelCoord), VividHasRealtimeLumenReflections());
@@ -380,6 +415,11 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
             VividAccumulateOpenPBROpaqueLight(
                 openpbr_scale_diffuse_specular(openpbr_eval(prepared, lightDir), radiance), result);
         }
+        if (thinWalledTransmissive)
+        {
+            result.diffuseLighting += EvaluateVividThinWalledTransmission(
+                v2Inputs, baseNormal, viewDirectionWS, lightDir, light.color, shadow, surfaceAO);
+        }
     }
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
     [loop]
@@ -393,13 +433,20 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
             continue;
         float attenuation = VividPunctualLightAttenuationWithDistanceModification(
             light, positionWS - light.positionWS, distances);
-        if (attenuation > 0.0f
-            && (dot(baseNormal, direction) > 0.0f || (resolved.coat_weight > 0.0f && dot(coatNormal, direction) > 0.0f)))
+        if (attenuation > 0.0f)
         {
-            float3 radiance = max(light.color, 0.0f) * attenuation;
-            diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(v2Inputs.core, direction, radiance);
-            VividAccumulateOpenPBROpaqueLight(
-                openpbr_scale_diffuse_specular(openpbr_eval(prepared, direction), radiance), result);
+            if (dot(baseNormal, direction) > 0.0f || (resolved.coat_weight > 0.0f && dot(coatNormal, direction) > 0.0f))
+            {
+                float3 radiance = max(light.color, 0.0f) * attenuation;
+                diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(v2Inputs.core, direction, radiance);
+                VividAccumulateOpenPBROpaqueLight(
+                    openpbr_scale_diffuse_specular(openpbr_eval(prepared, direction), radiance), result);
+            }
+            if (thinWalledTransmissive)
+            {
+                result.diffuseLighting += EvaluateVividThinWalledTransmission(
+                    v2Inputs, baseNormal, viewDirectionWS, direction, light.color * attenuation, 1.0f, surfaceAO);
+            }
         }
     }
     uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);

@@ -41,7 +41,7 @@ Material:
     - _ColorGradientPower: 1.1
     - _CombStrength: 0.85
     - _Cull: 2
-    - _DitherStrength: 0.85
+    - _DitherStrength: 0.6
     - _FurDensity: 128
     - _FurGeometry: 1
     - _FurLength: 0.055

@@ -78,6 +78,8 @@ namespace VividRP.Editor.GPUDriven
         internal const string UserVertexHookToken = "VIVID_SLAB_USER_VERTEX_HOOK";
         internal const string UserCoverageHookToken = "VIVID_SLAB_USER_COVERAGE_HOOK";
         internal const string EarlyDepthAttrToken = "VIVID_SLAB_EARLY_DEPTH_ATTR";
+        internal const string MotionZWriteToken = "VIVID_SLAB_MOTION_ZWRITE";
+        internal const string MotionZTestToken = "VIVID_SLAB_MOTION_ZTEST";
         internal const string UseBaseSubShaderToken = "VIVID_SLAB_USE_BASE_SUBSHADER";
 
         private static readonly Regex s_BaseDirectiveRegex = new(
@@ -271,6 +273,8 @@ namespace VividRP.Editor.GPUDriven
             string earlyDepthAttr = hasCustomCoverage && !usePreDepthEarlyZInGBuffer
                 ? "// [VividSlab] [earlydepthstencil] omitted when custom coverage clip is active."
                 : "[earlydepthstencil]";
+            string motionZWrite = usePreDepthEarlyZInGBuffer ? "Off" : "On";
+            string motionZTest = usePreDepthEarlyZInGBuffer ? "Equal" : "LEqual";
 
             string rasterText = normalizedSource;
 
@@ -309,6 +313,8 @@ namespace VividRP.Editor.GPUDriven
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserVertexHookToken, userVertexHook, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserCoverageHookToken, userCoverageHook, normalizedSourcePath);
             rasterText = rasterText.Replace(EarlyDepthAttrToken, earlyDepthAttr);
+            rasterText = rasterText.Replace(MotionZWriteToken, motionZWrite);
+            rasterText = rasterText.Replace(MotionZTestToken, motionZTest);
 
             bool isMultiClosure = graphPayload != null && graphPayload.IsMultiClosure;
             int closureCount = graphPayload != null ? graphPayload.ClosureCount : 1;

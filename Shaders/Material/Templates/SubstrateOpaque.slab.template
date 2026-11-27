@@ -439,6 +439,9 @@ SubShader
                     uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
                     if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))
                         headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+                    #if defined(VIVID_SLAB_THIN_WALLED_TRANSMISSION)
+                        headerFlags |= VIVID_SUBSTRATE_FLAG_THIN_WALLED;
+                    #endif
                     VividWriteSubstrateOpenPBRV2Single(
                         _OutSubstrateClosureBuffer,
                         pixelCoord,
@@ -655,6 +658,9 @@ SubShader
                     uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;
                     if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))
                         headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;
+                    #if defined(VIVID_SLAB_THIN_WALLED_TRANSMISSION)
+                        headerFlags |= VIVID_SUBSTRATE_FLAG_THIN_WALLED;
+                    #endif
                     VividWriteSubstrateOpenPBRV2Single(
                         _OutSubstrateClosureBuffer,
                         pixelCoord,
@@ -680,8 +686,8 @@ SubShader
         Tags { "LightMode" = "MotionVectors" }
 
         ColorMask RGBA
-        ZWrite On
-        ZTest LEqual
+        ZWrite VIVID_SLAB_MOTION_ZWRITE
+        ZTest VIVID_SLAB_MOTION_ZTEST
         Cull [_Cull]
         Stencil
         {
@@ -798,10 +804,11 @@ SubShader
             return o;
         }
 
+        VIVID_SLAB_EARLY_DEPTH_ATTR
         float4 FragSlabMotion(Varyings input) : SV_Target
         {
             UNITY_SETUP_INSTANCE_ID(input);
-            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE) && !defined(VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z)
             {
                 VividSlabEvalContext ctx;
                 ctx.uv0 = input.uv0;

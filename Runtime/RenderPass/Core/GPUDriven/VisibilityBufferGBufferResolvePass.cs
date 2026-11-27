@@ -924,7 +924,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer3Id, m_GBuffer3.innerHandle);
-            cmd.SetComputeTextureParam(slabCs, slabKernel, OutGBuffer4Id, m_GBuffer4.innerHandle);
             cmd.SetComputeTextureParam(slabCs, slabKernel, OutSubstrateClosureBufferId, substrateOutputId);
             cmd.DispatchCompute(
                 slabCs,

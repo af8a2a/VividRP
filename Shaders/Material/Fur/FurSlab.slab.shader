@@ -269,105 +269,117 @@ Shader "VividRP/Material/FurSlab"
 
         #if defined(VIVID_SLAB_TARGET_RASTER)
             float h = saturate(UNITY_ACCESS_INSTANCED_PROP(VividFurInstancedProps, _ShellHeight));
-            float2 baseUv = ctx.uv0 * _BaseMap_ST.xy + _BaseMap_ST.zw;
-            float3 baseTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUv).rgb;
-            float4 maskSample = SAMPLE_TEXTURE2D(_FurMaskMap, sampler_FurMaskMap, baseUv);
+            float shellStep = _ShellStep;
+        #else
+            // GPUDriven single-shell skin fallback until Stage 2.5 MeshShader shell amplification supplies per-shell height.
+            float h = 0.0f;
+            float shellStep = 1.0f;
+        #endif
 
-            VividFurStrandSample strand;
-            float effectiveShellHeight = h;
-            if (_HybridRaymarch > 0.5f && h > 1e-4f)
+        float4 baseMapST = VIVID_SLAB_PARAM(ctx, _BaseMap_ST);
+        float2 baseUv = ctx.uv0 * baseMapST.xy + baseMapST.zw;
+        float3 baseTex = VIVID_SLAB_SAMPLE_TEX2D(ctx, _BaseMap, baseUv).rgb;
+        float4 maskSample = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurMaskMap, baseUv);
+
+        float2 strandTiling = VIVID_SLAB_PARAM(ctx, _StrandTiling).xy;
+        float furDensity = VIVID_SLAB_PARAM(ctx, _FurDensity);
+        float strandThickness = VIVID_SLAB_PARAM(ctx, _StrandThickness);
+        float strandTaper = VIVID_SLAB_PARAM(ctx, _StrandTaper);
+        float lengthVariance = VIVID_SLAB_PARAM(ctx, _LengthVariance);
+        float clumpStrength = VIVID_SLAB_PARAM(ctx, _ClumpStrength);
+        float3 gravityWS = VIVID_SLAB_PARAM(ctx, _GravityWS).xyz;
+        float gravityStrength = VIVID_SLAB_PARAM(ctx, _GravityStrength);
+
+        VividFurStrandSample strand;
+        float effectiveShellHeight = h;
+        #if defined(VIVID_SLAB_TARGET_RASTER)
+        if (VIVID_SLAB_PARAM(ctx, _HybridRaymarch) > 0.5f && h > 1e-4f)
+        {
+            float ign = VividFurInterleavedGradientNoise(
+                ctx.positionCS.xy,
+                _JitterParams.xy,
+                VIVID_SLAB_PARAM(ctx, _TemporalDither) > 0.5f);
+            VividFurHybridHit hybridHit = VividEvaluateFurHybridSlab(
+                ctx.positionWS,
+                ctx.geometryNormalWS,
+                _WorldSpaceCameraPos,
+                ctx.uv0,
+                ctx.uv0Ddx,
+                ctx.uv0Ddy,
+                strandTiling,
+                furDensity,
+                h,
+                shellStep,
+                VIVID_SLAB_PARAM(ctx, _FurLength),
+                gravityWS,
+                gravityStrength,
+                strandThickness,
+                strandTaper,
+                lengthVariance,
+                clumpStrength,
+                maskSample.r,
+                VIVID_SLAB_PARAM(ctx, _AlphaCutoff),
+                VIVID_SLAB_PARAM(ctx, _DitherStrength),
+                ign,
+                (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
+                VIVID_SLAB_PARAM(ctx, _HybridMaxParallax));
+
+            if (hybridHit.hit)
             {
-                float ign = VividFurInterleavedGradientNoise(
-                    ctx.positionCS.xy,
-                    _JitterParams.xy,
-                    _TemporalDither > 0.5f);
-                VividFurHybridHit hybridHit = VividEvaluateFurHybridSlab(
-                    ctx.positionWS,
-                    ctx.geometryNormalWS,
-                    _WorldSpaceCameraPos,
-                    ctx.uv0,
-                    ctx.uv0Ddx,
-                    ctx.uv0Ddy,
-                    _StrandTiling.xy,
-                    _FurDensity,
-                    h,
-                    _ShellStep,
-                    _FurLength,
-                    _GravityWS.xyz,
-                    _GravityStrength,
-                    _StrandThickness,
-                    _StrandTaper,
-                    _LengthVariance,
-                    _ClumpStrength,
-                    maskSample.r,
-                    _AlphaCutoff,
-                    _DitherStrength,
-                    ign,
-                    (int)round(_HybridSteps),
-                    _HybridMaxParallax);
-
-                if (hybridHit.hit)
-                {
-                    strand = hybridHit.strand;
-                    effectiveShellHeight = hybridHit.hitShellHeight;
-                }
-                else
-                {
-                    strand = VividEvaluateFurProceduralStrands(
-                        ctx.uv0,
-                        _StrandTiling.xy,
-                        _FurDensity,
-                        h,
-                        _StrandThickness,
-                        _StrandTaper,
-                        _LengthVariance,
-                        _ClumpStrength,
-                        maskSample.r);
-                }
+                strand = hybridHit.strand;
+                effectiveShellHeight = hybridHit.hitShellHeight;
             }
             else
             {
                 strand = VividEvaluateFurProceduralStrands(
                     ctx.uv0,
-                    _StrandTiling.xy,
-                    _FurDensity,
+                    strandTiling,
+                    furDensity,
                     h,
-                    _StrandThickness,
-                    _StrandTaper,
-                    _LengthVariance,
-                    _ClumpStrength,
+                    strandThickness,
+                    strandTaper,
+                    lengthVariance,
+                    clumpStrength,
                     maskSample.r);
             }
-
-            fp.shellHeight = effectiveShellHeight;
-            fp.rootColor = saturate(_RootColor.rgb * baseTex);
-            fp.tipColor = saturate(_TipColor.rgb * baseTex);
-            fp.colorGradientPower = _ColorGradientPower;
-            fp.rootAO = _RootAO;
-            fp.aoPower = _AOPower;
-            fp.rootRoughness = _RootRoughness;
-            fp.tipRoughness = _TipRoughness;
-            fp.specularWeight = _SpecularWeight;
-            fp.specularTint = saturate(_SpecularTint.rgb);
-            fp.anisotropy = _Anisotropy;
-            fp.fuzzWeight = _FuzzWeight;
-            fp.fuzzColor = saturate(_FuzzColor.rgb);
-            fp.fuzzRoughness = _FuzzRoughness;
-            fp.strandVariation = strand.strandVariation;
-            fp.strandColorVariance = _StrandColorVariance;
-            fp.strandOffsetTS = strand.strandOffsetTS;
-            fp.strandNormalStrength = _StrandNormalStrength;
-            fp.gravityDirWS = _GravityWS.xyz;
-            fp.combDirWS = _CombDirWS.xyz;
-            fp.combStrength = _CombStrength;
-            fp.ambientOcclusion = saturate(ambientOcclusion * maskSample.g);
-        #else
-            const VividMaterialData matData = PullMaterialData(ctx.materialIndex);
-            fp.shellHeight = 0.5f;
-            fp.rootColor = saturate(matData.AlbedoColor.rgb * 0.45f);
-            fp.tipColor = saturate(matData.AlbedoColor.rgb);
-            fp.ambientOcclusion = saturate(ambientOcclusion);
+        }
+        else
         #endif
+        {
+            strand = VividEvaluateFurProceduralStrands(
+                ctx.uv0,
+                strandTiling,
+                furDensity,
+                h,
+                strandThickness,
+                strandTaper,
+                lengthVariance,
+                clumpStrength,
+                maskSample.r);
+        }
+
+        fp.shellHeight = effectiveShellHeight;
+        fp.rootColor = saturate(VIVID_SLAB_PARAM(ctx, _RootColor).rgb * baseTex);
+        fp.tipColor = saturate(VIVID_SLAB_PARAM(ctx, _TipColor).rgb * baseTex);
+        fp.colorGradientPower = VIVID_SLAB_PARAM(ctx, _ColorGradientPower);
+        fp.rootAO = VIVID_SLAB_PARAM(ctx, _RootAO);
+        fp.aoPower = VIVID_SLAB_PARAM(ctx, _AOPower);
+        fp.rootRoughness = VIVID_SLAB_PARAM(ctx, _RootRoughness);
+        fp.tipRoughness = VIVID_SLAB_PARAM(ctx, _TipRoughness);
+        fp.specularWeight = VIVID_SLAB_PARAM(ctx, _SpecularWeight);
+        fp.specularTint = saturate(VIVID_SLAB_PARAM(ctx, _SpecularTint).rgb);
+        fp.anisotropy = VIVID_SLAB_PARAM(ctx, _Anisotropy);
+        fp.fuzzWeight = VIVID_SLAB_PARAM(ctx, _FuzzWeight);
+        fp.fuzzColor = saturate(VIVID_SLAB_PARAM(ctx, _FuzzColor).rgb);
+        fp.fuzzRoughness = VIVID_SLAB_PARAM(ctx, _FuzzRoughness);
+        fp.strandVariation = strand.strandVariation;
+        fp.strandColorVariance = VIVID_SLAB_PARAM(ctx, _StrandColorVariance);
+        fp.strandOffsetTS = strand.strandOffsetTS;
+        fp.strandNormalStrength = VIVID_SLAB_PARAM(ctx, _StrandNormalStrength);
+        fp.gravityDirWS = gravityWS;
+        fp.combDirWS = VIVID_SLAB_PARAM(ctx, _CombDirWS).xyz;
+        fp.combStrength = VIVID_SLAB_PARAM(ctx, _CombStrength);
+        fp.ambientOcclusion = saturate(ambientOcclusion * maskSample.g);
 
         float finalAO = 1.0f;
         v2 = VividFurParamsToOpenPBRV2Inputs(fp, finalAO);

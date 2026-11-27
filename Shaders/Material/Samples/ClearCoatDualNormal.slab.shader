@@ -49,31 +49,17 @@ Shader "VividRP/Material/Samples/ClearCoatDualNormal"
         inout VividOpenPBRV2Inputs v2,
         inout float ambientOcclusion)
     {
-        #if defined(VIVID_SLAB_TARGET_RASTER)
-            float3 baseColor = saturate(_BaseColor.rgb);
-            float baseMetalness = saturate(_BaseMetalness);
-            float baseRoughness = clamp(_BaseRoughness, 0.04f, 1.0f);
-            float baseAnisotropy = saturate(_BaseAnisotropy);
-            float weaveScale = max(_WeaveScale, 1.0f);
-            float weaveStrength = saturate(_WeaveNormalStrength);
-            float coatWeight = saturate(_CoatWeight);
-            float coatRoughness = saturate(_CoatRoughness);
-            float coatIor = clamp(_CoatIor, 1.0f, 3.0f);
-            float3 coatColor = saturate(_CoatColor.rgb);
-            float coatDarkening = saturate(_CoatDarkening);
-        #else
-            float3 baseColor = float3(0.18f, 0.20f, 0.23f);
-            float baseMetalness = 0.55f;
-            float baseRoughness = 0.32f;
-            float baseAnisotropy = 0.78f;
-            float weaveScale = 84.0f;
-            float weaveStrength = 0.22f;
-            float coatWeight = 1.0f;
-            float coatRoughness = 0.02f;
-            float coatIor = 1.65f;
-            float3 coatColor = float3(1.0f, 0.98f, 0.96f);
-            float coatDarkening = 1.0f;
-        #endif
+        float3 baseColor = saturate(VIVID_SLAB_PARAM(ctx, _BaseColor).rgb);
+        float baseMetalness = saturate(VIVID_SLAB_PARAM(ctx, _BaseMetalness));
+        float baseRoughness = clamp(VIVID_SLAB_PARAM(ctx, _BaseRoughness), 0.04f, 1.0f);
+        float baseAnisotropy = saturate(VIVID_SLAB_PARAM(ctx, _BaseAnisotropy));
+        float weaveScale = max(VIVID_SLAB_PARAM(ctx, _WeaveScale), 1.0f);
+        float weaveStrength = saturate(VIVID_SLAB_PARAM(ctx, _WeaveNormalStrength));
+        float coatWeight = saturate(VIVID_SLAB_PARAM(ctx, _CoatWeight));
+        float coatRoughness = saturate(VIVID_SLAB_PARAM(ctx, _CoatRoughness));
+        float coatIor = clamp(VIVID_SLAB_PARAM(ctx, _CoatIor), 1.0f, 3.0f);
+        float3 coatColor = saturate(VIVID_SLAB_PARAM(ctx, _CoatColor).rgb);
+        float coatDarkening = saturate(VIVID_SLAB_PARAM(ctx, _CoatDarkening));
 
         // Tightly-woven 2x2 diagonal twill carbon-fiber ribbons (flat-topped tows + subtle micro-filaments).
         // Scale U by 2x to match sphere UV aspect ratio (2*pi azimuth vs pi elevation).

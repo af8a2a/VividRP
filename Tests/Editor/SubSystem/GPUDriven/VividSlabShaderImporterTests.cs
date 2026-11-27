@@ -968,5 +968,146 @@ namespace VividRP.Editor.Tests
                 MaterialShadingModelMask.OpenPBROpaque);
             return CompiledMaterialProgram.Compile(module, GPUDrivenMaterialCompiler.ProgramVersion);
         }
+
+        [Test]
+        public void Assemble_HandwrittenFabricAndClearCoatSlabs_ReflectParametersResourcesAndLinearColors()
+        {
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            string templateText = File.ReadAllText(templatePath);
+
+            // 1. Standalone handwritten FabricSlab (no linked MaterialGraph): reflects CBuffer + 6 Textures.
+            string fabricPath = VividPackagePathUtility.GetPreferredAssetPath(FabricSlabRelativePath);
+            string fabricSource = File.ReadAllText(fabricPath);
+            VividSlabShaderAssemblyResult fabricResult = VividSlabShaderAssembler.Assemble(
+                fabricPath,
+                fabricSource,
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(fabricResult.Succeeded, Is.True);
+            Assert.That(fabricResult.ParameterSlots.Length, Is.GreaterThanOrEqualTo(25));
+            Assert.That(fabricResult.ParameterStrideInWords % 4, Is.Zero);
+            Assert.That(fabricResult.ResourceSlots.Length, Is.EqualTo(6));
+
+            VividSlabParameterSlot baseColorSlot = FindParamSlot(fabricResult.ParameterSlots, "_BaseColor");
+            VividSlabParameterSlot sheenColorSlot = FindParamSlot(fabricResult.ParameterSlots, "_SheenColor");
+            VividSlabParameterSlot emissionSlot = FindParamSlot(fabricResult.ParameterSlots, "_EmissionColor");
+            VividSlabParameterSlot fabricTypeSlot = FindParamSlot(fabricResult.ParameterSlots, "_FabricType");
+            Assert.That(baseColorSlot.IsColor, Is.True, "Standard Color property _BaseColor must convert sRGB->Linear.");
+            Assert.That(sheenColorSlot.IsColor, Is.True, "Standard Color property _SheenColor must convert sRGB->Linear.");
+            Assert.That(emissionSlot.IsColor, Is.False, "[HDR] Color property _EmissionColor must stay linear without double conversion.");
+            Assert.That(fabricTypeSlot.Kind, Is.EqualTo(VividSlabParameterKind.Float));
+
+            VividSlabResourceSlot baseMapSlot = FindResourceSlot(fabricResult.ResourceSlots, "_BaseMap");
+            VividSlabResourceSlot bumpMapSlot = FindResourceSlot(fabricResult.ResourceSlots, "_BumpMap");
+            VividSlabResourceSlot emissionMapSlot = FindResourceSlot(fabricResult.ResourceSlots, "_EmissionMap");
+            VividSlabResourceSlot threadMapSlot = FindResourceSlot(fabricResult.ResourceSlots, "_ThreadMap");
+            VividSlabResourceSlot fuzzMapSlot = FindResourceSlot(fabricResult.ResourceSlots, "_FuzzMap");
+            Assert.That(baseMapSlot.DefaultTexture, Is.EqualTo(VividSlabDefaultTextureKind.White));
+            Assert.That(bumpMapSlot.SampleKind, Is.EqualTo(VividSlabTextureSampleKind.Normal));
+            Assert.That(bumpMapSlot.DefaultTexture, Is.EqualTo(VividSlabDefaultTextureKind.Bump));
+            Assert.That(emissionMapSlot.DefaultTexture, Is.EqualTo(VividSlabDefaultTextureKind.Black));
+            Assert.That(threadMapSlot.SampleKind, Is.EqualTo(VividSlabTextureSampleKind.Mask));
+            Assert.That(fuzzMapSlot.DefaultTexture, Is.EqualTo(VividSlabDefaultTextureKind.Gray));
+
+            StringAssert.Contains("VividLoadSlabParam__SheenColor(", fabricResult.ComputeResolveSource);
+            StringAssert.Contains("VividSampleSlabTex__BaseMap(", fabricResult.ComputeResolveSource);
+            StringAssert.Contains("return float4(1.0f, 0.5f, 1.0f, 0.5f);", fabricResult.ComputeResolveSource);
+            StringAssert.DoesNotContain("_OutGBuffer4", fabricResult.ComputeResolveSource);
+            StringAssert.Contains("#define VIVID_SLAB_PARAM(", fabricResult.RasterShaderSource);
+
+            // 2. Hybrid Graph + handwritten CBuffer ClearCoatDualNormal: merges without duplicate PropertyName.
+            string ccPath = VividPackagePathUtility.GetPreferredAssetPath(ClearCoatDualNormalSampleRelativePath);
+            string ccSource = File.ReadAllText(ccPath);
+            CompiledMaterialProgram openPbrProgram = BuildOpenPBROpaqueTestProgram();
+            VividSlabShaderAssemblyResult ccResult = VividSlabShaderAssembler.Assemble(
+                ccPath,
+                ccSource,
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: "OpenPBROpaque.vmatg",
+                compiledGraphProgram: openPbrProgram);
+
+            Assert.That(ccResult.Succeeded, Is.True);
+            var seenProps = new HashSet<string>(StringComparer.Ordinal);
+            foreach (VividSlabParameterSlot s in ccResult.ParameterSlots)
+                Assert.That(seenProps.Add(s.PropertyName), Is.True, $"Duplicate parameter slot '{s.PropertyName}'.");
+            Assert.That(FindParamSlot(ccResult.ParameterSlots, "_CoatWeight").DefaultValue.x, Is.EqualTo(1.0f).Within(1e-5f));
+            Assert.That(FindParamSlot(ccResult.ParameterSlots, "_CoatIor").DefaultValue.x, Is.EqualTo(1.65f).Within(1e-5f));
+            StringAssert.Contains("VividLoadSlabParam__CoatWeight(", ccResult.ComputeResolveSource);
+
+            // 3. Linear color packing & zero-allocation PackParameterLanes check.
+            var descriptor = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            try
+            {
+                descriptor.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: fabricResult.ShaderName,
+                    baseTemplateAssetPath: templatePath,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: fabricResult.EstimatedSubstrateBytesPerPixel,
+                    parameterStrideInWords: fabricResult.ParameterStrideInWords,
+                    parameters: fabricResult.ParameterSlots,
+                    resources: fabricResult.ResourceSlots,
+                    hasLinkedGraphSurface: false,
+                    hasCustomSurfaceHook: true,
+                    sourceContentHash: fabricResult.SourceContentHash,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>());
+
+                var lanes = new List<uint4>(16);
+                for (int w = 0; w < 8; w++)
+                {
+                    lanes.Clear();
+                    descriptor.PackParameterLanes(null, null, lanes);
+                }
+
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 64; i++)
+                {
+                    lanes.Clear();
+                    descriptor.PackParameterLanes(null, null, lanes);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero, "Reflected handwritten Slab parameter packing must allocate 0 managed bytes.");
+
+                int baseWord = baseColorSlot.WordOffset;
+                float packedR = math.asfloat(lanes[baseWord / 4][baseWord % 4]);
+                float expectedR = QualitySettings.activeColorSpace == ColorSpace.Linear
+                    ? new Color(baseColorSlot.DefaultValue.x, baseColorSlot.DefaultValue.y, baseColorSlot.DefaultValue.z, baseColorSlot.DefaultValue.w).linear.r
+                    : baseColorSlot.DefaultValue.x;
+                Assert.That(packedR, Is.EqualTo(expectedR).Within(1e-4f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(descriptor);
+            }
+        }
+
+        private static VividSlabParameterSlot FindParamSlot(VividSlabParameterSlot[] slots, string propName)
+        {
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (string.Equals(slots[i].PropertyName, propName, StringComparison.Ordinal))
+                    return slots[i];
+            }
+            Assert.Fail($"Expected parameter slot '{propName}' was not reflected.");
+            return default;
+        }
+
+        private static VividSlabResourceSlot FindResourceSlot(VividSlabResourceSlot[] slots, string propName)
+        {
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (string.Equals(slots[i].PropertyName, propName, StringComparison.Ordinal))
+                    return slots[i];
+            }
+            Assert.Fail($"Expected resource slot '{propName}' was not reflected.");
+            return default;
+        }
     }
 }

@@ -22,6 +22,15 @@ namespace VividRP.Runtime.GPUDriven
         Raw = 3,
     }
 
+    public enum VividSlabDefaultTextureKind : byte
+    {
+        InheritFallback = 0,
+        White = 1,
+        Black = 2,
+        Bump = 3,
+        Gray = 4,
+    }
+
     [Serializable]
     public struct VividSlabParameterSlot
     {
@@ -31,9 +40,16 @@ namespace VividRP.Runtime.GPUDriven
         public int WordOffset;
         public int WordCount;
         public Vector4 DefaultValue;
+        public bool IsColor;
 
         [NonSerialized]
         private int m_CachedPropertyId;
+
+        [NonSerialized]
+        private int m_CachedBaseTexturePropertyId;
+
+        [NonSerialized]
+        private bool m_BaseTexturePropertyIdResolved;
 
         public int PropertyId
         {
@@ -42,6 +58,25 @@ namespace VividRP.Runtime.GPUDriven
                 if (m_CachedPropertyId == 0 && !string.IsNullOrEmpty(PropertyName))
                     m_CachedPropertyId = Shader.PropertyToID(PropertyName);
                 return m_CachedPropertyId;
+            }
+        }
+
+        internal int BaseTexturePropertyId
+        {
+            get
+            {
+                if (!m_BaseTexturePropertyIdResolved)
+                {
+                    m_BaseTexturePropertyIdResolved = true;
+                    if (!string.IsNullOrEmpty(PropertyName)
+                        && PropertyName.Length > 3
+                        && PropertyName.EndsWith("_ST", StringComparison.Ordinal))
+                    {
+                        m_CachedBaseTexturePropertyId = Shader.PropertyToID(
+                            PropertyName.Substring(0, PropertyName.Length - 3));
+                    }
+                }
+                return m_CachedBaseTexturePropertyId;
             }
         }
     }
@@ -53,6 +88,7 @@ namespace VividRP.Runtime.GPUDriven
         public string PropertyName;
         public VividSlabTextureSampleKind SampleKind;
         public int SlotIndex;
+        public VividSlabDefaultTextureKind DefaultTexture;
 
         [NonSerialized]
         private int m_CachedPropertyId;
@@ -306,6 +342,8 @@ namespace VividRP.Runtime.GPUDriven
                     return new float4(overrideVal.x, overrideVal.y, overrideVal.z, overrideVal.w);
             }
 
+            bool convertColorToLinear = slot.IsColor && QualitySettings.activeColorSpace == ColorSpace.Linear;
+
             if (sourceMaterial != null)
             {
                 int propId = slot.PropertyId;
@@ -320,11 +358,37 @@ namespace VividRP.Runtime.GPUDriven
                         case VividSlabParameterKind.Float3:
                         case VividSlabParameterKind.Float4:
                         {
+                            if (convertColorToLinear)
+                            {
+                                Color lin = sourceMaterial.GetColor(propId).linear;
+                                return new float4(lin.r, lin.g, lin.b, lin.a);
+                            }
+
                             Vector4 vec = sourceMaterial.GetVector(propId);
                             return new float4(vec.x, vec.y, vec.z, vec.w);
                         }
                     }
                 }
+                else if (slot.Kind == VividSlabParameterKind.Float4)
+                {
+                    int baseTexId = slot.BaseTexturePropertyId;
+                    if (baseTexId != 0 && sourceMaterial.HasProperty(baseTexId))
+                    {
+                        Vector2 scale = sourceMaterial.GetTextureScale(baseTexId);
+                        Vector2 offset = sourceMaterial.GetTextureOffset(baseTexId);
+                        return new float4(scale.x, scale.y, offset.x, offset.y);
+                    }
+                }
+            }
+
+            if (convertColorToLinear)
+            {
+                Color linDefault = new Color(
+                    slot.DefaultValue.x,
+                    slot.DefaultValue.y,
+                    slot.DefaultValue.z,
+                    slot.DefaultValue.w).linear;
+                return new float4(linDefault.r, linDefault.g, linDefault.b, linDefault.a);
             }
 
             return new float4(

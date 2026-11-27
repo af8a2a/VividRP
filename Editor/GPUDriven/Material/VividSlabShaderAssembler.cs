@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using UnityEngine;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.GPUDriven
@@ -80,7 +81,62 @@ namespace VividRP.Editor.GPUDriven
         internal const string EarlyDepthAttrToken = "VIVID_SLAB_EARLY_DEPTH_ATTR";
         internal const string MotionZWriteToken = "VIVID_SLAB_MOTION_ZWRITE";
         internal const string MotionZTestToken = "VIVID_SLAB_MOTION_ZTEST";
+        internal const string ReflectedAccessorsToken = "VIVID_SLAB_REFLECTED_ACCESSORS";
+        internal const string VisibilityReflectedAccessorsToken = "VIVID_SLAB_VISIBILITY_REFLECTED_ACCESSORS";
         internal const string UseBaseSubShaderToken = "VIVID_SLAB_USE_BASE_SUBSHADER";
+
+        private static readonly Regex s_CBufferFieldRegex = new(
+            @"^\s*(float|float2|float3|float4|half|half2|half3|half4)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
+        private static readonly Regex s_Texture2DDeclRegex = new(
+            @"\bTEXTURE2D\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)",
+            RegexOptions.Compiled);
+
+        private static readonly Regex s_PropertyLineRegex = new(
+            @"([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*""[^""]*""\s*,\s*(Color|Vector|Float|Int|Integer|2D|Range\s*\([^)]*\))\s*\)\s*=\s*(.+)$",
+            RegexOptions.Compiled);
+
+        private static readonly Regex s_BlockCommentRegex = new(
+            @"/\*[\s\S]*?\*/",
+            RegexOptions.Compiled);
+
+        private static readonly Regex s_LineCommentRegex = new(
+            @"//[^\n]*",
+            RegexOptions.Compiled);
+
+        private static readonly Regex s_VectorLiteralRegex = new(
+            @"\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,\)]+)(?:\s*,\s*([^\)]+))?\s*\)",
+            RegexOptions.Compiled);
+
+        private readonly struct ParsedPropertyMeta
+        {
+            public readonly bool IsColor;
+            public readonly bool IsHdr;
+            public readonly bool IsGamma;
+            public readonly bool IsNormal;
+            public readonly bool HasNumericDefault;
+            public readonly Vector4 DefaultValue;
+            public readonly VividSlabDefaultTextureKind DefaultTexture;
+
+            public ParsedPropertyMeta(
+                bool isColor,
+                bool isHdr,
+                bool isGamma,
+                bool isNormal,
+                bool hasNumericDefault,
+                Vector4 defaultValue,
+                VividSlabDefaultTextureKind defaultTexture)
+            {
+                IsColor = isColor;
+                IsHdr = isHdr;
+                IsGamma = isGamma;
+                IsNormal = isNormal;
+                HasNumericDefault = hasNumericDefault;
+                DefaultValue = defaultValue;
+                DefaultTexture = defaultTexture;
+            }
+        }
 
         private static readonly Regex s_BaseDirectiveRegex = new(
             @"^\s*//\s*@vivid-base\s+""([^""]+)""\s*$",
@@ -301,6 +357,28 @@ namespace VividRP.Editor.GPUDriven
                 }
             }
 
+            // Reflect handwritten @vivid-cbuffer and @vivid-textures into GPUDriven parameter/resource slots
+            // (merging seamlessly after any linked MaterialGraph slots without duplicating symbols).
+            Dictionary<string, ParsedPropertyMeta> parsedProperties = ParseShaderLabProperties(normalizedSource);
+            BuildMergedParameterAndResourceSlots(
+                graphPayload,
+                userCBuffer,
+                userTextures,
+                parsedProperties,
+                out VividSlabParameterSlot[] mergedParameterSlots,
+                out int mergedParameterStrideInWords,
+                out VividSlabResourceSlot[] mergedResourceSlots);
+
+            string rasterReflectedAccessors = BuildRasterReflectedAccessors();
+            string visibilityReflectedAccessors = BuildGpuDrivenReflectedAccessors(
+                mergedParameterSlots,
+                mergedResourceSlots,
+                isCompute: false);
+            string computeReflectedAccessors = BuildGpuDrivenReflectedAccessors(
+                mergedParameterSlots,
+                mergedResourceSlots,
+                isCompute: true);
+
             // ShaderLab Properties block does not accept HLSL #line directives.
             rasterText = rasterText.Replace(GraphPropertiesToken, propertiesBlock);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphCBufferToken, rasterCBufferBlock, normalizedSourcePath);
@@ -308,6 +386,8 @@ namespace VividRP.Editor.GPUDriven
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserInstancingToken, userInstancing, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphTexturesToken, rasterTexturesBlock, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserTexturesToken, userTextures, normalizedSourcePath);
+            rasterText = rasterText.Replace(ReflectedAccessorsToken, rasterReflectedAccessors);
+            rasterText = rasterText.Replace(VisibilityReflectedAccessorsToken, visibilityReflectedAccessors);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphEvaluateToken, rasterEvaluateBlock, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserSurfaceHookToken, userSurfaceHook, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserVertexHookToken, userVertexHook, normalizedSourcePath);
@@ -325,6 +405,7 @@ namespace VividRP.Editor.GPUDriven
                 shaderName,
                 resolvedLinkedGraphPath,
                 compiledGraphProgram,
+                computeReflectedAccessors,
                 computeEvaluateBlock,
                 userSurfaceHook,
                 userVertexHook,
@@ -376,9 +457,9 @@ namespace VividRP.Editor.GPUDriven
                 ComputeResolveSource = computeSource,
                 ResolveKernelName = VividSlabProgramDescriptor.DefaultResolveKernelName,
                 EstimatedSubstrateBytesPerPixel = estimatedBytes,
-                ParameterStrideInWords = graphPayload != null ? graphPayload.ParameterStrideInWords : 0,
-                ParameterSlots = graphPayload != null ? graphPayload.ParameterSlots : Array.Empty<VividSlabParameterSlot>(),
-                ResourceSlots = graphPayload != null ? graphPayload.ResourceSlots : Array.Empty<VividSlabResourceSlot>(),
+                ParameterStrideInWords = mergedParameterStrideInWords,
+                ParameterSlots = mergedParameterSlots,
+                ResourceSlots = mergedResourceSlots,
                 HasLinkedGraphSurface = graphPayload != null,
                 HasCustomSurfaceHook = hasCustomSurfaceHook,
                 IsMultiClosure = isMultiClosure,
@@ -503,6 +584,457 @@ namespace VividRP.Editor.GPUDriven
             };
         }
 
+        private static Dictionary<string, ParsedPropertyMeta> ParseShaderLabProperties(string source)
+        {
+            var result = new Dictionary<string, ParsedPropertyMeta>(StringComparer.Ordinal);
+            if (string.IsNullOrEmpty(source))
+                return result;
+
+            int propsKeyword = source.IndexOf("Properties", StringComparison.Ordinal);
+            if (propsKeyword < 0)
+                return result;
+
+            int openBrace = source.IndexOf('{', propsKeyword);
+            if (openBrace < 0)
+                return result;
+
+            int depth = 0;
+            int closeBrace = -1;
+            for (int i = openBrace; i < source.Length; i++)
+            {
+                char ch = source[i];
+                if (ch == '{') depth++;
+                else if (ch == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        closeBrace = i;
+                        break;
+                    }
+                }
+            }
+
+            if (closeBrace <= openBrace)
+                return result;
+
+            string body = source.Substring(openBrace + 1, closeBrace - openBrace - 1);
+            body = s_BlockCommentRegex.Replace(body, string.Empty);
+            string[] lines = body.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = s_LineCommentRegex.Replace(lines[i], string.Empty).Trim();
+                if (string.IsNullOrEmpty(line))
+                    continue;
+
+                Match m = s_PropertyLineRegex.Match(line);
+                if (!m.Success)
+                    continue;
+
+                string prefix = line.Substring(0, m.Index);
+                string propName = m.Groups[1].Value;
+                string shaderType = m.Groups[2].Value.Trim();
+                string defaultExpr = m.Groups[3].Value.Trim();
+
+                bool isHdr = prefix.IndexOf("[HDR]", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isGamma = prefix.IndexOf("[Gamma]", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isNormal = prefix.IndexOf("[Normal]", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isColor = string.Equals(shaderType, "Color", StringComparison.OrdinalIgnoreCase);
+
+                bool hasNumericDefault = false;
+                Vector4 defaultVal = Vector4.zero;
+                VividSlabDefaultTextureKind defaultTex = VividSlabDefaultTextureKind.White;
+
+                if (string.Equals(shaderType, "2D", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (defaultExpr.IndexOf("\"black\"", StringComparison.OrdinalIgnoreCase) >= 0)
+                        defaultTex = VividSlabDefaultTextureKind.Black;
+                    else if (defaultExpr.IndexOf("\"bump\"", StringComparison.OrdinalIgnoreCase) >= 0)
+                        defaultTex = VividSlabDefaultTextureKind.Bump;
+                    else if (defaultExpr.IndexOf("\"gray\"", StringComparison.OrdinalIgnoreCase) >= 0
+                        || defaultExpr.IndexOf("\"grey\"", StringComparison.OrdinalIgnoreCase) >= 0)
+                        defaultTex = VividSlabDefaultTextureKind.Gray;
+                    else
+                        defaultTex = VividSlabDefaultTextureKind.White;
+                }
+                else if (isColor || string.Equals(shaderType, "Vector", StringComparison.OrdinalIgnoreCase))
+                {
+                    Match vm = s_VectorLiteralRegex.Match(defaultExpr);
+                    if (vm.Success
+                        && TryParseInvariantFloat(vm.Groups[1].Value, out float x)
+                        && TryParseInvariantFloat(vm.Groups[2].Value, out float y)
+                        && TryParseInvariantFloat(vm.Groups[3].Value, out float z))
+                    {
+                        float w = 1.0f;
+                        if (vm.Groups[4].Success)
+                            TryParseInvariantFloat(vm.Groups[4].Value, out w);
+                        defaultVal = new Vector4(x, y, z, w);
+                        hasNumericDefault = true;
+                    }
+                }
+                else
+                {
+                    if (TryParseInvariantFloat(defaultExpr, out float scalar))
+                    {
+                        defaultVal = new Vector4(scalar, 0.0f, 0.0f, 0.0f);
+                        hasNumericDefault = true;
+                    }
+                }
+
+                result[propName] = new ParsedPropertyMeta(
+                    isColor,
+                    isHdr,
+                    isGamma,
+                    isNormal,
+                    hasNumericDefault,
+                    defaultVal,
+                    defaultTex);
+            }
+
+            return result;
+        }
+
+        private static bool TryParseInvariantFloat(string raw, out float value)
+        {
+            string trimmed = (raw ?? string.Empty).Trim().TrimEnd('f', 'F');
+            return float.TryParse(
+                trimmed,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out value);
+        }
+
+        private static string StripHlslCommentsAndLineDirectives(string hlsl)
+        {
+            if (string.IsNullOrEmpty(hlsl))
+                return string.Empty;
+
+            string noBlock = s_BlockCommentRegex.Replace(hlsl, string.Empty);
+            string[] lines = noBlock.Split('\n');
+            var sb = new StringBuilder(noBlock.Length);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string trimmed = lines[i].TrimStart();
+                if (trimmed.StartsWith("#line", StringComparison.Ordinal))
+                    continue;
+                sb.AppendLine(s_LineCommentRegex.Replace(lines[i], string.Empty));
+            }
+            return sb.ToString();
+        }
+
+        private static void BuildMergedParameterAndResourceSlots(
+            MaterialSlabHlslPayload graphPayload,
+            string userCBuffer,
+            string userTextures,
+            Dictionary<string, ParsedPropertyMeta> parsedProperties,
+            out VividSlabParameterSlot[] mergedParameterSlots,
+            out int mergedParameterStrideInWords,
+            out VividSlabResourceSlot[] mergedResourceSlots)
+        {
+            var paramList = new List<VividSlabParameterSlot>();
+            var existingParamProps = new HashSet<string>(StringComparer.Ordinal);
+            int nextWordOffset = 0;
+
+            if (graphPayload != null && graphPayload.ParameterSlots != null)
+            {
+                for (int i = 0; i < graphPayload.ParameterSlots.Length; i++)
+                {
+                    VividSlabParameterSlot slot = graphPayload.ParameterSlots[i];
+                    if (parsedProperties.TryGetValue(slot.PropertyName, out ParsedPropertyMeta meta))
+                    {
+                        slot.IsColor = meta.IsColor && !meta.IsHdr && !meta.IsGamma;
+                        if (meta.HasNumericDefault)
+                            slot.DefaultValue = meta.DefaultValue;
+                    }
+                    paramList.Add(slot);
+                    if (!string.IsNullOrEmpty(slot.PropertyName))
+                        existingParamProps.Add(slot.PropertyName);
+                    nextWordOffset = Math.Max(nextWordOffset, slot.WordOffset + slot.WordCount);
+                }
+                nextWordOffset = Math.Max(nextWordOffset, graphPayload.ParameterStrideInWords);
+            }
+
+            string cleanCBuffer = StripHlslCommentsAndLineDirectives(userCBuffer);
+            MatchCollection fieldMatches = s_CBufferFieldRegex.Matches(cleanCBuffer);
+            for (int i = 0; i < fieldMatches.Count; i++)
+            {
+                string hlslType = fieldMatches[i].Groups[1].Value;
+                string propName = fieldMatches[i].Groups[2].Value;
+                if (existingParamProps.Contains(propName))
+                    continue;
+
+                VividSlabParameterKind kind;
+                int wordCount;
+                switch (hlslType)
+                {
+                    case "float":
+                    case "half":
+                        kind = VividSlabParameterKind.Float;
+                        wordCount = 1;
+                        break;
+                    case "float2":
+                    case "half2":
+                        kind = VividSlabParameterKind.Float2;
+                        wordCount = 2;
+                        break;
+                    case "float3":
+                    case "half3":
+                        kind = VividSlabParameterKind.Float3;
+                        wordCount = 3;
+                        break;
+                    default:
+                        kind = VividSlabParameterKind.Float4;
+                        wordCount = 4;
+                        break;
+                }
+
+                bool isColor = false;
+                Vector4 defaultValue = kind == VividSlabParameterKind.Float
+                    ? Vector4.zero
+                    : new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
+                if (parsedProperties.TryGetValue(propName, out ParsedPropertyMeta meta))
+                {
+                    isColor = meta.IsColor && !meta.IsHdr && !meta.IsGamma;
+                    if (meta.HasNumericDefault)
+                        defaultValue = meta.DefaultValue;
+                }
+
+                string symbol = propName.StartsWith("_", StringComparison.Ordinal)
+                    ? propName.Substring(1)
+                    : propName;
+
+                paramList.Add(new VividSlabParameterSlot
+                {
+                    Symbol = symbol,
+                    PropertyName = propName,
+                    Kind = kind,
+                    WordOffset = nextWordOffset,
+                    WordCount = wordCount,
+                    DefaultValue = defaultValue,
+                    IsColor = isColor,
+                });
+                existingParamProps.Add(propName);
+                nextWordOffset += wordCount;
+            }
+
+            mergedParameterSlots = paramList.ToArray();
+            mergedParameterStrideInWords = ((nextWordOffset + 3) / 4) * 4;
+
+            var resourceList = new List<VividSlabResourceSlot>();
+            var existingResourceProps = new HashSet<string>(StringComparer.Ordinal);
+            int nextSlotIndex = 0;
+
+            if (graphPayload != null && graphPayload.ResourceSlots != null)
+            {
+                for (int i = 0; i < graphPayload.ResourceSlots.Length; i++)
+                {
+                    VividSlabResourceSlot r = graphPayload.ResourceSlots[i];
+                    resourceList.Add(r);
+                    if (!string.IsNullOrEmpty(r.PropertyName))
+                        existingResourceProps.Add(r.PropertyName);
+                    nextSlotIndex = Math.Max(nextSlotIndex, r.SlotIndex + 1);
+                }
+            }
+
+            string cleanTextures = StripHlslCommentsAndLineDirectives(userTextures);
+            MatchCollection texMatches = s_Texture2DDeclRegex.Matches(cleanTextures);
+            for (int i = 0; i < texMatches.Count; i++)
+            {
+                string propName = texMatches[i].Groups[1].Value;
+                if (existingResourceProps.Contains(propName))
+                    continue;
+
+                VividSlabDefaultTextureKind defaultTex = VividSlabDefaultTextureKind.White;
+                bool isNormalAttr = false;
+                if (parsedProperties.TryGetValue(propName, out ParsedPropertyMeta meta))
+                {
+                    defaultTex = meta.DefaultTexture;
+                    isNormalAttr = meta.IsNormal;
+                }
+
+                VividSlabTextureSampleKind sampleKind;
+                if (isNormalAttr)
+                {
+                    sampleKind = VividSlabTextureSampleKind.Normal;
+                }
+                else if (propName.IndexOf("Mask", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Thread", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Fuzz", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Rough", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Metal", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Occlusion", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("AO", StringComparison.Ordinal) >= 0)
+                {
+                    sampleKind = VividSlabTextureSampleKind.Mask;
+                }
+                else if (defaultTex == VividSlabDefaultTextureKind.Bump)
+                {
+                    sampleKind = VividSlabTextureSampleKind.Normal;
+                }
+                else
+                {
+                    sampleKind = VividSlabTextureSampleKind.Color;
+                }
+
+                string symbol = propName.StartsWith("_", StringComparison.Ordinal)
+                    ? propName.Substring(1)
+                    : propName;
+
+                resourceList.Add(new VividSlabResourceSlot
+                {
+                    Symbol = symbol,
+                    PropertyName = propName,
+                    SampleKind = sampleKind,
+                    SlotIndex = nextSlotIndex,
+                    DefaultTexture = defaultTex,
+                });
+                existingResourceProps.Add(propName);
+                nextSlotIndex++;
+            }
+
+            mergedResourceSlots = resourceList.ToArray();
+        }
+
+        private static string BuildRasterReflectedAccessors()
+        {
+            return
+                "// [VividSlab] Unified parameter & texture accessors (Raster CBuffer/Texture2D path)\n"
+                + "#ifndef VIVID_SLAB_PARAM\n"
+                + "#define VIVID_SLAB_PARAM(ctx, propName) (propName)\n"
+                + "#endif\n"
+                + "#ifndef VIVID_SLAB_SAMPLE_TEX2D\n"
+                + "#define VIVID_SLAB_SAMPLE_TEX2D(ctx, texName, uv) SAMPLE_TEXTURE2D(texName, sampler##texName, (uv))\n"
+                + "#endif\n"
+                + "#ifndef VIVID_SLAB_SAMPLE_TEX2D_GRAD\n"
+                + "#define VIVID_SLAB_SAMPLE_TEX2D_GRAD(ctx, texName, uv, ddxUv, ddyUv) SAMPLE_TEXTURE2D_GRAD(texName, sampler##texName, (uv), (ddxUv), (ddyUv))\n"
+                + "#endif";
+        }
+
+        private static string BuildGpuDrivenReflectedAccessors(
+            VividSlabParameterSlot[] paramSlots,
+            VividSlabResourceSlot[] resSlots,
+            bool isCompute)
+        {
+            var sb = new StringBuilder(1024);
+            sb.AppendLine("// [VividSlab] Auto-reflected GPUDriven parameter & texture accessors");
+            if (paramSlots != null)
+            {
+                for (int i = 0; i < paramSlots.Length; i++)
+                {
+                    VividSlabParameterSlot slot = paramSlots[i];
+                    if (string.IsNullOrEmpty(slot.PropertyName))
+                        continue;
+
+                    string retType;
+                    string loadFn;
+                    switch (slot.Kind)
+                    {
+                        case VividSlabParameterKind.Bool:
+                        case VividSlabParameterKind.Float:
+                            retType = "float";
+                            loadFn = "VividLoadMaterialFloat";
+                            break;
+                        case VividSlabParameterKind.Float2:
+                            retType = "float2";
+                            loadFn = "VividLoadMaterialFloat2";
+                            break;
+                        case VividSlabParameterKind.Float3:
+                            retType = "float3";
+                            loadFn = "VividLoadMaterialFloat3";
+                            break;
+                        default:
+                            retType = "float4";
+                            loadFn = "VividLoadMaterialFloat4";
+                            break;
+                    }
+
+                    sb.Append(retType)
+                        .Append(" VividLoadSlabParam_")
+                        .Append(slot.PropertyName)
+                        .Append("(const uint parameterAddress) { return ")
+                        .Append(loadFn)
+                        .Append("(parameterAddress, ")
+                        .Append(slot.WordOffset.ToString(CultureInfo.InvariantCulture))
+                        .AppendLine("u); }");
+                }
+            }
+
+            if (resSlots != null)
+            {
+                for (int i = 0; i < resSlots.Length; i++)
+                {
+                    VividSlabResourceSlot slot = resSlots[i];
+                    if (string.IsNullOrEmpty(slot.PropertyName))
+                        continue;
+
+                    string hasFn;
+                    string sampleFn;
+                    switch (slot.SampleKind)
+                    {
+                        case VividSlabTextureSampleKind.Normal:
+                            hasFn = "VividSurfaceHasNormal";
+                            sampleFn = "VividSampleNormalGrad";
+                            break;
+                        case VividSlabTextureSampleKind.Mask:
+                            hasFn = "VividSurfaceHasMask";
+                            sampleFn = "VividSampleMaskGrad";
+                            break;
+                        case VividSlabTextureSampleKind.Raw:
+                            hasFn = "VividSurfaceHasMask";
+                            sampleFn = "VividSampleRawGrad";
+                            break;
+                        default:
+                            hasFn = "VividSurfaceHasBaseColor";
+                            sampleFn = "VividSampleBaseColorGrad";
+                            break;
+                    }
+
+                    string defaultLiteral = slot.DefaultTexture switch
+                    {
+                        VividSlabDefaultTextureKind.Black => "float4(0.0f, 0.0f, 0.0f, 1.0f)",
+                        // Matches Unity's built-in "bump" texture and VirtualTextureSurfaceSampling.VividSampleNormalGrad:
+                        // UnpackNormalmapRGorAG computes x = a * r * 2 - 1, y = g * 2 - 1 -> (1.0, 0.5, 1.0, 0.5) unpacks to (0, 0, 1).
+                        VividSlabDefaultTextureKind.Bump => "float4(1.0f, 0.5f, 1.0f, 0.5f)",
+                        VividSlabDefaultTextureKind.Gray => "float4(0.5f, 0.5f, 0.5f, 1.0f)",
+                        _ => "float4(1.0f, 1.0f, 1.0f, 1.0f)",
+                    };
+
+                    sb.Append("float4 VividSampleSlabTex_")
+                        .Append(slot.PropertyName)
+                        .AppendLine("(const VividSlabEvalContext ctx, const float2 uv, const float2 uvDdx, const float2 uvDdy)");
+                    sb.AppendLine("{");
+                    sb.Append("    const VividMaterialResourceData res = PullMaterialResourceData(ctx.resourceAddress + ")
+                        .Append(slot.SlotIndex.ToString(CultureInfo.InvariantCulture))
+                        .AppendLine("u);");
+                    sb.AppendLine("    VividSurfaceBindingData binding;");
+                    sb.AppendLine("    binding.BaseColorResource = res.BaseColorResource;");
+                    sb.AppendLine("    binding.NormalResource = res.NormalResource;");
+                    sb.AppendLine("    binding.MaskResource = res.MaskResource;");
+                    sb.AppendLine("    binding.Flags = res.SurfaceBindingFlags;");
+                    sb.AppendLine("    binding.UVScaleBias = res.UVScaleBias;");
+                    sb.Append("    if (!").Append(hasFn).AppendLine("(binding))");
+                    sb.Append("        return ").Append(defaultLiteral).AppendLine(";");
+                    if (isCompute)
+                        sb.AppendLine("    const VividSurfaceSampleContext sampleCtx = VividCreateSurfaceSampleContextGrad(binding, uv, uvDdx, uvDdy, ctx.positionCS);");
+                    else
+                        sb.AppendLine("    const VividSurfaceSampleContext sampleCtx = VividCreateSurfaceSampleContextGrad(binding, uv, uvDdx, uvDdy);");
+                    sb.Append("    return ").Append(sampleFn).AppendLine("(binding, sampleCtx);");
+                    sb.AppendLine("}");
+                }
+            }
+
+            sb.AppendLine("#ifndef VIVID_SLAB_PARAM");
+            sb.AppendLine("#define VIVID_SLAB_PARAM(ctx, propName) VividLoadSlabParam_##propName((ctx).parameterAddress)");
+            sb.AppendLine("#endif");
+            sb.AppendLine("#ifndef VIVID_SLAB_SAMPLE_TEX2D");
+            sb.AppendLine("#define VIVID_SLAB_SAMPLE_TEX2D(ctx, texName, uv) VividSampleSlabTex_##texName((ctx), (uv), (ctx).uv0Ddx, (ctx).uv0Ddy)");
+            sb.AppendLine("#endif");
+            sb.AppendLine("#ifndef VIVID_SLAB_SAMPLE_TEX2D_GRAD");
+            sb.AppendLine("#define VIVID_SLAB_SAMPLE_TEX2D_GRAD(ctx, texName, uv, ddxUv, ddyUv) VividSampleSlabTex_##texName((ctx), (uv), (ddxUv), (ddyUv))");
+            sb.AppendLine("#endif");
+            return sb.ToString().TrimEnd();
+        }
+
         private static string ExtractSubShaderBlock(string templateText)
         {
             Match match = s_SubShaderBlockRegex.Match(templateText);
@@ -520,6 +1052,7 @@ namespace VividRP.Editor.GPUDriven
             string shaderName,
             string linkedGraphPath,
             CompiledMaterialProgram compiledProgram,
+            string reflectedAccessorsBlock,
             string computeEvaluateFunction,
             string userSurfaceHook,
             string userVertexHook,
@@ -573,12 +1106,16 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("float4 _ResolveOutputSize;");
             sb.AppendLine("uint _WriteSubstrateClosureBuffer;");
             sb.AppendLine();
+            // Keep total compute UAV count <= 8 (GBuffer0..3 + SubstrateClosureBuffer + 3 VT feedback UAVs).
+            // Standalone Slab resolve emits hasDiffuseIrradiance = false in the TopLayer header, so
+            // _OutGBuffer4 (DiffuseIrradiance) is never read for these pixels and is omitted here.
             sb.AppendLine("RWTexture2D<float4> _OutGBuffer0;");
             sb.AppendLine("RWTexture2D<float4> _OutGBuffer1;");
             sb.AppendLine("RWTexture2D<float4> _OutGBuffer2;");
             sb.AppendLine("RWTexture2D<float4> _OutGBuffer3;");
-            sb.AppendLine("RWTexture2D<float4> _OutGBuffer4;");
             sb.AppendLine("RWTexture2DArray<uint> _OutSubstrateClosureBuffer;");
+            sb.AppendLine();
+            sb.AppendLine(reflectedAccessorsBlock);
             sb.AppendLine();
             sb.AppendLine(userVertexHook);
             sb.AppendLine();
@@ -713,7 +1250,6 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("        _OutGBuffer1[pixelCoord] = packedSummary.rt1;");
             sb.AppendLine("        _OutGBuffer2[pixelCoord] = packedSummary.rt2;");
             sb.AppendLine("        _OutGBuffer3[pixelCoord] = packedSummary.rt3;");
-            sb.AppendLine("        _OutGBuffer4[pixelCoord] = packedSummary.rt4;");
             sb.AppendLine();
             sb.AppendLine("        if (_WriteSubstrateClosureBuffer != 0u)");
             sb.AppendLine("        {");
@@ -752,13 +1288,15 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("        _OutGBuffer1[pixelCoord] = packedSummary.rt1;");
             sb.AppendLine("        _OutGBuffer2[pixelCoord] = packedSummary.rt2;");
             sb.AppendLine("        _OutGBuffer3[pixelCoord] = packedSummary.rt3;");
-            sb.AppendLine("        _OutGBuffer4[pixelCoord] = packedSummary.rt4;");
             sb.AppendLine();
             sb.AppendLine("        if (_WriteSubstrateClosureBuffer != 0u)");
             sb.AppendLine("        {");
             sb.AppendLine("            uint headerFlags = VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS;");
             sb.AppendLine("            if (any(v2Inputs.core.emissionLuminance * v2Inputs.core.emissionColor > 0.0f))");
             sb.AppendLine("                headerFlags |= VIVID_SUBSTRATE_FLAG_HAS_EMISSION;");
+            sb.AppendLine("            #if defined(VIVID_SLAB_THIN_WALLED_TRANSMISSION)");
+            sb.AppendLine("                headerFlags |= VIVID_SUBSTRATE_FLAG_THIN_WALLED;");
+            sb.AppendLine("            #endif");
             sb.AppendLine("            VividWriteSubstrateOpenPBRV2Single(_OutSubstrateClosureBuffer, pixelCoord, v2Inputs, headerFlags);");
             sb.AppendLine("        }");
             sb.AppendLine("    }");

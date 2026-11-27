@@ -50,6 +50,7 @@ SubShader
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
+        VIVID_SLAB_REFLECTED_ACCESSORS
         VIVID_SLAB_USER_VERTEX_HOOK
         VIVID_SLAB_USER_COVERAGE_HOOK
 
@@ -170,6 +171,7 @@ SubShader
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
+        VIVID_SLAB_REFLECTED_ACCESSORS
         VIVID_SLAB_USER_VERTEX_HOOK
         VIVID_SLAB_USER_COVERAGE_HOOK
 
@@ -300,6 +302,7 @@ SubShader
         uint _WriteSubstrateClosureBuffer;
         RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u5);
 
+        VIVID_SLAB_REFLECTED_ACCESSORS
         VIVID_SLAB_USER_VERTEX_HOOK
         VIVID_SLAB_USER_COVERAGE_HOOK
         VIVID_SLAB_GRAPH_EVALUATE
@@ -500,6 +503,7 @@ SubShader
         uint _WriteSubstrateClosureBuffer;
         RWTexture2DArray<uint> _OutSubstrateClosureBuffer : register(u5);
 
+        VIVID_SLAB_REFLECTED_ACCESSORS
         VIVID_SLAB_USER_VERTEX_HOOK
         VIVID_SLAB_USER_COVERAGE_HOOK
         VIVID_SLAB_GRAPH_EVALUATE
@@ -720,6 +724,7 @@ SubShader
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
+        VIVID_SLAB_REFLECTED_ACCESSORS
         VIVID_SLAB_USER_VERTEX_HOOK
         VIVID_SLAB_USER_COVERAGE_HOOK
 
@@ -875,6 +880,7 @@ SubShader
         StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
         ByteAddressBuffer _SharedIndexBuffer;
 
+        VIVID_SLAB_VISIBILITY_REFLECTED_ACCESSORS
         VIVID_SLAB_USER_VERTEX_HOOK
         VIVID_SLAB_USER_COVERAGE_HOOK
 

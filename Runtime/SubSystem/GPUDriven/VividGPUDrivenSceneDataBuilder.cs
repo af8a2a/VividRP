@@ -1734,7 +1734,10 @@ namespace VividRP.Runtime.GPUDriven
                     MaterialValueType.Texture2D,
                     sampleClass);
 
-                VividSurfaceBindingData resolvedBinding = fallbackSurfaceBinding;
+                VividSurfaceBindingData resolvedBinding =
+                    slot.DefaultTexture == VividSlabDefaultTextureKind.InheritFallback
+                        ? fallbackSurfaceBinding
+                        : default;
                 float4 tilingOffset = materialData.TextureTilingOffset;
 
                 if (overrideProxy != null

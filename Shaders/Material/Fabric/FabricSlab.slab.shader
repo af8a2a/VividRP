@@ -123,86 +123,64 @@ Shader "VividRP/Material/FabricSlab"
 
         float3 normalTS = float3(0.0f, 0.0f, 1.0f);
 
-        #if defined(VIVID_SLAB_TARGET_RASTER)
-            float2 baseUv = ctx.uv0 * _BaseMap_ST.xy + _BaseMap_ST.zw;
-            float4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUv);
-            float4 maskSample = SAMPLE_TEXTURE2D(_MaskMap, sampler_MaskMap, baseUv);
-            float4 packedNormal = SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, baseUv);
-            float3 emissionSample = SAMPLE_TEXTURE2D(_EmissionMap, sampler_EmissionMap, baseUv).rgb;
+        float4 baseMapST = VIVID_SLAB_PARAM(ctx, _BaseMap_ST);
+        float2 baseUv = ctx.uv0 * baseMapST.xy + baseMapST.zw;
+        float4 baseSample = VIVID_SLAB_SAMPLE_TEX2D(ctx, _BaseMap, baseUv);
+        float4 maskSample = VIVID_SLAB_SAMPLE_TEX2D(ctx, _MaskMap, baseUv);
+        float4 packedNormal = VIVID_SLAB_SAMPLE_TEX2D(ctx, _BumpMap, baseUv);
+        float3 emissionSample = VIVID_SLAB_SAMPLE_TEX2D(ctx, _EmissionMap, baseUv).rgb;
 
-            normalTS = UnpackNormalScale(packedNormal, _BumpScale);
+        normalTS = UnpackNormalScale(packedNormal, VIVID_SLAB_PARAM(ctx, _BumpScale));
 
-            fp.fabricType = _FabricType > 0.5f ? VIVID_FABRIC_TYPE_SILK : VIVID_FABRIC_TYPE_COTTON_WOOL;
-            fp.baseColor = saturate(baseSample.rgb * _BaseColor.rgb);
-            fp.sheenColor = saturate(_SheenColor.rgb);
-            fp.smoothness = saturate(_Smoothness * maskSample.a);
-            fp.diffuseRoughness = saturate(_DiffuseRoughness);
-            fp.fuzzWeight = saturate(_FuzzWeight * maskSample.g);
-            fp.fuzzRoughness = clamp(_FuzzRoughness, 0.10f, 1.0f);
-            fp.anisotropy = clamp(_Anisotropy, -1.0f, 1.0f);
-            fp.anisotropyRotation = _AnisotropyRotation;
-            fp.silkSpecularBoost = saturate(_SilkSpecularBoost);
-            fp.ambientOcclusion = lerp(1.0f, saturate(maskSample.r), saturate(_OcclusionStrength));
-            fp.emission = max(emissionSample * _EmissionColor.rgb, 0.0f.xxx);
+        fp.fabricType = VIVID_SLAB_PARAM(ctx, _FabricType) > 0.5f ? VIVID_FABRIC_TYPE_SILK : VIVID_FABRIC_TYPE_COTTON_WOOL;
+        fp.baseColor = saturate(baseSample.rgb * VIVID_SLAB_PARAM(ctx, _BaseColor).rgb);
+        fp.sheenColor = saturate(VIVID_SLAB_PARAM(ctx, _SheenColor).rgb);
+        fp.smoothness = saturate(VIVID_SLAB_PARAM(ctx, _Smoothness) * maskSample.a);
+        fp.diffuseRoughness = saturate(VIVID_SLAB_PARAM(ctx, _DiffuseRoughness));
+        fp.fuzzWeight = saturate(VIVID_SLAB_PARAM(ctx, _FuzzWeight) * maskSample.g);
+        fp.fuzzRoughness = clamp(VIVID_SLAB_PARAM(ctx, _FuzzRoughness), 0.10f, 1.0f);
+        fp.anisotropy = clamp(VIVID_SLAB_PARAM(ctx, _Anisotropy), -1.0f, 1.0f);
+        fp.anisotropyRotation = VIVID_SLAB_PARAM(ctx, _AnisotropyRotation);
+        fp.silkSpecularBoost = saturate(VIVID_SLAB_PARAM(ctx, _SilkSpecularBoost));
+        fp.ambientOcclusion = lerp(1.0f, saturate(maskSample.r), saturate(VIVID_SLAB_PARAM(ctx, _OcclusionStrength)));
+        fp.emission = max(emissionSample * VIVID_SLAB_PARAM(ctx, _EmissionColor).rgb, 0.0f.xxx);
 
-            if (_UseThreadMap > 0.5f)
-            {
-                float2 threadUv = ctx.uv0 * _ThreadMap_ST.xy + _ThreadMap_ST.zw;
-                float4 threadSample = SAMPLE_TEXTURE2D(_ThreadMap, sampler_ThreadMap, threadUv);
-                VividApplyFabricThreadMap(
-                    threadSample,
-                    _ThreadAOStrength,
-                    _ThreadNormalStrength,
-                    _ThreadSmoothnessScale,
-                    normalTS,
-                    fp.smoothness,
-                    fp.ambientOcclusion);
-            }
-            else if (_UseProceduralWeave > 0.5f)
-            {
-                VividApplyProceduralFabricWeave(
-                    ctx,
-                    fp.fabricType,
-                    _ProceduralWeaveScale,
-                    _ProceduralWeaveStrength,
-                    normalTS,
-                    fp.baseColor,
-                    fp.smoothness,
-                    fp.ambientOcclusion);
-            }
-
-            if (_UseFuzzMap > 0.5f && _FuzzDetailStrength > 1e-4f)
-            {
-                float2 fuzzUv = ctx.uv0 * max(_FuzzMapUVScale, 0.01f);
-                float fuzzDetail = SAMPLE_TEXTURE2D(_FuzzMap, sampler_FuzzMap, fuzzUv).r;
-                float fuzzMod = lerp(1.0f, lerp(0.65f, 1.25f, saturate(fuzzDetail)), saturate(_FuzzDetailStrength));
-                fp.baseColor = saturate(fp.baseColor * fuzzMod);
-                fp.fuzzWeight = saturate(fp.fuzzWeight * lerp(1.0f, saturate(fuzzDetail + 0.35f), saturate(_FuzzDetailStrength)));
-            }
-        #else
-            // GPUDriven Compute target: consume per-instance VividMaterialData base albedo/roughness/emission
-            // with procedural woven CottonWool fabric defaults (zero switch divergence).
-            const VividMaterialData matData = PullMaterialData(ctx.materialIndex);
-            fp.fabricType = VIVID_FABRIC_TYPE_COTTON_WOOL;
-            fp.baseColor = saturate(matData.AlbedoColor.rgb);
-            fp.sheenColor = saturate(lerp(fp.baseColor, 1.0f.xxx, 0.35f));
-            fp.smoothness = saturate(1.0f - saturate(matData.Roughness));
-            fp.diffuseRoughness = 0.85f;
-            fp.fuzzWeight = 0.65f;
-            fp.fuzzRoughness = 0.55f;
-            fp.ambientOcclusion = 1.0f;
-            fp.emission = max(matData.Emission.rgb, 0.0f.xxx);
-
+        if (VIVID_SLAB_PARAM(ctx, _UseThreadMap) > 0.5f)
+        {
+            float4 threadMapST = VIVID_SLAB_PARAM(ctx, _ThreadMap_ST);
+            float2 threadUv = ctx.uv0 * threadMapST.xy + threadMapST.zw;
+            float4 threadSample = VIVID_SLAB_SAMPLE_TEX2D(ctx, _ThreadMap, threadUv);
+            VividApplyFabricThreadMap(
+                threadSample,
+                VIVID_SLAB_PARAM(ctx, _ThreadAOStrength),
+                VIVID_SLAB_PARAM(ctx, _ThreadNormalStrength),
+                VIVID_SLAB_PARAM(ctx, _ThreadSmoothnessScale),
+                normalTS,
+                fp.smoothness,
+                fp.ambientOcclusion);
+        }
+        else if (VIVID_SLAB_PARAM(ctx, _UseProceduralWeave) > 0.5f)
+        {
             VividApplyProceduralFabricWeave(
                 ctx,
                 fp.fabricType,
-                72.0f,
-                0.35f,
+                VIVID_SLAB_PARAM(ctx, _ProceduralWeaveScale),
+                VIVID_SLAB_PARAM(ctx, _ProceduralWeaveStrength),
                 normalTS,
                 fp.baseColor,
                 fp.smoothness,
                 fp.ambientOcclusion);
-        #endif
+        }
+
+        float fuzzDetailStrength = VIVID_SLAB_PARAM(ctx, _FuzzDetailStrength);
+        if (VIVID_SLAB_PARAM(ctx, _UseFuzzMap) > 0.5f && fuzzDetailStrength > 1e-4f)
+        {
+            float2 fuzzUv = ctx.uv0 * max(VIVID_SLAB_PARAM(ctx, _FuzzMapUVScale), 0.01f);
+            float fuzzDetail = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FuzzMap, fuzzUv).r;
+            float fuzzMod = lerp(1.0f, lerp(0.65f, 1.25f, saturate(fuzzDetail)), saturate(fuzzDetailStrength));
+            fp.baseColor = saturate(fp.baseColor * fuzzMod);
+            fp.fuzzWeight = saturate(fp.fuzzWeight * lerp(1.0f, saturate(fuzzDetail + 0.35f), saturate(fuzzDetailStrength)));
+        }
 
         float3 normalWS = geomNormalWS;
         if (tangentLenSq > 1e-8f)

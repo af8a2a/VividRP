@@ -49,7 +49,7 @@ namespace VividRP.Editor.GPUDriven
     /// </list>
     /// Automatically reimports when linked <c>.vmatg</c> MaterialGraphs or base templates change.
     /// </summary>
-    [ScriptedImporter(5, Extension)]
+    [ScriptedImporter(6, Extension)]
     internal sealed class VividSlabShaderImporter : ScriptedImporter
     {
         internal const string Extension = "slab.shader";

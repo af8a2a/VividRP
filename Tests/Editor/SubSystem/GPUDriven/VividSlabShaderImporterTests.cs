@@ -220,6 +220,85 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Assemble_SubstrateOpaqueTemplate_WiresFragmentInstancingAndMotionVectorsWithWpoAndCoverage()
+        {
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            const string instancedWpoSource =
+                "// @vivid-base \"Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template\"\n"
+                + "Shader \"VividRP/Material/TestInstancedMotion\"\n"
+                + "{\n"
+                + "    Properties { _FurLength(\"Fur Length\", Float) = 0.05 }\n"
+                + "    // @vivid-cbuffer-begin\n"
+                + "    float _FurLength;\n"
+                + "    // @vivid-cbuffer-end\n"
+                + "    // @vivid-instancing-begin\n"
+                + "    UNITY_INSTANCING_BUFFER_START(Props)\n"
+                + "        UNITY_DEFINE_INSTANCED_PROP(float, _ShellHeight)\n"
+                + "    UNITY_INSTANCING_BUFFER_END(Props)\n"
+                + "    // @vivid-instancing-end\n"
+                + "    // @vivid-vertex-begin\n"
+                + "    #define VIVID_SLAB_HAS_VERTEX_OFFSET 1\n"
+                + "    float3 VividSlabEvaluateVertexOffset(const VividSlabVertexContext ctx)\n"
+                + "    {\n"
+                + "        #if defined(VIVID_SLAB_TARGET_RASTER)\n"
+                + "            float h = UNITY_ACCESS_INSTANCED_PROP(Props, _ShellHeight);\n"
+                + "            return ctx.normalWS * (h * _FurLength);\n"
+                + "        #else\n"
+                + "            return 0.0f.xxx;\n"
+                + "        #endif\n"
+                + "    }\n"
+                + "    // @vivid-vertex-end\n"
+                + "    // @vivid-coverage-begin\n"
+                + "    #define VIVID_SLAB_HAS_CUSTOM_COVERAGE 1\n"
+                + "    void VividSlabEvaluateCoverage(const VividSlabEvalContext ctx, out float alpha, out float cutoff)\n"
+                + "    {\n"
+                + "        #if defined(VIVID_SLAB_TARGET_RASTER)\n"
+                + "            float h = UNITY_ACCESS_INSTANCED_PROP(Props, _ShellHeight);\n"
+                + "            alpha = 1.0f - h;\n"
+                + "            cutoff = 0.5f;\n"
+                + "        #else\n"
+                + "            alpha = 1.0f;\n"
+                + "            cutoff = 0.0f;\n"
+                + "        #endif\n"
+                + "    }\n"
+                + "    // @vivid-coverage-end\n"
+                + "    VIVID_SLAB_USE_BASE_SUBSHADER\n"
+                + "}\n";
+
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                "TestInstancedMotion.slab.shader",
+                instancedWpoSource,
+                templatePath,
+                File.ReadAllText(templatePath),
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.HasVertexOffset, Is.True);
+            Assert.That(assembled.HasCustomCoverage, Is.True);
+
+            // Fragment instancing + user instancing buffer wired across Raster passes.
+            StringAssert.Contains("UNITY_INSTANCING_BUFFER_START(Props)", assembled.RasterShaderSource);
+            StringAssert.Contains("UNITY_TRANSFER_INSTANCE_ID(input, o);", assembled.RasterShaderSource);
+            StringAssert.Contains("UNITY_SETUP_INSTANCE_ID(input);", assembled.RasterShaderSource);
+            StringAssert.DoesNotContain(VividSlabShaderAssembler.UserInstancingToken, assembled.RasterShaderSource);
+
+            // MotionVectors pass present with WPO, previous-WPO hook, coverage clip, and VividRP velocity encoding.
+            StringAssert.Contains("Name \"MotionVectors\"", assembled.RasterShaderSource);
+            StringAssert.Contains("Tags { \"LightMode\" = \"MotionVectors\" }", assembled.RasterShaderSource);
+            StringAssert.Contains("VertSlabMotion", assembled.RasterShaderSource);
+            StringAssert.Contains("FragSlabMotion", assembled.RasterShaderSource);
+            StringAssert.Contains("VIVID_SLAB_HAS_PREV_VERTEX_OFFSET", assembled.RasterShaderSource);
+            StringAssert.Contains("EncodeMotionVectorFromCsPositions(", assembled.RasterShaderSource);
+            StringAssert.Contains("EncodeCameraMotionVectorFromCsPositions(", assembled.RasterShaderSource);
+
+            // Standalone GPUDriven Compute must not receive Raster-only UNITY_INSTANCING_BUFFER declarations.
+            StringAssert.DoesNotContain("UNITY_INSTANCING_BUFFER_START", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+        }
+
+        [Test]
         public void DynamicSlabProgramRegistration_PacksLanesAndRequiresSubstrateBuffer_ZeroAllocation()
         {
             VividSlabProgramDescriptor descriptor = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();

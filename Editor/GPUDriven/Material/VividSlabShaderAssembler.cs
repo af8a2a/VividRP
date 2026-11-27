@@ -72,6 +72,7 @@ namespace VividRP.Editor.GPUDriven
         internal const string GraphTexturesToken = "VIVID_SLAB_GRAPH_TEXTURES";
         internal const string GraphEvaluateToken = "VIVID_SLAB_GRAPH_EVALUATE";
         internal const string UserCBufferToken = "VIVID_SLAB_USER_CBUFFER";
+        internal const string UserInstancingToken = "VIVID_SLAB_USER_INSTANCING";
         internal const string UserTexturesToken = "VIVID_SLAB_USER_TEXTURES";
         internal const string UserSurfaceHookToken = "VIVID_SLAB_USER_SURFACE_HOOK";
         internal const string UserVertexHookToken = "VIVID_SLAB_USER_VERTEX_HOOK";
@@ -113,6 +114,10 @@ namespace VividRP.Editor.GPUDriven
 
         private static readonly Regex s_UserCBufferRegex = new(
             @"^[ \t]*//[ \t]*@vivid-cbuffer-begin[ \t]*\n([\s\S]*?)^[ \t]*//[ \t]*@vivid-cbuffer-end[ \t]*$",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
+        private static readonly Regex s_UserInstancingRegex = new(
+            @"^[ \t]*//[ \t]*@vivid-instancing-begin[ \t]*\n([\s\S]*?)^[ \t]*//[ \t]*@vivid-instancing-end[ \t]*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
         private static readonly Regex s_UserTexturesRegex = new(
@@ -217,6 +222,11 @@ namespace VividRP.Editor.GPUDriven
                 s_UserCBufferRegex,
                 normalizedSourcePath,
                 out _);
+            string userInstancing = ExtractAndStripBlock(
+                ref normalizedSource,
+                s_UserInstancingRegex,
+                normalizedSourcePath,
+                out _);
             string userTextures = ExtractAndStripBlock(
                 ref normalizedSource,
                 s_UserTexturesRegex,
@@ -289,6 +299,7 @@ namespace VividRP.Editor.GPUDriven
             rasterText = rasterText.Replace(GraphPropertiesToken, propertiesBlock);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphCBufferToken, rasterCBufferBlock, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserCBufferToken, userCBuffer, normalizedSourcePath);
+            rasterText = ReplaceTokenWithLineAnchor(rasterText, UserInstancingToken, userInstancing, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphTexturesToken, rasterTexturesBlock, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserTexturesToken, userTextures, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphEvaluateToken, rasterEvaluateBlock, normalizedSourcePath);

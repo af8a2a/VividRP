@@ -3,11 +3,12 @@
 //   // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template"
 //
 // Expands:
-//   1. VividPreDepth (with optional @vivid-vertex-begin WPO & @vivid-coverage-begin AlphaClip)
-//   2. ShadowCaster  (with optional WPO & AlphaClip)
+//   1. VividPreDepth (with optional @vivid-vertex-begin WPO, @vivid-coverage-begin AlphaClip, & fragment instancing)
+//   2. ShadowCaster  (with optional WPO, AlphaClip, & fragment instancing)
 //   3. VividGBuffer  (Single-Closure Tier 1/2 OR Multi-Closure Tier 3 Substrate UAV u5 + TopLayer Summary)
 //   4. VividGBufferGPUDrivenDecal (Clustered GPUDriven Decal pass -> Substrate UAV u5 + TopLayer Summary)
-//   5. VividVisibilityRaster (GPUDriven Programmable VisibilityBuffer raster for custom WPO / AlphaClip)
+//   5. MotionVectors (Per-object + WPO/Prev-WPO + Coverage motion vectors for TAA & temporal passes)
+//   6. VividVisibilityRaster (GPUDriven Programmable VisibilityBuffer raster for custom WPO / AlphaClip)
 SubShader
 {
     Tags
@@ -45,6 +46,7 @@ SubShader
             VIVID_SLAB_USER_CBUFFER
         CBUFFER_END
 
+        VIVID_SLAB_USER_INSTANCING
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
@@ -67,12 +69,14 @@ SubShader
             float3 normalWS : TEXCOORD1;
             float4 tangentWS : TEXCOORD2;
             float2 uv0 : TEXCOORD3;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
         Varyings VertSlabDepth(Attributes input)
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
+            UNITY_TRANSFER_INSTANCE_ID(input, o);
             float3 positionWS = TransformObjectToWorld(input.positionOS);
             float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
             #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
@@ -101,6 +105,7 @@ SubShader
 
         void FragSlabDepth(Varyings input)
         {
+            UNITY_SETUP_INSTANCE_ID(input);
             #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
             {
                 VividSlabEvalContext ctx;
@@ -154,6 +159,7 @@ SubShader
             VIVID_SLAB_USER_CBUFFER
         CBUFFER_END
 
+        VIVID_SLAB_USER_INSTANCING
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
@@ -176,12 +182,14 @@ SubShader
             float3 normalWS : TEXCOORD1;
             float4 tangentWS : TEXCOORD2;
             float2 uv0 : TEXCOORD3;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
         Varyings VertSlabShadow(Attributes input)
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
+            UNITY_TRANSFER_INSTANCE_ID(input, o);
             float3 positionWS = TransformObjectToWorld(input.positionOS);
             float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
             #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
@@ -210,6 +218,7 @@ SubShader
 
         void FragSlabShadow(Varyings input)
         {
+            UNITY_SETUP_INSTANCE_ID(input);
             #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
             {
                 VividSlabEvalContext ctx;
@@ -265,6 +274,7 @@ SubShader
             VIVID_SLAB_USER_CBUFFER
         CBUFFER_END
 
+        VIVID_SLAB_USER_INSTANCING
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
@@ -292,12 +302,14 @@ SubShader
             float3 normalWS : TEXCOORD1;
             float4 tangentWS : TEXCOORD2;
             float2 uv0 : TEXCOORD3;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
         Varyings VertSlabGBuffer(Attributes input)
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
+            UNITY_TRANSFER_INSTANCE_ID(input, o);
             float3 positionWS = TransformObjectToWorld(input.positionOS);
             float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
             #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
@@ -329,6 +341,7 @@ SubShader
             Varyings input,
             FRONT_FACE_TYPE frontFace : FRONT_FACE_SEMANTIC)
         {
+            UNITY_SETUP_INSTANCE_ID(input);
             float normalFlipSign = IS_FRONT_VFACE(frontFace, 1.0f, -1.0f);
             VividSlabEvalContext ctx;
             ctx.uv0 = input.uv0;
@@ -458,6 +471,7 @@ SubShader
             VIVID_SLAB_USER_CBUFFER
         CBUFFER_END
 
+        VIVID_SLAB_USER_INSTANCING
         VIVID_SLAB_GRAPH_TEXTURES
         VIVID_SLAB_USER_TEXTURES
 
@@ -485,12 +499,14 @@ SubShader
             float3 normalWS : TEXCOORD1;
             float4 tangentWS : TEXCOORD2;
             float2 uv0 : TEXCOORD3;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
         Varyings VertSlabGBufferDecal(Attributes input)
         {
             Varyings o;
             UNITY_SETUP_INSTANCE_ID(input);
+            UNITY_TRANSFER_INSTANCE_ID(input, o);
             float3 positionWS = TransformObjectToWorld(input.positionOS);
             float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
             #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
@@ -522,6 +538,7 @@ SubShader
             Varyings input,
             FRONT_FACE_TYPE frontFace : FRONT_FACE_SEMANTIC)
         {
+            UNITY_SETUP_INSTANCE_ID(input);
             float normalFlipSign = IS_FRONT_VFACE(frontFace, 1.0f, -1.0f);
             VividSlabEvalContext ctx;
             ctx.uv0 = input.uv0;
@@ -634,6 +651,163 @@ SubShader
                 return VividPackSurfaceSummaryGBuffer(summary);
             }
             #endif
+        }
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "MotionVectors"
+        Tags { "LightMode" = "MotionVectors" }
+
+        ColorMask RGBA
+        ZWrite On
+        ZTest LEqual
+        Cull [_Cull]
+        Stencil
+        {
+            WriteMask 32
+            Ref 32
+            Comp Always
+            Pass Replace
+        }
+
+        HLSLPROGRAM
+        #pragma use_dxc
+        #pragma multi_compile_instancing
+        #pragma vertex VertSlabMotion
+        #pragma fragment FragSlabMotion
+
+        #define VIVID_SLAB_TARGET_RASTER 1
+        #define VIVIDRP_SHADERPASS_MOTION_VECTORS 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+        #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+
+        CBUFFER_START(UnityPerMaterial)
+            VIVID_SLAB_GRAPH_CBUFFER
+            VIVID_SLAB_USER_CBUFFER
+        CBUFFER_END
+
+        VIVID_SLAB_USER_INSTANCING
+        VIVID_SLAB_GRAPH_TEXTURES
+        VIVID_SLAB_USER_TEXTURES
+
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
+
+        struct Attributes
+        {
+            float3 positionOS : POSITION;
+            float3 normalOS : NORMAL;
+            float4 tangentOS : TANGENT;
+            float2 uv0 : TEXCOORD0;
+            float3 previousPositionOS : TEXCOORD4;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
+        };
+
+        struct Varyings
+        {
+            float4 positionCS : SV_POSITION;
+            float3 positionWS : TEXCOORD0;
+            float3 normalWS : TEXCOORD1;
+            float4 tangentWS : TEXCOORD2;
+            float2 uv0 : TEXCOORD3;
+            float4 positionCSNoJitter : TEXCOORD4;
+            float4 previousPositionCSNoJitter : TEXCOORD5;
+            float objectMotion : TEXCOORD6;
+            UNITY_VERTEX_INPUT_INSTANCE_ID
+        };
+
+        Varyings VertSlabMotion(Attributes input)
+        {
+            Varyings o;
+            UNITY_SETUP_INSTANCE_ID(input);
+            UNITY_TRANSFER_INSTANCE_ID(input, o);
+
+            float3 positionWS = TransformObjectToWorld(input.positionOS);
+            float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
+
+            float3 previousPositionOS = unity_MotionVectorsParams.x == 1.0
+                ? input.previousPositionOS
+                : input.positionOS;
+            float3 prevPositionWS = mul(UNITY_PREV_MATRIX_M, float4(previousPositionOS, 1.0f)).xyz;
+            float3 prevNormalWS = SafeNormalize(mul((float3x3)UNITY_PREV_MATRIX_M, input.normalOS));
+
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                VividSlabVertexContext vctx;
+                vctx.positionOS = input.positionOS;
+                vctx.positionWS = positionWS;
+                vctx.normalOS = input.normalOS;
+                vctx.normalWS = normalWS;
+                vctx.uv0 = input.uv0;
+                vctx.parameterAddress = 0u;
+                vctx.resourceAddress = 0u;
+                vctx.materialIndex = 0u;
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+
+                VividSlabVertexContext prevVctx;
+                prevVctx.positionOS = previousPositionOS;
+                prevVctx.positionWS = prevPositionWS;
+                prevVctx.normalOS = input.normalOS;
+                prevVctx.normalWS = prevNormalWS;
+                prevVctx.uv0 = input.uv0;
+                prevVctx.parameterAddress = 0u;
+                prevVctx.resourceAddress = 0u;
+                prevVctx.materialIndex = 0u;
+                #if defined(VIVID_SLAB_HAS_PREV_VERTEX_OFFSET)
+                    prevPositionWS += VividSlabEvaluatePreviousVertexOffset(prevVctx);
+                #else
+                    prevPositionWS += VividSlabEvaluateVertexOffset(prevVctx);
+                #endif
+            }
+            #endif
+
+            o.positionWS = positionWS;
+            o.positionCS = TransformWorldToHClip(positionWS);
+            o.normalWS = normalWS;
+            o.tangentWS = float4(
+                TransformObjectToWorldDir(input.tangentOS.xyz),
+                input.tangentOS.w * GetOddNegativeScale());
+            o.uv0 = input.uv0;
+            o.positionCSNoJitter = mul(_NonJitteredViewProjMatrix, float4(positionWS, 1.0f));
+            o.previousPositionCSNoJitter = mul(_PrevViewProjMatrix, float4(prevPositionWS, 1.0f));
+            o.objectMotion = any(abs(positionWS - prevPositionWS) > 1e-5f) ? 1.0f : 0.0f;
+            return o;
+        }
+
+        float4 FragSlabMotion(Varyings input) : SV_Target
+        {
+            UNITY_SETUP_INSTANCE_ID(input);
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                VividSlabEvalContext ctx;
+                ctx.uv0 = input.uv0;
+                ctx.uv0Ddx = ddx(input.uv0);
+                ctx.uv0Ddy = ddy(input.uv0);
+                ctx.geometryNormalWS = SafeNormalize(input.normalWS);
+                ctx.geometryTangentWS = float4(
+                    SafeNormalize(input.tangentWS.xyz),
+                    input.tangentWS.w);
+                ctx.positionWS = input.positionWS;
+                ctx.positionCS = input.positionCS;
+                ctx.parameterAddress = 0u;
+                ctx.resourceAddress = 0u;
+                ctx.materialIndex = 0u;
+
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
+            #endif
+
+            return input.objectMotion > 0.0f
+                ? EncodeMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter)
+                : EncodeCameraMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter);
         }
         ENDHLSL
     }

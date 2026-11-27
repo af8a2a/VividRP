@@ -66,6 +66,9 @@ namespace VividRP.Runtime.GPUDriven
         [SerializeField]
         private bool m_TakeOverSourceRenderer = true;
 
+        [SerializeField, Min(0.0f), Tooltip("Extra world-space bounds padding (meters) for World Position Offset / vertex displacement materials. Combines via max with any @vivid-wpo-padding declared on assigned materials.")]
+        private float m_WorldPositionOffsetPadding;
+
         private RendererTrackingDirtyFlags m_TrackingDirtyFlags = RendererTrackingDirtyFlags.All;
 
         [NonSerialized]
@@ -122,6 +125,39 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<GPUDrivenMaterialProxy> materialProxies => m_MaterialProxies;
 
         public bool takeOverSourceRenderer => m_TakeOverSourceRenderer;
+
+        public float worldPositionOffsetPadding => float.IsFinite(m_WorldPositionOffsetPadding)
+            ? Mathf.Max(0.0f, m_WorldPositionOffsetPadding)
+            : 0.0f;
+
+        public bool SetWorldPositionOffsetPadding(float padding)
+        {
+            float sanitized = float.IsFinite(padding) ? Mathf.Max(0.0f, padding) : 0.0f;
+            if (Mathf.Approximately(m_WorldPositionOffsetPadding, sanitized))
+                return false;
+
+            m_WorldPositionOffsetPadding = sanitized;
+            MarkRenderDataDirty();
+            return true;
+        }
+
+        internal float ComputeEffectiveWorldPositionOffsetPadding()
+        {
+            float padding = worldPositionOffsetPadding;
+            if (m_SourceMaterials != null)
+            {
+                for (int i = 0; i < m_SourceMaterials.Length; i++)
+                {
+                    Material mat = m_SourceMaterials[i];
+                    if (mat == null)
+                        continue;
+                    float matPad = VividSlabProgramDescriptor.ResolveMaterialWorldPositionOffsetPadding(mat);
+                    if (matPad > padding)
+                        padding = matPad;
+                }
+            }
+            return padding;
+        }
 
         public int subMeshCount => m_SourceMesh != null ? Mathf.Max(1, m_SourceMesh.subMeshCount) : 0;
 

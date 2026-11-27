@@ -1,4 +1,5 @@
 // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template"
+// @vivid-wpo-padding _FurLength + _GravityStrength + _WindStrength + 0.02
 //
 // VividRP Shell-Based Fur Material (.slab.shader, Phase 1 Raster Vertical Slice).
 // Driven via DrawMeshInstanced / RenderMeshInstanced with per-instance _ShellHeight in [0, 1]:

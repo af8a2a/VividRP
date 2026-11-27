@@ -225,6 +225,14 @@ bool VSMHZBOccluded(VividMeshletRenderRequestPacked request, uint level, bool pr
         length(transform[1].xyz), length(transform[2].xyz)) : float3(
         dot(abs(transform[0].xyz), bounds.extent), dot(abs(transform[1].xyz), bounds.extent),
         dot(abs(transform[2].xyz), bounds.extent));
+    float wpoPadWS = VividGetInstanceWpoPaddingWS(instance);
+    if (wpoPadWS > 0.0)
+    {
+        support += wpoPadWS * float3(
+            length(projection[0].xyz),
+            length(projection[1].xyz),
+            length(projection[2].xyz));
+    }
     float3 magnitude = float3(dot(abs(transform[0].xyz), abs(bounds.center)) + abs(transform[0].w),
         dot(abs(transform[1].xyz), abs(bounds.center)) + abs(transform[1].w),
         dot(abs(transform[2].xyz), abs(bounds.center)) + abs(transform[2].w)) + support;

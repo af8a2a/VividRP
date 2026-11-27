@@ -52,6 +52,7 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
     const VividMeshletListBuildJob job = _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + groupID.x];
     const VividInstanceData instanceData = PullInstanceData(job.InstanceID);
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
+    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
 
     const uint baseNodeIndex = instanceData.TopMeshLODStartIndex + job.MeshLODNodeOffset;
 
@@ -97,11 +98,13 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
         VividVSMLocalBounds bounds = VividVSMLoadLodBounds(nodeIndex, meshLODNode.Bounds);
         if (!VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, bounds.center,
             bounds.extent, bounds.radius, bounds.sphere,
-            mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) continue;
+            mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix),
+            wpoPadWS)) continue;
 #else
         // Reject selected node bounds before expanding meshlets and reserving requests.
-        if (!VividVSMCasterSphereOverlaps(cullingContextIndex,
-                TransformSphere(meshLODNode.Bounds, instanceData.ObjectToWorldMatrix))) continue;
+        float4 nodeSphereWS = TransformSphere(meshLODNode.Bounds, instanceData.ObjectToWorldMatrix);
+        nodeSphereWS.w += wpoPadWS;
+        if (!VividVSMCasterSphereOverlaps(cullingContextIndex, nodeSphereWS)) continue;
 #endif
 #endif
 

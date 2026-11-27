@@ -429,15 +429,18 @@ bool GetVSMPageRange(
         sourceRequest.InstanceID_LOD);
     const VividDecodedMeshlet meshlet = PullMeshletData(
         sourceRequest.MeshletID);
-    const float4 sphereWS = TransformSphere(
+    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
+    float4 sphereWS = TransformSphere(
         meshlet.BoundingSphere,
         instanceData.ObjectToWorldMatrix);
+    sphereWS.w += wpoPadWS;
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
     VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(sourceRequest.MeshletID, meshlet.BoundingSphere);
-    if (!VividVSMProjectLocalBounds(bounds.center, bounds.extent, bounds.radius, bounds.sphere,
-            mul(_VSMProjections[cascadeIndex].worldToShadow, instanceData.ObjectToWorldMatrix),
+    const float4x4 worldToShadow = _VSMProjections[cascadeIndex].worldToShadow;
+    if (!VividVSMProjectLocalBoundsWpo(bounds.center, bounds.extent, bounds.radius, bounds.sphere,
+            mul(worldToShadow, instanceData.ObjectToWorldMatrix), worldToShadow, wpoPadWS,
             (uint)max(_VSMPrototypeVirtualResolution, 1), minVirtualTexel, maxVirtualTexel)) return false;
 #else
     if (!VividVSMProjectCasterSphere(sphereWS, _VSMProjections[cascadeIndex].worldToShadow,

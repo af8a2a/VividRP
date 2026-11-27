@@ -1,5 +1,6 @@
 // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template"
 // @vivid-graph "Packages/com.vivid.render-pipelines/Runtime/Resources/MaterialGraphs/OpenPBROpaque.vmatg"
+// @vivid-wpo-padding 0.025
 
 Shader "VividRP/Material/Samples/SubstrateMultiClosurePoC"
 {

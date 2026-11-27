@@ -53,6 +53,7 @@ namespace VividRP.Runtime.GPUDriven
         public Matrix4x4 worldToObjectMatrix;
         public Bounds localBounds;
         public Bounds worldBounds;
+        public float worldPositionOffsetPadding;
         internal uint cameraLayerMask;
         public uint renderingLayerMask;
         public uint shaderUserValue;
@@ -615,7 +616,10 @@ namespace VividRP.Runtime.GPUDriven
             Matrix4x4 objectToWorldMatrix = meshletRenderer.transform.localToWorldMatrix;
             Matrix4x4 worldToObjectMatrix = meshletRenderer.transform.worldToLocalMatrix;
             Bounds localBounds = meshletRenderer.localBounds;
+            float wpoPadding = meshletRenderer.ComputeEffectiveWorldPositionOffsetPadding();
             Bounds worldBounds = TransformBounds(localBounds, objectToWorldMatrix);
+            if (wpoPadding > 0.0f)
+                worldBounds.Expand(wpoPadding * 2.0f);
             int materialCount = meshletRenderer.sourceMaterials.Count;
 
             return new VividMeshletRendererRenderData
@@ -627,6 +631,7 @@ namespace VividRP.Runtime.GPUDriven
                 worldToObjectMatrix = worldToObjectMatrix,
                 localBounds = localBounds,
                 worldBounds = worldBounds,
+                worldPositionOffsetPadding = wpoPadding,
                 cameraLayerMask = GetCameraLayerMask(meshletRenderer.gameObject),
                 renderingLayerMask = meshletRenderer.renderingLayerMask,
                 shaderUserValue = meshletRenderer.GetShaderUserValue(),
@@ -683,7 +688,10 @@ namespace VividRP.Runtime.GPUDriven
             trackedData.objectToWorldMatrix = objectToWorldMatrix;
             trackedData.worldToObjectMatrix = worldToObjectMatrix;
             trackedData.localBounds = localBounds;
-            trackedData.worldBounds = TransformBounds(localBounds, objectToWorldMatrix);
+            Bounds worldBounds = TransformBounds(localBounds, objectToWorldMatrix);
+            if (trackedData.worldPositionOffsetPadding > 0.0f)
+                worldBounds.Expand(trackedData.worldPositionOffsetPadding * 2.0f);
+            trackedData.worldBounds = worldBounds;
             return trackedData;
         }
 

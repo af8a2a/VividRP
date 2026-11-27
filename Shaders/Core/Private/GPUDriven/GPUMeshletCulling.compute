@@ -254,17 +254,23 @@ bool TryResolveCulledMeshlet(
         GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
         VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
 
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
     VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(renderRequest.MeshletID, meshlet.BoundingSphere);
-    cullBounds = VividBuildCullBoundsFromCenterExtent(bounds.center,
-        bounds.sphere ? bounds.radius.xxx : bounds.extent, instanceData.ObjectToWorldMatrix);
+    cullBounds = VividExpandCullBoundsWS(
+        VividBuildCullBoundsFromCenterExtent(bounds.center,
+            bounds.sphere ? bounds.radius.xxx : bounds.extent, instanceData.ObjectToWorldMatrix),
+        wpoPadWS);
     if (!VividInstanceFrustumVisible(cullBounds, cullingContext.FrustumPlanes)) return false;
     if (cullBounds.Valid && !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, bounds.center,
             bounds.extent, bounds.radius, bounds.sphere,
-            mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix))) return false;
+            mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix),
+            wpoPadWS)) return false;
 #else
-    cullBounds = VividBuildMeshletCullBounds(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+    cullBounds = VividExpandCullBoundsWS(
+        VividBuildMeshletCullBounds(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix),
+        wpoPadWS);
     if (!VividInstanceFrustumVisible(cullBounds, cullingContext.FrustumPlanes)) return false;
     if (cullBounds.Valid && cullingContext.CullingSphereLS.w > 0.0f)
     {
@@ -276,7 +282,8 @@ bool TryResolveCulledMeshlet(
     // Use the material's local-facing side. GetRendererListID already compensates
     // mirrored winding in raster state; applying that flip to the local cone twice
     // would reject the visible side of reflected instances.
-    if (cullBounds.Valid && (rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
+    // Skip rest-pose cone culling when WPO displacement padding is active.
+    if (cullBounds.Valid && wpoPadWS <= 0.0f && (rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
         !VividMeshletConeVisible(meshlet.BoundingSphere, meshlet.ConeAxis, meshlet.ConeCutoff,
             meshlet.ConeValid != 0u, (materialData.RendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u,
             cullingContext.CameraIsPerspective != 0, cullingContext.CameraPosition.xyz,
@@ -407,8 +414,9 @@ void ExecuteOcclusionTestCulled(const uint3 dispatchThreadID)
     const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
     const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
-    VividInstanceCullBounds cullBounds = VividBuildMeshletCullBounds(
-        meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+    VividInstanceCullBounds cullBounds = VividExpandCullBoundsWS(
+        VividBuildMeshletCullBounds(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix),
+        VividGetInstanceWpoPaddingWS(instanceData));
     if (!IsMeshletVisibleAfterOcclusion(cullBounds))
         return;
 

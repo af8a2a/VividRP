@@ -288,13 +288,20 @@ float4 TransformSphere(const float4 sphereOS, const float4x4 objectToWorldMatrix
     return float4(centerWS, radiusWS);
 }
 
+float VividGetInstanceWpoPaddingWS(const VividInstanceData instanceData)
+{
+    return max(instanceData.AABBMax.w, 0.0f);
+}
+
 float4 ComputeInstanceBoundingSphereWS(const VividInstanceData instanceData)
 {
     const float3 aabbMinOS = instanceData.AABBMin.xyz;
     const float3 aabbMaxOS = instanceData.AABBMax.xyz;
     const float3 centerOS = (aabbMinOS + aabbMaxOS) * 0.5f;
     const float radiusOS = length(aabbMaxOS - centerOS);
-    return TransformSphere(float4(centerOS, radiusOS), instanceData.ObjectToWorldMatrix);
+    float4 sphereWS = TransformSphere(float4(centerOS, radiusOS), instanceData.ObjectToWorldMatrix);
+    sphereWS.w += VividGetInstanceWpoPaddingWS(instanceData);
+    return sphereWS;
 }
 
 bool FrustumVsSphere(const VividGPUCullingContext cullingContext, const float4 sphereWS)

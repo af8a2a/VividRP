@@ -53,6 +53,28 @@ VividInstanceCullBounds VividBuildInstanceCullBounds(float3 boundsMin, float3 bo
     return bounds;
 }
 
+// Conservatively expands a world-space OBB by an isotropic world-space WPO displacement
+// bound (meters). Zero extra work when padWS <= 0; avoids matrix inversion under shear/scale.
+VividInstanceCullBounds VividExpandCullBoundsWS(VividInstanceCullBounds bounds, float padWS)
+{
+    if (!(padWS > 0.0f) || !bounds.Valid)
+        return bounds;
+
+    float3 worldExtent = abs(bounds.AxisX) + abs(bounds.AxisY) + abs(bounds.AxisZ) + padWS.xxx;
+    bounds.AxisX = float3(worldExtent.x, 0.0f, 0.0f);
+    bounds.AxisY = float3(0.0f, worldExtent.y, 0.0f);
+    bounds.AxisZ = float3(0.0f, 0.0f, worldExtent.z);
+    bounds.WorldMagnitude = abs(bounds.CenterWS) + worldExtent;
+    bounds.AxisScale = max(1e-30f, max(worldExtent.x, max(worldExtent.y, worldExtent.z)));
+    bounds.Valid = all(isfinite(worldExtent)) && all(isfinite(bounds.WorldMagnitude))
+        && isfinite(bounds.AxisScale) && bounds.AxisScale < 1e30f;
+    float inverseScale = rcp(bounds.AxisScale);
+    bounds.UnitAxisX = (float16_t3)(bounds.AxisX * inverseScale);
+    bounds.UnitAxisY = (float16_t3)(bounds.AxisY * inverseScale);
+    bounds.UnitAxisZ = (float16_t3)(bounds.AxisZ * inverseScale);
+    return bounds;
+}
+
 bool VividInstanceOutsidePlane(VividInstanceCullBounds bounds, float4 plane)
 {
     float normalMaximum = max(abs(plane.x), max(abs(plane.y), abs(plane.z)));

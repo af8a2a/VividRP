@@ -1088,6 +1088,93 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Assemble_WpoPaddingDirectives_ParseConstantAndPropertyExpressionsWithZeroAllocResolution()
+        {
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            string templateText = File.ReadAllText(templatePath);
+
+            // 1. Constant @vivid-wpo-padding directive on SubstrateMultiClosurePoC.slab.shader
+            string multiPath = VividPackagePathUtility.GetPreferredAssetPath(
+                "Shaders/Material/Samples/SubstrateMultiClosurePoC.slab.shader");
+            VividSlabShaderAssemblyResult multiResult = VividSlabShaderAssembler.Assemble(
+                multiPath,
+                File.ReadAllText(multiPath),
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+            Assert.That(multiResult.Succeeded, Is.True);
+            Assert.That(multiResult.HasVertexOffset, Is.True);
+            Assert.That(multiResult.WorldPositionOffsetPadding, Is.EqualTo(0.025f).Within(1e-5f));
+            Assert.That(multiResult.WorldPositionOffsetPaddingProperties, Is.Empty);
+
+            // 2. Mixed property + constant @vivid-wpo-padding directive on FurSlab.slab.shader
+            string furPath = VividPackagePathUtility.GetPreferredAssetPath(FurSlabRelativePath);
+            VividSlabShaderAssemblyResult furResult = VividSlabShaderAssembler.Assemble(
+                furPath,
+                File.ReadAllText(furPath),
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+            Assert.That(furResult.Succeeded, Is.True);
+            Assert.That(furResult.HasVertexOffset, Is.True);
+            Assert.That(furResult.WorldPositionOffsetPadding, Is.EqualTo(0.02f).Within(1e-5f));
+            Assert.That(furResult.WorldPositionOffsetPaddingProperties, Is.EqualTo(new[]
+            {
+                "_FurLength",
+                "_GravityStrength",
+                "_WindStrength",
+            }));
+
+            var descriptor = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            try
+            {
+                descriptor.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: furResult.ShaderName,
+                    baseTemplateAssetPath: templatePath,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: furResult.EstimatedSubstrateBytesPerPixel,
+                    parameterStrideInWords: furResult.ParameterStrideInWords,
+                    parameters: furResult.ParameterSlots,
+                    resources: furResult.ResourceSlots,
+                    hasLinkedGraphSurface: false,
+                    hasCustomSurfaceHook: true,
+                    sourceContentHash: furResult.SourceContentHash,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>(),
+                    hasCustomCoverage: furResult.HasCustomCoverage,
+                    hasVertexOffset: furResult.HasVertexOffset,
+                    worldPositionOffsetPadding: furResult.WorldPositionOffsetPadding,
+                    worldPositionOffsetPaddingProperties: furResult.WorldPositionOffsetPaddingProperties);
+
+                float expectedDefaultPad = 0.02f
+                    + Mathf.Abs(FindParamSlot(furResult.ParameterSlots, "_FurLength").DefaultValue.x)
+                    + Mathf.Abs(FindParamSlot(furResult.ParameterSlots, "_GravityStrength").DefaultValue.x)
+                    + Mathf.Abs(FindParamSlot(furResult.ParameterSlots, "_WindStrength").DefaultValue.x);
+
+                // Warm up property ID cache before measuring managed allocations.
+                float resolvedPad = 0.0f;
+                for (int w = 0; w < 8; w++)
+                    resolvedPad = descriptor.ResolveWorldPositionOffsetPadding(null);
+                Assert.That(resolvedPad, Is.EqualTo(expectedDefaultPad).Within(1e-5f));
+
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 64; i++)
+                    resolvedPad = descriptor.ResolveWorldPositionOffsetPadding(null);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero, "ResolveWorldPositionOffsetPadding must allocate 0 managed bytes.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(descriptor);
+            }
+        }
+
         private static VividSlabParameterSlot FindParamSlot(VividSlabParameterSlot[] slots, string propName)
         {
             for (int i = 0; i < slots.Length; i++)

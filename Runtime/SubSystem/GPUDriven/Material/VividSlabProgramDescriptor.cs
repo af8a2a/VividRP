@@ -162,6 +162,12 @@ namespace VividRP.Runtime.GPUDriven
         private bool m_HasVertexOffset;
 
         [SerializeField]
+        private float m_WorldPositionOffsetPadding;
+
+        [SerializeField]
+        private string[] m_WorldPositionOffsetPaddingProperties = Array.Empty<string>();
+
+        [SerializeField]
         private uint m_SourceContentHash;
 
         [SerializeField]
@@ -172,6 +178,15 @@ namespace VividRP.Runtime.GPUDriven
 
         [NonSerialized]
         private uint[] m_ScratchWords = Array.Empty<uint>();
+
+        [NonSerialized]
+        private int[] m_WpoPaddingPropertyIds;
+
+        private static readonly int s_MaxWorldPositionOffsetPropertyId =
+            Shader.PropertyToID("_MaxWorldPositionOffset");
+
+        private static readonly int s_WpoMaxDisplacementPropertyId =
+            Shader.PropertyToID("_WPOMaxDisplacement");
 
         public Shader RasterShader => m_RasterShader;
 
@@ -213,6 +228,11 @@ namespace VividRP.Runtime.GPUDriven
 
         public bool HasVertexOffset => m_HasVertexOffset;
 
+        public float WorldPositionOffsetPadding => Mathf.Max(0.0f, m_WorldPositionOffsetPadding);
+
+        public IReadOnlyList<string> WorldPositionOffsetPaddingProperties =>
+            m_WorldPositionOffsetPaddingProperties ?? Array.Empty<string>();
+
         public bool RequiresProgrammableVisibilityRaster =>
             m_HasCustomCoverage || m_HasVertexOffset;
 
@@ -250,7 +270,9 @@ namespace VividRP.Runtime.GPUDriven
             bool isMultiClosure = false,
             int closureCount = 1,
             bool hasCustomCoverage = false,
-            bool hasVertexOffset = false)
+            bool hasVertexOffset = false,
+            float worldPositionOffsetPadding = 0.0f,
+            string[] worldPositionOffsetPaddingProperties = null)
         {
             m_RasterShader = rasterShader;
             m_ResolveComputeShader = resolveComputeShader;
@@ -272,12 +294,124 @@ namespace VividRP.Runtime.GPUDriven
             m_ClosureCount = Mathf.Clamp(closureCount, 1, VividSubstrateContract.MaxClosuresPerPixel);
             m_HasCustomCoverage = hasCustomCoverage;
             m_HasVertexOffset = hasVertexOffset;
+            m_WorldPositionOffsetPadding = float.IsFinite(worldPositionOffsetPadding)
+                ? Mathf.Max(0.0f, worldPositionOffsetPadding)
+                : 0.0f;
+            m_WorldPositionOffsetPaddingProperties = worldPositionOffsetPaddingProperties ?? Array.Empty<string>();
+            m_WpoPaddingPropertyIds = null;
             m_SourceContentHash = sourceContentHash;
             m_HasImportErrors = hasImportErrors;
             m_Diagnostics = diagnostics ?? Array.Empty<string>();
 
             if (m_RasterShader != null)
                 VividSlabProgramRegistry.Register(m_RasterShader, this);
+        }
+
+        /// <summary>
+        /// Evaluates the conservative world-space WPO bounds padding (in meters) for a material
+        /// using this Slab program. Allocates zero managed memory after first call.
+        /// </summary>
+        public float ResolveWorldPositionOffsetPadding(Material sourceMaterial)
+        {
+            float padding = float.IsFinite(m_WorldPositionOffsetPadding)
+                ? Mathf.Max(0.0f, m_WorldPositionOffsetPadding)
+                : 0.0f;
+
+            string[] props = m_WorldPositionOffsetPaddingProperties;
+            if (props != null && props.Length > 0)
+            {
+                if (m_WpoPaddingPropertyIds == null || m_WpoPaddingPropertyIds.Length != props.Length)
+                {
+                    m_WpoPaddingPropertyIds = new int[props.Length];
+                    for (int i = 0; i < props.Length; i++)
+                    {
+                        m_WpoPaddingPropertyIds[i] = !string.IsNullOrEmpty(props[i])
+                            ? Shader.PropertyToID(props[i])
+                            : 0;
+                    }
+                }
+
+                for (int i = 0; i < m_WpoPaddingPropertyIds.Length; i++)
+                {
+                    int propId = m_WpoPaddingPropertyIds[i];
+                    if (propId == 0)
+                        continue;
+
+                    float value = 0.0f;
+                    if (sourceMaterial != null && sourceMaterial.HasProperty(propId))
+                    {
+                        value = sourceMaterial.GetFloat(propId);
+                    }
+                    else
+                    {
+                        value = FindDefaultParameterScalar(propId);
+                    }
+
+                    if (float.IsFinite(value))
+                        padding += Mathf.Abs(value);
+                }
+            }
+
+            if (sourceMaterial != null)
+            {
+                if (sourceMaterial.HasProperty(s_MaxWorldPositionOffsetPropertyId))
+                {
+                    float overridePad = sourceMaterial.GetFloat(s_MaxWorldPositionOffsetPropertyId);
+                    if (float.IsFinite(overridePad) && overridePad > padding)
+                        padding = overridePad;
+                }
+                if (sourceMaterial.HasProperty(s_WpoMaxDisplacementPropertyId))
+                {
+                    float overridePad = sourceMaterial.GetFloat(s_WpoMaxDisplacementPropertyId);
+                    if (float.IsFinite(overridePad) && overridePad > padding)
+                        padding = overridePad;
+                }
+            }
+
+            return float.IsFinite(padding) ? Mathf.Max(0.0f, padding) : 0.0f;
+        }
+
+        public static float ResolveMaterialWorldPositionOffsetPadding(Material sourceMaterial)
+        {
+            if (sourceMaterial == null)
+                return 0.0f;
+
+            if (sourceMaterial.shader != null
+                && VividSlabProgramRegistry.TryGetDescriptor(
+                    sourceMaterial.shader,
+                    out VividSlabProgramDescriptor descriptor)
+                && descriptor != null)
+            {
+                return descriptor.ResolveWorldPositionOffsetPadding(sourceMaterial);
+            }
+
+            float padding = 0.0f;
+            if (sourceMaterial.HasProperty(s_MaxWorldPositionOffsetPropertyId))
+            {
+                float v = sourceMaterial.GetFloat(s_MaxWorldPositionOffsetPropertyId);
+                if (float.IsFinite(v) && v > padding)
+                    padding = v;
+            }
+            if (sourceMaterial.HasProperty(s_WpoMaxDisplacementPropertyId))
+            {
+                float v = sourceMaterial.GetFloat(s_WpoMaxDisplacementPropertyId);
+                if (float.IsFinite(v) && v > padding)
+                    padding = v;
+            }
+            return padding;
+        }
+
+        private float FindDefaultParameterScalar(int propId)
+        {
+            if (m_Parameters == null)
+                return 0.0f;
+
+            for (int i = 0; i < m_Parameters.Length; i++)
+            {
+                if (m_Parameters[i].PropertyId == propId)
+                    return m_Parameters[i].DefaultValue.x;
+            }
+            return 0.0f;
         }
 
         /// <summary>

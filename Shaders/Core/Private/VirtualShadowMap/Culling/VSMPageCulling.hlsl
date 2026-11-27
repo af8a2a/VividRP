@@ -31,12 +31,17 @@ bool VividVSMProjectCasterSphere(float4 sphereWS, float4x4 worldToShadow, uint r
 
 // Project an affine local bound directly into the directional shadow plane.
 // This avoids inflating a nonuniformly scaled sphere into a world-space sphere.
-bool VividVSMProjectLocalBounds(float3 center, float3 extent, float radius, bool sphere,
-    float4x4 localToShadow, uint resolution, out uint2 low, out uint2 high)
+bool VividVSMProjectLocalBoundsWpo(float3 center, float3 extent, float radius, bool sphere,
+    float4x4 localToShadow, float4x4 worldToShadow, float wpoPadWS, uint resolution,
+    out uint2 low, out uint2 high)
 {
     float4 projected = mul(localToShadow, float4(center, 1.0));
     float2 support = sphere ? radius * float2(length(localToShadow[0].xyz), length(localToShadow[1].xyz))
         : float2(dot(abs(localToShadow[0].xyz), extent), dot(abs(localToShadow[1].xyz), extent));
+    if (wpoPadWS > 0.0)
+    {
+        support += wpoPadWS * float2(length(worldToShadow[0].xyz), length(worldToShadow[1].xyz));
+    }
     low = 0u; high = resolution - 1u;
     // Only directional/affine projections are tightened. Invalid bounds or
     // projective transforms conservatively retain the full virtual viewport.
@@ -50,6 +55,12 @@ bool VividVSMProjectLocalBounds(float3 center, float3 extent, float radius, bool
     low = VividVSMUVToVirtualTexel(uv - span, resolution);
     high = VividVSMUVToVirtualTexel(uv + span, resolution);
     return true;
+}
+
+bool VividVSMProjectLocalBounds(float3 center, float3 extent, float radius, bool sphere,
+    float4x4 localToShadow, uint resolution, out uint2 low, out uint2 high)
+{
+    return VividVSMProjectLocalBoundsWpo(center, extent, radius, sphere, localToShadow, (float4x4)0, 0.0, resolution, low, high);
 }
 
 bool VividVSMFrustumVsLocalBounds(float4 planes[6], float3 center, float3 extent,
@@ -129,10 +140,11 @@ bool VividVSMCasterSphereOverlaps(uint level, float4 sphereWS)
 }
 
 bool VividVSMCasterLocalBoundsOverlaps(uint level, float3 center, float3 extent, float radius, bool sphere,
-    float4x4 localToShadow)
+    float4x4 localToShadow, float wpoPadWS = 0.0)
 {
     uint2 low, high;
-    return VividVSMProjectLocalBounds(center, extent, radius, sphere, localToShadow,
+    return VividVSMProjectLocalBoundsWpo(center, extent, radius, sphere, localToShadow,
+        _VSMProjections[level].worldToShadow, wpoPadWS,
         (uint)_VSMCasterCullingParameters.z, low, high) && VividVSMCasterRectOverlaps(level, low, high);
 }
 

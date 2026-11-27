@@ -1001,11 +1001,15 @@ namespace VividRP.Runtime.GPUDriven
                     ? trackedResources.LocalBounds[subMeshIndex]
                     : trackedData.localBounds;
 
+                float wpoPaddingWS = Mathf.Max(
+                    trackedData.worldPositionOffsetPadding,
+                    VividSlabProgramDescriptor.ResolveMaterialWorldPositionOffsetPadding(material));
                 VividInstanceData instanceData = CreateInstanceData(
                     trackedData,
                     materialIndex,
                     meshMetadata,
-                    localBounds);
+                    localBounds,
+                    wpoPaddingWS);
                 sceneData.AddInstance(
                     instanceData,
                     CreateInstanceSourceData(
@@ -2481,15 +2485,19 @@ namespace VividRP.Runtime.GPUDriven
             in VividMeshletRendererRenderData trackedData,
             int materialIndex,
             in MeshletAssetMetadata meshMetadata,
-            in Bounds localBounds
+            in Bounds localBounds,
+            float worldPositionOffsetPaddingWS = 0.0f
         )
         {
+            float wpoPad = float.IsFinite(worldPositionOffsetPaddingWS)
+                ? Mathf.Max(0.0f, worldPositionOffsetPaddingWS)
+                : 0.0f;
             return new VividInstanceData
             {
                 ObjectToWorldMatrix = ToFloat4x4(trackedData.objectToWorldMatrix),
                 WorldToObjectMatrix = ToFloat4x4(trackedData.worldToObjectMatrix),
                 AABBMin = ToFloat4(localBounds.min),
-                AABBMax = ToFloat4(localBounds.max),
+                AABBMax = new float4(localBounds.max.x, localBounds.max.y, localBounds.max.z, wpoPad),
                 TopMeshLODStartIndex = meshMetadata.TopMeshLODStartIndex,
                 TotalMeshLODCount = meshMetadata.TotalMeshLODCount,
                 MaterialIndex = (uint) materialIndex,

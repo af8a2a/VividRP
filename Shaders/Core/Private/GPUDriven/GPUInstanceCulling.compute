@@ -137,13 +137,17 @@ bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint c
     }
     if (overlaps)
     {
-        VividInstanceCullBounds bounds = VividBuildInstanceCullBounds(node.Min.xyz, node.Max.xyz, instance.ObjectToWorldMatrix);
+        const float wpoPadWS = VividGetInstanceWpoPaddingWS(instance);
+        VividInstanceCullBounds bounds = VividExpandCullBoundsWS(
+            VividBuildInstanceCullBounds(node.Min.xyz, node.Max.xyz, instance.ObjectToWorldMatrix),
+            wpoPadWS);
         overlaps = VividInstanceFrustumVisible(bounds, _CullingContexts[contextIndex].FrustumPlanes);
     }
 #else
     if (overlaps)
         overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
-            (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false, localToShadow);
+            (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false,
+            localToShadow, VividGetInstanceWpoPaddingWS(instance));
 #endif
     return overlaps;
 }
@@ -381,15 +385,18 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-    VividInstanceCullBounds bounds = VividBuildInstanceCullBounds(
-        instanceData.AABBMin.xyz, instanceData.AABBMax.xyz, instanceData.ObjectToWorldMatrix);
+    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
+    VividInstanceCullBounds bounds = VividExpandCullBoundsWS(
+        VividBuildInstanceCullBounds(
+            instanceData.AABBMin.xyz, instanceData.AABBMax.xyz, instanceData.ObjectToWorldMatrix),
+        wpoPadWS);
     if (!VividInstanceFrustumVisible(bounds, cullingContext.FrustumPlanes)) return;
 
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
     float3 centerOS = instanceData.AABBMin.xyz * 0.5f + instanceData.AABBMax.xyz * 0.5f;
     float3 extentOS = instanceData.AABBMax.xyz * 0.5f - instanceData.AABBMin.xyz * 0.5f;
     float4x4 localToShadow = mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix);
-    if (bounds.Valid && !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, centerOS, extentOS, 0.0, false, localToShadow)) return;
+    if (bounds.Valid && !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, centerOS, extentOS, 0.0, false, localToShadow, wpoPadWS)) return;
 #else
 #if defined(VIVID_VSM_EARLY_CULL)
     if (bounds.Valid)

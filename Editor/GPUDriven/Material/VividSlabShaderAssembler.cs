@@ -17,6 +17,10 @@ namespace VividRP.Editor.GPUDriven
         internal string ComputeSurfaceMode { get; set; } = string.Empty;
 
         internal string ShaderName { get; set; } = string.Empty;
+
+        internal float WorldPositionOffsetPadding { get; set; }
+
+        internal string[] WorldPositionOffsetPaddingProperties { get; set; } = Array.Empty<string>();
     }
 
     internal sealed class VividSlabShaderAssemblyResult
@@ -56,6 +60,10 @@ namespace VividRP.Editor.GPUDriven
         internal bool HasCustomCoverage { get; set; }
 
         internal bool HasVertexOffset { get; set; }
+
+        internal float WorldPositionOffsetPadding { get; set; }
+
+        internal string[] WorldPositionOffsetPaddingProperties { get; set; } = Array.Empty<string>();
 
         internal uint SourceContentHash { get; set; }
 
@@ -150,6 +158,10 @@ namespace VividRP.Editor.GPUDriven
             @"^\s*//\s*@vivid-compute-surface\s+""([^""]+)""\s*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
+        private static readonly Regex s_WpoPaddingDirectiveRegex = new(
+            @"^\s*//\s*@vivid-wpo-padding\s+([^\r\n]+)$",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
         private static readonly Regex s_ShaderNameRegex = new(
             @"Shader\s+""([^""]+)""",
             RegexOptions.Compiled);
@@ -204,7 +216,69 @@ namespace VividRP.Editor.GPUDriven
             if (shaderNameMatch.Success)
                 directives.ShaderName = shaderNameMatch.Groups[1].Value.Trim();
 
+            Match wpoPaddingMatch = s_WpoPaddingDirectiveRegex.Match(sourceText);
+            if (wpoPaddingMatch.Success)
+            {
+                ParseWpoPaddingExpression(
+                    wpoPaddingMatch.Groups[1].Value,
+                    out float constantPad,
+                    out string[] propNames);
+                directives.WorldPositionOffsetPadding = constantPad;
+                directives.WorldPositionOffsetPaddingProperties = propNames;
+            }
+
             return directives;
+        }
+
+        private static void ParseWpoPaddingExpression(
+            string expression,
+            out float constantPad,
+            out string[] propertyNames)
+        {
+            constantPad = 0.0f;
+            if (string.IsNullOrWhiteSpace(expression))
+            {
+                propertyNames = Array.Empty<string>();
+                return;
+            }
+
+            string trimmed = expression.Trim().Trim('"');
+            string[] terms = trimmed.Split('+');
+            var props = new List<string>(terms.Length);
+            for (int i = 0; i < terms.Length; i++)
+            {
+                string term = terms[i].Trim();
+                if (string.IsNullOrEmpty(term))
+                    continue;
+
+                if (float.TryParse(term, NumberStyles.Float, CultureInfo.InvariantCulture, out float literal))
+                {
+                    if (float.IsFinite(literal))
+                        constantPad += Mathf.Max(0.0f, literal);
+                }
+                else if (IsValidHlslIdentifier(term) && !props.Contains(term))
+                {
+                    props.Add(term);
+                }
+            }
+
+            propertyNames = props.Count > 0 ? props.ToArray() : Array.Empty<string>();
+        }
+
+        private static bool IsValidHlslIdentifier(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+            char first = text[0];
+            if (!(char.IsLetter(first) || first == '_'))
+                return false;
+            for (int i = 1; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (!(char.IsLetterOrDigit(c) || c == '_'))
+                    return false;
+            }
+            return true;
         }
 
         internal static VividSlabShaderAssemblyResult Assemble(
@@ -466,6 +540,8 @@ namespace VividRP.Editor.GPUDriven
                 ClosureCount = closureCount,
                 HasCustomCoverage = hasCustomCoverage,
                 HasVertexOffset = hasVertexOffset,
+                WorldPositionOffsetPadding = directives.WorldPositionOffsetPadding,
+                WorldPositionOffsetPaddingProperties = directives.WorldPositionOffsetPaddingProperties,
                 SourceContentHash = contentHash,
                 Diagnostics = diagnostics.ToArray(),
             };

@@ -320,12 +320,23 @@ namespace VividRP.Editor.GPUDriven
                         VividSubstrateFeatureMask.OpenPBROpaque | VividSubstrateFeatureMask.Coat)
                       * VividSubstrateContract.BytesPerSlice
                     : VividSubstrateContract.OpenPBROpaqueSingleTotalSlices * VividSubstrateContract.BytesPerSlice;
-            if (!isMultiClosure && hasCustomSurfaceHook && userSurfaceHook.IndexOf("coatWeight", StringComparison.Ordinal) >= 0)
+            if (!isMultiClosure && hasCustomSurfaceHook)
             {
+                VividSubstrateFeatureMask hookFeatures = VividSubstrateFeatureMask.OpenPBROpaque;
+                if (userSurfaceHook.IndexOf("coatWeight", StringComparison.Ordinal) >= 0)
+                {
+                    hookFeatures |= VividSubstrateFeatureMask.Coat;
+                    if (userSurfaceHook.IndexOf("hasIndependentCoatNormal", StringComparison.Ordinal) >= 0)
+                        hookFeatures |= VividSubstrateFeatureMask.DualNormal;
+                }
+                if (userSurfaceHook.IndexOf("fuzzWeight", StringComparison.Ordinal) >= 0)
+                    hookFeatures |= VividSubstrateFeatureMask.Fuzz;
+                if (userSurfaceHook.IndexOf("specularAnisotropy", StringComparison.Ordinal) >= 0)
+                    hookFeatures |= VividSubstrateFeatureMask.Anisotropy;
+
                 estimatedBytes = Math.Max(
                     estimatedBytes,
-                    VividSubstrateContract.ComputeSingleClosureTotalSlices(
-                        VividSubstrateFeatureMask.OpenPBROpaque | VividSubstrateFeatureMask.Coat)
+                    VividSubstrateContract.ComputeSingleClosureTotalSlices(hookFeatures)
                     * VividSubstrateContract.BytesPerSlice);
             }
 

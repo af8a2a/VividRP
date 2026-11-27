@@ -119,6 +119,24 @@ OpenPBR_PreparedBsdf VividPrepareOpenPBRV2(
     OpenPBR_ResolvedInputs resolved,
     float3 viewDirectionWS)
 {
+    // Opaque deferred shading normal horizon clamp: a perturbed normal-mapped base normal
+    // can dip slightly behind viewDirectionWS at grazing silhouettes while the geometric/coat
+    // normal is still front-facing. Prevent Vendor openpbr_prepare from classifying that rim
+    // pixel as "inside" (which would drop the exterior coat lobe to black).
+    float baseNdotV = dot(resolved.geometry_basis.n, viewDirectionWS);
+    if (baseNdotV <= 1e-4f)
+    {
+        float3 shiftedN = SafeNormalize(
+            resolved.geometry_basis.n + viewDirectionWS * (1e-4f - baseNdotV));
+        float handedness = dot(cross(resolved.geometry_basis.n, resolved.geometry_basis.t), resolved.geometry_basis.b) < 0.0f
+            ? -1.0f
+            : 1.0f;
+        resolved.geometry_basis = VividMakeOpenPBRBasisFromTangent(
+            shiftedN,
+            resolved.geometry_basis.t,
+            handedness);
+    }
+
     return openpbr_prepare(
         resolved,
         VIVID_OPENPBR_OPAQUE_PREPARE_PATH_THROUGHPUT.xxx,

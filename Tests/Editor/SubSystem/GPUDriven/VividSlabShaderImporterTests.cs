@@ -16,6 +16,8 @@ namespace VividRP.Editor.Tests
             "Shaders/Material/Samples/SubstratePoC.slab.shader";
         private const string MultiClosureSampleSlabShaderRelativePath =
             "Shaders/Material/Samples/SubstrateMultiClosurePoC.slab.shader";
+        private const string ClearCoatDualNormalSampleRelativePath =
+            "Shaders/Material/Samples/ClearCoatDualNormal.slab.shader";
         private const string BaseTemplateRelativePath =
             "Shaders/Material/Templates/SubstrateOpaque.slab.template";
         private const string StandardLitRelativePath =
@@ -128,6 +130,48 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("runtimeHeader.ProgramID != _TargetMaterialBin", first.ComputeResolveSource);
             StringAssert.DoesNotContain("switch (", first.ComputeResolveSource);
             StringAssert.DoesNotContain("switch(", first.ComputeResolveSource);
+        }
+
+        [Test]
+        public void Assemble_ClearCoatDualNormalSample_EstimatesDualNormalBudgetAndEmitsBothTargets()
+        {
+            string samplePath = VividPackagePathUtility.GetPreferredAssetPath(ClearCoatDualNormalSampleRelativePath);
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            CompiledMaterialProgram openPbrProgram = BuildOpenPBROpaqueTestProgram();
+
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                samplePath,
+                File.ReadAllText(samplePath),
+                templatePath,
+                File.ReadAllText(templatePath),
+                resolvedLinkedGraphPath: "OpenPBROpaque.vmatg",
+                compiledGraphProgram: openPbrProgram);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.ShaderName, Is.EqualTo("VividRP/Material/Samples/ClearCoatDualNormal"));
+            Assert.That(assembled.HasLinkedGraphSurface, Is.True);
+            Assert.That(assembled.HasCustomSurfaceHook, Is.True);
+            Assert.That(assembled.IsMultiClosure, Is.False);
+            Assert.That(
+                assembled.EstimatedSubstrateBytesPerPixel,
+                Is.EqualTo(
+                    VividSubstrateContract.ComputeSingleClosureTotalSlices(
+                        VividSubstrateFeatureMask.OpenPBROpaque
+                        | VividSubstrateFeatureMask.Coat
+                        | VividSubstrateFeatureMask.DualNormal
+                        | VividSubstrateFeatureMask.Anisotropy)
+                    * VividSubstrateContract.BytesPerSlice));
+
+            StringAssert.Contains("_CoatWeight", assembled.RasterShaderSource);
+            StringAssert.Contains("_CoatRoughness", assembled.RasterShaderSource);
+            StringAssert.Contains("_CoatIor", assembled.RasterShaderSource);
+            StringAssert.Contains("_CoatDarkening", assembled.RasterShaderSource);
+            StringAssert.Contains("v2.hasIndependentCoatNormal", assembled.RasterShaderSource);
+            StringAssert.Contains("v2.coatNormalWS", assembled.RasterShaderSource);
+            StringAssert.Contains("v2.hasIndependentCoatNormal", assembled.ComputeResolveSource);
+            StringAssert.Contains("v2.coatNormalWS", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
         }
 
         [Test]

@@ -55,6 +55,14 @@ namespace VividRP.Runtime.GPUDriven
             return OverflowBinIndex;
         }
 
+        internal static ulong ComputeDirectProgramBinBit(int binIndex)
+        {
+            if (binIndex < FirstDirectProgramBinIndex || binIndex > MaxDirectProgramBins)
+                return 0ul;
+
+            return 1ul << (binIndex - FirstDirectProgramBinIndex);
+        }
+
         internal static int GetIndirectArgsByteOffset(int binIndex)
         {
             return binIndex * IndirectArgsByteStride;

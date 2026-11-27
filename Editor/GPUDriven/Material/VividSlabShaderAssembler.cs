@@ -13,6 +13,8 @@ namespace VividRP.Editor.GPUDriven
 
         internal string LinkedGraphPath { get; set; } = string.Empty;
 
+        internal string ComputeSurfaceMode { get; set; } = string.Empty;
+
         internal string ShaderName { get; set; } = string.Empty;
     }
 
@@ -85,6 +87,10 @@ namespace VividRP.Editor.GPUDriven
             @"^\s*//\s*@vivid-graph\s+""([^""]+)""\s*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
+        private static readonly Regex s_ComputeSurfaceDirectiveRegex = new(
+            @"^\s*//\s*@vivid-compute-surface\s+""([^""]+)""\s*$",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
         private static readonly Regex s_ShaderNameRegex = new(
             @"Shader\s+""([^""]+)""",
             RegexOptions.Compiled);
@@ -126,6 +132,10 @@ namespace VividRP.Editor.GPUDriven
             Match graphMatch = s_GraphDirectiveRegex.Match(sourceText);
             if (graphMatch.Success)
                 directives.LinkedGraphPath = graphMatch.Groups[1].Value.Trim();
+
+            Match computeSurfaceMatch = s_ComputeSurfaceDirectiveRegex.Match(sourceText);
+            if (computeSurfaceMatch.Success)
+                directives.ComputeSurfaceMode = computeSurfaceMatch.Groups[1].Value.Trim();
 
             Match shaderNameMatch = s_ShaderNameRegex.Match(sourceText);
             if (shaderNameMatch.Success)
@@ -228,12 +238,24 @@ namespace VividRP.Editor.GPUDriven
             string rasterTexturesBlock = graphPayload != null
                 ? graphPayload.RasterTexturesBlock
                 : "// [VividSlab] No linked MaterialGraph texture declarations.";
+            string computeSurfaceMode = directives.ComputeSurfaceMode;
+            if (string.IsNullOrEmpty(computeSurfaceMode) && !string.IsNullOrEmpty(baseTemplateText))
+            {
+                Match templateComputeSurface = s_ComputeSurfaceDirectiveRegex.Match(baseTemplateText);
+                if (templateComputeSurface.Success)
+                    computeSurfaceMode = templateComputeSurface.Groups[1].Value.Trim();
+            }
+            bool useStandardLitComputeSurface = graphPayload == null
+                && string.Equals(computeSurfaceMode, "StandardLit", StringComparison.OrdinalIgnoreCase);
+
             string rasterEvaluateBlock = graphPayload != null
                 ? graphPayload.RasterEvaluateFunction
                 : BuildDefaultRasterEvaluateFunction();
             string computeEvaluateBlock = graphPayload != null
                 ? graphPayload.ComputeEvaluateFunction
-                : BuildDefaultComputeEvaluateFunction();
+                : useStandardLitComputeSurface
+                    ? BuildStandardLitComputeEvaluateFunction()
+                    : BuildDefaultComputeEvaluateFunction();
             string earlyDepthAttr = hasCustomCoverage
                 ? "// [VividSlab] [earlydepthstencil] omitted when custom coverage clip is active."
                 : "[earlydepthstencil]";
@@ -293,7 +315,11 @@ namespace VividRP.Editor.GPUDriven
 
             int estimatedBytes = graphPayload != null
                 ? graphPayload.EstimatedSubstrateBytesPerPixel
-                : VividSubstrateContract.OpenPBROpaqueSingleTotalSlices * VividSubstrateContract.BytesPerSlice;
+                : useStandardLitComputeSurface
+                    ? VividSubstrateContract.ComputeSingleClosureTotalSlices(
+                        VividSubstrateFeatureMask.OpenPBROpaque | VividSubstrateFeatureMask.Coat)
+                      * VividSubstrateContract.BytesPerSlice
+                    : VividSubstrateContract.OpenPBROpaqueSingleTotalSlices * VividSubstrateContract.BytesPerSlice;
             if (!isMultiClosure && hasCustomSurfaceHook && userSurfaceHook.IndexOf("coatWeight", StringComparison.Ordinal) >= 0)
             {
                 estimatedBytes = Math.Max(
@@ -406,6 +432,18 @@ namespace VividRP.Editor.GPUDriven
                 + "}";
         }
 
+        private static string BuildStandardLitComputeEvaluateFunction()
+        {
+            return
+                "void VividSlabEvaluateGraphSurface(\n"
+                + "    const VividSlabEvalContext ctx,\n"
+                + "    out VividOpenPBRV2Inputs v2Inputs,\n"
+                + "    out float ambientOcclusion)\n"
+                + "{\n"
+                + "    VividSlabEvaluateStandardLitFromMaterialData(ctx, v2Inputs, ambientOcclusion);\n"
+                + "}";
+        }
+
         private static VividSlabShaderAssemblyResult CreateFailureResult(
             string shaderName,
             string baseTemplatePath,
@@ -478,6 +516,8 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1");
             sb.AppendLine("#endif");
             sb.AppendLine("#include_with_pragmas \"Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl\"");
+            sb.AppendLine("#define VIVID_SLAB_NO_AOT_SURFACE_DISPATCH 1");
+            sb.AppendLine("#include \"Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl\"");
             sb.AppendLine("#include \"Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl\"");
             sb.AppendLine("#include \"Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl\"");
             sb.AppendLine("#include \"Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl\"");
@@ -564,14 +604,30 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    float3 n2 = SafeNormalize(mul(nOS2, (float3x3)instanceData.WorldToObjectMatrix));");
             sb.AppendLine("    #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)");
             sb.AppendLine("    {");
-            sb.AppendLine("        VividSlabVertexContext vctx0 = { posOS0, posWS0, nOS0, n0, DecodeVividMeshletUV(v0), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress };");
-            sb.AppendLine("        VividSlabVertexContext vctx1 = { posOS1, posWS1, nOS1, n1, DecodeVividMeshletUV(v1), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress };");
-            sb.AppendLine("        VividSlabVertexContext vctx2 = { posOS2, posWS2, nOS2, n2, DecodeVividMeshletUV(v2), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress };");
+            sb.AppendLine("        VividSlabVertexContext vctx0 = { posOS0, posWS0, nOS0, n0, DecodeVividMeshletUV(v0), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex };");
+            sb.AppendLine("        VividSlabVertexContext vctx1 = { posOS1, posWS1, nOS1, n1, DecodeVividMeshletUV(v1), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex };");
+            sb.AppendLine("        VividSlabVertexContext vctx2 = { posOS2, posWS2, nOS2, n2, DecodeVividMeshletUV(v2), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex };");
             sb.AppendLine("        posWS0 += VividSlabEvaluateVertexOffset(vctx0);");
             sb.AppendLine("        posWS1 += VividSlabEvaluateVertexOffset(vctx1);");
             sb.AppendLine("        posWS2 += VividSlabEvaluateVertexOffset(vctx2);");
             sb.AppendLine("    }");
             sb.AppendLine("    #endif");
+            sb.AppendLine("    float normalFlipSign = 1.0f;");
+            sb.AppendLine("    {");
+            sb.AppendLine("        const VividMaterialData cullMat = PullMaterialData(instanceData.MaterialIndex);");
+            sb.AppendLine("        if ((GetRendererListID(instanceData, cullMat) & VIVIDRENDERERLISTID_CULL_OFF) != 0u)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            float3 autoNormalWS = cross(SafeNormalize(posWS0 - posWS1), SafeNormalize(posWS2 - posWS0));");
+            sb.AppendLine("            float3 viewDirWS = GetViewForwardDir(UNITY_MATRIX_V);");
+            sb.AppendLine("            if (unity_OrthoParams.w == 0.0f)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                float3 triCenterWS = (posWS0 + posWS1 + posWS2) / 3.0f;");
+            sb.AppendLine("                float3 camToTri = triCenterWS - _WorldSpaceCameraPos;");
+            sb.AppendLine("                if (dot(camToTri, camToTri) > 1e-8f) viewDirWS = camToTri;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            normalFlipSign = dot(autoNormalWS, viewDirWS) < 0.0f ? -1.0f : 1.0f;");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
             sb.AppendLine("    float4 posCS = float4(float2(pixelCoord) + 0.5f, 0.0f, 1.0f);");
             sb.AppendLine("    float2 pixelNdc = posCS.xy * _ResolveOutputSize.zw * 2.0f - 1.0f;");
             sb.AppendLine("    #ifdef UNITY_UV_STARTS_AT_TOP");
@@ -586,10 +642,10 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine();
             sb.AppendLine("    float3 uInterp = InterpolateWithBarycentric(bary, DecodeVividMeshletUV(v0).x, DecodeVividMeshletUV(v1).x, DecodeVividMeshletUV(v2).x);");
             sb.AppendLine("    float3 vInterp = InterpolateWithBarycentric(bary, DecodeVividMeshletUV(v0).y, DecodeVividMeshletUV(v1).y, DecodeVividMeshletUV(v2).y);");
-            sb.AppendLine("    float3 geometryNormalWS = SafeNormalize(InterpolateWithBarycentricNoDerivatives(bary, n0, n1, n2));");
+            sb.AppendLine("    float3 geometryNormalWS = SafeNormalize(InterpolateWithBarycentricNoDerivatives(bary, n0, n1, n2) * normalFlipSign);");
             sb.AppendLine("    float4 tangentOS = InterpolateWithBarycentricNoDerivatives(bary, DecodeVividMeshletTangent(v0), DecodeVividMeshletTangent(v1), DecodeVividMeshletTangent(v2));");
             sb.AppendLine("    float3 tangentWS = mul((float3x3)instanceData.ObjectToWorldMatrix, tangentOS.xyz);");
-            sb.AppendLine("    float tangentSign = (instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u ? -tangentOS.w : tangentOS.w;");
+            sb.AppendLine("    float tangentSign = ((instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u ? -tangentOS.w : tangentOS.w) * normalFlipSign;");
             sb.AppendLine("    float4 geometryTangentWS = dot(tangentWS, tangentWS) > 1e-8f ? float4(normalize(tangentWS), tangentSign) : float4(1.0f, 0.0f, 0.0f, 1.0f);");
             sb.AppendLine();
             sb.AppendLine("    VividSlabEvalContext evalCtx;");
@@ -602,6 +658,7 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    evalCtx.positionCS = posCS;");
             sb.AppendLine("    evalCtx.parameterAddress = runtimeHeader.ParameterAddress;");
             sb.AppendLine("    evalCtx.resourceAddress = runtimeHeader.ResourceBindingAddress;");
+            sb.AppendLine("    evalCtx.materialIndex = instanceData.MaterialIndex;");
             sb.AppendLine();
             sb.AppendLine("    #if defined(VIVID_SLAB_MULTI_CLOSURE_OUTPUT)");
             sb.AppendLine("    {");

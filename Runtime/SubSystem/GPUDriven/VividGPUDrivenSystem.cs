@@ -471,10 +471,29 @@ namespace VividRP.Runtime.GPUDriven
                 CoreUtils.SetKeyword(material, VirtualTextureBackendKeyword, UsesVirtualTexture);
         }
 
+        internal static LocalKeyword ResolveTextureBackendKeyword(ComputeShader computeShader)
+        {
+            return computeShader != null
+                ? computeShader.keywordSpace.FindKeyword(VirtualTextureBackendKeyword)
+                : default;
+        }
+
         internal void ConfigureTextureBackendKeyword(ComputeShader computeShader)
         {
             if (computeShader != null)
                 CoreUtils.SetKeyword(computeShader, VirtualTextureBackendKeyword, UsesVirtualTexture);
+        }
+
+        internal void ConfigureTextureBackendKeyword(
+            ComputeShader computeShader,
+            in LocalKeyword cachedKeyword)
+        {
+            if (computeShader == null || !cachedKeyword.isValid)
+                return;
+
+            bool expected = UsesVirtualTexture;
+            if (computeShader.IsKeywordEnabled(cachedKeyword) != expected)
+                computeShader.SetKeyword(cachedKeyword, expected);
         }
 
         internal static bool ScheduleCullForCamera(Camera camera, int frameIndex)

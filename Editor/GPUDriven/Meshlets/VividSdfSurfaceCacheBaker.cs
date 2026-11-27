@@ -252,7 +252,9 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                     continue;
                 var mesh = renderer.sourceMesh;
                 var material = renderer.sourceMaterials[0];
-                if (material == null || material.shader.name != "VividRP/Material/StandardLit"
+                if (material == null || material.shader == null
+                    || (material.shader.name != "VividRP/Material/StandardLit"
+                        && material.shader.name != "VividRP/Material/StandardLitSlab")
                     || material.GetFloat("_Surface") != 0f || material.GetFloat("_AlphaClip") != 0f
                     || !seen.Add((mesh, material)))
                     continue;

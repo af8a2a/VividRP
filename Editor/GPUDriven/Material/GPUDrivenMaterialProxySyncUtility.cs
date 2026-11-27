@@ -53,6 +53,14 @@ namespace VividRP.Editor.GPUDriven
     internal static class GPUDrivenMaterialProxySyncUtility
     {
         internal const string StandardLitShaderName = "VividRP/Material/StandardLit";
+        internal const string StandardLitSlabShaderName = "VividRP/Material/StandardLitSlab";
+
+        internal static bool IsStandardLitCompatibleShader(Shader shader)
+        {
+            return shader != null
+                && (shader.name == StandardLitShaderName
+                    || shader.name == StandardLitSlabShaderName);
+        }
 
         private const float EnabledThreshold = 0.001f;
 
@@ -174,7 +182,7 @@ namespace VividRP.Editor.GPUDriven
                 sourceMaterial,
                 s_AORemapMinId,
                 s_AORemapMaxId);
-            materialProxy.EmissionColor = sourceMaterial.shader != null && sourceMaterial.shader.name == StandardLitShaderName
+            materialProxy.EmissionColor = IsStandardLitCompatibleShader(sourceMaterial.shader)
                 ? GPUDrivenMaterialCompiler.ResolveStandardLitEmissionColor(sourceMaterial, out _)
                 : GetColor(sourceMaterial, s_EmissionColorId, Color.black);
             materialProxy.AlphaClip = IsAlphaClipEnabled(sourceMaterial);
@@ -256,7 +264,7 @@ namespace VividRP.Editor.GPUDriven
                 return;
             }
 
-            bool isStandardLit = sourceMaterial.shader != null && sourceMaterial.shader.name == StandardLitShaderName;
+            bool isStandardLit = IsStandardLitCompatibleShader(sourceMaterial.shader);
             if (!isStandardLit)
             {
                 warnings.Add(

@@ -1,0 +1,509 @@
+// VividRP StandardLit Full-Feature Base Template (.slab.template)
+// Referenced by StandardLitSlab.slab.shader (and custom StandardLit-based .slab.shader assets) via:
+//   // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/StandardLit.slab.template"
+//
+// Instructs VividSlabShaderImporter to generate a standalone, zero-switch GPUDriven ComputeShader
+// that evaluates VividMaterialData + VividSurfaceBindingData (VT primary + Bindless experimental)
+// directly into Substrate OpenPBR V2 (Tier 1/2) + TopLayer Summary, while Raster preserves all
+// 9 StandardLit passes (PreDepth, ShadowCaster/VSM, GBuffer, Decal, Meta, MotionVectors, 3x DXR)
+// plus VividVisibilityRaster for optional WPO/Custom Coverage hooks.
+// @vivid-compute-surface "StandardLit"
+SubShader
+{
+    Tags
+    {
+        "RenderType" = "Opaque"
+        "Queue" = "Geometry"
+        "RenderPipeline" = "VividRenderPipeline"
+    }
+
+    Pass
+    {
+        Name "VividPreDepth"
+        Tags { "LightMode" = "VividPreDepth" }
+
+        Blend One Zero
+        ZWrite On
+        ZTest LEqual
+        Cull [_Cull]
+        ColorMask 0
+
+        HLSLPROGRAM
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _OPACITYMAP
+            #pragma vertex Vert
+            #pragma fragment FragPreDepth
+
+            #define VIVIDRP_SHADERPASS_DEPTH_ONLY 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitDepthOnlyPass.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "ShadowCaster"
+        Tags { "LightMode" = "ShadowCaster" "VividVSMCaster" = "2" "VividVSMConservativeBounds" = "1" }
+
+        ZWrite On
+        ZTest LEqual
+        Cull [_Cull]
+        ColorMask 0
+
+        HLSLPROGRAM
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma multi_compile_fragment _ VIVID_VSM_CASTER
+            #pragma require randomwrite : VIVID_VSM_CASTER
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _OPACITYMAP
+            #pragma vertex Vert
+            #pragma fragment Frag
+
+            #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitShadowCasterPass.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "VividGBuffer"
+        Tags { "LightMode" = "VividGBuffer" }
+
+        Blend One Zero
+        ZWrite [_ZWrite]
+        ZTest Equal
+        Cull [_Cull]
+
+        HLSLPROGRAM
+            #pragma target 5.0
+            #pragma require randomwrite
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _OPACITYMAP
+            #pragma shader_feature_local_fragment _NORMALMAP
+            #pragma shader_feature_local_fragment _RMOMAP
+            #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_fragment _ROUGHNESSMAP
+            #pragma shader_feature_local_fragment _OCCLUSIONMAP
+            #pragma shader_feature_local_fragment _EMISSION
+            #pragma shader_feature_local_fragment _CLEARCOAT
+            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma vertex Vert
+            #pragma fragment FragGBuffer
+
+            #define VIVID_SLAB_TARGET_RASTER 1
+            #define VIVIDRP_SHADERPASS_GBUFFER 1
+            #if !defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+            #define VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT 1
+            #endif
+            #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+            #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+            #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitInput.hlsl"
+            #if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+            VIVID_SLAB_USER_TEXTURES
+            VIVID_SLAB_USER_SURFACE_HOOK
+            #endif
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividShaderPassGBuffer.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "VividGBufferGPUDrivenDecal"
+        Tags { "LightMode" = "VividGBufferGPUDrivenDecal" }
+
+        Blend One Zero
+        ZWrite [_ZWrite]
+        ZTest Equal
+        Cull [_Cull]
+
+        HLSLPROGRAM
+            #pragma target 5.0
+            #pragma require randomwrite
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _OPACITYMAP
+            #pragma shader_feature_local_fragment _NORMALMAP
+            #pragma shader_feature_local_fragment _RMOMAP
+            #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_fragment _ROUGHNESSMAP
+            #pragma shader_feature_local_fragment _OCCLUSIONMAP
+            #pragma shader_feature_local_fragment _EMISSION
+            #pragma shader_feature_local_fragment _CLEARCOAT
+            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma vertex Vert
+            #pragma fragment FragGBuffer
+
+            #define VIVID_SLAB_TARGET_RASTER 1
+            #define VIVIDRP_SHADERPASS_GBUFFER 1
+            #if !defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+            #define VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT 1
+            #endif
+            #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+            #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+            #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
+            #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitInput.hlsl"
+            #if defined(VIVIDRP_SUBSTRATE_GBUFFER_OUTPUT)
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+            VIVID_SLAB_USER_TEXTURES
+            VIVID_SLAB_USER_SURFACE_HOOK
+            #endif
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividShaderPassGBuffer.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "Meta"
+        Tags { "LightMode" = "Meta" }
+
+        Cull Off
+
+        HLSLPROGRAM
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma shader_feature EDITOR_VISUALIZATION
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _OPACITYMAP
+            #pragma shader_feature_local_fragment _RMOMAP
+            #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_fragment _EMISSION
+            #pragma vertex Vert
+            #pragma fragment Frag
+
+            #define VIVIDRP_SHADERPASS_META 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD2 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+            #define VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitMetaPass.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "MotionVectors"
+        Tags { "LightMode" = "MotionVectors" }
+
+        ColorMask RGBA
+        ZWrite [_ZWrite]
+        ZTest LEqual
+        Cull [_Cull]
+        Stencil
+        {
+            WriteMask 32
+            Ref 32
+            Comp Always
+            Pass Replace
+        }
+
+        HLSLPROGRAM
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _OPACITYMAP
+            #pragma vertex Vert
+            #pragma fragment Frag
+
+            #define VIVIDRP_SHADERPASS_MOTION_VECTORS 1
+            #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+            #define VIVIDRP_ATTRIBUTES_NEED_PREVIOUS_POSITION 1
+            #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+            #define VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/StandardLit/StandardLitMotionVectorPass.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "IndirectDXR"
+        Tags { "LightMode" = "IndirectDXR" }
+
+        HLSLPROGRAM
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
+            #pragma raytracing surface_shader
+            #pragma multi_compile _ INSTANCING_ON
+            #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _NORMALMAP
+            #pragma shader_feature_local_raytracing _RMOMAP
+            #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+            #pragma shader_feature_local_raytracing _OCCLUSIONMAP
+            #pragma shader_feature_local_raytracing _EMISSION
+            #pragma shader_feature_local_raytracing _CLEARCOAT
+            #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+            #define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME StandardLitIndirectDiffuseClosestHit
+            #define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME StandardLitIndirectDiffuseAnyHit
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "ReferencedPathtracingDXR"
+        Tags { "LightMode" = "ReferencedPathtracingDXR" }
+
+        HLSLPROGRAM
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
+            #pragma raytracing surface_shader
+            #pragma multi_compile_raytracing _ VIVIDRP_REFERENCE_PT_FP16
+            #pragma multi_compile _ INSTANCING_ON
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _OPACITYMAP
+            #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
+            #pragma shader_feature_local_raytracing _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local_raytracing _NORMALMAP
+            #pragma shader_feature_local_raytracing _RMOMAP
+            #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+            #pragma shader_feature_local_raytracing _EMISSION
+            #pragma shader_feature_local_raytracing _CLEARCOAT
+            #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracing.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "RaytracingGBufferDXR"
+        Tags { "LightMode" = "RaytracingGBufferDXR" }
+
+        HLSLPROGRAM
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
+            #pragma raytracing surface_shader
+            #pragma multi_compile _ INSTANCING_ON
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _OPACITYMAP
+            #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
+            #pragma shader_feature_local_raytracing _NORMALMAP
+            #pragma shader_feature_local_raytracing _RMOMAP
+            #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+            #pragma shader_feature_local_raytracing _EMISSION
+            #pragma shader_feature_local_raytracing _CLEARCOAT
+            #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+            #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/RaytracingGBuffer.hlsl"
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "VividVisibilityRaster"
+        Tags { "LightMode" = "VividVisibilityRaster" }
+
+        ZWrite On
+        ZTest LEqual
+        Cull [_Cull]
+
+        HLSLPROGRAM
+            #pragma target 5.0
+            #pragma vertex VertSlabVis
+            #pragma fragment FragSlabVis
+            #pragma use_dxc
+            #pragma require barycentrics
+            #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+
+            #define VIVID_SLAB_TARGET_VISIBILITY_RASTER 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+            #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+            #if !defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #endif
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
+
+            #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
+            #include "UnityIndirect.cginc"
+
+            uint _TargetSlabProgramID;
+            StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
+            StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
+            ByteAddressBuffer _SharedIndexBuffer;
+
+            VIVID_SLAB_USER_VERTEX_HOOK
+            VIVID_SLAB_USER_COVERAGE_HOOK
+
+            struct Attributes
+            {
+                uint vertexID : SV_VertexID;
+                uint instanceID : SV_InstanceID;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                nointerpolation uint2 visibilityValue : TEXCOORD0;
+                float2 uv0 : TEXCOORD1;
+                float3 geometricNormalWS : TEXCOORD2;
+                float3 positionWS : TEXCOORD3;
+                float4 geometricTangentWS : TEXCOORD4;
+                nointerpolation uint3 materialIds : TEXCOORD5;
+            };
+
+            uint VividSlabVisPullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
+            {
+                const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
+                const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
+                const uint shiftAmount = (absoluteIndexID % 4u) * 8u;
+                return (packedIndices >> shiftAmount) & 0xFFu;
+            }
+
+            Varyings VertSlabVis(Attributes input)
+            {
+                InitIndirectDrawArgs(0);
+
+                Varyings output;
+                output.positionCS = float4(-2.0f, -2.0f, 0.0f, 1.0f);
+                output.visibilityValue = 0u;
+                output.uv0 = 0.0f;
+                output.geometricNormalWS = float3(0.0f, 0.0f, 1.0f);
+                output.positionWS = 0.0f;
+                output.geometricTangentWS = float4(1.0f, 0.0f, 0.0f, 1.0f);
+                output.materialIds = 0u;
+
+                const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
+                const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
+                const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
+                const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+
+                VividMaterialRuntimeHeader runtimeHeader;
+                VividMaterialProgramData programData;
+                const uint programStatus = VividGetMaterialProgramStatus(
+                    instanceData.MaterialIndex,
+                    runtimeHeader,
+                    programData);
+                if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN
+                    || runtimeHeader.ProgramID != _TargetSlabProgramID)
+                {
+                    return output;
+                }
+
+                const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+                const uint indexCount = meshlet.TriangleCount * 3u;
+                if (vertexID >= indexCount)
+                    return output;
+
+                const uint vertexIndex = VividSlabVisPullIndex(meshlet, vertexID);
+                const VividDecodedMeshletVertex vertex = DecodeVividMeshletVertex(
+                    _SharedVertexBuffer[meshlet.VertexOffset + vertexIndex]);
+
+                float3 positionWS = TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz);
+                float3 normalWS = SafeNormalize(mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
+                #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+                {
+                    VividSlabVertexContext vctx;
+                    vctx.positionOS = vertex.Position.xyz;
+                    vctx.positionWS = positionWS;
+                    vctx.normalOS = vertex.Normal.xyz;
+                    vctx.normalWS = normalWS;
+                    vctx.uv0 = vertex.UV.xy;
+                    vctx.parameterAddress = runtimeHeader.ParameterAddress;
+                    vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
+                    vctx.materialIndex = instanceData.MaterialIndex;
+                    positionWS += VividSlabEvaluateVertexOffset(vctx);
+                }
+                #endif
+
+                float3 tangentWS = mul((float3x3)instanceData.ObjectToWorldMatrix, vertex.Tangent.xyz);
+                float tangentSign = (instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u
+                    ? -vertex.Tangent.w
+                    : vertex.Tangent.w;
+
+                output.positionCS = TransformWorldToHClip(positionWS);
+                output.positionWS = positionWS;
+                output.geometricNormalWS = normalWS;
+                output.geometricTangentWS = dot(tangentWS, tangentWS) > 1e-8f
+                    ? float4(normalize(tangentWS), tangentSign)
+                    : float4(1.0f, 0.0f, 0.0f, 1.0f);
+
+                VividVisibilityBufferValue visibilityBufferValue;
+                visibilityBufferValue.InstanceID = renderRequest.InstanceID_LOD;
+                visibilityBufferValue.MeshletID = renderRequest.MeshletID;
+                visibilityBufferValue.IndexID = vertexID;
+                output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
+                output.uv0 = vertex.UV.xy;
+                output.materialIds = uint3(
+                    runtimeHeader.ParameterAddress,
+                    runtimeHeader.ResourceBindingAddress,
+                    instanceData.MaterialIndex);
+                return output;
+            }
+
+            VividVisibilityBufferFragmentOutput FragSlabVis(
+                Varyings input,
+                linear float3 barycentrics : SV_Barycentrics)
+            {
+                const float2 uv0Ddx = ddx(input.uv0);
+                const float2 uv0Ddy = ddy(input.uv0);
+
+                #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+                {
+                    VividSlabEvalContext ctx;
+                    ctx.uv0 = input.uv0;
+                    ctx.uv0Ddx = uv0Ddx;
+                    ctx.uv0Ddy = uv0Ddy;
+                    ctx.geometryNormalWS = SafeNormalize(input.geometricNormalWS);
+                    ctx.geometryTangentWS = float4(
+                        SafeNormalize(input.geometricTangentWS.xyz),
+                        input.geometricTangentWS.w);
+                    ctx.positionWS = input.positionWS;
+                    ctx.positionCS = input.positionCS;
+                    ctx.parameterAddress = input.materialIds.x;
+                    ctx.resourceAddress = input.materialIds.y;
+                    ctx.materialIndex = input.materialIds.z;
+
+                    float alpha = 1.0f;
+                    float cutoff = 0.5f;
+                    VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                    clip(alpha - cutoff);
+                }
+                #endif
+
+                return PackVividVisibilityBufferFragmentOutput(
+                    input.visibilityValue,
+                    input.uv0,
+                    uv0Ddx,
+                    uv0Ddy,
+                    input.geometricNormalWS,
+                    barycentrics);
+            }
+        ENDHLSL
+    }
+}

@@ -46,6 +46,7 @@ namespace VividRP.Runtime.GPUDriven
             Shader rasterShader,
             ComputeShader computeShader,
             int kernelIndex,
+            LocalKeyword virtualTextureKeyword,
             int parameterStrideInWords,
             int resourceCount,
             bool requiresProgrammableVisibilityRaster,
@@ -55,6 +56,7 @@ namespace VividRP.Runtime.GPUDriven
             RasterShader = rasterShader;
             ComputeShader = computeShader;
             KernelIndex = kernelIndex;
+            VirtualTextureKeyword = virtualTextureKeyword;
             ParameterStrideInWords = parameterStrideInWords;
             ResourceCount = resourceCount;
             RequiresProgrammableVisibilityRaster = requiresProgrammableVisibilityRaster;
@@ -65,6 +67,7 @@ namespace VividRP.Runtime.GPUDriven
         internal Shader RasterShader { get; }
         internal ComputeShader ComputeShader { get; }
         internal int KernelIndex { get; }
+        internal LocalKeyword VirtualTextureKeyword { get; }
         internal int ParameterStrideInWords { get; }
         internal int ResourceCount { get; }
         internal bool RequiresProgrammableVisibilityRaster { get; }
@@ -98,6 +101,10 @@ namespace VividRP.Runtime.GPUDriven
         private int m_MaxVisibleMeshletRenderRequestCount;
         private uint m_MainViewRendererBatchMask;
         private uint m_ShadowRendererBatchMask;
+        private ulong m_ActiveDirectProgramBinMask;
+        private bool m_HasActiveOverflowProgramBin;
+        private bool m_HasInstanceOverflowMaterial;
+        private int m_ActiveMaterialBinsSyncedHeaderCount;
 
         public IReadOnlyList<VividInstanceData> Instances => m_Instances;
 
@@ -182,11 +189,13 @@ namespace VividRP.Runtime.GPUDriven
             int kernelIndex = cs != null && cs.HasKernel(descriptor.ResolveKernelName)
                 ? cs.FindKernel(descriptor.ResolveKernelName)
                 : -1;
+            LocalKeyword vtKeyword = VividGPUDrivenSystem.ResolveTextureBackendKeyword(cs);
             m_DynamicSlabPrograms.Add(new VividDynamicSlabProgramBinding(
                 programID,
                 descriptor.RasterShader,
                 cs,
                 kernelIndex,
+                vtKeyword,
                 descriptor.ParameterStrideInWords,
                 descriptor.ResourceCount,
                 descriptor.RequiresProgrammableVisibilityRaster,
@@ -258,6 +267,77 @@ namespace VividRP.Runtime.GPUDriven
             int batchIndex = (int) batchKey;
             return (uint) batchIndex < (uint) VividRendererListID.Count
                 && (m_ShadowRendererBatchMask & (1u << batchIndex)) != 0;
+        }
+
+        internal ulong ActiveDirectProgramBinMask
+        {
+            get
+            {
+                EnsureActiveMaterialBinsSynced();
+                return m_ActiveDirectProgramBinMask;
+            }
+        }
+
+        internal bool HasActiveOverflowProgramBin
+        {
+            get
+            {
+                EnsureActiveMaterialBinsSynced();
+                return m_HasActiveOverflowProgramBin
+                    || m_HasInstanceOverflowMaterial
+                    || m_TerrainMaterials.Count > 0;
+            }
+        }
+
+        internal int ActiveBinnedDispatchCount
+        {
+            get
+            {
+                EnsureActiveMaterialBinsSynced();
+                bool hasOverflow = m_HasActiveOverflowProgramBin
+                    || m_HasInstanceOverflowMaterial
+                    || m_TerrainMaterials.Count > 0;
+                return 1
+                    + math.countbits(m_ActiveDirectProgramBinMask)
+                    + (hasOverflow ? 1 : 0);
+            }
+        }
+
+        internal void RefreshActiveMaterialBins()
+        {
+            m_ActiveDirectProgramBinMask = 0ul;
+            m_HasActiveOverflowProgramBin = false;
+            int headerCount = m_MaterialRuntimeHeaders.Count;
+            for (int i = 0; i < headerCount; i++)
+            {
+                RecordActiveMaterialBin(m_MaterialRuntimeHeaders[i].ProgramID);
+            }
+
+            m_ActiveMaterialBinsSyncedHeaderCount = headerCount;
+        }
+
+        private void EnsureActiveMaterialBinsSynced()
+        {
+            if (m_ActiveMaterialBinsSyncedHeaderCount != m_MaterialRuntimeHeaders.Count)
+                RefreshActiveMaterialBins();
+        }
+
+        private void RecordActiveMaterialBin(VividMaterialProgramID programID)
+        {
+            bool validProgram = programID != VividMaterialProgramID.Invalid
+                && (uint)programID < (uint)m_MaterialPrograms.Count;
+            int binIndex = VividMaterialBinningContract.MapProgramIdToBinIndex(
+                (uint)programID,
+                validProgram);
+            if (binIndex == VividMaterialBinningContract.OverflowBinIndex)
+            {
+                m_HasActiveOverflowProgramBin = true;
+            }
+            else
+            {
+                m_ActiveDirectProgramBinMask |=
+                    VividMaterialBinningContract.ComputeDirectProgramBinBit(binIndex);
+            }
         }
 
         internal bool RequiresDualSlabSidecar(uint materialIndex)
@@ -386,6 +466,11 @@ namespace VividRP.Runtime.GPUDriven
             m_Instances.Add(instanceData);
             m_InstanceSources.Add(sourceData);
             RegisterRendererBatch(instanceData);
+            if ((instanceData.Flags & VividInstanceFlags.Disabled) == 0
+                && instanceData.MaterialIndex >= (uint)m_MaterialRuntimeHeaders.Count)
+            {
+                m_HasInstanceOverflowMaterial = true;
+            }
 
             uint maxNodesPerJob = global::VividRP.Runtime.GPUDriven.Meshlets.VividMeshletListBuildJob.MaxLODNodesPerThreadGroup;
             if (maxNodesPerJob == 0)
@@ -408,6 +493,7 @@ namespace VividRP.Runtime.GPUDriven
             m_MaxVisibleMeshletRenderRequestCount = 0;
             m_MainViewRendererBatchMask = 0;
             m_ShadowRendererBatchMask = 0;
+            m_HasInstanceOverflowMaterial = false;
         }
 
         internal void ClearMaterials()
@@ -423,6 +509,9 @@ namespace VividRP.Runtime.GPUDriven
             m_MaterialPrograms.Clear();
             m_MaterialPrograms.AddRange(runtimePrograms);
             m_DynamicSlabPrograms.Clear();
+            m_ActiveDirectProgramBinMask = 0ul;
+            m_HasActiveOverflowProgramBin = false;
+            m_ActiveMaterialBinsSyncedHeaderCount = 0;
         }
 
         internal int AddMaterial(
@@ -512,6 +601,8 @@ namespace VividRP.Runtime.GPUDriven
             m_Materials.Add(materialData);
             m_MaterialRuntimeHeaders.Add(runtimeHeader);
             m_ShadowMaterialResourceCounts.Add(shadowResourceCount);
+            RecordActiveMaterialBin(runtimeHeader.ProgramID);
+            m_ActiveMaterialBinsSyncedHeaderCount = m_MaterialRuntimeHeaders.Count;
             return materialIndex;
         }
 

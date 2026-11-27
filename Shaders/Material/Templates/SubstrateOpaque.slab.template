@@ -85,6 +85,7 @@ SubShader
                 vctx.uv0 = input.uv0;
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
+                vctx.materialIndex = 0u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -114,6 +115,7 @@ SubShader
                 ctx.positionCS = input.positionCS;
                 ctx.parameterAddress = 0u;
                 ctx.resourceAddress = 0u;
+                ctx.materialIndex = 0u;
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;
@@ -192,6 +194,7 @@ SubShader
                 vctx.uv0 = input.uv0;
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
+                vctx.materialIndex = 0u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -221,6 +224,7 @@ SubShader
                 ctx.positionCS = input.positionCS;
                 ctx.parameterAddress = 0u;
                 ctx.resourceAddress = 0u;
+                ctx.materialIndex = 0u;
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;
@@ -306,6 +310,7 @@ SubShader
                 vctx.uv0 = input.uv0;
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
+                vctx.materialIndex = 0u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -334,6 +339,7 @@ SubShader
             ctx.positionCS = input.positionCS;
             ctx.parameterAddress = 0u;
             ctx.resourceAddress = 0u;
+            ctx.materialIndex = 0u;
 
             #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
             {
@@ -494,6 +500,7 @@ SubShader
                 vctx.uv0 = input.uv0;
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
+                vctx.materialIndex = 0u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -522,6 +529,7 @@ SubShader
             ctx.positionCS = input.positionCS;
             ctx.parameterAddress = 0u;
             ctx.resourceAddress = 0u;
+            ctx.materialIndex = 0u;
 
             #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
             {
@@ -678,7 +686,7 @@ SubShader
             float3 geometricNormalWS : TEXCOORD2;
             float3 positionWS : TEXCOORD3;
             float4 geometricTangentWS : TEXCOORD4;
-            nointerpolation uint2 materialAddrs : TEXCOORD5;
+            nointerpolation uint3 materialIds : TEXCOORD5;
         };
 
         uint VividSlabVisPullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
@@ -700,7 +708,7 @@ SubShader
             output.geometricNormalWS = float3(0.0f, 0.0f, 1.0f);
             output.positionWS = 0.0f;
             output.geometricTangentWS = float4(1.0f, 0.0f, 0.0f, 1.0f);
-            output.materialAddrs = 0u;
+            output.materialIds = 0u;
 
             const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
             const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
@@ -740,6 +748,7 @@ SubShader
                 vctx.uv0 = vertex.UV.xy;
                 vctx.parameterAddress = runtimeHeader.ParameterAddress;
                 vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
+                vctx.materialIndex = instanceData.MaterialIndex;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -762,7 +771,10 @@ SubShader
             visibilityBufferValue.IndexID = vertexID;
             output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
             output.uv0 = vertex.UV.xy;
-            output.materialAddrs = uint2(runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress);
+            output.materialIds = uint3(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
+                instanceData.MaterialIndex);
             return output;
         }
 
@@ -785,8 +797,9 @@ SubShader
                     input.geometricTangentWS.w);
                 ctx.positionWS = input.positionWS;
                 ctx.positionCS = input.positionCS;
-                ctx.parameterAddress = input.materialAddrs.x;
-                ctx.resourceAddress = input.materialAddrs.y;
+                ctx.parameterAddress = input.materialIds.x;
+                ctx.resourceAddress = input.materialIds.y;
+                ctx.materialIndex = input.materialIds.z;
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;

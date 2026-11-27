@@ -48,6 +48,22 @@ VividSurfaceSummaryGBufferOutput FragGBuffer(VividPackedVaryingsMesh packedInput
 #endif
 
     VividOpenPBRV2Inputs v2Inputs = VividStandardLitToOpenPBRV2Inputs(params);
+#if defined(VIVID_SLAB_HAS_CUSTOM_POST_SURFACE) && defined(VIVIDRP_SLAB_SURFACE_CONTRACT_INCLUDED)
+    {
+        VividSlabEvalContext slabCtx;
+        slabCtx.uv0 = input.texCoord0.xy;
+        slabCtx.uv0Ddx = ddx(input.texCoord0.xy);
+        slabCtx.uv0Ddy = ddy(input.texCoord0.xy);
+        slabCtx.geometryNormalWS = SafeNormalize(input.tangentToWorld[2]);
+        slabCtx.geometryTangentWS = float4(SafeNormalize(input.tangentToWorld[0]), 1.0f);
+        slabCtx.positionWS = input.positionRWS;
+        slabCtx.positionCS = input.positionSS;
+        slabCtx.parameterAddress = 0u;
+        slabCtx.resourceAddress = 0u;
+        slabCtx.materialIndex = 0u;
+        VividSlabPostEvaluateSurface(slabCtx, v2Inputs, ambientOcclusion);
+    }
+#endif
     if (_WriteSubstrateClosureBuffer != 0u)
     {
         uint headerFlags = 0u;

@@ -20,6 +20,10 @@ namespace VividRP.Editor.Tests
             "Shaders/Material/Templates/SubstrateOpaque.slab.template";
         private const string StandardLitRelativePath =
             "Shaders/Material/StandardLit/StandardLit.shader";
+        private const string StandardLitSlabRelativePath =
+            "Shaders/Material/StandardLit/StandardLitSlab.slab.shader";
+        private const string StandardLitTemplateRelativePath =
+            "Shaders/Material/Templates/StandardLit.slab.template";
 
         [Test]
         public void ParseDirectives_ExtractsBaseGraphAndShaderName()
@@ -423,6 +427,253 @@ namespace VividRP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(descriptor);
             }
+        }
+
+        [Test]
+        public void StandardLitSlab_Assemble_PreservesAllPassesPropertiesAndZeroSwitchCompute()
+        {
+            string slabPath = VividPackagePathUtility.GetPreferredAssetPath(StandardLitSlabRelativePath);
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(StandardLitTemplateRelativePath);
+            string legacyPath = VividPackagePathUtility.GetPreferredAssetPath(StandardLitRelativePath);
+
+            string slabSource = File.ReadAllText(slabPath);
+            string templateSource = File.ReadAllText(templatePath);
+            string legacySource = File.ReadAllText(legacyPath);
+
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                slabPath,
+                slabSource,
+                templatePath,
+                templateSource,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.ShaderName, Is.EqualTo("VividRP/Material/StandardLitSlab"));
+            Assert.That(assembled.HasLinkedGraphSurface, Is.False);
+            Assert.That(assembled.IsMultiClosure, Is.False);
+            Assert.That(assembled.EstimatedSubstrateBytesPerPixel, Is.EqualTo(32));
+
+            int propsStart = assembled.RasterShaderSource.IndexOf("Properties", StringComparison.Ordinal);
+            int subShaderStart = assembled.RasterShaderSource.IndexOf("SubShader", StringComparison.Ordinal);
+            StringAssert.DoesNotContain(
+                "#line",
+                assembled.RasterShaderSource.Substring(propsStart, subShaderStart - propsStart));
+
+            string[] expectedPasses =
+            {
+                "Name \"VividPreDepth\"",
+                "Name \"ShadowCaster\"",
+                "Name \"VividGBuffer\"",
+                "Name \"VividGBufferGPUDrivenDecal\"",
+                "Name \"Meta\"",
+                "Name \"MotionVectors\"",
+                "Name \"IndirectDXR\"",
+                "Name \"ReferencedPathtracingDXR\"",
+                "Name \"RaytracingGBufferDXR\"",
+                "Name \"VividVisibilityRaster\"",
+            };
+            for (int i = 0; i < expectedPasses.Length; i++)
+                StringAssert.Contains(expectedPasses[i], assembled.RasterShaderSource);
+
+            StringAssert.Contains("CustomEditor \"VividRP.Editor.StandardLitShaderGUI\"", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabEvaluateStandardLitFromMaterialData(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VIVID_SLAB_NO_AOT_SURFACE_DISPATCH", assembled.ComputeResolveSource);
+            StringAssert.Contains("VividWriteSubstrateOpenPBRV2Single(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
+
+            // Verify 100% property parity with StandardLit.shader.
+            var propRegex = new System.Text.RegularExpressions.Regex(@"(_[A-Za-z0-9_]+)\s*\(");
+            int legacyPropsEnd = legacySource.IndexOf("SubShader", StringComparison.Ordinal);
+            foreach (System.Text.RegularExpressions.Match m in propRegex.Matches(legacySource.Substring(0, legacyPropsEnd)))
+            {
+                string propName = m.Groups[1].Value;
+                StringAssert.Contains(
+                    propName + "(",
+                    slabSource,
+                    $"StandardLitSlab.slab.shader is missing StandardLit property '{propName}'.");
+            }
+
+            // Verify custom @vivid-surface-begin..end post-hook injects into BOTH Raster and Compute.
+            string withHook = slabSource.Replace(
+                "VIVID_SLAB_USE_BASE_SUBSHADER",
+                "// @vivid-surface-begin\n"
+                + "#define VIVID_SLAB_HAS_CUSTOM_POST_SURFACE 1\n"
+                + "void VividSlabPostEvaluateSurface(const VividSlabEvalContext ctx, inout VividOpenPBRV2Inputs v2, inout float ambientOcclusion) { v2.coatWeight = max(v2.coatWeight, 0.25f); }\n"
+                + "// @vivid-surface-end\n\n    VIVID_SLAB_USE_BASE_SUBSHADER");
+            VividSlabShaderAssemblyResult hooked = VividSlabShaderAssembler.Assemble(
+                slabPath,
+                withHook,
+                templatePath,
+                templateSource,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+            Assert.That(hooked.Succeeded, Is.True);
+            Assert.That(hooked.HasCustomSurfaceHook, Is.True);
+            StringAssert.Contains("VividSlabPostEvaluateSurface(", hooked.RasterShaderSource);
+            StringAssert.Contains("VividSlabPostEvaluateSurface(", hooked.ComputeResolveSource);
+        }
+
+        [Test]
+        public void SceneData_ActiveMaterialBins_TracksDirectBitmaskOverflowTerrainAndZeroAllocation()
+        {
+            VividSlabProgramDescriptor descriptorA = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            VividSlabProgramDescriptor descriptorB = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            try
+            {
+                descriptorA.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: "VividRP/Material/TestActiveBinA",
+                    baseTemplateAssetPath: string.Empty,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: 32,
+                    parameterStrideInWords: 0,
+                    parameters: Array.Empty<VividSlabParameterSlot>(),
+                    resources: Array.Empty<VividSlabResourceSlot>(),
+                    hasLinkedGraphSurface: false,
+                    hasCustomSurfaceHook: false,
+                    sourceContentHash: 0x11112222u,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>());
+                descriptorB.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: "VividRP/Material/TestActiveBinB",
+                    baseTemplateAssetPath: string.Empty,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: 32,
+                    parameterStrideInWords: 0,
+                    parameters: Array.Empty<VividSlabParameterSlot>(),
+                    resources: Array.Empty<VividSlabResourceSlot>(),
+                    hasLinkedGraphSurface: false,
+                    hasCustomSurfaceHook: false,
+                    sourceContentHash: 0x33334444u,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>());
+
+                var scene = new VividGPUDrivenSceneData();
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(0ul));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(1));
+
+                VividMaterialProgramID programA = scene.RegisterDynamicSlabProgram(descriptorA);
+                VividMaterialProgramID programB = scene.RegisterDynamicSlabProgram(descriptorB);
+                ulong expectedBitA = VividMaterialBinningContract.ComputeDirectProgramBinBit((int)(uint)programA);
+                ulong expectedBitB = VividMaterialBinningContract.ComputeDirectProgramBinBit((int)(uint)programB);
+                Assert.That(expectedBitA, Is.Not.EqualTo(0ul));
+                Assert.That(expectedBitB, Is.Not.EqualTo(0ul));
+                Assert.That(expectedBitA, Is.Not.EqualTo(expectedBitB));
+
+                // Registering programs without referencing materials keeps them inactive.
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(0ul));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(1));
+
+                scene.AddMaterial(
+                    default(VividMaterialData),
+                    new VividMaterialRuntimeHeader
+                    {
+                        ProgramID = programA,
+                        ParameterAddress = 0u,
+                        ResourceBindingAddress = 0u,
+                    });
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(expectedBitA));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(2));
+
+                scene.AddMaterial(
+                    default(VividMaterialData),
+                    new VividMaterialRuntimeHeader
+                    {
+                        ProgramID = programB,
+                        ParameterAddress = 0u,
+                        ResourceBindingAddress = 0u,
+                    });
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(expectedBitA | expectedBitB));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(3));
+
+                // Legacy fallback (ProgramID == Invalid) activates the overflow bin.
+                scene.AddLegacyMaterial(default(VividMaterialData));
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(expectedBitA | expectedBitB));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.True);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(4));
+
+                // Warm up and verify stable active-bin queries and tzcnt iteration allocate zero managed memory.
+                int sink = IterateActiveBins(scene, 64);
+
+                long beforeAlloc = GC.GetAllocatedBytesForCurrentThread();
+                sink += IterateActiveBins(scene, 1024);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - beforeAlloc;
+                Assert.That(sink, Is.GreaterThan(0));
+                Assert.That(allocated, Is.Zero, "Active bin bitmask queries and tzcnt iteration must allocate zero bytes.");
+
+                // ClearMaterials resets material bins cleanly.
+                scene.ClearMaterials();
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(0ul));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(1));
+
+                // StandardSingleSlab (ProgramID == 0) maps to OverflowBinIndex in both C# and HLSL.
+                Assert.That(
+                    VividMaterialBinningContract.MapProgramIdToBinIndex((uint)VividMaterialProgramID.StandardSingleSlab, true),
+                    Is.EqualTo(VividMaterialBinningContract.OverflowBinIndex));
+                scene.MutableMaterialRuntimeHeaders.Add(new VividMaterialRuntimeHeader
+                {
+                    ProgramID = VividMaterialProgramID.StandardSingleSlab,
+                });
+                Assert.That(scene.ActiveDirectProgramBinMask, Is.EqualTo(0ul));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.True);
+                Assert.That(scene.ActiveBinnedDispatchCount, Is.EqualTo(2));
+
+                // Terrain materials and out-of-range instance MaterialIndex also keep OverflowBin active.
+                scene.ClearMaterials();
+                scene.MutableTerrainMaterials.Add(default(VividTerrainMaterialData));
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.True);
+                scene.ClearTerrainMaterials();
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+
+                scene.AddInstance(
+                    new VividInstanceData
+                    {
+                        MaterialIndex = 99u,
+                        Flags = VividInstanceFlags.None,
+                    },
+                    1);
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.True);
+                scene.ClearInstances();
+                Assert.That(scene.HasActiveOverflowProgramBin, Is.False);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(descriptorA);
+                UnityEngine.Object.DestroyImmediate(descriptorB);
+            }
+        }
+
+        private static int IterateActiveBins(VividGPUDrivenSceneData scene, int iterations)
+        {
+            int sink = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                ulong mask = scene.ActiveDirectProgramBinMask;
+                while (mask != 0ul)
+                {
+                    sink += VividMaterialBinningContract.FirstDirectProgramBinIndex + math.tzcnt(mask);
+                    mask &= mask - 1ul;
+                }
+
+                if (scene.HasActiveOverflowProgramBin)
+                    sink += VividMaterialBinningContract.OverflowBinIndex;
+                sink += scene.ActiveBinnedDispatchCount;
+            }
+
+            return sink;
         }
 
         private static CompiledMaterialProgram BuildMultiClosureTestProgram(int closureCount)

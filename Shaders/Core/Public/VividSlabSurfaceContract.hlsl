@@ -14,6 +14,7 @@ struct VividSlabVertexContext
     float2 uv0;
     uint parameterAddress;
     uint resourceAddress;
+    uint materialIndex;
 };
 
 // Unified surface evaluation context shared between Raster (.slab.shader Shader MainAsset),
@@ -29,6 +30,7 @@ struct VividSlabEvalContext
     float4 positionCS;
     uint parameterAddress;
     uint resourceAddress;
+    uint materialIndex;
 };
 
 // Multi-Closure evaluation result (Phase S2: up to 4 closures, 3 operators -> Substrate Tier 3).
@@ -177,6 +179,61 @@ float4 VividSlabSampleResourceNormal(
 
 #define VIVID_SLAB_PARAM_FLOAT4(propName, wordOffset) \
     VividLoadMaterialFloat4(ctx.parameterAddress, (wordOffset))
+
+#if defined(VIVID_SLAB_TARGET_GPUDRIVEN_COMPUTE) && defined(VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED)
+// Evaluates StandardLit material data (Albedo, RMO/Mask remap, NormalMap + scale, Emission,
+// SpecularIOR, ClearCoat) directly from PullMaterialData(ctx.materialIndex) + PullSurfaceBindingData(...)
+// for standalone StandardLit .slab.shader ComputeShaders (VT primary + Bindless experimental, zero switch).
+void VividSlabEvaluateStandardLitFromMaterialData(
+    const VividSlabEvalContext ctx,
+    out VividOpenPBRV2Inputs v2Inputs,
+    out float ambientOcclusion)
+{
+    const VividMaterialData materialData = PullMaterialData(ctx.materialIndex);
+    const VividSurfaceBindingData surfaceBindingData =
+        PullSurfaceBindingData(materialData.SurfaceBindingIndex);
+    const VividSlabMaterialData slabData = VividCreateSlabMaterialData(materialData);
+    const VividEvaluatedSlabSurface evalSurf = VividEvaluateSlabSurfaceGrad(
+        slabData,
+        surfaceBindingData,
+        ctx.uv0,
+        ctx.uv0Ddx,
+        ctx.uv0Ddy,
+        ctx.positionCS);
+
+    float3 normalWS = SafeNormalize(ctx.geometryNormalWS);
+    const float tangentLenSq = dot(ctx.geometryTangentWS.xyz, ctx.geometryTangentWS.xyz);
+    const float3 tangentWS = tangentLenSq > 1e-8f
+        ? ctx.geometryTangentWS.xyz * rsqrt(tangentLenSq)
+        : float3(1.0f, 0.0f, 0.0f);
+    const float tangentSign = ctx.geometryTangentWS.w < 0.0f ? -1.0f : 1.0f;
+    if (evalSurf.HasNormal != 0u && tangentLenSq > 1e-8f)
+    {
+        const float3 bitangentWS = cross(normalWS, tangentWS) * tangentSign;
+        normalWS = SafeNormalize(
+            evalSurf.NormalTS.x * tangentWS
+            + evalSurf.NormalTS.y * bitangentWS
+            + evalSurf.NormalTS.z * normalWS);
+    }
+
+    VividStandardLitSurfaceParams stdParams = VividCreateDefaultStandardLitSurfaceParams();
+    stdParams.baseColor = evalSurf.BaseColor;
+    stdParams.metallic = evalSurf.Metallic;
+    stdParams.smoothness = saturate(1.0f - saturate(evalSurf.PerceptualRoughness));
+    stdParams.specularIor = materialData.SpecularIOR > 0.0f ? materialData.SpecularIOR : 1.5f;
+    stdParams.clearCoatMask = saturate(materialData.ClearCoatMask);
+    stdParams.clearCoatSmoothness = saturate(materialData.ClearCoatSmoothness);
+    stdParams.normalWS = normalWS;
+    stdParams.coatNormalWS = normalWS;
+    stdParams.hasIndependentCoatNormal = 0u;
+    stdParams.tangentWS = tangentWS;
+    stdParams.tangentHandedness = tangentSign;
+    stdParams.emission = max(materialData.Emission.rgb, 0.0f);
+
+    v2Inputs = VividStandardLitToOpenPBRV2Inputs(stdParams);
+    ambientOcclusion = evalSurf.AmbientOcclusion;
+}
+#endif
 
 #else // VIVID_SLAB_TARGET_RASTER
 

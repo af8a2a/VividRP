@@ -35,6 +35,7 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_ClearCoatMaskPropertyId = Shader.PropertyToID("_ClearCoatMask");
         private static readonly int s_ClearCoatSmoothnessPropertyId = Shader.PropertyToID("_ClearCoatSmoothness");
         private const string StandardLitShaderName = "VividRP/Material/StandardLit";
+        private const string StandardLitSlabShaderName = "VividRP/Material/StandardLitSlab";
         private const string SimpleForwardShaderName = "VividRP/Material/SimpleForward";
         private static readonly EntityIdComparer s_EntityIdComparer = new();
         private static readonly EntityIdSubMeshIndexComparer s_EntityIdSubMeshIndexComparer = new();
@@ -1557,7 +1558,9 @@ namespace VividRP.Runtime.GPUDriven
                         textureBackend.CreateSurfaceBinding(
                             ExtractSurfaceTextures(materialProxy, textureBackend));
                     sceneData.MutableSurfaceBindings.Add(baseBinding);
-                    materialData = CreateMaterialData(materialProxy.SourceMaterial, surfaceBindingIndex);
+                    materialData = GPUDrivenMaterialCompiler.CreateLegacyMaterialData(
+                        materialProxy,
+                        surfaceBindingIndex);
                     proxySlabDescriptor.PackParameterLanes(
                         materialProxy.SourceMaterial,
                         materialProxy,
@@ -2654,10 +2657,14 @@ namespace VividRP.Runtime.GPUDriven
         private static bool IsStandardLitShader(Shader shader)
         {
             return shader != null
-                && string.Equals(
-                    shader.name,
-                    StandardLitShaderName,
-                    StringComparison.Ordinal);
+                && (string.Equals(
+                        shader.name,
+                        StandardLitShaderName,
+                        StringComparison.Ordinal)
+                    || string.Equals(
+                        shader.name,
+                        StandardLitSlabShaderName,
+                        StringComparison.Ordinal));
         }
 
         private static VividRendererListID GetRendererListId(Material material)

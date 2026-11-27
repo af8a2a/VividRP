@@ -162,6 +162,8 @@ VividEvaluatedSlabSurface VividEvaluateSlabSurfaceGrad(
 }
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividMaterialNodeLibrary.hlsl"
+#if !defined(VIVID_SLAB_NO_AOT_SURFACE_DISPATCH)
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMaterialSurfaceAOT.generated.hlsl"
+#endif
 
 #endif // VIVIDRP_GPU_DRIVEN_MATERIAL_SURFACE_INCLUDED

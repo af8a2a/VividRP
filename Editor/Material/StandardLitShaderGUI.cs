@@ -254,6 +254,8 @@ namespace VividRP.Editor
         private const string VirtualTextureBaseColorKeyword = "_VIRTUAL_TEXTURE_BASE_COLOR";
         private const string StandardLitShaderName =
             "VividRP/Material/StandardLit";
+        private const string StandardLitSlabShaderName =
+            "VividRP/Material/StandardLitSlab";
 
         internal static void SetupMaterial(Material material, Shader oldShader, bool logWarnings)
         {
@@ -416,7 +418,8 @@ namespace VividRP.Editor
         {
             return material != null
                 && material.shader != null
-                && material.shader.name == StandardLitShaderName;
+                && (material.shader.name == StandardLitShaderName
+                    || material.shader.name == StandardLitSlabShaderName);
         }
 
         private static void SyncGlobalIlluminationFlags(Material material)

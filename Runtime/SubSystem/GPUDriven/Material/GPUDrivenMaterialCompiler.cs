@@ -1150,7 +1150,7 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static VividMaterialData CreateLegacyMaterialData(
+        internal static VividMaterialData CreateLegacyMaterialData(
             GPUDrivenMaterialProxy materialProxy,
             uint surfaceBindingIndex)
         {

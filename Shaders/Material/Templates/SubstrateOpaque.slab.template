@@ -357,7 +357,7 @@ SubShader
             ctx.resourceAddress = 0u;
             ctx.materialIndex = 0u;
 
-            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE) && !defined(VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z)
             {
                 float alpha = 1.0f;
                 float cutoff = 0.5f;
@@ -554,7 +554,7 @@ SubShader
             ctx.resourceAddress = 0u;
             ctx.materialIndex = 0u;
 
-            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE) && !defined(VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z)
             {
                 float alpha = 1.0f;
                 float cutoff = 0.5f;

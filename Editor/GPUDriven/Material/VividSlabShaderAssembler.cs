@@ -266,7 +266,9 @@ namespace VividRP.Editor.GPUDriven
                 : useStandardLitComputeSurface
                     ? BuildStandardLitComputeEvaluateFunction()
                     : BuildDefaultComputeEvaluateFunction();
-            string earlyDepthAttr = hasCustomCoverage
+            bool usePreDepthEarlyZInGBuffer = hasCustomCoverage
+                && userCoverageHook.IndexOf("VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z", StringComparison.Ordinal) >= 0;
+            string earlyDepthAttr = hasCustomCoverage && !usePreDepthEarlyZInGBuffer
                 ? "// [VividSlab] [earlydepthstencil] omitted when custom coverage clip is active."
                 : "[earlydepthstencil]";
 
@@ -340,10 +342,14 @@ namespace VividRP.Editor.GPUDriven
                     if (userSurfaceHook.IndexOf("hasIndependentCoatNormal", StringComparison.Ordinal) >= 0)
                         hookFeatures |= VividSubstrateFeatureMask.DualNormal;
                 }
-                if (userSurfaceHook.IndexOf("fuzzWeight", StringComparison.Ordinal) >= 0)
+                if (userSurfaceHook.IndexOf("fuzzWeight", StringComparison.Ordinal) >= 0
+                    || userSurfaceHook.IndexOf("VividFurParamsToOpenPBRV2Inputs", StringComparison.Ordinal) >= 0)
+                {
                     hookFeatures |= VividSubstrateFeatureMask.Fuzz;
+                }
                 if (userSurfaceHook.IndexOf("specularAnisotropy", StringComparison.Ordinal) >= 0
-                    || userSurfaceHook.IndexOf("VividFabricParamsToOpenPBRV2Inputs", StringComparison.Ordinal) >= 0)
+                    || userSurfaceHook.IndexOf("VividFabricParamsToOpenPBRV2Inputs", StringComparison.Ordinal) >= 0
+                    || userSurfaceHook.IndexOf("VividFurParamsToOpenPBRV2Inputs", StringComparison.Ordinal) >= 0)
                 {
                     hookFeatures |= VividSubstrateFeatureMask.Anisotropy;
                 }

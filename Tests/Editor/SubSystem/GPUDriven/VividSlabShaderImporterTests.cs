@@ -20,6 +20,8 @@ namespace VividRP.Editor.Tests
             "Shaders/Material/Samples/ClearCoatDualNormal.slab.shader";
         private const string FabricSlabRelativePath =
             "Shaders/Material/Fabric/FabricSlab.slab.shader";
+        private const string FurSlabRelativePath =
+            "Shaders/Material/Fur/FurSlab.slab.shader";
         private const string BaseTemplateRelativePath =
             "Shaders/Material/Templates/SubstrateOpaque.slab.template";
         private const string StandardLitRelativePath =
@@ -293,6 +295,52 @@ namespace VividRP.Editor.Tests
             StringAssert.Contains("EncodeCameraMotionVectorFromCsPositions(", assembled.RasterShaderSource);
 
             // Standalone GPUDriven Compute must not receive Raster-only UNITY_INSTANCING_BUFFER declarations.
+            StringAssert.DoesNotContain("UNITY_INSTANCING_BUFFER_START", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
+            StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+        }
+
+        [Test]
+        public void Assemble_FurSlab_WiresInstancingWpoPrevWpoPreDepthEarlyZAndZeroSwitchCompute()
+        {
+            string furPath = VividPackagePathUtility.GetPreferredAssetPath(FurSlabRelativePath);
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+
+            VividSlabShaderAssemblyResult assembled = VividSlabShaderAssembler.Assemble(
+                furPath,
+                File.ReadAllText(furPath),
+                templatePath,
+                File.ReadAllText(templatePath),
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(assembled.Succeeded, Is.True);
+            Assert.That(assembled.ShaderName, Is.EqualTo("VividRP/Material/FurSlab"));
+            Assert.That(assembled.HasVertexOffset, Is.True);
+            Assert.That(assembled.HasCustomCoverage, Is.True);
+            Assert.That(assembled.HasCustomSurfaceHook, Is.True);
+            Assert.That(assembled.IsMultiClosure, Is.False);
+            Assert.That(
+                assembled.EstimatedSubstrateBytesPerPixel,
+                Is.EqualTo(
+                    VividSubstrateContract.ComputeSingleClosureTotalSlices(
+                        VividSubstrateFeatureMask.OpenPBROpaque
+                        | VividSubstrateFeatureMask.Fuzz
+                        | VividSubstrateFeatureMask.Anisotropy)
+                    * VividSubstrateContract.BytesPerSlice));
+
+            // Raster: instanced _ShellHeight, WPO + Prev-WPO MotionVectors, PreDepth Early-Z GBuffer.
+            StringAssert.Contains("UNITY_INSTANCING_BUFFER_START(VividFurInstancedProps)", assembled.RasterShaderSource);
+            StringAssert.Contains("UNITY_DEFINE_INSTANCED_PROP(float, _ShellHeight)", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabEvaluateVertexOffset(", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabEvaluatePreviousVertexOffset(", assembled.RasterShaderSource);
+            StringAssert.Contains("VIVID_SLAB_GBUFFER_PREDEPTH_EARLY_Z", assembled.RasterShaderSource);
+            StringAssert.Contains("[earlydepthstencil]", assembled.RasterShaderSource);
+            StringAssert.Contains("Name \"MotionVectors\"", assembled.RasterShaderSource);
+            StringAssert.Contains("CustomEditor \"VividRP.Editor.FurShaderGUI\"", assembled.RasterShaderSource);
+
+            // Compute: compiles cleanly with zero switch and no Raster-only instancing buffer.
+            StringAssert.Contains("VividFurParamsToOpenPBRV2Inputs(", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("UNITY_INSTANCING_BUFFER_START", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);

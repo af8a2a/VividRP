@@ -143,16 +143,23 @@ SubShader
         ColorMask 0
 
         HLSLPROGRAM
+        #pragma target 5.0
         #pragma use_dxc
         #pragma multi_compile_instancing
+        #pragma multi_compile_fragment _ VIVID_VSM_CASTER
+        #pragma require randomwrite : VIVID_VSM_CASTER
         #pragma vertex VertSlabShadow
         #pragma fragment FragSlabShadow
 
         #define VIVID_SLAB_TARGET_RASTER 1
+        #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
         #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
         #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
         #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
         #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapCaster.hlsl"
+
+        float4 _ShadowBias;
 
         CBUFFER_START(UnityPerMaterial)
             VIVID_SLAB_GRAPH_CBUFFER
@@ -185,6 +192,17 @@ SubShader
             UNITY_VERTEX_INPUT_INSTANCE_ID
         };
 
+        float4 ApplySlabShadowClamping(float4 positionCS)
+        {
+            #if UNITY_REVERSED_Z
+                float clampedZ = min(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
+            #else
+                float clampedZ = max(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
+            #endif
+            positionCS.z = lerp(positionCS.z, clampedZ, round(_ShadowBias.z) == 1.0 ? 1.0 : 0.0);
+            return positionCS;
+        }
+
         Varyings VertSlabShadow(Attributes input)
         {
             Varyings o;
@@ -207,7 +225,7 @@ SubShader
             }
             #endif
             o.positionWS = positionWS;
-            o.positionCS = TransformWorldToHClip(positionWS);
+            o.positionCS = ApplySlabShadowClamping(TransformWorldToHClip(positionWS));
             o.normalWS = normalWS;
             o.tangentWS = float4(
                 TransformObjectToWorldDir(input.tangentOS.xyz),
@@ -241,6 +259,7 @@ SubShader
                 clip(alpha - cutoff);
             }
             #endif
+            VividWriteVSMDepth(input.positionCS);
         }
         ENDHLSL
     }

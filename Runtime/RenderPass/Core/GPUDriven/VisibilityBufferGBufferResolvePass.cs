@@ -416,6 +416,15 @@ namespace VividRP.Runtime.RenderPass.Core
             VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
                 ? VividGPUDrivenSystem.instance
                 : null;
+            if (HasUpstreamGBuffer()
+                && (system == null || system.SceneData == null || system.SceneData.InstanceCount == 0))
+            {
+                // Upstream GBufferPass already cleared and populated GBuffer0..4 (and Substrate headers);
+                // skip resolving an empty visibility buffer so raster-drawn meshes are preserved.
+                m_LastRecordedBinnedDispatchCount = 0;
+                return;
+            }
+
             var nativeCmd = context.GetNativeCommandBuffer();
 
             if (CanUseSinglePassComputeResolve())
@@ -589,6 +598,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 out m_SubstrateFrameData,
                 out m_SubstrateClosureBufferHandle,
                 out _);
+        }
+
+        private bool HasUpstreamGBuffer()
+        {
+            return !ReferenceEquals(m_GBuffer0, m_DefaultGBuffer0);
         }
 
         private bool CanUseSinglePassComputeResolve()
@@ -810,9 +824,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
             int dispatchedBins = 0;
 
-            // Bin 0: Empty/sky clear tiles always execute on the base binned resolver.
-            RecordBaseBinnedResolveDispatch(cmd, VividMaterialBinningContract.EmptyBinIndex);
-            dispatchedBins++;
+            // Bin 0: Empty/sky clear tiles only run when this pass owns GBuffer0..4.
+            // When GBuffer targets are overridden by an upstream GBufferPass, skipping Bin 0
+            // preserves raster-drawn MeshRenderers alongside GPUDriven MeshletRenderers.
+            if (!HasUpstreamGBuffer())
+            {
+                RecordBaseBinnedResolveDispatch(cmd, VividMaterialBinningContract.EmptyBinIndex);
+                dispatchedBins++;
+            }
 
             // Direct ProgramID bins [1 .. MaxDirectProgramBins]: O(popcount) active-only iteration.
             // Dynamic *.slab.shader bins dispatch their own standalone ComputeShader (zero switch divergence).

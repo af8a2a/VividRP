@@ -1782,11 +1782,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 && (m_FullSphere ? settings.farTraceDistance.value > 2f * Mathf.Sqrt(3f) * (50f / 48f)
                     : settings.farTraceDistance.value > m_TraceDistance + FarCellSize);
             m_WorldWork.Resize(farConfigured && m_FullSphere ? 1024 : 1, farConfigured && m_FullSphere ? 445 : 1);
-            if (m_UseSdf)
+            bool prepareReflectionSky = useSettings && !m_OffscreenOnly && settings.lumenReflections.value;
+            if (m_UseSdf || prepareReflectionSky)
             {
                 m_SkyTexture = PassRecorder.ImportTextureForPass(this, SkyManager.GetSkySourceCubemapHandle());
-                if (useSettings && settings.occludedSky.value && (!m_RestirGather || farConfigured)
-                    && !m_OffscreenOnly && m_SkyTexture.IsValid())
+                bool wantOccludedSky = m_UseSdf
+                    ? (useSettings && settings.occludedSky.value && (!m_RestirGather || farConfigured) && !m_OffscreenOnly)
+                    : prepareReflectionSky;
+                if (wantOccludedSky && m_SkyTexture.IsValid())
                 {
                     float skyDistance = settings.skyTraceDistance.overrideState
                         ? settings.skyTraceDistance.value
@@ -3829,11 +3832,23 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(shader, GlobalUseMipId, useMip ? 1 : 0);
             if (!useGlobalClipmap)
             {
-                cmd.SetComputeBufferParam(shader, kernel, ObjectWorkId, m_Scene.LeafInstances);
-                cmd.SetComputeBufferParam(shader, kernel, ObjectPagesId, m_Scene.LeafInstances);
-                cmd.SetComputeBufferParam(shader, kernel, ObjectGridId, m_Scene.LeafInstances);
-                cmd.SetComputeBufferParam(shader, kernel, GlobalPagesId, m_Scene.LeafInstances);
-                cmd.SetComputeBufferParam(shader, kernel, GlobalThinBricksId, m_Scene.LeafInstances);
+                if (m_Scene != null && m_Scene.LeafInstances != null)
+                {
+                    cmd.SetComputeBufferParam(shader, kernel, ObjectWorkId, m_Scene.LeafInstances);
+                    cmd.SetComputeBufferParam(shader, kernel, ObjectPagesId, m_Scene.LeafInstances);
+                    cmd.SetComputeBufferParam(shader, kernel, ObjectGridId, m_Scene.LeafInstances);
+                    cmd.SetComputeBufferParam(shader, kernel, GlobalPagesId, m_Scene.LeafInstances);
+                    cmd.SetComputeBufferParam(shader, kernel, GlobalThinBricksId, m_Scene.LeafInstances);
+                }
+                else if (m_MeshCardGrid.IsValid())
+                {
+                    BufferHandle fallbackBuffer = m_MeshCardGrid.innerHandle;
+                    cmd.SetComputeBufferParam(shader, kernel, ObjectWorkId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, ObjectPagesId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, ObjectGridId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, GlobalPagesId, fallbackBuffer);
+                    cmd.SetComputeBufferParam(shader, kernel, GlobalThinBricksId, fallbackBuffer);
+                }
                 return;
             }
             cmd.SetComputeBufferParam(shader, kernel, ObjectWorkId, m_ObjectPageWork.IsValid() ? m_ObjectPageWork : m_GlobalPages);

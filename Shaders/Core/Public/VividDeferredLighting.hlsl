@@ -997,6 +997,7 @@ bool TryEvaluateDeferredHairLighting(
 
     // 1. Indirect Lighting (Lumen Diffuse GI / ProbeVolume / Sky + Reflections via cylinder normal V_perp)
     float3 cylNormal = VividComputeHairCylinderNormal(bsdfIn.tangentWS, viewDirectionWS, summary.normalWS);
+    float3 macroGiNormal = SafeNormalize(lerp(summary.normalWS, cylNormal, 0.25f));
     float4 realtimeDiffuseGI = LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo);
     float3 diffuseIrradiance;
     if (realtimeDiffuseGI.a >= 1.0f)
@@ -1006,9 +1007,9 @@ bool TryEvaluateDeferredHairLighting(
         diffuseIrradiance = summary.diffuseIrradiance;
     else if (VividHasProbeVolumeGI())
         diffuseIrradiance = SampleVividProbeVolume(positionWS,
-            cylNormal, viewDirectionWS, 0xFFFFFFFFu, VividAllowUnoccludedSkyFallback());
+            macroGiNormal, viewDirectionWS, 0xFFFFFFFFu, VividAllowUnoccludedSkyFallback());
     else
-        diffuseIrradiance = VividAllowUnoccludedSkyFallback() ? VividSampleAmbientProbe(cylNormal) : 0.0f.xxx;
+        diffuseIrradiance = VividAllowUnoccludedSkyFallback() ? VividSampleAmbientProbe(macroGiNormal) : 0.0f.xxx;
     if (realtimeDiffuseGI.a > 0.0f && realtimeDiffuseGI.a < 1.0f)
         diffuseIrradiance = lerp(diffuseIrradiance, realtimeDiffuseGI.rgb, realtimeDiffuseGI.a);
 
@@ -1033,11 +1034,12 @@ bool TryEvaluateDeferredHairLighting(
     float sinThetaV = clamp(dot(bsdfIn.tangentWS, viewDirectionWS), -1.0f, 1.0f);
     float cosThetaV = sqrt(saturate(1.0f - sinThetaV * sinThetaV));
     float F_env = VividHairFresnelSchlick(f0, cosThetaV * 0.70710678f);
+    // Multi-scattered fur/hair diffuse GI lifts shadowed albedo toward sqrt(baseColor) instead of darkening.
     float3 envDiffuseAlbedo = lerp(
         bsdfIn.baseColor,
-        sqrt(max(bsdfIn.baseColor, 1e-4f.xxx)) * bsdfIn.baseColor,
-        0.5f * saturate(bsdfIn.scatter));
-    envDiffuseAlbedo = lerp(envDiffuseAlbedo, bsdfIn.baseColor * 0.85f, saturate(bsdfIn.medullaWeight) * 0.5f);
+        sqrt(max(bsdfIn.baseColor, 1e-4f.xxx)),
+        0.35f * saturate(bsdfIn.scatter));
+    envDiffuseAlbedo = lerp(envDiffuseAlbedo, bsdfIn.baseColor * 0.92f, saturate(bsdfIn.medullaWeight) * 0.35f);
 
     result.indirectDiffuseLighting = max(diffuseIrradiance, 0.0f.xxx) * envDiffuseAlbedo * (1.0f - F_env) * bsdfIn.ambientOcclusion;
     result.indirectSpecularLighting = max(specRadiance, 0.0f.xxx) * F_env * lerp(0.35f, 1.0f, bsdfIn.ambientOcclusion);
@@ -1054,9 +1056,20 @@ bool TryEvaluateDeferredHairLighting(
         float3 lightDir = SafeNormalize(light.directionWS);
         float3 unshadowed = max(light.color, 0.0f.xxx);
 
+        // Macro-body horizon wrap: deep roots follow opaque skin N.L while outer fur tips
+        // wrap softly around the silhouette and transmit backlit TT glow cleanly.
+        float NdotL = dot(bsdfIn.geomNormalWS, lightDir);
+        float skinWrap = saturate((NdotL + 0.35f) / 1.35f);
+        float reflectionVis = lerp(saturate(NdotL), skinWrap, 0.40f + 0.45f * bsdfIn.shellDepth);
+        float backlitVis = smoothstep(-0.65f, 0.25f, NdotL) * lerp(0.15f, 1.0f, bsdfIn.shellDepth);
+        float dualVis = lerp(0.25f, 1.0f, skinWrap);
+
         VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, lightDir, shadow);
-        float3 directSpec = unshadowed * (resp.lobeR + resp.lobeTRT) * saturate(shadow);
-        float3 directDiff = unshadowed * ((resp.lobeTT + resp.lobeMedulla) * saturate(shadow) + resp.lobeDualScatter);
+        float shadowSat = saturate(shadow);
+        float3 directSpec = unshadowed * (resp.lobeR + resp.lobeTRT) * (shadowSat * reflectionVis);
+        float3 directDiff = unshadowed * (
+            (resp.lobeTT * backlitVis + resp.lobeMedulla * reflectionVis) * shadowSat
+            + resp.lobeDualScatter * dualVis);
         result.specularLighting += directSpec;
         result.diffuseLighting += directDiff;
         diffuseBounce += directDiff;
@@ -1077,10 +1090,16 @@ bool TryEvaluateDeferredHairLighting(
             light, positionWS - light.positionWS, distances);
         if (attenuation > 0.0f)
         {
+            float NdotL = dot(bsdfIn.geomNormalWS, direction);
+            float skinWrap = saturate((NdotL + 0.35f) / 1.35f);
+            float reflectionVis = lerp(saturate(NdotL), skinWrap, 0.40f + 0.45f * bsdfIn.shellDepth);
+            float backlitVis = smoothstep(-0.65f, 0.25f, NdotL) * lerp(0.15f, 1.0f, bsdfIn.shellDepth);
+            float dualVis = lerp(0.25f, 1.0f, skinWrap);
+
             float3 radiance = max(light.color, 0.0f.xxx) * attenuation;
             VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, direction, 1.0f);
-            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT);
-            float3 directDiff = radiance * (resp.lobeTT + resp.lobeMedulla + resp.lobeDualScatter);
+            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT) * reflectionVis;
+            float3 directDiff = radiance * (resp.lobeTT * backlitVis + resp.lobeMedulla * reflectionVis + resp.lobeDualScatter * dualVis);
             result.specularLighting += directSpec;
             result.diffuseLighting += directDiff;
             diffuseBounce += directDiff;
@@ -1106,10 +1125,16 @@ bool TryEvaluateDeferredHairLighting(
         float solidAngle = saturate(area * frontFacing / (distSq + area * VIVID_HAIR_INV_PI));
         if (solidAngle > 1e-5f)
         {
+            float NdotL = dot(bsdfIn.geomNormalWS, lightDir);
+            float skinWrap = saturate((NdotL + 0.35f) / 1.35f);
+            float reflectionVis = lerp(saturate(NdotL), skinWrap, 0.40f + 0.45f * bsdfIn.shellDepth);
+            float backlitVis = smoothstep(-0.65f, 0.25f, NdotL) * lerp(0.15f, 1.0f, bsdfIn.shellDepth);
+            float dualVis = lerp(0.25f, 1.0f, skinWrap);
+
             float3 radiance = max(light.color, 0.0f.xxx) * (intensity * solidAngle);
             VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, lightDir, 1.0f);
-            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT);
-            float3 directDiff = radiance * (resp.lobeTT + resp.lobeMedulla + resp.lobeDualScatter);
+            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT) * reflectionVis;
+            float3 directDiff = radiance * (resp.lobeTT * backlitVis + resp.lobeMedulla * reflectionVis + resp.lobeDualScatter * dualVis);
             result.specularLighting += directSpec;
             result.diffuseLighting += directDiff;
             diffuseBounce += directDiff;

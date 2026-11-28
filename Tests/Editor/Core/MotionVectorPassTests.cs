@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -6,6 +7,7 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
@@ -196,6 +198,18 @@ namespace VividRP.Editor.Tests
         public void SupportsAsyncCompute_ReturnsFalse_ForMotionVectorPass()
         {
             Assert.That((typeof(MotionVectorPass)).SupportsAsyncCompute(), Is.False);
+        }
+
+        [Test]
+        public void CameraMotionVectorsShader_UnpacksVisibilityInstanceIdWithoutShellBits()
+        {
+            string shaderPath = VividPackagePathUtility.GetPreferredAssetPath("Shaders/Core/Private/CameraMotionVectors.shader");
+            string source = File.ReadAllText(shaderPath);
+
+            StringAssert.Contains("VividVisibilityBuffer.hlsl", source);
+            StringAssert.Contains("HasValidVisibilityBufferValue(packedVisibility)", source);
+            StringAssert.Contains("UnpackVisibilityBufferInstanceID(packedVisibility.x)", source);
+            StringAssert.DoesNotContain("_MotionVisibility.Load(int3(pixelCoord, 0)).x - 1u", source);
         }
 
         private static RenderGraphTexture GetTextureField(MotionVectorPass pass, string fieldName)

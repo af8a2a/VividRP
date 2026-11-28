@@ -39,6 +39,7 @@ Shader "Hidden/VividRP/CameraMotionVectors"
 
             #if defined(VIVID_MESHLET_MOTION)
             #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/PrimitiveScene/VividPrimitiveSceneTypes.cs.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
             Texture2D<uint2> _MotionVisibility;
             StructuredBuffer<VividLegacyInstanceMappingData> _VividLegacyInstanceMappingData;
             StructuredBuffer<VividPrimitiveDrawSectionData> _VividPrimitiveDrawSectionData;
@@ -89,28 +90,32 @@ Shader "Hidden/VividRP/CameraMotionVectors"
 
                 uint objectVelocity = 0u;
                 #if defined(VIVID_MESHLET_MOTION)
-                uint instanceIndex = _MotionVisibility.Load(int3(pixelCoord, 0)).x - 1u;
+                uint2 packedVisibility = _MotionVisibility.Load(int3(pixelCoord, 0));
                 uint primitiveIndex = 0xffffffffu;
                 uint primitiveGeneration = 0u;
-                if (_VividPrimitiveSceneDirectEnabled != 0u)
+                if (HasValidVisibilityBufferValue(packedVisibility))
                 {
-                    if (instanceIndex < _VividPrimitiveDrawSectionCount)
+                    uint instanceIndex = UnpackVisibilityBufferInstanceID(packedVisibility.x);
+                    if (_VividPrimitiveSceneDirectEnabled != 0u)
                     {
-                        VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
-                        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) != 0u)
+                        if (instanceIndex < _VividPrimitiveDrawSectionCount)
                         {
-                            primitiveIndex = section.PrimitiveIndex;
-                            primitiveGeneration = section.PrimitiveGeneration;
+                            VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+                            if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) != 0u)
+                            {
+                                primitiveIndex = section.PrimitiveIndex;
+                                primitiveGeneration = section.PrimitiveGeneration;
+                            }
                         }
                     }
-                }
-                else if (instanceIndex < _VividLegacyInstanceMappingCount)
-                {
-                    VividLegacyInstanceMappingData mapping = _VividLegacyInstanceMappingData[instanceIndex];
-                    if ((mapping.Flags & 1u) != 0u)
+                    else if (instanceIndex < _VividLegacyInstanceMappingCount)
                     {
-                        primitiveIndex = mapping.PrimitiveIndex;
-                        primitiveGeneration = mapping.PrimitiveGeneration;
+                        VividLegacyInstanceMappingData mapping = _VividLegacyInstanceMappingData[instanceIndex];
+                        if ((mapping.Flags & 1u) != 0u)
+                        {
+                            primitiveIndex = mapping.PrimitiveIndex;
+                            primitiveGeneration = mapping.PrimitiveGeneration;
+                        }
                     }
                 }
 

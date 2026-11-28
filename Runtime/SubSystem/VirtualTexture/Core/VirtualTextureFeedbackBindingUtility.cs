@@ -112,14 +112,56 @@ namespace VividRP.Runtime
             return true;
         }
 
+        private static ComputeBuffer s_DummyFeedbackRequests;
+        private static ComputeBuffer s_DummyFeedbackCounter;
+        private static ComputeBuffer s_DummyFeedbackHash;
+        private static bool s_DummyCleanupRegistered;
+
+        private static void ReleaseDummyFeedbackBuffers()
+        {
+            s_DummyFeedbackRequests?.Release();
+            s_DummyFeedbackRequests = null;
+            s_DummyFeedbackCounter?.Release();
+            s_DummyFeedbackCounter = null;
+            s_DummyFeedbackHash?.Release();
+            s_DummyFeedbackHash = null;
+        }
+
+        private static void EnsureDummyFeedbackBuffers()
+        {
+            if (!s_DummyCleanupRegistered)
+            {
+                s_DummyCleanupRegistered = true;
+                AppDomain.CurrentDomain.DomainUnload += (_, _) => ReleaseDummyFeedbackBuffers();
+            }
+            if (s_DummyFeedbackRequests == null || !s_DummyFeedbackRequests.IsValid())
+                s_DummyFeedbackRequests = new ComputeBuffer(1, sizeof(uint) * 4, ComputeBufferType.Structured);
+            if (s_DummyFeedbackCounter == null || !s_DummyFeedbackCounter.IsValid())
+                s_DummyFeedbackCounter = new ComputeBuffer(1, sizeof(uint), ComputeBufferType.Structured);
+            if (s_DummyFeedbackHash == null || !s_DummyFeedbackHash.IsValid())
+                s_DummyFeedbackHash = new ComputeBuffer(1, sizeof(uint), ComputeBufferType.Structured);
+        }
+
         internal static bool BindFeedbackComputeTargets(
             CommandBuffer cmd,
             ComputeShader computeShader,
             int kernelIndex,
             in VirtualTextureSpaceBinding binding)
         {
-            if (cmd == null || computeShader == null || kernelIndex < 0 || !binding.HasFeedback)
+            if (cmd == null || computeShader == null || kernelIndex < 0)
                 return false;
+
+            if (!binding.HasFeedback)
+            {
+                // Compute shaders compiled with VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+                // still declare the feedback RWStructuredBuffers even when _VTFeedbackEnabled == 0.
+                // Bind 1-element dummy UAVs so Unity/D3D12 never drops the dispatch.
+                EnsureDummyFeedbackBuffers();
+                cmd.SetComputeBufferParam(computeShader, kernelIndex, VirtualTextureShaderIDs._VTFeedbackRequests, s_DummyFeedbackRequests);
+                cmd.SetComputeBufferParam(computeShader, kernelIndex, VirtualTextureShaderIDs._VTFeedbackCounter, s_DummyFeedbackCounter);
+                cmd.SetComputeBufferParam(computeShader, kernelIndex, VirtualTextureShaderIDs._VTFeedbackResidentHash, s_DummyFeedbackHash);
+                return false;
+            }
 
             cmd.SetComputeBufferParam(
                 computeShader,

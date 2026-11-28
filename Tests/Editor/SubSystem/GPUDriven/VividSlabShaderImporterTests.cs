@@ -341,9 +341,34 @@ namespace VividRP.Editor.Tests
 
             // Compute: compiles cleanly with zero switch and no Raster-only instancing buffer.
             StringAssert.Contains("VividFurParamsToOpenPBRV2Inputs(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VIVID_SLAB_SUPPORTS_HAIR_CLOSURE", assembled.RasterShaderSource);
+            StringAssert.Contains("VIVID_SLAB_SUPPORTS_HAIR_CLOSURE", assembled.ComputeResolveSource);
+            StringAssert.Contains("VividSlabTryEvaluateHairClosure(", assembled.RasterShaderSource);
+            StringAssert.Contains("VividSlabTryEvaluateHairClosure(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VividFurParamsToSubstrateHairInputs(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VividWriteSubstrateHair(", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("UNITY_INSTANCING_BUFFER_START", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
+
+            // Stage 3.3 Marschner Hair/Fur parameters reflected into GPUDriven parameter lanes.
+            string[] expectedHairParams =
+            {
+                "_FurLightingModel",
+                "_HairRadialRoughness",
+                "_HairCuticleAngle",
+                "_HairScatter",
+                "_HairBacklit",
+                "_FurMedullaWeight",
+                "_FurMedullaRoughness",
+            };
+            foreach (string propName in expectedHairParams)
+            {
+                Assert.That(
+                    Array.Exists(assembled.ParameterSlots, slot => slot.PropertyName == propName),
+                    Is.True,
+                    $"Expected Stage 3.3 Hair parameter '{propName}' to be reflected into GPUDriven parameter slots.");
+            }
         }
 
         [Test]

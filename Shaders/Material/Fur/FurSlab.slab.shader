@@ -57,6 +57,7 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurStrands)] _GPUDrivenShadowMaxHeight("GPUDriven Shadow Max Height", Range(0.0, 1.0)) = 0.35
 
         [Main(FurShading, _, on, off)] _FurShading("Root-to-Tip & Substrate Shading", Float) = 1
+        [SubEnum(FurShading, OpenPBR V2 Plush, 0, Marschner Hair Fur, 1)] _FurLightingModel("Lighting Model", Float) = 0.0
         [Tex(FurShading)] _BaseMap("Base Albedo Map", 2D) = "white" {}
         [Sub(FurShading)] _BaseMap_ST("Base UV Tiling & Offset", Vector) = (1, 1, 0, 0)
         [Sub(FurShading)] _RootColor("Root Color", Color) = (0.14, 0.09, 0.06, 1.0)
@@ -70,10 +71,16 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurShading)] _TipRoughness("Tip Specular Roughness", Range(0.15, 0.95)) = 0.34
         [Sub(FurShading)] _SpecularWeight("Keratin Specular Weight", Range(0.0, 1.0)) = 0.65
         [Sub(FurShading)] _SpecularTint("Keratin Specular Tint", Color) = (1.0, 0.94, 0.86, 1.0)
-        [Sub(FurShading)] _Anisotropy("Strand Anisotropy", Range(0.0, 1.0)) = 0.72
-        [Sub(FurShading)] _FuzzWeight("Fuzz Rim Sheen Weight", Range(0.0, 1.0)) = 0.85
-        [Sub(FurShading)] _FuzzColor("Fuzz Rim Sheen Color", Color) = (0.94, 0.84, 0.72, 1.0)
-        [Sub(FurShading)] _FuzzRoughness("Fuzz Rim Roughness", Range(0.15, 1.0)) = 0.46
+        [Sub(FurShading)] _Anisotropy("Strand Anisotropy (OpenPBR)", Range(0.0, 1.0)) = 0.72
+        [Sub(FurShading)] _FuzzWeight("Fuzz Rim Sheen Weight (OpenPBR)", Range(0.0, 1.0)) = 0.85
+        [Sub(FurShading)] _FuzzColor("Fuzz Rim Sheen Color (OpenPBR)", Color) = (0.94, 0.84, 0.72, 1.0)
+        [Sub(FurShading)] _FuzzRoughness("Fuzz Rim Roughness (OpenPBR)", Range(0.15, 1.0)) = 0.46
+        [Sub(FurShading)] _HairRadialRoughness("Marschner Radial Roughness", Range(0.05, 1.0)) = 0.45
+        [Sub(FurShading)] _HairCuticleAngle("Marschner Cuticle Tilt (Deg)", Range(0.0, 12.0)) = 2.5
+        [Sub(FurShading)] _HairScatter("Dual Scattering Strength", Range(0.0, 1.0)) = 0.85
+        [Sub(FurShading)] _HairBacklit("Backlit TT Transmission", Range(0.0, 1.0)) = 0.85
+        [Sub(FurShading)] _FurMedullaWeight("Animal Fur Medulla Weight", Range(0.0, 1.0)) = 0.55
+        [Sub(FurShading)] _FurMedullaRoughness("Animal Fur Medulla Softness", Range(0.10, 1.0)) = 0.65
 
         // Per-instance shell height h in [0, 1]; defaults to 0 (skin layer) when rendered non-instanced.
         [HideInInspector] _ShellHeight("Shell Height", Range(0.0, 1.0)) = 0.0
@@ -128,6 +135,13 @@ Shader "VividRP/Material/FurSlab"
     float _FuzzWeight;
     float4 _FuzzColor;
     float _FuzzRoughness;
+    float _FurLightingModel;
+    float _HairRadialRoughness;
+    float _HairCuticleAngle;
+    float _HairScatter;
+    float _HairBacklit;
+    float _FurMedullaWeight;
+    float _FurMedullaRoughness;
     // @vivid-cbuffer-end
 
     // @vivid-instancing-begin
@@ -346,10 +360,11 @@ Shader "VividRP/Material/FurSlab"
     // @vivid-surface-begin
     #define VIVID_SLAB_HAS_CUSTOM_POST_SURFACE 1
     #define VIVID_SLAB_THIN_WALLED_TRANSMISSION 1
-    void VividSlabPostEvaluateSurface(
+    #define VIVID_SLAB_SUPPORTS_HAIR_CLOSURE 1
+
+    VividFurSurfaceParams VividFurEvaluateSharedParams(
         const VividSlabEvalContext ctx,
-        inout VividOpenPBRV2Inputs v2,
-        inout float ambientOcclusion)
+        float baseAmbientOcclusion)
     {
         VividFurSurfaceParams fp = VividCreateDefaultFurSurfaceParams();
         fp.normalWS = SafeNormalize(ctx.geometryNormalWS);
@@ -465,10 +480,40 @@ Shader "VividRP/Material/FurSlab"
         fp.strandOffsetTS = strand.strandOffsetTS;
         fp.strandNormalStrength = VIVID_SLAB_PARAM(ctx, _StrandNormalStrength);
         fp.gravityDirWS = gravityWS;
+        fp.gravityStrength = gravityStrength;
         fp.combDirWS = VIVID_SLAB_PARAM(ctx, _CombDirWS).xyz;
         fp.combStrength = VIVID_SLAB_PARAM(ctx, _CombStrength);
-        fp.ambientOcclusion = saturate(ambientOcclusion * maskSample.g);
+        fp.ambientOcclusion = saturate(baseAmbientOcclusion * maskSample.g);
+        fp.hairRadialRoughness = VIVID_SLAB_PARAM(ctx, _HairRadialRoughness);
+        fp.hairCuticleAngleDeg = VIVID_SLAB_PARAM(ctx, _HairCuticleAngle);
+        fp.hairScatter = VIVID_SLAB_PARAM(ctx, _HairScatter);
+        fp.hairBacklit = VIVID_SLAB_PARAM(ctx, _HairBacklit);
+        fp.furMedullaWeight = VIVID_SLAB_PARAM(ctx, _FurMedullaWeight);
+        fp.furMedullaRoughness = VIVID_SLAB_PARAM(ctx, _FurMedullaRoughness);
+        return fp;
+    }
 
+    bool VividSlabTryEvaluateHairClosure(
+        const VividSlabEvalContext ctx,
+        out VividSubstrateHairInputs hairInputs,
+        out float3 summaryNormalWS)
+    {
+        hairInputs = VividCreateDefaultSubstrateHairInputs();
+        summaryNormalWS = SafeNormalize(ctx.geometryNormalWS);
+        if (VIVID_SLAB_PARAM(ctx, _FurLightingModel) < 0.5f)
+            return false;
+
+        VividFurSurfaceParams fp = VividFurEvaluateSharedParams(ctx, 1.0f);
+        hairInputs = VividFurParamsToSubstrateHairInputs(fp, summaryNormalWS);
+        return true;
+    }
+
+    void VividSlabPostEvaluateSurface(
+        const VividSlabEvalContext ctx,
+        inout VividOpenPBRV2Inputs v2,
+        inout float ambientOcclusion)
+    {
+        VividFurSurfaceParams fp = VividFurEvaluateSharedParams(ctx, ambientOcclusion);
         float finalAO = 1.0f;
         v2 = VividFurParamsToOpenPBRV2Inputs(fp, finalAO);
         ambientOcclusion = finalAO;

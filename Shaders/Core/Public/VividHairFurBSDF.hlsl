@@ -261,7 +261,7 @@ VividHairFurBSDFResponse VividEvaluateHairFurDirect(
     // Cortex transmittance fraction left after medulla interception (Yan 2015/2017 coupling),
     // and energy-conserving Zinke Dual Scattering split between single-bounce transmitted rays
     // and locally multi-scattered fiber-volume radiance.
-    float msShare = scatterWeight * lerp(0.08f, 0.26f, 1.0f - shellDepth);
+    float msShare = scatterWeight * lerp(0.16f, 0.34f, 1.0f - shellDepth);
     float singleInternalScale = 1.0f - msShare;
     float cortexFraction = (1.0f - medullaWeight) * singleInternalScale;
 
@@ -328,18 +328,20 @@ VividHairFurBSDFResponse VividEvaluateHairFurDirect(
         float fAvg = VividHairFresnelSchlick(f0, cosThetaD * 0.70710678f);
         float transmitIn = 1.0f - fAvg;
 
-        // Broad longitudinal scattering inside turbid medulla (no sharp caustic).
-        float B_Medulla = lerp(0.45f, 0.95f, medullaRough);
-        float M_Medulla = VividHairGaussianM(B_Medulla, sinThetaSum);
+        // Yan (2015/2017) turbid medulla volume scattering loses incoming longitudinal direction memory:
+        // its longitudinal profile is broad/isotropic (normalized to <= 1 over sinTheta in [-1, 1])
+        // with only subtle specular memory at low medullaRoughness, avoiding artificial specular-band pileup.
+        float M_Iso = (2.0f / VIVID_HAIR_PI) * cosThetaL; // integral_{-1}^{1} (2/pi)*sqrt(1-x^2) dx = 1.0
+        float M_Broad = VividHairGaussianM(lerp(0.60f, 1.15f, medullaRough), sinThetaSum);
+        float M_Medulla = lerp(M_Iso, M_Broad, 0.20f * (1.0f - medullaRough));
 
-        // Azimuthal split: back/side diffuse (g > 0) + broad forward scatter (g < 0).
-        float N_TRTs = VividHairAzimuthalPoisson(cosPhi, lerp(0.35f, 0.08f, medullaRough));
-        float N_TTs = VividHairAzimuthalPoisson(cosPhi, lerp(-0.55f, -0.15f, medullaRough));
+        // Azimuthal split: broad back/side velvety diffuse (g > 0) + soft forward scatter (g < 0).
+        float N_TRTs = VividHairAzimuthalPoisson(cosPhi, lerp(0.28f, 0.06f, medullaRough));
+        float N_TTs = VividHairAzimuthalPoisson(cosPhi, lerp(-0.45f, -0.12f, medullaRough));
 
-        // Medulla rays travel through one thin cortex wall (sqrt(baseColor) * baseColor_scatter),
-        // keeping light animal fur creamy/plush and dark fur richly pigmented.
-        float3 medullaAlbedo = baseColor * lerp(0.72f, 0.88f, medullaRough);
-        float backShare = lerp(0.65f, 0.78f, medullaRough);
+        // Medulla body albedo retains warm plush luminance across the full lit fur coat.
+        float3 medullaAlbedo = lerp(baseColor, sqrt(safeBaseColor) * baseColor, 0.15f) * lerp(0.84f, 0.96f, medullaRough);
+        float backShare = lerp(0.68f, 0.80f, medullaRough);
         float fwdShare = (1.0f - backShare) * backlitWeight;
 
         // Normalized spherical energy: integral over S^2 of (M_Medulla * N_poisson) <= 1.0.
@@ -361,10 +363,11 @@ VividHairFurBSDFResponse VividEvaluateHairFurDirect(
         float NdotLWrap = saturate(dot(fakeNormal, lightDir) * 0.5f + 0.5f);
         float kajiyaDiffuse = cosThetaL; // 1 - |T.L| cylinder irradiance projection
 
-        // Average single-bounce fiber albedo (Zinke a_b / Karis multi-scatter color):
-        // Higher-order bounces raise saturation naturally; sqrt(baseColor) recovers bright
-        // blonde/white fur luminance while dark fur stays deep.
-        float3 avgFiberAlbedo = sqrt(safeBaseColor) * baseColor;
+        // Average multi-bounce fiber albedo (Zinke a_b / Karis multi-scatter color):
+        // Higher-order bounces preserve warm saturation while lifting luminance on light/mid fur
+        // without darkening brown coats (<= 1.0 for white furnace).
+        float3 avgFiberAlbedo = lerp(baseColor, sqrt(safeBaseColor), 0.25f) * (baseColor / max(max(baseColor.r, max(baseColor.g, baseColor.b)), 0.15f));
+        avgFiberAlbedo = min(avgFiberAlbedo, sqrt(safeBaseColor));
         float fAvg = VividHairFresnelSchlick(f0, cosThetaD * 0.70710678f);
 
         // Direct shadow penetration through outer fur tips (global forward multiple scattering):

@@ -1454,3 +1454,12 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMMarkCoarsePagesUnified
 #pragma kernel VSMMarkLocalReceiverPages VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE
 #pragma kernel VSMClearLocalPageRequests
+
+// Phase 2: Unified allocation, per-(VSMId, Mip) bounds/hierarchy, view compaction & local caster culling.
+#pragma kernel VSMUpdatePhysicalPagesUnified
+#pragma kernel VSMAllocateNewPageMappingsUnified
+#pragma kernel VSMClearUnifiedPageBounds
+#pragma kernel VSMBuildUnifiedPageCullHierarchy
+#pragma kernel VSMCompactUnifiedViews
+#pragma kernel VSMCullLocalInstancesCS
+#pragma kernel VSMBuildLocalMeshletPagesCS

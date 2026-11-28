@@ -181,6 +181,26 @@ uint2 VividVSMDecodePageWindow(uint tag)
         ? uint2((tag >> 8u) & 15u, (tag >> 12u) & 15u) : uint2(1u, 1u);
 }
 
+// Unified (VSMId, Mip) active-view window tag: [0..15]=activeViewIndex, [16..19]=extent.x, [20..23]=extent.y.
+uint VividVSMEncodeUnifiedPageWindow(uint activeViewIndex, uint2 extent)
+{
+    return VIVID_VSM_PAGE_WINDOW_FLAG
+        | (activeViewIndex & 0xFFFFu)
+        | ((extent.x & 15u) << 16u)
+        | ((extent.y & 15u) << 20u);
+}
+
+uint VividVSMDecodeUnifiedActiveView(uint tag)
+{
+    return tag & 0xFFFFu;
+}
+
+uint2 VividVSMDecodeUnifiedWindowExtent(uint tag)
+{
+    return (tag & VIVID_VSM_PAGE_WINDOW_FLAG) != 0u
+        ? uint2((tag >> 16u) & 15u, (tag >> 20u) & 15u) : uint2(1u, 1u);
+}
+
 // UE VirtualShadowMapPageAccessCommon.ush page-table ABI. Cache metadata and
 // physical owners retain their own slot+1 sentinel; these entries never do.
 #define VIVID_VSM_PAGE_TABLE_VALID 0x80000000u

@@ -123,23 +123,33 @@ bool VividTryResolveVSMPagePhysicalTexel(
     return true;
 }
 
-// A window can contain unmapped, clean or deferred holes. Resolve each
-// fragment independently, after derivatives but before coverage and UAV writes.
-bool VividTryResolveVSMWindowPhysicalTexel(float4 positionCS, uint originPage,
-    uint2 extent, out uint2 physicalTexel)
+// Mip-aware window physical texel resolution for unified Directional + Point + Spot VSMs.
+bool VividTryResolveVSMWindowPhysicalTexelAxis(float4 positionCS, uint originPage,
+    uint2 extent, uint mipBase, uint axis, out uint2 physicalTexel)
 {
     physicalTexel = 0u;
     uint pageSize = (uint)_VSMPrototypePageSize;
     if (any(positionCS.xy < 0.0) || any(positionCS.xy >= (float2)(extent * pageSize))) return false;
     uint2 localTexel = (uint2)positionCS.xy;
     uint2 pageOffset = localTexel / pageSize;
-    uint axis = (uint)_VSMPrototypePagesPerAxis;
-    uint2 origin = uint2(originPage % axis, (originPage / axis) % axis);
+    uint localOrigin = originPage - mipBase;
+    uint2 origin = uint2(localOrigin % axis, localOrigin / axis);
     if (any(origin + pageOffset >= axis)) return false;
     uint page = originPage + pageOffset.y * axis + pageOffset.x;
     if ((_VSMPrototypePageMetadata[page].x & (1u << 1u)) == 0u) return false;
     positionCS.xy = (float2)(localTexel % pageSize);
     return VividTryResolveVSMPagePhysicalTexel(positionCS, page, physicalTexel);
+}
+
+// A window can contain unmapped, clean or deferred holes. Resolve each
+// fragment independently, after derivatives but before coverage and UAV writes.
+bool VividTryResolveVSMWindowPhysicalTexel(float4 positionCS, uint originPage,
+    uint2 extent, out uint2 physicalTexel)
+{
+    uint axis = (uint)_VSMPrototypePagesPerAxis;
+    uint perLevel = axis * axis;
+    uint mipBase = (originPage / perLevel) * perLevel;
+    return VividTryResolveVSMWindowPhysicalTexelAxis(positionCS, originPage, extent, mipBase, axis, physicalTexel);
 }
 
 void VividWriteVSMPageDepth(float4 positionCS, uint virtualPageIndex)

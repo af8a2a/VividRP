@@ -142,6 +142,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_VSMMarkCoarsePagesUnifiedKernel = -1;
         private int m_VSMMarkLocalReceiverPagesKernel = -1;
         private int m_VSMClearLocalPageRequestsKernel = -1;
+        private int m_VSMUpdatePhysicalPagesUnifiedKernel = -1;
+        private int m_VSMAllocateNewPageMappingsUnifiedKernel = -1;
+        private int m_VSMClearUnifiedPageBoundsKernel = -1;
+        private int m_VSMBuildUnifiedPageCullHierarchyKernel = -1;
+        private int m_VSMCompactUnifiedViewsKernel = -1;
+        private int m_VSMCullLocalInstancesKernel = -1;
+        private int m_VSMBuildLocalMeshletPagesKernel = -1;
         private int m_VSMClearPageHierarchyKernel = -1;
         private int m_VSMBuildPageHierarchyKernel = -1;
         private int m_VSMBuildAvailableLevelHintsKernel = -1;
@@ -276,6 +283,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMMarkCoarsePagesUnifiedKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMarkCoarsePagesUnified");
             m_VSMMarkLocalReceiverPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMMarkLocalReceiverPages");
             m_VSMClearLocalPageRequestsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMClearLocalPageRequests");
+            m_VSMUpdatePhysicalPagesUnifiedKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMUpdatePhysicalPagesUnified");
+            m_VSMAllocateNewPageMappingsUnifiedKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMAllocateNewPageMappingsUnified");
+            m_VSMClearUnifiedPageBoundsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMClearUnifiedPageBounds");
+            m_VSMBuildUnifiedPageCullHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildUnifiedPageCullHierarchy");
+            m_VSMCompactUnifiedViewsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMCompactUnifiedViews");
+            m_VSMCullLocalInstancesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMCullLocalInstancesCS");
+            m_VSMBuildLocalMeshletPagesKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildLocalMeshletPagesCS");
             m_VSMClearPageHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMClearPageCullHierarchy");
             m_VSMBuildPageHierarchyKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMBuildPageCullHierarchy");
             m_VSMPropagateMappedClipmapsKernel = FindKernelOrInvalid(m_VirtualShadowMapPageManagementCompute, "VSMPropagateMappedClipmaps");
@@ -690,8 +704,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (localCount > 0)
                 {
                     registry.PrepareFrame(m_PageDebugCameraEntityId, clipmaps, localGrid.CollectedDescriptors, localCount);
-                    localGrid.PrepareForPass(this, registry, clustered, cameraData,
-                        settings.virtualShadowMapResolutionLodBiasLocal.value);
+                    if (localGrid.PrepareForPass(this, registry, clustered, cameraData,
+                        settings.virtualShadowMapResolutionLodBiasLocal.value))
+                    {
+                        VirtualShadowMapPrototypeRuntime.LocalCasterPipeline.PrepareForPass(
+                            this, registry, settings.virtualShadowMapPhysicalPageBudget.value);
+                    }
                 }
             }
             if (!VirtualShadowMapPerformanceThrottle.Prepare(settings, m_VirtualShadowMapPageManagementCompute))
@@ -1948,6 +1966,55 @@ namespace VividRP.Runtime.RenderPass.Core
                         VirtualShadowMapProjectionSet.PageOffsetsId, VirtualShadowMapPrototypeRuntime.Projections.PageOffsetsBuffer);
                     nativeCmd.DispatchCompute(m_VirtualShadowMapPageManagementCompute, kernel, CoreUtils.DivRoundUp(pageTableEntryCount, 64), 1, 1);
                 }
+            }
+
+            if (VirtualShadowMapPrototypeRuntime.LocalLightGrid.Active
+                && VirtualShadowMapPrototypeRuntime.LocalCasterPipeline.Active
+                && m_HasMeshletShadowCasters)
+            {
+                var localKernels = new VirtualShadowMapLocalCasterPipeline.Kernels
+                {
+                    UpdatePhysicalAddressesUnified = m_VSMUpdatePhysicalAddressesUnifiedKernel,
+                    RemapPagesUnified = m_VSMRemapPagesUnifiedKernel,
+                    ResetPhysicalPageLists = m_VSMResetPhysicalPageListsKernel,
+                    UpdatePhysicalPagesUnified = m_VSMUpdatePhysicalPagesUnifiedKernel,
+                    PackAvailablePages = m_VSMPackAvailablePagesKernel,
+                    AppendEmptyPhysicalPages = m_VSMAppendEmptyPhysicalPagesKernel,
+                    AllocateNewPageMappingsUnified = m_VSMAllocateNewPageMappingsUnifiedKernel,
+                    AppendPhysicalPageLists = m_VSMAppendPhysicalPageListsKernel,
+                    ResetPageWorkLists = m_VSMResetPageWorkListsKernel,
+                    BuildPageWorkLists = m_VSMBuildPageWorkListsKernel,
+                    ClearUnifiedPageBounds = m_VSMClearUnifiedPageBoundsKernel,
+                    BuildUnifiedPageCullHierarchy = m_VSMBuildUnifiedPageCullHierarchyKernel,
+                    CompactUnifiedViews = m_VSMCompactUnifiedViewsKernel,
+                    CullLocalInstances = m_VSMCullLocalInstancesKernel,
+                    BuildLocalMeshletPages = m_VSMBuildLocalMeshletPagesKernel,
+                    ClearPhysicalPages = m_VirtualShadowMapClearPhysicalPagesKernel,
+                    ResetMergePages = m_VSMResetMergePagesKernel,
+                    SelectMergePages = m_VSMSelectMergePagesKernel,
+                    MergeStaticPages = m_VSMMergeStaticPagesKernel,
+                    ReducePageOccupancy = m_VSMReducePageOccupancyKernel,
+                    FinalizeDirtyPages = m_VirtualShadowMapFinalizeDirtyPagesKernel,
+                    PropagateMappedMips = m_VSMPropagateMappedMipsKernel,
+                };
+                VirtualShadowMapPrototypeRuntime.LocalCasterPipeline.RecordLocalRasterPipeline(
+                    nativeCmd,
+                    m_VirtualShadowMapPageManagementCompute,
+                    in localKernels,
+                    VirtualShadowMapPrototypeRuntime.LocalLightGrid,
+                    meshletContext.System,
+                    meshletContext.StaticDrawSet,
+                    meshletContext.DynamicDrawSet,
+                    m_Materials,
+                    rasterDepth,
+                    meshletContext.VirtualTextureReady,
+                    in meshletContext.VirtualTextureBinding,
+                    m_VirtualTextureFrameData != null ? m_VirtualTextureFrameData.AdaptiveMipBias : 0.0f,
+                    m_FrameIndex,
+                    VirtualShadowMapPrototypeRuntime.Projections.Count,
+                    pageTableEntryCount,
+                    VirtualShadowMapPrototypeRuntime.PhysicalPagesPerRow,
+                    physicalPageCapacity);
             }
 
             if (VirtualShadowMapPrototypeRuntime.AvailableLevelHintsEnabled && m_VSMBuildAvailableLevelHintsKernel >= 0)

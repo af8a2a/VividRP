@@ -59,8 +59,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
 #if defined(VIVID_VSM_PAGE_CASTER)
             int _VSMRasterWindowPages;
+            int _VSMUnifiedViewMode;
             StructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
             StructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
+            StructuredBuffer<VividVSMActiveView> _VSMUnifiedActiveViews;
 #endif
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
@@ -81,6 +83,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 float4 pageClipDistances : SV_ClipDistance0;
                 nointerpolation uint virtualPageIndex : TEXCOORD2;
                 nointerpolation uint2 windowExtent : TEXCOORD3;
+                nointerpolation uint2 mipAddressing : TEXCOORD4;
                 uint renderTargetArrayIndex : SV_RenderTargetArrayIndex;
 #endif
             };
@@ -159,6 +162,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 output.pageClipDistances = -1.0;
                 output.virtualPageIndex = 0u;
                 output.windowExtent = 1u;
+                output.mipAddressing = uint2(0u, 1u);
                 output.renderTargetArrayIndex = 0u;
 #endif
 
@@ -169,7 +173,24 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 uint virtualPageIndex;
                 uint cascadeIndex;
                 uint2 windowExtent = 1u;
-                if (GetCommandID(0) >= VIVIDRENDERERLISTID_COUNT)
+                uint unifiedMipBase = 0u;
+                uint unifiedMipPages = 1u;
+                uint unifiedVirtualResolution = (uint)max(_VSMPrototypeVirtualResolution, 1);
+                if (_VSMUnifiedViewMode != 0)
+                {
+                    pageRequest = _VSMPrototypeMeshletPageRequests[instanceID];
+                    virtualPageIndex = pageRequest.z;
+                    uint activeViewIndex = VividVSMDecodeUnifiedActiveView(pageRequest.w);
+                    windowExtent = VividVSMDecodeUnifiedWindowExtent(pageRequest.w);
+                    VividVSMActiveView activeView = _VSMUnifiedActiveViews[activeViewIndex];
+                    cascadeIndex = activeView.vsmId;
+                    VividVSMProjection activeProj = _VSMProjections[cascadeIndex];
+                    uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
+                    unifiedVirtualResolution = max(activeView.virtualResolution, pageSize);
+                    unifiedMipPages = max(unifiedVirtualResolution / pageSize, 1u);
+                    unifiedMipBase = VividVSMCalcProjectionPageIndex(activeProj, activeView.mipLevel, 0u);
+                }
+                else if (GetCommandID(0) >= VIVIDRENDERERLISTID_COUNT)
                 {
                     const uint pageCount = _VSMPrototypeMeshletRasterPages[0];
                     if (pageCount == 0u)
@@ -231,7 +252,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 #if defined(VIVID_VSM_PAGE_CASTER)
                 // Large records fan out over all relevant pages. Recheck this
                 // particular page before vertex pulling, as well as in compute.
-                if (all(windowExtent == 1u) && !VividVSMCasterReceiverSphere(virtualPageIndex,
+                if (_VSMUnifiedViewMode == 0 && all(windowExtent == 1u) && !VividVSMCasterReceiverSphere(virtualPageIndex,
                         TransformSphere(meshlet.BoundingSphere, objectToWorldMatrix),
                         _VSMProjections[cascadeIndex].worldToShadow)) return output;
 #endif
@@ -252,31 +273,51 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 output.positionCS = mul(
                     _VSMProjections[cascadeIndex].worldToClip,
                     float4(positionWS, 1.0));
+                if (_VSMUnifiedViewMode == 0)
+                    output.positionCS = ApplyVividShadowClamping(output.positionCS);
 #else
                 output.positionCS = TransformWorldToHClip(positionWS);
-#endif
                 output.positionCS = ApplyVividShadowClamping(output.positionCS);
+#endif
 
                 output.instanceIndex = renderRequest.InstanceID_LOD;
                 output.uv0 = vertex.UV.xy;
 #if defined(VIVID_VSM_PAGE_CASTER)
-                // UE HW VSM uses viewport clipping plus a fragment ViewRect.
-                // Keep page clip planes only for the diagnostic per-page path.
-                output.pageClipDistances = _VSMRasterWindowPages > 1 ? 1.0
-                    : GetVSMPageClipDistances(output.positionCS, virtualPageIndex,
-                        cascadeIndex, windowExtent);
-                const uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
-                const uint pageInProjection = virtualPageIndex % (pagesPerAxis * pagesPerAxis);
-                const uint2 origin = uint2(pageInProjection % pagesPerAxis,
-                    pageInProjection / pagesPerAxis) * (uint)_VSMPrototypePageSize;
-                output.positionCS = VividVSMToRasterClip(output.positionCS, origin,
-                    (uint)_VSMPrototypeVirtualResolution,
-                    (uint)_VSMPrototypePageSize * (uint)max(_VSMRasterWindowPages, 1));
-                output.virtualPageIndex = virtualPageIndex;
-                output.windowExtent = windowExtent;
-                output.renderTargetArrayIndex = _VSMRasterWindowPages > 1
-                    ? 0u : VividVSMPageTableSlot(_VSMPrototypePageTable[virtualPageIndex],
-                        (uint)_VSMPrototypePhysicalPagesPerRow);
+                if (_VSMUnifiedViewMode != 0)
+                {
+                    output.pageClipDistances = 1.0;
+                    const uint pageInMip = virtualPageIndex - unifiedMipBase;
+                    const uint2 origin = uint2(pageInMip % unifiedMipPages, pageInMip / unifiedMipPages)
+                        * (uint)_VSMPrototypePageSize;
+                    output.positionCS = VividVSMToRasterClip(output.positionCS, origin,
+                        unifiedVirtualResolution,
+                        (uint)_VSMPrototypePageSize * (uint)max(_VSMRasterWindowPages, 1));
+                    output.virtualPageIndex = virtualPageIndex;
+                    output.windowExtent = windowExtent;
+                    output.mipAddressing = uint2(unifiedMipBase, unifiedMipPages);
+                    output.renderTargetArrayIndex = 0u;
+                }
+                else
+                {
+                    // UE HW VSM uses viewport clipping plus a fragment ViewRect.
+                    // Keep page clip planes only for the diagnostic per-page path.
+                    output.pageClipDistances = _VSMRasterWindowPages > 1 ? 1.0
+                        : GetVSMPageClipDistances(output.positionCS, virtualPageIndex,
+                            cascadeIndex, windowExtent);
+                    const uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
+                    const uint pageInProjection = virtualPageIndex % (pagesPerAxis * pagesPerAxis);
+                    const uint2 origin = uint2(pageInProjection % pagesPerAxis,
+                        pageInProjection / pagesPerAxis) * (uint)_VSMPrototypePageSize;
+                    output.positionCS = VividVSMToRasterClip(output.positionCS, origin,
+                        (uint)_VSMPrototypeVirtualResolution,
+                        (uint)_VSMPrototypePageSize * (uint)max(_VSMRasterWindowPages, 1));
+                    output.virtualPageIndex = virtualPageIndex;
+                    output.windowExtent = windowExtent;
+                    output.mipAddressing = uint2(0u, pagesPerAxis);
+                    output.renderTargetArrayIndex = _VSMRasterWindowPages > 1
+                        ? 0u : VividVSMPageTableSlot(_VSMPrototypePageTable[virtualPageIndex],
+                            (uint)_VSMPrototypePhysicalPagesPerRow);
+                }
 #endif
 
                 return output;
@@ -293,7 +334,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 // Resolve once before material/VT coverage and the depth atomic.
                 uint2 physicalTexel;
                 bool validTexel;
-                if (_VSMRasterWindowPages > 1)
+                if (_VSMUnifiedViewMode != 0)
+                    validTexel = VividTryResolveVSMWindowPhysicalTexelAxis(input.positionCS,
+                        input.virtualPageIndex, input.windowExtent, input.mipAddressing.x,
+                        input.mipAddressing.y, physicalTexel);
+                else if (_VSMRasterWindowPages > 1)
                     validTexel = VividTryResolveVSMWindowPhysicalTexel(input.positionCS,
                         input.virtualPageIndex, input.windowExtent, physicalTexel);
                 else

@@ -84,38 +84,77 @@ groupshared uint g_VSMInvalidationMask;
 
 void VSMSetupInvalidation(VSMInvalidationSource source, uint level)
 {
+    VividVSMProjection proj = _VSMProjections[level];
     g_VSMInvalidationMask = source.State.x;
+    if ((proj.meta.y & (VIVID_VSM_PROJ_FLAG_UNREFERENCED | VIVID_VSM_PROJ_FLAG_UNCACHED)) != 0u)
+    {
+        g_VSMInvalidationMask = 0u;
+        return;
+    }
+    if ((proj.meta.y & VIVID_VSM_PROJ_FLAG_SKIP_DYNAMIC_INVALID) != 0u)
+    {
+        g_VSMInvalidationMask &= ~kVSMPageDynamicDirty;
+        if (g_VSMInvalidationMask == 0u) return;
+    }
+
     g_VSMInvalidationUV = float4(0, 0, 1, 1);
     g_VSMInvalidationDepth = 1.0;
     float3 center = (source.BoundsMin.xyz + source.BoundsMax.xyz) * 0.5;
     float3 extent = (source.BoundsMax.xyz - source.BoundsMin.xyz) * 0.5;
-    float4x4 matrix = _VSMProjections[level].worldToShadow;
-    bool bounded = (source.State.z & 8u) == 0u && all(extent >= 0.0)
-        && all(isfinite(center)) && all(isfinite(extent)) && all(matrix[3].xyz == 0.0) && matrix[3].w > 0.0;
-    if (bounded)
+    float4x4 matrix = proj.worldToShadow;
+    bool unbounded = (source.State.z & 8u) != 0u || any(extent < 0.0) || !all(isfinite(center)) || !all(isfinite(extent));
+
+    if (VividVSMProjectionIsDirectional(proj))
     {
-        float3 p = mul(matrix, float4(center, 1)).xyz;
-        float3 support = float3(dot(abs(matrix[0].xyz), extent), dot(abs(matrix[1].xyz), extent),
-            dot(abs(matrix[2].xyz), extent));
-        float3 magnitude = float3(dot(abs(matrix[0].xyz), abs(center)) + abs(matrix[0].w),
-            dot(abs(matrix[1].xyz), abs(center)) + abs(matrix[1].w),
-            dot(abs(matrix[2].xyz), abs(center)) + abs(matrix[2].w)) + support;
-        support += 1e-6 * magnitude + 1e-7;
-        float3 low = (p - support) / matrix[3].w, high = (p + support) / matrix[3].w;
-        if (all(isfinite(low)) && all(isfinite(high)))
+        bool bounded = !unbounded && all(matrix[3].xyz == 0.0) && matrix[3].w > 0.0;
+        if (bounded)
         {
-            if (any(high.xy < 0) || any(low.xy > 1) || high.z < 0 || low.z > 1)
-                g_VSMInvalidationMask = 0u;
-            g_VSMInvalidationUV = saturate(float4(low.xy, high.xy));
-            // UE's epsilon prevents self-occlusion of nearly coplanar geometry.
-            g_VSMInvalidationDepth = high.z + 1e-8;
+            float3 p = mul(matrix, float4(center, 1)).xyz;
+            float3 support = float3(dot(abs(matrix[0].xyz), extent), dot(abs(matrix[1].xyz), extent),
+                dot(abs(matrix[2].xyz), extent));
+            float3 magnitude = float3(dot(abs(matrix[0].xyz), abs(center)) + abs(matrix[0].w),
+                dot(abs(matrix[1].xyz), abs(center)) + abs(matrix[1].w),
+                dot(abs(matrix[2].xyz), abs(center)) + abs(matrix[2].w)) + support;
+            support += 1e-6 * magnitude + 1e-7;
+            float3 low = (p - support) / matrix[3].w, high = (p + support) / matrix[3].w;
+            if (all(isfinite(low)) && all(isfinite(high)))
+            {
+                if (any(high.xy < 0) || any(low.xy > 1) || high.z < 0 || low.z > 1)
+                    g_VSMInvalidationMask = 0u;
+                g_VSMInvalidationUV = saturate(float4(low.xy, high.xy));
+                // UE's epsilon prevents self-occlusion of nearly coplanar geometry.
+                g_VSMInvalidationDepth = high.z + 1e-8;
+            }
         }
+        uint axis = (uint)_VSMPrototypePagesPerAxis;
+        g_VSMInvalidationRect = min((uint4)(g_VSMInvalidationUV * axis), axis - 1u);
     }
-    uint axis = (uint)_VSMPrototypePagesPerAxis;
-    g_VSMInvalidationRect = min((uint4)(g_VSMInvalidationUV * axis), axis - 1u);
+    else
+    {
+        if (!unbounded)
+        {
+            if (!VividVSMInstanceIntersectsLocalLight(proj, float4(center, length(extent))))
+            {
+                g_VSMInvalidationMask = 0u;
+                return;
+            }
+            float4 uvRect;
+            float minZ, maxZ;
+            if (!VividVSMProjectPerspectiveUVZ(center, extent, 0.0, false, matrix, matrix, 0.0, uvRect, minZ, maxZ))
+            {
+                g_VSMInvalidationMask = 0u;
+                return;
+            }
+            g_VSMInvalidationUV = uvRect;
+            // UE's epsilon prevents self-occlusion of axis-aligned boxes under point/spot lights.
+            g_VSMInvalidationDepth = maxZ + 1e-8;
+        }
+        uint axis0 = VividVSMProjectionIsSinglePage(proj) ? 1u : max(proj.addressing.z, 1u);
+        g_VSMInvalidationRect = min((uint4)(g_VSMInvalidationUV * (float)axis0), axis0 - 1u);
+    }
 }
 
-bool VSMInvalidationPageOccluded(uint index, uint2 page)
+bool VSMInvalidationPageOccludedRes(uint index, uint2 page, uint resolution)
 {
     if (_VSMInvalidateUseHZB == 0 || _VSMHZBHistoryValid == 0 || g_VSMInvalidationDepth >= 1.0) return false;
     uint encoded = _VSMHZBPreviousTable[index];
@@ -123,7 +162,6 @@ bool VSMInvalidationPageOccluded(uint index, uint2 page)
         || VividVSMPageTableSlot(encoded, (uint)_VSMPrototypePhysicalPagesPerRow) >= (uint)_VSMPrototypePhysicalPageCapacity) return false;
     // Per-page clamped hierarchical test. Expand to whole intersecting texels;
     // empty/missing history stays visible. Invalidation always uses STATIC HZB.
-    uint resolution = (uint)_VSMPrototypeVirtualResolution;
     uint4 pixels = min((uint4)(g_VSMInvalidationUV * resolution), resolution - 1u);
     uint2 baseLow = pixels.xy >> 1u, baseHigh = pixels.zw >> 1u;
     int2 logSize = firstbithigh(baseHigh - baseLow);
@@ -142,6 +180,11 @@ bool VSMInvalidationPageOccluded(uint index, uint2 page)
     return g_VSMInvalidationDepth < farthest;
 }
 
+bool VSMInvalidationPageOccluded(uint index, uint2 page)
+{
+    return VSMInvalidationPageOccludedRes(index, page, (uint)_VSMPrototypeVirtualResolution);
+}
+
 // Bounded persistent worker groups pull instance/clipmap jobs dynamically.
 // Wave compaction combines sparse events; 64 lanes share each projected rect,
 // unlike the legacy single-thread static bounds loop. No oversized job buffer.
@@ -158,27 +201,76 @@ void VSMProcessInvalidationQueue(uint lane : SV_GroupIndex)
         uint level = job % (uint)_VSMProjectionCount;
         if (lane == 0u) VSMSetupInvalidation(_VSMInvalidationQueue[job / (uint)_VSMProjectionCount], level);
         GroupMemoryBarrierWithGroupSync();
-        uint width = g_VSMInvalidationRect.z - g_VSMInvalidationRect.x + 1u;
-        uint pages = g_VSMInvalidationMask != 0u ? width * (g_VSMInvalidationRect.w - g_VSMInvalidationRect.y + 1u) : 0u;
-        uint axis = (uint)_VSMPrototypePagesPerAxis;
         uint tested = 0u, culled = 0u, written = 0u;
-        for (uint p = lane; p < pages; p += 64u)
+        if (g_VSMInvalidationMask != 0u)
         {
-            uint2 page = g_VSMInvalidationRect.xy + uint2(p % width, p / width);
-            uint index = level * axis * axis + page.y * axis + page.x;
-            uint flags = _VSMPrototypePageMetadata[index].x;
-            if ((flags & kVSMPageAllocated) == 0u) continue;
-            tested++;
-            if (VSMInvalidationPageOccluded(index, page))
+            VividVSMProjection proj = _VSMProjections[level];
+            if (VividVSMProjectionIsDirectional(proj))
             {
-                culled++;
-                continue;
+                uint width = g_VSMInvalidationRect.z - g_VSMInvalidationRect.x + 1u;
+                uint pages = width * (g_VSMInvalidationRect.w - g_VSMInvalidationRect.y + 1u);
+                uint axis = (uint)_VSMPrototypePagesPerAxis;
+                for (uint p = lane; p < pages; p += 64u)
+                {
+                    uint2 page = g_VSMInvalidationRect.xy + uint2(p % width, p / width);
+                    uint index = level * axis * axis + page.y * axis + page.x;
+                    uint flags = _VSMPrototypePageMetadata[index].x;
+                    if ((flags & kVSMPageAllocated) == 0u) continue;
+                    tested++;
+                    if (VSMInvalidationPageOccluded(index, page))
+                    {
+                        culled++;
+                        continue;
+                    }
+                    uint ignored;
+                    InterlockedOr(_VSMPrototypePageMetadata[index].x, g_VSMInvalidationMask, ignored);
+                    if ((g_VSMInvalidationMask & kVSMPageDirty) != 0u)
+                        InterlockedAnd(_VSMPrototypePageMetadata[index].x, ~kVSMPageCached, ignored);
+                    written++;
+                }
             }
-            uint ignored;
-            InterlockedOr(_VSMPrototypePageMetadata[index].x, g_VSMInvalidationMask, ignored);
-            if ((g_VSMInvalidationMask & kVSMPageDirty) != 0u)
-                InterlockedAnd(_VSMPrototypePageMetadata[index].x, ~kVSMPageCached, ignored);
-            written++;
+            else
+            {
+                bool isSingle = VividVSMProjectionIsSinglePage(proj);
+                uint minMip = isSingle ? 0u : proj.meta.z;
+                uint maxMips = isSingle ? 1u : max(proj.addressing.w, 1u);
+                uint prevVsmId = proj.identityAndOrigin.y;
+                bool hasPrevVsm = prevVsmId != VIVID_VSM_INVALID_ID && prevVsmId < (uint)_VSMProjectionCount;
+                [loop]
+                for (uint mip = minMip; mip < maxMips; mip++)
+                {
+                    uint mipAxis = isSingle ? 1u : VividVSMMipPagesPerAxis(proj.addressing.z, mip);
+                    uint4 mipRect = isSingle ? uint4(0u, 0u, 0u, 0u)
+                        : min((uint4)(g_VSMInvalidationUV * (float)mipAxis), mipAxis - 1u);
+                    uint width = mipRect.z - mipRect.x + 1u;
+                    uint pages = width * (mipRect.w - mipRect.y + 1u);
+                    uint mipRes = mipAxis * (uint)_VSMPrototypePageSize;
+                    for (uint p = lane; p < pages; p += 64u)
+                    {
+                        uint2 page = mipRect.xy + uint2(p % width, p / width);
+                        uint index = VividVSMCalcProjectionPageIndex(proj, mip, page);
+                        if (index >= (uint)_VSMPrototypePageTableEntryCount) continue;
+                        uint flags = _VSMPrototypePageMetadata[index].x;
+                        if ((flags & kVSMPageAllocated) == 0u) continue;
+                        tested++;
+                        if (hasPrevVsm)
+                        {
+                            uint prevIndex = VividVSMCalcProjectionPageIndex(_VSMProjections[prevVsmId], mip, page);
+                            if (prevIndex < (uint)_VSMPrototypePageTableEntryCount
+                                && VSMInvalidationPageOccludedRes(prevIndex, page, mipRes))
+                            {
+                                culled++;
+                                continue;
+                            }
+                        }
+                        uint ignored;
+                        InterlockedOr(_VSMPrototypePageMetadata[index].x, g_VSMInvalidationMask, ignored);
+                        if ((g_VSMInvalidationMask & kVSMPageDirty) != 0u)
+                            InterlockedAnd(_VSMPrototypePageMetadata[index].x, ~kVSMPageCached, ignored);
+                        written++;
+                    }
+                }
+            }
         }
         tested = WaveActiveSum(tested); culled = WaveActiveSum(culled); written = WaveActiveSum(written);
         if (WaveIsFirstLane())

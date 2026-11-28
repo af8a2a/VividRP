@@ -608,6 +608,7 @@ void ProcessVSMPageMeshlet(VividMeshletRenderRequestPacked sourceRequest,
         }
     }
 }
+
 void RunVSMCullMeshletsToPages(uint3 dispatchThreadID)
 {
     const uint localRequestIndex = dispatchThreadID.x;
@@ -2256,3 +2257,5 @@ void VSMPropagateMappedMips(uint3 id : SV_DispatchThreadID)
         }
     }
 }
+
+#include "../Culling/VSMLocalCasterPipeline.hlsl"

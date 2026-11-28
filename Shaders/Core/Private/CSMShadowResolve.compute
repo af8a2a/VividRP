@@ -1214,6 +1214,7 @@ void CSMShadowBilateralFilterV(
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMFiltering.hlsl"
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMReceiverResolve.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Projection/VSMLocalProjection.hlsl"
 
 [numthreads(8, 8, 1)]
 void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
@@ -1463,3 +1464,6 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMCompactUnifiedViews
 #pragma kernel VSMCullLocalInstancesCS
 #pragma kernel VSMBuildLocalMeshletPagesCS
+
+// Phase 3: One-Pass Local Light Shadow Projection (4-bit x 32 lights/pixel + blue-noise dither + dual-cube-face SMRT).
+#pragma kernel VSMResolveLocalShadows

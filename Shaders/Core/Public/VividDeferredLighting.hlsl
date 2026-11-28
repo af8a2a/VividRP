@@ -8,6 +8,7 @@
 #include "VividSimpleSlabDirectLighting.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
 #include "VividOpenPBROpaqueDeferredLighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapAddressing.hlsl"
 
 // Shared 2D Deferred input contract for compute and retained raster entrypoints.
 // GBuffer contains TopLayer Surface Summary, never a legacy material ID.
@@ -23,9 +24,13 @@ Texture2D<float4> _LayerAux1;
 Texture2DArray<uint> _SubstrateClosureBuffer;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
+Texture2D<uint4> _VSMLocalShadowMaskBits;
+StructuredBuffer<uint> _VSMPrunedLightOffsetCount;
+StructuredBuffer<uint> _VSMPrunedLightIndices;
 Texture2D<float> _GTAOTexture;
 Texture2D<float4> _ScreenSpaceReflectionTexture;
 
+uint _VSMLocalShadowMaskEnabled;
 uint _ScreenSpaceReflectionEnabled;
 uint _VividSlabLutReady;
 uint _VividOpenPBRLutsReady;
@@ -232,6 +237,62 @@ float EvaluateDeferredDirectionalShadowAttenuation(
     return lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
 }
 
+struct VividDeferredLocalShadowContext
+{
+    bool active;
+    uint4 maskBits;
+    uint prunedOffset;
+    uint prunedCount;
+};
+
+VividDeferredLocalShadowContext CreateDeferredLocalShadowContext(
+    uint2 pixelCoord,
+    float3 positionWS)
+{
+    VividDeferredLocalShadowContext ctx = (VividDeferredLocalShadowContext)0;
+    if (_VSMLocalShadowMaskEnabled == 0u || _ClusteredPunctualLightGridEnabled == 0u)
+        return ctx;
+
+    uint2 tileCoord = VividClusteredLighting::GetTileCoord(pixelCoord);
+    float viewDepth = VividClusteredLighting::GetViewDepthWS(positionWS);
+    uint sliceIndex = VividClusteredLighting::GetSliceIndex(pixelCoord, viewDepth);
+    uint clusterIndex = VividClusteredLighting::GetLayeredOffsetBufferIndex(
+        LIGHTCATEGORY_PUNCTUAL, tileCoord, sliceIndex);
+    uint packed = _VSMPrunedLightOffsetCount[clusterIndex];
+    uint count = min(
+        (packed >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK,
+        VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS);
+    if (count == 0u)
+        return ctx;
+
+    ctx.active = true;
+    ctx.maskBits = _VSMLocalShadowMaskBits.Load(int3(pixelCoord, 0));
+    ctx.prunedOffset = packed & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+    ctx.prunedCount = count;
+    return ctx;
+}
+
+float EvaluateDeferredLocalShadowAttenuation(
+    VividDeferredLocalShadowContext ctx,
+    uint punctualLightIndex,
+    PunctualLightData light)
+{
+    if (!ctx.active || light.shadowStrength <= 0.0)
+        return 1.0;
+
+    [loop]
+    for (uint slot = 0u; slot < ctx.prunedCount; ++slot)
+    {
+        if (_VSMPrunedLightIndices[ctx.prunedOffset + slot] == punctualLightIndex)
+        {
+            float shadow = VividVSMUnpackShadowMask4Bit(ctx.maskBits, slot);
+            return lerp(1.0, shadow, saturate(light.shadowStrength));
+        }
+    }
+
+    return 1.0;
+}
+
 bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
     uint2 pixelCoord, float3 positionWS, out VividSimpleSlabDeferredLighting result,
     out float3 diffuseBounce)
@@ -298,10 +359,14 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
             inputs.normalWS, SafeNormalize(light.directionWS), max(light.color, 0.0) * shadow), result);
     }
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
+    if (punctualCount > 0u)
+        localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
     {
-        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        uint punctualLightIndex = VividLightingLoop::GetPunctualLightIndex(lightLoop, i);
+        PunctualLightData light = GetPunctualLight(punctualLightIndex);
         float3 direction;
         float4 distances;
         GetVividPunctualLightVectors(positionWS, light, direction, distances);
@@ -309,6 +374,7 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
             continue;
         float attenuation = VividPunctualLightAttenuationWithDistanceModification(
             light, positionWS - light.positionWS, distances);
+        attenuation *= EvaluateDeferredLocalShadowAttenuation(localShadowCtx, punctualLightIndex, light);
         if (attenuation > 0.0)
         {
             diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(inputs,
@@ -424,10 +490,14 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
         }
     }
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
+    if (punctualCount > 0u)
+        localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
     {
-        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        uint punctualLightIndex = VividLightingLoop::GetPunctualLightIndex(lightLoop, i);
+        PunctualLightData light = GetPunctualLight(punctualLightIndex);
         float3 direction;
         float4 distances;
         GetVividPunctualLightVectors(positionWS, light, direction, distances);
@@ -437,9 +507,10 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
             light, positionWS - light.positionWS, distances);
         if (attenuation > 0.0f)
         {
-            if (dot(baseNormal, direction) > 0.0f || (resolved.coat_weight > 0.0f && dot(coatNormal, direction) > 0.0f))
+            float localShadow = EvaluateDeferredLocalShadowAttenuation(localShadowCtx, punctualLightIndex, light);
+            if (localShadow > 0.0f && (dot(baseNormal, direction) > 0.0f || (resolved.coat_weight > 0.0f && dot(coatNormal, direction) > 0.0f)))
             {
-                float3 radiance = max(light.color, 0.0f) * attenuation;
+                float3 radiance = max(light.color, 0.0f) * (attenuation * localShadow);
                 diffuseBounce += VividEvaluateOpenPBROpaqueDiffuseBounce(v2Inputs.core, direction, radiance);
                 VividAccumulateOpenPBROpaqueLight(
                     openpbr_scale_diffuse_specular(openpbr_eval(prepared, direction), radiance), result);
@@ -447,7 +518,7 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
             if (thinWalledTransmissive)
             {
                 result.diffuseLighting += EvaluateVividThinWalledTransmission(
-                    v2Inputs, baseNormal, viewDirectionWS, direction, light.color * attenuation, 1.0f, surfaceAO);
+                    v2Inputs, baseNormal, viewDirectionWS, direction, light.color * attenuation, localShadow, surfaceAO);
             }
         }
     }
@@ -588,10 +659,14 @@ bool TryEvaluateDeferredSubstrateMultiClosureLighting(VividSurfaceSummaryData su
 
     // 3. Direct punctual lights
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
+    if (punctualCount > 0u)
+        localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
     {
-        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        uint punctualLightIndex = VividLightingLoop::GetPunctualLightIndex(lightLoop, i);
+        PunctualLightData light = GetPunctualLight(punctualLightIndex);
         float3 direction;
         float4 distances;
         GetVividPunctualLightVectors(positionWS, light, direction, distances);
@@ -599,6 +674,7 @@ bool TryEvaluateDeferredSubstrateMultiClosureLighting(VividSurfaceSummaryData su
             continue;
         float attenuation = VividPunctualLightAttenuationWithDistanceModification(
             light, positionWS - light.positionWS, distances);
+        attenuation *= EvaluateDeferredLocalShadowAttenuation(localShadowCtx, punctualLightIndex, light);
         if (attenuation <= 0.0f)
             continue;
         float3 radiance = max(light.color, 0.0f) * attenuation;
@@ -676,12 +752,21 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
     }
 
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
+    if (punctualCount > 0u)
+        localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint lightIndex = 0; lightIndex < punctualCount; ++lightIndex)
     {
-        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, lightIndex);
+        uint punctualLightIndex = VividLightingLoop::GetPunctualLightIndex(lightLoop, lightIndex);
+        PunctualLightData light = GetPunctualLight(punctualLightIndex);
+        float localShadow = EvaluateDeferredLocalShadowAttenuation(localShadowCtx, punctualLightIndex, light);
+        if (localShadow <= 0.0f)
+            continue;
         VividAccumulateSimpleSlabDirectLighting(
-            VividEvaluateSimpleSlabPunctualLight(slab, preLight.energy, positionWS, viewDirectionWS, light),
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabPunctualLight(slab, preLight.energy, positionWS, viewDirectionWS, light),
+                localShadow.xxx),
             directLighting);
     }
 
@@ -874,12 +959,17 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     }
 
     uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
+    if (punctualLightCount > 0u)
+        localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
     {
-        PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(
-            lightLoop,
-            localLightIndex);
+        uint punctualLightIndex = VividLightingLoop::GetPunctualLightIndex(lightLoop, localLightIndex);
+        PunctualLightData punctualLight = GetPunctualLight(punctualLightIndex);
+        float localShadow = EvaluateDeferredLocalShadowAttenuation(localShadowCtx, punctualLightIndex, punctualLight);
+        if (localShadow <= 0.0f)
+            continue;
         float3 lightDirectionWS;
         float4 lightDistances;
         GetVividPunctualLightVectors(
@@ -905,7 +995,7 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
                     positionWS,
                     viewDirectionWS,
                     punctualLight),
-                baseWeight),
+                baseWeight * localShadow),
             baseSimpleDirectLighting);
         VividAccumulateSimpleSlabDirectLighting(
             VividScaleSimpleSlabDirectLighting(
@@ -915,7 +1005,7 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
                     positionWS,
                     viewDirectionWS,
                     punctualLight),
-                topWeight),
+                topWeight * localShadow),
             topSimpleDirectLighting);
     }
 
@@ -1078,10 +1168,14 @@ bool TryEvaluateDeferredHairLighting(
 
     // 3. Direct Punctual Lights
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
+    if (punctualCount > 0u)
+        localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
     {
-        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        uint punctualLightIndex = VividLightingLoop::GetPunctualLightIndex(lightLoop, i);
+        PunctualLightData light = GetPunctualLight(punctualLightIndex);
         float3 direction;
         float4 distances;
         GetVividPunctualLightVectors(positionWS, light, direction, distances);
@@ -1091,6 +1185,8 @@ bool TryEvaluateDeferredHairLighting(
             light, positionWS - light.positionWS, distances);
         if (attenuation > 0.0f)
         {
+            float localShadow = EvaluateDeferredLocalShadowAttenuation(localShadowCtx, punctualLightIndex, light);
+            float shadowSat = saturate(localShadow);
             float NdotL = dot(bsdfIn.geomNormalWS, direction);
             float skinWrap = saturate((NdotL + 0.35f) / 1.35f);
             float reflectionVis = lerp(saturate(NdotL), skinWrap, 0.40f + 0.45f * bsdfIn.shellDepth);
@@ -1098,9 +1194,11 @@ bool TryEvaluateDeferredHairLighting(
             float dualVis = lerp(0.25f, 1.0f, skinWrap);
 
             float3 radiance = max(light.color, 0.0f.xxx) * attenuation;
-            VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, direction, 1.0f);
-            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT) * reflectionVis;
-            float3 directDiff = radiance * (resp.lobeTT * backlitVis + resp.lobeMedulla * reflectionVis + resp.lobeDualScatter * dualVis);
+            VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, direction, localShadow);
+            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT) * (shadowSat * reflectionVis);
+            float3 directDiff = radiance * (
+                (resp.lobeTT * backlitVis + resp.lobeMedulla * reflectionVis) * shadowSat
+                + resp.lobeDualScatter * dualVis);
             result.specularLighting += directSpec;
             result.diffuseLighting += directDiff;
             diffuseBounce += directDiff;

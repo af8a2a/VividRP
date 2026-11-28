@@ -52,6 +52,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly VirtualShadowMapRegistry Registry = new();
         internal static readonly VirtualShadowMapLocalLightGrid LocalLightGrid = new();
         internal static readonly VirtualShadowMapLocalCasterPipeline LocalCasterPipeline = new();
+        internal static readonly VirtualShadowMapLocalShadowResolver LocalShadowResolver = new();
         private static GraphicsBuffer s_RemapPageMetadata;
         private static GraphicsBuffer s_PageTable;
         private static GraphicsBuffer s_PageMetadata;
@@ -804,6 +805,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             Projections.Dispose();
             LocalLightGrid.Dispose();
             LocalCasterPipeline.Dispose();
+            LocalShadowResolver.Dispose();
             ReleaseAllocatedResources();
             s_VirtualResolution = 0;
             s_CascadeCount = 0;
@@ -824,6 +826,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             Projections.Reset();
             LocalLightGrid.Disable();
             LocalCasterPipeline.Disable();
+            LocalShadowResolver.Disable();
             s_PageDebugCameraEntityId = 0ul;
             s_PageDebugFrameIndex = -1;
             s_FrameState = VirtualShadowMapPrototypeFrameState.Disabled;

@@ -72,15 +72,22 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         internal bool Active { get; private set; }
         internal int CollectedLightCount => m_CollectedCount;
+        internal int PunctualLightCount => m_PunctualLightCount;
         internal int ClusterCount => m_ClusterCount;
         internal int UnifiedProjectionCount => m_UnifiedProjectionCount;
         internal int UnifiedPageTableEntryCount => m_UnifiedPageTableEntryCount;
+        internal GraphicsBuffer SourcePunctualLights => m_SourcePunctualLights;
+        internal GraphicsBuffer SourceLogBaseBuffer => m_SourceLogBaseBuffer;
         internal GraphicsBuffer PunctualLightVSMInfo => m_PunctualLightVSMInfo;
         internal GraphicsBuffer PrunedLightOffsetCount => m_PrunedLightOffsetCount;
         internal GraphicsBuffer PrunedLightIndices => m_PrunedLightIndices;
         internal GraphicsBuffer UnifiedProjections => m_UnifiedProjections;
         internal GraphicsBuffer LocalPageRequestFlags => m_LocalPageRequestFlags;
         internal GraphicsBuffer LocalPageReceiverMasks => m_LocalPageReceiverMasks;
+        internal Vector4 CameraViewParams => m_CameraViewParams;
+        internal Vector4 ClusterParams => m_ClusterParams;
+        internal Vector4 ClusterDepthParams => m_ClusterDepthParams;
+        internal Matrix4x4 CameraViewMatrix => m_CameraViewMatrix;
         internal VividVSMLocalLightDescriptor[] CollectedDescriptors => m_CollectedDescriptors;
         internal int2[] PunctualVSMInfoUpload => m_PunctualVSMInfoUpload;
 

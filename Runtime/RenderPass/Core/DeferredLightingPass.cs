@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.VirtualShadowMap;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -454,6 +455,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DebugTexture.Resize(width, height);
             m_SubsurfaceDiffuse.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
+            VirtualShadowMapPrototypeRuntime.LocalShadowResolver.PrepareForDeferredPass(
+                this,
+                VirtualShadowMapPrototypeRuntime.LocalLightGrid);
             PrepareSlabLutResource(frameData);
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
         }
@@ -819,6 +823,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, LayeredOffsetId, m_LayeredOffsetBuffer);
             SetLightLoopBuffer(cmd, kernel, LayeredLightListId, m_LayeredLightListBuffer);
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
+            VirtualShadowMapPrototypeRuntime.LocalShadowResolver.BindToDeferredPass(cmd, m_DeferredLitCompute, kernel);
         }
 
         private bool HasValidDeferredLitVariantKernels()

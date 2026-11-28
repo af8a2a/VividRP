@@ -217,6 +217,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_VSMAdaptiveKernel = -1;
         private int m_VSMHintsKernel = -1;
         private int m_VSMAdaptiveHintsKernel = -1;
+        private int m_VSMLocalResolveKernel = -1;
+        private bool m_VSMLocalResolveActive;
+        private CascadedShadowSettingsVolume m_CachedCsmSettings;
 
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
@@ -340,6 +343,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMAdaptiveKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptive");
             m_VSMHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveHints");
             m_VSMAdaptiveHintsKernel = FindKernelOrInvalid(m_ResolveCompute, "VSMShadowResolveAdaptiveHints");
+            m_VSMLocalResolveKernel = FindKernelOrInvalid(m_ResolveCompute, VirtualShadowMapLocalShadowResolver.ResolveLocalKernelName);
 
             for (var i = 0; i < s_BendCompositeKernelNames.Length; i++)
                 m_BendCompositeKernels[i] = FindKernelOrInvalid(m_ResolveCompute, s_BendCompositeKernelNames[i]);
@@ -397,19 +401,42 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
             m_LevelHintShadowData = shadowData;
-            if (!shadowData.isCSMActive)
-                return;
-
-            m_IsActive = true;
+            var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            m_CachedCsmSettings = csmSettings;
             m_ViewProjMatrix = cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
             m_InvViewProjMatrix = m_ViewProjMatrix.inverse;
             var receiverProjection = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
-            bool orthographic = cameraData.camera.orthographic;
+            bool orthographic = cameraData.camera != null && cameraData.camera.orthographic;
             m_VSMReceiverOffsetParameters = orthographic
                 ? new Vector4(0.0005f, 0, 0.01f, 1)
                 : new Vector4(0.0005f / Mathf.Abs(receiverProjection.m00),
                     0.015f / Mathf.Abs(receiverProjection.m11), 0, 0);
             m_VSMReceiverViewForward = -cameraData.GetViewMatrix().GetRow(2);
+            m_FrameIndex = cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+
+            if (m_VSMLocalResolveKernel >= 0
+                && VirtualShadowMapPrototypeRuntime.LocalLightGrid.Active
+                && VirtualShadowMapPrototypeRuntime.LocalCasterPipeline.Active)
+            {
+                m_VSMLocalResolveActive = VirtualShadowMapPrototypeRuntime.LocalShadowResolver.PrepareForResolvePass(
+                    this,
+                    width,
+                    height,
+                    VirtualShadowMapPrototypeRuntime.LocalLightGrid,
+                    VirtualShadowMapPrototypeRuntime.LocalCasterPipeline);
+            }
+            else
+            {
+                m_VSMLocalResolveActive = false;
+                VirtualShadowMapPrototypeRuntime.LocalShadowResolver.Disable();
+            }
+
+            if (!shadowData.isCSMActive)
+                return;
+
+            m_IsActive = true;
 
             m_CascadeCount = shadowData.cascadeCount;
             m_MaxShadowDistance = shadowData.maxShadowDistance;
@@ -417,9 +444,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeResolution = shadowData.cascadeResolution;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
-            m_FrameIndex = cameraData.frameIndex >= 0
-                ? cameraData.frameIndex
-                : Time.frameCount;
             m_CameraEntityId = cameraData.camera != null
                 ? EntityId.ToULong(cameraData.camera.GetEntityId())
                 : 0ul;
@@ -482,7 +506,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             }
 
-            var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             m_SMRTSampleIndexOffset = VirtualShadowMapReceiverQuality.BuildSMRTSampleIndexOffset(
                 csmSettings, cameraData.additionalData, m_FrameIndex);
             m_VSMReceiverQuality = VirtualShadowMapReceiverQuality.BuildParameters(csmSettings, cameraData, shadowData.clipmaps.Resolution);
@@ -614,7 +637,31 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(ComputePassContext context)
         {
-            if (!m_IsActive || m_ResolveCompute == null || m_Kernel < 0)
+            if (m_ResolveCompute == null)
+                return;
+
+            var cmd = context.cmd;
+            if (m_VSMLocalResolveActive
+                && m_VSMLocalResolveKernel >= 0
+                && m_DepthTexture.innerHandle.IsValid()
+                && m_GBuffer1.innerHandle.IsValid())
+            {
+                VirtualShadowMapPrototypeRuntime.LocalShadowResolver.RecordResolve(
+                    cmd,
+                    m_ResolveCompute,
+                    m_VSMLocalResolveKernel,
+                    VirtualShadowMapPrototypeRuntime.LocalLightGrid,
+                    VirtualShadowMapPrototypeRuntime.LocalCasterPipeline,
+                    m_DepthTexture.innerHandle,
+                    m_GBuffer1.innerHandle,
+                    m_InvViewProjMatrix,
+                    m_FrameIndex,
+                    m_VSMReceiverOffsetParameters,
+                    m_VSMReceiverViewForward,
+                    m_CachedCsmSettings);
+            }
+
+            if (!m_IsActive || m_Kernel < 0)
                 return;
 
             if (!m_DepthTexture.innerHandle.IsValid()
@@ -626,7 +673,6 @@ namespace VividRP.Runtime.RenderPass.Core
             // A prepared VSM frame can still fail during raster. Never promote
             // fallback CSM output to SMRT history or use it for the next ray budget.
             m_EnableVSMTemporal &= VirtualShadowMapPrototypeRuntime.IsFrameActive;
-            var cmd = context.cmd;
 
             if (m_EnableTiledResolve
                 && m_TileListBuffer?.innerHandle.IsValid() == true
@@ -655,6 +701,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VSMTemporalKernel = -1;
             m_VSMKernel = m_VSMAdaptiveKernel = -1;
             m_VSMHintsKernel = m_VSMAdaptiveHintsKernel = -1;
+            m_VSMLocalResolveKernel = -1;
+            m_VSMLocalResolveActive = false;
+            m_CachedCsmSettings = null;
             m_LevelHintShadowData = null;
             m_ResolveCompute = null;
             m_Kernel = -1;

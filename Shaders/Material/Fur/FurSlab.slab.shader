@@ -70,17 +70,17 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurShading)] _RootRoughness("Root Specular Roughness", Range(0.15, 0.95)) = 0.50
         [Sub(FurShading)] _TipRoughness("Tip Specular Roughness", Range(0.15, 0.95)) = 0.34
         [Sub(FurShading)] _SpecularWeight("Keratin Specular Weight", Range(0.0, 1.0)) = 0.65
-        [Sub(FurShading)] _SpecularTint("Keratin Specular Tint", Color) = (1.0, 0.94, 0.86, 1.0)
-        [Sub(FurShading)] _Anisotropy("Strand Anisotropy (OpenPBR)", Range(0.0, 1.0)) = 0.72
-        [Sub(FurShading)] _FuzzWeight("Fuzz Rim Sheen Weight (OpenPBR)", Range(0.0, 1.0)) = 0.85
-        [Sub(FurShading)] _FuzzColor("Fuzz Rim Sheen Color (OpenPBR)", Color) = (0.94, 0.84, 0.72, 1.0)
-        [Sub(FurShading)] _FuzzRoughness("Fuzz Rim Roughness (OpenPBR)", Range(0.15, 1.0)) = 0.46
-        [Sub(FurShading)] _HairRadialRoughness("Marschner Radial Roughness", Range(0.05, 1.0)) = 0.45
-        [Sub(FurShading)] _HairCuticleAngle("Marschner Cuticle Tilt (Deg)", Range(0.0, 12.0)) = 2.5
-        [Sub(FurShading)] _HairScatter("Dual Scattering Strength", Range(0.0, 1.0)) = 0.85
-        [Sub(FurShading)] _HairBacklit("Backlit TT Transmission", Range(0.0, 1.0)) = 0.85
-        [Sub(FurShading)] _FurMedullaWeight("Animal Fur Medulla Weight", Range(0.0, 1.0)) = 0.55
-        [Sub(FurShading)] _FurMedullaRoughness("Animal Fur Medulla Softness", Range(0.10, 1.0)) = 0.65
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 0)] _SpecularTint("Keratin Specular Tint", Color) = (1.0, 0.94, 0.86, 1.0)
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 0)] _Anisotropy("Strand Anisotropy", Range(0.0, 1.0)) = 0.72
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 0)] _FuzzWeight("Fuzz Rim Sheen Weight", Range(0.0, 1.0)) = 0.85
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 0)] _FuzzColor("Fuzz Rim Sheen Color", Color) = (0.94, 0.84, 0.72, 1.0)
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 0)] _FuzzRoughness("Fuzz Rim Roughness", Range(0.15, 1.0)) = 0.46
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _HairRadialRoughness("Radial Roughness", Range(0.05, 1.0)) = 0.45
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _HairCuticleAngle("Cuticle Tilt (Deg)", Range(0.0, 12.0)) = 2.5
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _HairScatter("Dual Scattering Strength", Range(0.0, 1.0)) = 0.85
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _HairBacklit("Backlit TT Transmission", Range(0.0, 1.0)) = 0.85
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _FurMedullaWeight("Medulla Weight", Range(0.0, 1.0)) = 0.55
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _FurMedullaRoughness("Medulla Softness", Range(0.10, 1.0)) = 0.65
 
         // Per-instance shell height h in [0, 1]; defaults to 0 (skin layer) when rendered non-instanced.
         [HideInInspector] _ShellHeight("Shell Height", Range(0.0, 1.0)) = 0.0

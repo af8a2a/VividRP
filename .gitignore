@@ -19,3 +19,7 @@ ReferenceVSM.meta
 
 # Local implementation reports, profiling captures and temporary artifacts.
 /Temp~/
+
+# External large LookDev strand-hair grooms (download via Tools~/Download-HairCase07Assets.ps1)
+Samples/HairLookDev/Grooms/Case07/
+Samples/HairLookDev/Grooms/Case07.meta

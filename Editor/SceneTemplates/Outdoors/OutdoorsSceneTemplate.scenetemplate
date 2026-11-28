@@ -65,45 +65,45 @@ MonoBehaviour:
     Includes Physically Based Sky, Auto Exposure, ACES Tonemapping, CSM, FreeCamera, a Golden Material Ball, and an 11-sphere calibration & .slab.shader showcase (18% Gray, Glossy Dielectric, Chrome Mirror, ClearCoat Car Paint, Fabric Velvet, Fabric Shot Silk, Brushed Copper, ClearCoat Dual-Normal Carbon Fiber, SubstratePoC Coat, SubstrateMultiClosurePoC WPO/AlphaClip, and Instanced Shell Fur Plush).'
   preview: {fileID: -6049507688365762563}
   dependencies:
-  - dependency: {fileID: 2100000, guid: c055add8caaf72242968604b394b840e, type: 2}
-    instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 19b43581d88d2c241a040461c5796c47, type: 2}
-    instantiationMode: 1
-  - dependency: {fileID: 2800000, guid: 177b2538515c71b4a86aa1cad939807a, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 3197ade3ac086174995b6f2d15cb7879, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 69f2c87e2d87161469f65ab3f2bf7f71, type: 2}
     instantiationMode: 1
-  - dependency: {fileID: 2100000, guid: 684e3d163491f9d4b9adcba392fa3ea9, type: 2}
-    instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 0fe0a029964e5c24581561a4ed6596bc, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: b5ae5fb160c16b149891707bc1a51a49, type: 2}
     instantiationMode: 1
-  - dependency: {fileID: 2100000, guid: e2b745089ccb6e5469ccd2bca3c252a4, type: 2}
-    instantiationMode: 1
   - dependency: {fileID: 2100000, guid: e7c1e9f3a448f174e9a2f3626fad5ec2, type: 2}
-    instantiationMode: 1
-  - dependency: {fileID: 11400000, guid: 2d6227a1c6344d3459b5c58d5b7535bd, type: 2}
-    instantiationMode: 1
-  - dependency: {fileID: 2100000, guid: ee33aa117c2e2804ba837e5d9f02d174, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 35e1a61c511572b4ea77ee872d3c46a6, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: b47e99f48c4622e4a91fd28d8ee4632e, type: 2}
     instantiationMode: 0
-  - dependency: {fileID: 2100000, guid: 689ae06b84673144f9b11192efcf1e8d, type: 2}
-    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: 3ff6fe981379dab4b96e4183b82f3b0f, type: 2}
+    instantiationMode: 0
   - dependency: {fileID: 2100000, guid: a8d7aa418bf1e2f4abe63c4c6c8b432c, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: 689ae06b84673144f9b11192efcf1e8d, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: 3c842d5eea725384fa788fc6babfae7b, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 2100000, guid: f5330040995fc284face91e3ad7bf02b, type: 2}
     instantiationMode: 1
-  - dependency: {fileID: 2100000, guid: f83f91ef67c59334eae270593395864e, type: 2}
+  - dependency: {fileID: 2100000, guid: c055add8caaf72242968604b394b840e, type: 2}
     instantiationMode: 1
-  - dependency: {fileID: 2100000, guid: b47e99f48c4622e4a91fd28d8ee4632e, type: 2}
+  - dependency: {fileID: 2800000, guid: 177b2538515c71b4a86aa1cad939807a, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: 684e3d163491f9d4b9adcba392fa3ea9, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: e2b745089ccb6e5469ccd2bca3c252a4, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 11400000, guid: 2d6227a1c6344d3459b5c58d5b7535bd, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: ee33aa117c2e2804ba837e5d9f02d174, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 2100000, guid: f83f91ef67c59334eae270593395864e, type: 2}
     instantiationMode: 1
   - dependency: {fileID: 919132149155446097, guid: 39857cfad1651644682ff5b772e6e697, type: 3}
     instantiationMode: 1

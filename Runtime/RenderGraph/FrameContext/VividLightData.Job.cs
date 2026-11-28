@@ -287,7 +287,7 @@ namespace VividRP.Runtime
 
                     if (IsPunctualLightSupported(lightRenderData))
                     {
-                        var candidate = CreatePunctualLightCandidate(lightRenderData);
+                        var candidate = CreatePunctualLightCandidate(visibleLightRenderDataRecords[lightIndex].visibleLightIndex, lightRenderData);
                         var viewSpaceCullData = BuildPunctualLightViewSpaceCullDataRecord(
                             candidate.lightCullData,
                             worldToViewMatrix);

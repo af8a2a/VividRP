@@ -20,6 +20,14 @@ namespace VividRP.Runtime
         public BoolParameter enableCSM = new(false);
         [Tooltip("Experimental directional-light virtual shadow map. Unity Renderer casters require a VSM-compatible ShadowCaster pass; incompatible content and unsupported platforms fail closed to CSM.")]
         public BoolParameter enableVirtualShadowMapPrototype = new(false);
+        [Tooltip("Experimental unified Point/Spot local-light Virtual Shadow Maps (Phase 1+ pipeline).")]
+        public BoolParameter virtualShadowMapLocalLights = new(false);
+        [Tooltip("Maximum virtual shadow resolution per Point face / Spot light. Rounded up to a power of two (default 4096 = 32x32 pages, 6 mips).")]
+        public ClampedIntParameter virtualShadowMapLocalResolution = new(4096, 512, 16384);
+        [Tooltip("UE ResolutionLodBiasLocal: negative requests finer local-light mips, positive requests coarser mips.")]
+        public ClampedFloatParameter virtualShadowMapResolutionLodBiasLocal = new(0f, -4f, 4f);
+        [Tooltip("Projected screen diameter threshold (pixels) below which a local light downgrades to a Single-Page (Distant) VSM. Zero disables Single-Page downgrade.")]
+        public ClampedFloatParameter virtualShadowMapDistantLightPixelThreshold = new(128f, 0f, 1024f);
         [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to a power of two (at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]

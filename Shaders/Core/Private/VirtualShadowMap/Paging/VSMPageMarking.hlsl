@@ -313,3 +313,5 @@ void VSMMarkReceiverPagesUE(uint3 id : SV_DispatchThreadID, uint groupIndex : SV
     MarkVSMReceiverUE(position, groupIndex);
 }
 #endif
+
+#include "VSMLocalPageMarking.hlsl"

@@ -19,6 +19,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividMeshletCull.hlsli"
 #if defined(VIVID_VSM_EARLY_CULL)
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapProjection.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/VirtualShadowMap/Culling/VSMPageCulling.hlsl"
 #endif
 

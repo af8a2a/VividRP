@@ -1448,3 +1448,9 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 #pragma kernel VSMUpdatePhysicalPageAddressesUnified
 #pragma kernel VSMRemapPagesUnified
 #pragma kernel VSMPropagateMappedMips
+
+// Phase 1: Pruned local light grid and unified local-light page/coarse marking.
+#pragma kernel VSMPruneLightGridCS
+#pragma kernel VSMMarkCoarsePagesUnified
+#pragma kernel VSMMarkLocalReceiverPages VIVID_VSM_MARK_RECEIVERS VIVID_VSM_PAGE_PRESSURE
+#pragma kernel VSMClearLocalPageRequests

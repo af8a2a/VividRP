@@ -235,10 +235,21 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        public struct PunctualLightShadowMeta
+        {
+            public EntityId lightEntityId;
+            public int visibleLightIndex;
+            public float spotAngle;
+            public float shapeRadius;
+            public VividLightRenderDataFlags flags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct PunctualLightCandidate
         {
             public PunctualLightData lightData;
             public PunctualLightCullData lightCullData;
+            public PunctualLightShadowMeta shadowMeta;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -339,6 +350,7 @@ namespace VividRP.Runtime
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
+        public PunctualLightShadowMeta[] punctualLightShadowMeta = Array.Empty<PunctualLightShadowMeta>();
         public AreaLightData[] areaLights = Array.Empty<AreaLightData>();
         public ReflectionProbeData[] reflectionProbes = Array.Empty<ReflectionProbeData>();
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
@@ -786,6 +798,9 @@ namespace VividRP.Runtime
             if (requiredCapacity > punctualLights.Length)
                 punctualLights = new PunctualLightData[requiredCapacity];
 
+            if (requiredCapacity > punctualLightShadowMeta.Length)
+                punctualLightShadowMeta = new PunctualLightShadowMeta[requiredCapacity];
+
             if (requiredCapacity > punctualLightCullData.Length)
                 punctualLightCullData = new PunctualLightCullData[requiredCapacity];
 
@@ -1117,6 +1132,7 @@ namespace VividRP.Runtime
             {
                 punctualLights[punctualIndex] = punctualCandidates[punctualIndex].lightData;
                 punctualLightCullData[punctualIndex] = punctualCandidates[punctualIndex].lightCullData;
+                punctualLightShadowMeta[punctualIndex] = punctualCandidates[punctualIndex].shadowMeta;
             }
         }
 
@@ -1252,7 +1268,7 @@ namespace VividRP.Runtime
             };
         }
 
-        private static PunctualLightCandidate CreatePunctualLightCandidate(VividLightRenderData trackedLightData)
+        private static PunctualLightCandidate CreatePunctualLightCandidate(int visibleLightIndex, VividLightRenderData trackedLightData)
         {
             var punctualLightData = CreatePunctualLightData(trackedLightData);
 
@@ -1260,6 +1276,14 @@ namespace VividRP.Runtime
             {
                 lightData = punctualLightData,
                 lightCullData = CreatePunctualLightCullData(punctualLightData),
+                shadowMeta = new PunctualLightShadowMeta
+                {
+                    lightEntityId = trackedLightData.lightEntityId,
+                    visibleLightIndex = visibleLightIndex,
+                    spotAngle = trackedLightData.spotAngle,
+                    shapeRadius = trackedLightData.shapeRadius,
+                    flags = trackedLightData.flags,
+                },
             };
         }
 

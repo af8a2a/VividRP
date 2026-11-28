@@ -140,6 +140,8 @@ namespace VividRP.Runtime
 
         internal bool HasImportedBuffer => m_ImportedGraphicsBuffer != null;
 
+        internal GraphicsBuffer ImportedBuffer => m_ImportedGraphicsBuffer;
+
         internal bool HasImportedHandle => m_UsesImportedHandle && innerHandle.IsValid();
 
         internal void SetImportedHandle(BufferHandle handle)

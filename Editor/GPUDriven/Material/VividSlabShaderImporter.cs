@@ -49,7 +49,7 @@ namespace VividRP.Editor.GPUDriven
     /// </list>
     /// Automatically reimports when linked <c>.vmatg</c> MaterialGraphs or base templates change.
     /// </summary>
-    [ScriptedImporter(8, Extension)]
+    [ScriptedImporter(9, Extension)]
     internal sealed class VividSlabShaderImporter : ScriptedImporter
     {
         internal const string Extension = "slab.shader";
@@ -130,7 +130,8 @@ namespace VividRP.Editor.GPUDriven
                 assembled.HasCustomCoverage,
                 assembled.HasVertexOffset,
                 assembled.WorldPositionOffsetPadding,
-                assembled.WorldPositionOffsetPaddingProperties);
+                assembled.WorldPositionOffsetPaddingProperties,
+                assembled.ShellLayerCount);
 
             ctx.AddObjectToAsset(MainShaderObjectId, rasterShader);
             ctx.AddObjectToAsset(DescriptorObjectId, descriptor);

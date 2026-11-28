@@ -1177,6 +1177,106 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Assemble_ShellLayersDirectiveAndFurSlab_WiresDynamicGPUDrivenShellAmplification()
+        {
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            string templateText = File.ReadAllText(templatePath);
+
+            // 1. FurSlab declares @vivid-shell-layers 8 and wires both VisibilityRaster and Compute Resolve shells.
+            string furPath = VividPackagePathUtility.GetPreferredAssetPath(FurSlabRelativePath);
+            VividSlabShaderAssemblyResult furResult = VividSlabShaderAssembler.Assemble(
+                furPath,
+                File.ReadAllText(furPath),
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(furResult.Succeeded, Is.True);
+            Assert.That(furResult.ShellLayerCount, Is.EqualTo(8));
+            Assert.That(furResult.HasVertexOffset, Is.True);
+            Assert.That(furResult.HasCustomCoverage, Is.True);
+
+            // Reflected GPUDriven shell controls
+            VividSlabParameterSlot shellCountSlot = FindParamSlot(furResult.ParameterSlots, "_GPUDrivenShellCount");
+            VividSlabParameterSlot shellPowerSlot = FindParamSlot(furResult.ParameterSlots, "_ShellHeightPower");
+            Assert.That(shellCountSlot.DefaultValue.x, Is.EqualTo(8.0f).Within(1e-5f));
+            Assert.That(shellPowerSlot.DefaultValue.x, Is.EqualTo(1.0f).Within(1e-5f));
+
+            // VisibilityRaster encodes ShellIndex and evaluates custom shell params + hybrid coverage.
+            Assert.That(furResult.RasterShaderSource, Does.Contain("float4 _VividSlabShellParams;"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("PackVisibilityBufferValueWithShell(visibilityBufferValue, shellIndex)"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("VividSlabResolveShellLayer(vctx, shellHeight, shellStep)"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("VividEvaluateFurHybridSlabWithDerivatives("));
+
+            // Standalone Compute Resolve unpacks ShellIndex, replays shell WPO, computes analytic world-pos derivatives,
+            // and runs Hybrid Fur raymarching without ddx/ddy or >8 UAVs.
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("#define VIVID_SLAB_MAX_SHELL_LAYERS 8u"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("UnpackVisibilityBufferShellIndex(packedVis)"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("VividSlabResolveShellLayer(shellCtx, shellHeight, shellStep)"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("InterpolateWithBarycentric(bary, posWS0, posWS1, posWS2)"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("evalCtx.positionWSDdx = posWSInterp.ddx;"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("evalCtx.positionWSDdy = posWSInterp.ddy;"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("evalCtx.shellHeight = shellHeight;"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("evalCtx.shellStep = shellStep;"));
+            Assert.That(furResult.ComputeResolveSource, Does.Not.Contain("_OutGBuffer4"));
+            Assert.That(furResult.ComputeResolveSource, Does.Not.Contain("GPUDriven single-shell skin fallback"));
+
+            // 2. Non-shell shaders default to ShellLayerCount == 1 and clamp out-of-range directives to [1, 16].
+            string fabricPath = VividPackagePathUtility.GetPreferredAssetPath(FabricSlabRelativePath);
+            VividSlabShaderAssemblyResult fabricResult = VividSlabShaderAssembler.Assemble(
+                fabricPath,
+                File.ReadAllText(fabricPath),
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+            Assert.That(fabricResult.Succeeded, Is.True);
+            Assert.That(fabricResult.ShellLayerCount, Is.EqualTo(1));
+            Assert.That(fabricResult.ComputeResolveSource, Does.Contain("#define VIVID_SLAB_MAX_SHELL_LAYERS 1u"));
+
+            VividSlabShaderDirectives clampedDirectives = VividSlabShaderAssembler.ParseDirectives(
+                "// @vivid-shell-layers 64\nShader \"Test/ClampedShells\" {}");
+            Assert.That(clampedDirectives.ShellLayerCount, Is.EqualTo(VividSlabProgramDescriptor.MaxSupportedShellLayerCount));
+
+            var descriptor = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            try
+            {
+                descriptor.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: furResult.ShaderName,
+                    baseTemplateAssetPath: templatePath,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: furResult.EstimatedSubstrateBytesPerPixel,
+                    parameterStrideInWords: furResult.ParameterStrideInWords,
+                    parameters: furResult.ParameterSlots,
+                    resources: furResult.ResourceSlots,
+                    hasLinkedGraphSurface: false,
+                    hasCustomSurfaceHook: true,
+                    sourceContentHash: furResult.SourceContentHash,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>(),
+                    hasCustomCoverage: false,
+                    hasVertexOffset: false,
+                    worldPositionOffsetPadding: 0.0f,
+                    worldPositionOffsetPaddingProperties: null,
+                    shellLayerCount: furResult.ShellLayerCount);
+
+                Assert.That(descriptor.ShellLayerCount, Is.EqualTo(8));
+                Assert.That(
+                    descriptor.RequiresProgrammableVisibilityRaster,
+                    Is.True,
+                    "Multi-shell descriptors must route through programmable VisibilityBuffer rasterization.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(descriptor);
+            }
+        }
+
         private static VividSlabParameterSlot FindParamSlot(VividSlabParameterSlot[] slots, string propName)
         {
             for (int i = 0; i < slots.Length; i++)

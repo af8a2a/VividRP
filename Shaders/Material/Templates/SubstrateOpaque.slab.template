@@ -91,6 +91,10 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.shellHeight = 0.0f;
+                vctx.shellStep = 1.0f;
+                vctx.shellIndex = 0u;
+                vctx.shellCount = 1u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -118,10 +122,16 @@ SubShader
                     SafeNormalize(input.tangentWS.xyz),
                     input.tangentWS.w);
                 ctx.positionWS = input.positionWS;
+                ctx.positionWSDdx = ddx(input.positionWS);
+                ctx.positionWSDdy = ddy(input.positionWS);
                 ctx.positionCS = input.positionCS;
                 ctx.parameterAddress = 0u;
                 ctx.resourceAddress = 0u;
                 ctx.materialIndex = 0u;
+                ctx.shellHeight = 0.0f;
+                ctx.shellStep = 1.0f;
+                ctx.shellIndex = 0u;
+                ctx.shellCount = 1u;
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;
@@ -223,6 +233,10 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.shellHeight = 0.0f;
+                vctx.shellStep = 1.0f;
+                vctx.shellIndex = 0u;
+                vctx.shellCount = 1u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -250,10 +264,16 @@ SubShader
                     SafeNormalize(input.tangentWS.xyz),
                     input.tangentWS.w);
                 ctx.positionWS = input.positionWS;
+                ctx.positionWSDdx = ddx(input.positionWS);
+                ctx.positionWSDdy = ddy(input.positionWS);
                 ctx.positionCS = input.positionCS;
                 ctx.parameterAddress = 0u;
                 ctx.resourceAddress = 0u;
                 ctx.materialIndex = 0u;
+                ctx.shellHeight = 0.0f;
+                ctx.shellStep = 1.0f;
+                ctx.shellIndex = 0u;
+                ctx.shellCount = 1u;
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;
@@ -345,6 +365,10 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.shellHeight = 0.0f;
+                vctx.shellStep = 1.0f;
+                vctx.shellIndex = 0u;
+                vctx.shellCount = 1u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -374,10 +398,16 @@ SubShader
                 SafeNormalize(input.tangentWS.xyz),
                 input.tangentWS.w * normalFlipSign);
             ctx.positionWS = input.positionWS;
+            ctx.positionWSDdx = ddx(input.positionWS);
+            ctx.positionWSDdy = ddy(input.positionWS);
             ctx.positionCS = input.positionCS;
             ctx.parameterAddress = 0u;
             ctx.resourceAddress = 0u;
             ctx.materialIndex = 0u;
+            ctx.shellHeight = 0.0f;
+            ctx.shellStep = 1.0f;
+            ctx.shellIndex = 0u;
+            ctx.shellCount = 1u;
 
             // VividPreDepth already evaluated custom coverage + clip() and populated the depth buffer.
             // VividGBuffer runs with ZWrite Off + ZTest Equal + [earlydepthstencil], so occluded
@@ -541,6 +571,10 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.shellHeight = 0.0f;
+                vctx.shellStep = 1.0f;
+                vctx.shellIndex = 0u;
+                vctx.shellCount = 1u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -570,10 +604,16 @@ SubShader
                 SafeNormalize(input.tangentWS.xyz),
                 input.tangentWS.w * normalFlipSign);
             ctx.positionWS = input.positionWS;
+            ctx.positionWSDdx = ddx(input.positionWS);
+            ctx.positionWSDdy = ddy(input.positionWS);
             ctx.positionCS = input.positionCS;
             ctx.parameterAddress = 0u;
             ctx.resourceAddress = 0u;
             ctx.materialIndex = 0u;
+            ctx.shellHeight = 0.0f;
+            ctx.shellStep = 1.0f;
+            ctx.shellIndex = 0u;
+            ctx.shellCount = 1u;
 
             // VividPreDepth already evaluated custom coverage + clip() and populated the depth buffer.
             // VividGBuffer runs with ZWrite Off + ZTest Equal + [earlydepthstencil], so occluded
@@ -767,6 +807,10 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.shellHeight = 0.0f;
+                vctx.shellStep = 1.0f;
+                vctx.shellIndex = 0u;
+                vctx.shellCount = 1u;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
 
                 VividSlabVertexContext prevVctx;
@@ -778,6 +822,10 @@ SubShader
                 prevVctx.parameterAddress = 0u;
                 prevVctx.resourceAddress = 0u;
                 prevVctx.materialIndex = 0u;
+                prevVctx.shellHeight = 0.0f;
+                prevVctx.shellStep = 1.0f;
+                prevVctx.shellIndex = 0u;
+                prevVctx.shellCount = 1u;
                 #if defined(VIVID_SLAB_HAS_PREV_VERTEX_OFFSET)
                     prevPositionWS += VividSlabEvaluatePreviousVertexOffset(prevVctx);
                 #else
@@ -814,10 +862,16 @@ SubShader
                     SafeNormalize(input.tangentWS.xyz),
                     input.tangentWS.w);
                 ctx.positionWS = input.positionWS;
+                ctx.positionWSDdx = ddx(input.positionWS);
+                ctx.positionWSDdy = ddy(input.positionWS);
                 ctx.positionCS = input.positionCS;
                 ctx.parameterAddress = 0u;
                 ctx.resourceAddress = 0u;
                 ctx.materialIndex = 0u;
+                ctx.shellHeight = 0.0f;
+                ctx.shellStep = 1.0f;
+                ctx.shellIndex = 0u;
+                ctx.shellCount = 1u;
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;
@@ -866,6 +920,7 @@ SubShader
         #include "UnityIndirect.cginc"
 
         uint _TargetSlabProgramID;
+        float4 _VividSlabShellParams;
         StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
         StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
         ByteAddressBuffer _SharedIndexBuffer;
@@ -889,6 +944,7 @@ SubShader
             float3 positionWS : TEXCOORD3;
             float4 geometricTangentWS : TEXCOORD4;
             nointerpolation uint3 materialIds : TEXCOORD5;
+            nointerpolation float4 shellParams : TEXCOORD6;
         };
 
         uint VividSlabVisPullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
@@ -911,6 +967,7 @@ SubShader
             output.positionWS = 0.0f;
             output.geometricTangentWS = float4(1.0f, 0.0f, 0.0f, 1.0f);
             output.materialIds = 0u;
+            output.shellParams = float4(0.0f, 1.0f, 0.0f, 1.0f);
 
             const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
             const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
@@ -940,17 +997,39 @@ SubShader
 
             float3 positionWS = TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz);
             float3 normalWS = SafeNormalize(mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
+
+            const uint shellIndex = (uint)round(max(_VividSlabShellParams.z, 0.0f));
+            const uint maxShellCount = max((uint)round(_VividSlabShellParams.w), 1u);
+            float shellHeight = _VividSlabShellParams.x;
+            float shellStep = _VividSlabShellParams.y > 0.0f
+                ? _VividSlabShellParams.y
+                : VividComputeSlabShellStep(maxShellCount);
+
+            VividSlabVertexContext vctx;
+            vctx.positionOS = vertex.Position.xyz;
+            vctx.positionWS = positionWS;
+            vctx.normalOS = vertex.Normal.xyz;
+            vctx.normalWS = normalWS;
+            vctx.uv0 = vertex.UV.xy;
+            vctx.parameterAddress = runtimeHeader.ParameterAddress;
+            vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
+            vctx.materialIndex = instanceData.MaterialIndex;
+            vctx.shellHeight = shellHeight;
+            vctx.shellStep = shellStep;
+            vctx.shellIndex = shellIndex;
+            vctx.shellCount = maxShellCount;
+
+            #if defined(VIVID_SLAB_HAS_SHELL_PARAMS_HOOK)
+            {
+                if (!VividSlabResolveShellLayer(vctx, shellHeight, shellStep))
+                    return output;
+                vctx.shellHeight = shellHeight;
+                vctx.shellStep = shellStep;
+            }
+            #endif
+
             #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
             {
-                VividSlabVertexContext vctx;
-                vctx.positionOS = vertex.Position.xyz;
-                vctx.positionWS = positionWS;
-                vctx.normalOS = vertex.Normal.xyz;
-                vctx.normalWS = normalWS;
-                vctx.uv0 = vertex.UV.xy;
-                vctx.parameterAddress = runtimeHeader.ParameterAddress;
-                vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
-                vctx.materialIndex = instanceData.MaterialIndex;
                 positionWS += VividSlabEvaluateVertexOffset(vctx);
             }
             #endif
@@ -971,12 +1050,13 @@ SubShader
             visibilityBufferValue.InstanceID = renderRequest.InstanceID_LOD;
             visibilityBufferValue.MeshletID = renderRequest.MeshletID;
             visibilityBufferValue.IndexID = vertexID;
-            output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
+            output.visibilityValue = PackVisibilityBufferValueWithShell(visibilityBufferValue, shellIndex);
             output.uv0 = vertex.UV.xy;
             output.materialIds = uint3(
                 runtimeHeader.ParameterAddress,
                 runtimeHeader.ResourceBindingAddress,
                 instanceData.MaterialIndex);
+            output.shellParams = float4(shellHeight, shellStep, (float)shellIndex, (float)maxShellCount);
             return output;
         }
 
@@ -998,10 +1078,16 @@ SubShader
                     SafeNormalize(input.geometricTangentWS.xyz),
                     input.geometricTangentWS.w);
                 ctx.positionWS = input.positionWS;
+                ctx.positionWSDdx = ddx(input.positionWS);
+                ctx.positionWSDdy = ddy(input.positionWS);
                 ctx.positionCS = input.positionCS;
                 ctx.parameterAddress = input.materialIds.x;
                 ctx.resourceAddress = input.materialIds.y;
                 ctx.materialIndex = input.materialIds.z;
+                ctx.shellHeight = input.shellParams.x;
+                ctx.shellStep = input.shellParams.y;
+                ctx.shellIndex = (uint)round(max(input.shellParams.z, 0.0f));
+                ctx.shellCount = max((uint)round(input.shellParams.w), 1u);
 
                 float alpha = 1.0f;
                 float cutoff = 0.5f;

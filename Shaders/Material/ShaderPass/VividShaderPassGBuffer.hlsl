@@ -60,10 +60,16 @@ VividSurfaceSummaryGBufferOutput FragGBuffer(VividPackedVaryingsMesh packedInput
         slabCtx.geometryNormalWS = SafeNormalize(input.tangentToWorld[2]);
         slabCtx.geometryTangentWS = float4(SafeNormalize(input.tangentToWorld[0]), 1.0f);
         slabCtx.positionWS = input.positionRWS;
+        slabCtx.positionWSDdx = ddx(input.positionRWS);
+        slabCtx.positionWSDdy = ddy(input.positionRWS);
         slabCtx.positionCS = input.positionSS;
         slabCtx.parameterAddress = 0u;
         slabCtx.resourceAddress = 0u;
         slabCtx.materialIndex = 0u;
+        slabCtx.shellHeight = 0.0f;
+        slabCtx.shellStep = 1.0f;
+        slabCtx.shellIndex = 0u;
+        slabCtx.shellCount = 1u;
         VividSlabPostEvaluateSurface(slabCtx, v2Inputs, ambientOcclusion);
     }
 #endif

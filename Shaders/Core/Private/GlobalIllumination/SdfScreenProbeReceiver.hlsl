@@ -61,7 +61,7 @@ VividMeshSdfReceiver LoadSdfReceiver(uint2 pixel, float3 position, float3 shadin
 {
     VividMeshSdfReceiver receiver = (VividMeshSdfReceiver)0;
     uint2 visibility = _SdfReceiverVisibility.Load(int3(pixel, 0));
-    uint index = visibility.x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    uint index = UnpackVisibilityBufferInstanceID(visibility.x);
     if (index >= _SdfReceiverCount)
         return receiver;
 

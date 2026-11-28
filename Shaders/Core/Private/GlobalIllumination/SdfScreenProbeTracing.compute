@@ -743,7 +743,7 @@ ProbeRaySample InitProbeRay(float3 direction, uint bin, float inverseRelativePdf
 float ProbeReceiverSpeed(uint2 pixel, float3 position)
 {
 #if defined(VIVID_SDF_RECEIVER)
-    uint receiverIndex = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    uint receiverIndex = UnpackVisibilityBufferInstanceID(_SdfReceiverVisibility.Load(int3(pixel, 0)).x);
     if (_SdfDirectionalCacheEnabled != 0u && receiverIndex < _SdfReceiverCount)
         return InstanceSpeed(_SdfReceiverEntities[receiverIndex].z, position);
 #endif
@@ -2010,7 +2010,7 @@ void TraceLumenScreenRays(uint3 id : SV_DispatchThreadID)
     float traceDistance = level < WorldClipmaps ? min(maxDistance, WorldNearDistance(level)) : maxDistance;
     float thicknessScale = 1.0;
 #if defined(VIVID_SDF_RECEIVER)
-    uint index = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    uint index = UnpackVisibilityBufferInstanceID(_SdfReceiverVisibility.Load(int3(pixel, 0)).x);
     thicknessScale = index < _SdfReceiverCount && _SdfReceiverEntities[index].z != 0xffffffffu ? 1.0 : 2.0;
 #endif
     float2 hzbFactor = _SdfDiffuseScreenSize.xy / (2.0 * _SdfClosestHzbSize.xy);

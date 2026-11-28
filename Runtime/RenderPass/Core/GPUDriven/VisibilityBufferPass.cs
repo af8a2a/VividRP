@@ -31,6 +31,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
         private static readonly int s_TargetSlabProgramId = Shader.PropertyToID("_TargetSlabProgramID");
+        private static readonly int s_SlabShellParamsId = Shader.PropertyToID("_VividSlabShellParams");
         private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
         private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
@@ -916,14 +917,34 @@ namespace VividRP.Runtime.RenderPass.Core
                             m_VirtualTextureFrameData.AdaptiveMipBias);
                     }
 
-                    cmd.DrawProceduralIndirect(
-                        Matrix4x4.identity,
-                        material,
-                        passIndex,
-                        MeshTopology.Triangles,
-                        indirectArgsBuffer,
-                        rendererListIndex * IndirectDrawArgsByteStride,
-                        m_DrawProperties);
+                    int shellLayerCount = Mathf.Clamp(
+                        binding.Descriptor.ShellLayerCount,
+                        1,
+                        VividSlabProgramDescriptor.MaxSupportedShellLayerCount);
+                    float uniformShellStep = shellLayerCount > 1
+                        ? 1.0f / (shellLayerCount - 1)
+                        : 1.0f;
+
+                    // Outer-to-inner shell order lets hardware Early-Z reject inner shells
+                    // occluded by outer strands, matching VividFurShellRenderer.
+                    for (int shellIndex = shellLayerCount - 1; shellIndex >= 0; --shellIndex)
+                    {
+                        float uniformShellHeight = shellLayerCount > 1
+                            ? (float)shellIndex / (shellLayerCount - 1)
+                            : 0.0f;
+                        m_DrawProperties.SetVector(
+                            s_SlabShellParamsId,
+                            new Vector4(uniformShellHeight, uniformShellStep, shellIndex, shellLayerCount));
+
+                        cmd.DrawProceduralIndirect(
+                            Matrix4x4.identity,
+                            material,
+                            passIndex,
+                            MeshTopology.Triangles,
+                            indirectArgsBuffer,
+                            rendererListIndex * IndirectDrawArgsByteStride,
+                            m_DrawProperties);
+                    }
                 }
             }
         }

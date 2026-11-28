@@ -1,5 +1,6 @@
 // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template"
 // @vivid-wpo-padding _FurLength + _GravityStrength + _WindStrength + 0.02
+// @vivid-shell-layers 8
 //
 // VividRP Shell-Based Fur Material (.slab.shader, Phase 1 Raster Vertical Slice).
 // Driven via DrawMeshInstanced / RenderMeshInstanced with per-instance _ShellHeight in [0, 1]:
@@ -45,6 +46,8 @@ Shader "VividRP/Material/FurSlab"
         [SubToggle(FurStrands, _)] _HybridRaymarch("Hybrid Slab Raymarch (4-8 Shells)", Float) = 0.0
         [Sub(FurStrands)] _HybridSteps("Hybrid Raymarch Steps", Range(1.0, 8.0)) = 4.0
         [Sub(FurStrands)] _HybridMaxParallax("Hybrid Max Grazing Parallax", Range(1.0, 5.0)) = 3.0
+        [Sub(FurStrands)] _GPUDrivenShellCount("GPUDriven Shell Count (1-8)", Range(1.0, 8.0)) = 8.0
+        [Sub(FurStrands)] _ShellHeightPower("GPUDriven Shell Height Power", Range(0.5, 2.0)) = 1.0
 
         [Main(FurShading, _, on, off)] _FurShading("Root-to-Tip & Substrate Shading", Float) = 1
         [Tex(FurShading)] _BaseMap("Base Albedo Map", 2D) = "white" {}
@@ -94,6 +97,8 @@ Shader "VividRP/Material/FurSlab"
     float _HybridRaymarch;
     float _HybridSteps;
     float _HybridMaxParallax;
+    float _GPUDrivenShellCount;
+    float _ShellHeightPower;
     float4 _BaseMap_ST;
     float4 _RootColor;
     float4 _TipColor;
@@ -131,25 +136,45 @@ Shader "VividRP/Material/FurSlab"
 
     #define VIVID_SLAB_HAS_VERTEX_OFFSET 1
     #define VIVID_SLAB_HAS_PREV_VERTEX_OFFSET 1
+    #define VIVID_SLAB_HAS_SHELL_PARAMS_HOOK 1
+
+    bool VividSlabResolveShellLayer(
+        const VividSlabVertexContext ctx,
+        out float shellHeight,
+        out float shellStep)
+    {
+        uint targetCount = clamp((uint)round(VIVID_SLAB_PARAM(ctx, _GPUDrivenShellCount)), 1u, max(ctx.shellCount, 1u));
+        if (ctx.shellIndex >= targetCount)
+        {
+            shellHeight = 0.0f;
+            shellStep = 1.0f;
+            return false;
+        }
+
+        float heightPower = clamp(VIVID_SLAB_PARAM(ctx, _ShellHeightPower), 0.5f, 2.0f);
+        shellHeight = VividComputeSlabShellHeight(ctx.shellIndex, targetCount, heightPower);
+        shellStep = VividComputeSlabShellStep(targetCount);
+        return true;
+    }
 
     float3 VividSlabEvaluateVertexOffset(const VividSlabVertexContext ctx)
     {
         #if defined(VIVID_SLAB_TARGET_RASTER)
             float h = saturate(UNITY_ACCESS_INSTANCED_PROP(VividFurInstancedProps, _ShellHeight));
-            return VividEvaluateFurVertexOffset(
-                ctx.positionWS,
-                ctx.normalWS,
-                h,
-                _FurLength,
-                _GravityWS.xyz,
-                _GravityStrength,
-                _WindDirWS.xyz,
-                _WindStrength,
-                _WindFrequency,
-                _TimeParameters.x);
         #else
-            return 0.0f.xxx;
+            float h = saturate(ctx.shellHeight);
         #endif
+        return VividEvaluateFurVertexOffset(
+            ctx.positionWS,
+            ctx.normalWS,
+            h,
+            VIVID_SLAB_PARAM(ctx, _FurLength),
+            VIVID_SLAB_PARAM(ctx, _GravityWS).xyz,
+            VIVID_SLAB_PARAM(ctx, _GravityStrength),
+            VIVID_SLAB_PARAM(ctx, _WindDirWS).xyz,
+            VIVID_SLAB_PARAM(ctx, _WindStrength),
+            VIVID_SLAB_PARAM(ctx, _WindFrequency),
+            _TimeParameters.x);
     }
 
     float3 VividSlabEvaluatePreviousVertexOffset(const VividSlabVertexContext ctx)
@@ -160,15 +185,15 @@ Shader "VividRP/Material/FurSlab"
                 ctx.positionWS,
                 ctx.normalWS,
                 h,
-                _FurLength,
-                _GravityWS.xyz,
-                _GravityStrength,
-                _WindDirWS.xyz,
-                _WindStrength,
-                _WindFrequency,
+                VIVID_SLAB_PARAM(ctx, _FurLength),
+                VIVID_SLAB_PARAM(ctx, _GravityWS).xyz,
+                VIVID_SLAB_PARAM(ctx, _GravityStrength),
+                VIVID_SLAB_PARAM(ctx, _WindDirWS).xyz,
+                VIVID_SLAB_PARAM(ctx, _WindStrength),
+                VIVID_SLAB_PARAM(ctx, _WindFrequency),
                 _LastTimeParameters.x);
         #else
-            return 0.0f.xxx;
+            return VividSlabEvaluateVertexOffset(ctx);
         #endif
     }
     // @vivid-vertex-end
@@ -187,71 +212,85 @@ Shader "VividRP/Material/FurSlab"
     {
         #if defined(VIVID_SLAB_TARGET_RASTER)
             float h = saturate(UNITY_ACCESS_INSTANCED_PROP(VividFurInstancedProps, _ShellHeight));
-            if (h <= 1e-4f)
-            {
-                alpha = 1.0f;
-                cutoff = 0.0f;
-                return;
-            }
-
-            float2 baseUv = ctx.uv0 * _BaseMap_ST.xy + _BaseMap_ST.zw;
-            float densityMask = SAMPLE_TEXTURE2D(_FurMaskMap, sampler_FurMaskMap, baseUv).r;
-            float ign = VividFurInterleavedGradientNoise(
-                ctx.positionCS.xy,
-                _JitterParams.xy,
-                _TemporalDither > 0.5f);
-
-            if (_HybridRaymarch > 0.5f)
-            {
-                VividFurHybridHit hybridHit = VividEvaluateFurHybridSlab(
-                    ctx.positionWS,
-                    ctx.geometryNormalWS,
-                    _WorldSpaceCameraPos,
-                    ctx.uv0,
-                    ctx.uv0Ddx,
-                    ctx.uv0Ddy,
-                    _StrandTiling.xy,
-                    _FurDensity,
-                    h,
-                    _ShellStep,
-                    _FurLength,
-                    _GravityWS.xyz,
-                    _GravityStrength,
-                    _StrandThickness,
-                    _StrandTaper,
-                    _LengthVariance,
-                    _ClumpStrength,
-                    densityMask,
-                    _AlphaCutoff,
-                    _DitherStrength,
-                    ign,
-                    (int)round(_HybridSteps),
-                    _HybridMaxParallax);
-
-                alpha = hybridHit.hit ? 1.0f : 0.0f;
-                cutoff = 0.5f;
-                return;
-            }
-
-            VividFurStrandSample strand = VividEvaluateFurProceduralStrands(
-                ctx.uv0,
-                _StrandTiling.xy,
-                _FurDensity,
-                h,
-                _StrandThickness,
-                _StrandTaper,
-                _LengthVariance,
-                _ClumpStrength,
-                densityMask);
-
-            alpha = strand.alpha;
-            // Blend base alpha threshold with spatio-temporal IGN dither for soft TAA-reconstructed tips.
-            float ditherCutoff = lerp(0.04f, 0.96f, ign);
-            cutoff = lerp(saturate(_AlphaCutoff), ditherCutoff, saturate(_DitherStrength));
+            float shellStep = _ShellStep;
         #else
+            float h = saturate(ctx.shellHeight);
+            float shellStep = ctx.shellStep;
+        #endif
+
+        if (h <= 1e-4f)
+        {
             alpha = 1.0f;
             cutoff = 0.0f;
-        #endif
+            return;
+        }
+
+        float4 baseMapST = VIVID_SLAB_PARAM(ctx, _BaseMap_ST);
+        float2 baseUv = ctx.uv0 * baseMapST.xy + baseMapST.zw;
+        float densityMask = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurMaskMap, baseUv).r;
+        float ign = VividFurInterleavedGradientNoise(
+            ctx.positionCS.xy,
+            _JitterParams.xy,
+            VIVID_SLAB_PARAM(ctx, _TemporalDither) > 0.5f);
+
+        float2 strandTiling = VIVID_SLAB_PARAM(ctx, _StrandTiling).xy;
+        float furDensity = VIVID_SLAB_PARAM(ctx, _FurDensity);
+        float strandThickness = VIVID_SLAB_PARAM(ctx, _StrandThickness);
+        float strandTaper = VIVID_SLAB_PARAM(ctx, _StrandTaper);
+        float lengthVariance = VIVID_SLAB_PARAM(ctx, _LengthVariance);
+        float clumpStrength = VIVID_SLAB_PARAM(ctx, _ClumpStrength);
+        float alphaCutoff = VIVID_SLAB_PARAM(ctx, _AlphaCutoff);
+        float ditherStrength = VIVID_SLAB_PARAM(ctx, _DitherStrength);
+
+        if (VIVID_SLAB_PARAM(ctx, _HybridRaymarch) > 0.5f)
+        {
+            VividFurHybridHit hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
+                ctx.positionWS,
+                ctx.positionWSDdx,
+                ctx.positionWSDdy,
+                ctx.geometryNormalWS,
+                _WorldSpaceCameraPos,
+                ctx.uv0,
+                ctx.uv0Ddx,
+                ctx.uv0Ddy,
+                strandTiling,
+                furDensity,
+                h,
+                shellStep,
+                VIVID_SLAB_PARAM(ctx, _FurLength),
+                VIVID_SLAB_PARAM(ctx, _GravityWS).xyz,
+                VIVID_SLAB_PARAM(ctx, _GravityStrength),
+                strandThickness,
+                strandTaper,
+                lengthVariance,
+                clumpStrength,
+                densityMask,
+                alphaCutoff,
+                ditherStrength,
+                ign,
+                (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
+                VIVID_SLAB_PARAM(ctx, _HybridMaxParallax));
+
+            alpha = hybridHit.hit ? 1.0f : 0.0f;
+            cutoff = 0.5f;
+            return;
+        }
+
+        VividFurStrandSample strand = VividEvaluateFurProceduralStrands(
+            ctx.uv0,
+            strandTiling,
+            furDensity,
+            h,
+            strandThickness,
+            strandTaper,
+            lengthVariance,
+            clumpStrength,
+            densityMask);
+
+        alpha = strand.alpha;
+        // Blend base alpha threshold with spatio-temporal IGN dither for soft TAA-reconstructed tips.
+        float ditherCutoff = lerp(0.04f, 0.96f, ign);
+        cutoff = lerp(saturate(alphaCutoff), ditherCutoff, saturate(ditherStrength));
     }
     // @vivid-coverage-end
 
@@ -272,9 +311,8 @@ Shader "VividRP/Material/FurSlab"
             float h = saturate(UNITY_ACCESS_INSTANCED_PROP(VividFurInstancedProps, _ShellHeight));
             float shellStep = _ShellStep;
         #else
-            // GPUDriven single-shell skin fallback until Stage 2.5 MeshShader shell amplification supplies per-shell height.
-            float h = 0.0f;
-            float shellStep = 1.0f;
+            float h = saturate(ctx.shellHeight);
+            float shellStep = ctx.shellStep;
         #endif
 
         float4 baseMapST = VIVID_SLAB_PARAM(ctx, _BaseMap_ST);
@@ -293,15 +331,16 @@ Shader "VividRP/Material/FurSlab"
 
         VividFurStrandSample strand;
         float effectiveShellHeight = h;
-        #if defined(VIVID_SLAB_TARGET_RASTER)
         if (VIVID_SLAB_PARAM(ctx, _HybridRaymarch) > 0.5f && h > 1e-4f)
         {
             float ign = VividFurInterleavedGradientNoise(
                 ctx.positionCS.xy,
                 _JitterParams.xy,
                 VIVID_SLAB_PARAM(ctx, _TemporalDither) > 0.5f);
-            VividFurHybridHit hybridHit = VividEvaluateFurHybridSlab(
+            VividFurHybridHit hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
                 ctx.positionWS,
+                ctx.positionWSDdx,
+                ctx.positionWSDdy,
                 ctx.geometryNormalWS,
                 _WorldSpaceCameraPos,
                 ctx.uv0,
@@ -345,7 +384,6 @@ Shader "VividRP/Material/FurSlab"
             }
         }
         else
-        #endif
         {
             strand = VividEvaluateFurProceduralStrands(
                 ctx.uv0,

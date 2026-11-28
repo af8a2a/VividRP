@@ -4,6 +4,10 @@
 #define VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_BITS 8u
 #define VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_MASK ((1u << VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_BITS) - 1u)
 #define VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS 1u
+#define VIVID_VISIBILITY_BUFFER_SHELL_INDEX_BITS 4u
+#define VIVID_VISIBILITY_BUFFER_SHELL_INDEX_SHIFT 28u
+#define VIVID_VISIBILITY_BUFFER_SHELL_INDEX_MASK ((1u << VIVID_VISIBILITY_BUFFER_SHELL_INDEX_BITS) - 1u)
+#define VIVID_VISIBILITY_BUFFER_INSTANCE_ID_MASK ((1u << VIVID_VISIBILITY_BUFFER_SHELL_INDEX_SHIFT) - 1u)
 
 struct VividVisibilityBufferValue
 {
@@ -60,22 +64,41 @@ float3 DecodeVividVisibilityBufferBarycentrics(float2 barycentrics)
 
 bool IsPackedVisibilityBufferValueValid(const uint2 packedValue)
 {
-    return packedValue.x != 0u;
+    return (packedValue.x & VIVID_VISIBILITY_BUFFER_INSTANCE_ID_MASK) != 0u;
 }
 
-uint2 PackVisibilityBufferValue(const VividVisibilityBufferValue value)
+uint UnpackVisibilityBufferInstanceID(const uint packedX)
 {
+    return (packedX & VIVID_VISIBILITY_BUFFER_INSTANCE_ID_MASK) - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+}
+
+uint UnpackVisibilityBufferShellIndex(const uint2 packedValue)
+{
+    return (packedValue.x >> VIVID_VISIBILITY_BUFFER_SHELL_INDEX_SHIFT) & VIVID_VISIBILITY_BUFFER_SHELL_INDEX_MASK;
+}
+
+uint2 PackVisibilityBufferValueWithShell(const VividVisibilityBufferValue value, const uint shellIndex)
+{
+    const uint packedInstance =
+        (value.InstanceID + VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS) & VIVID_VISIBILITY_BUFFER_INSTANCE_ID_MASK;
+    const uint packedShell =
+        (shellIndex & VIVID_VISIBILITY_BUFFER_SHELL_INDEX_MASK) << VIVID_VISIBILITY_BUFFER_SHELL_INDEX_SHIFT;
     return uint2(
-        value.InstanceID + VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS,
+        packedInstance | packedShell,
         (value.MeshletID << VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_BITS) |
         ((value.IndexID / 3u) & VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_MASK)
     );
 }
 
+uint2 PackVisibilityBufferValue(const VividVisibilityBufferValue value)
+{
+    return PackVisibilityBufferValueWithShell(value, 0u);
+}
+
 VividVisibilityBufferValue UnpackVisibilityBufferValue(const uint2 packedValue)
 {
     VividVisibilityBufferValue value;
-    value.InstanceID = packedValue.x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    value.InstanceID = UnpackVisibilityBufferInstanceID(packedValue.x);
     value.MeshletID = packedValue.y >> VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_BITS;
     value.IndexID = (packedValue.y & VIVID_VISIBILITY_BUFFER_TRIANGLE_INDEX_MASK) * 3u;
     return value;

@@ -15,6 +15,10 @@ struct VividSlabVertexContext
     uint parameterAddress;
     uint resourceAddress;
     uint materialIndex;
+    float shellHeight;
+    float shellStep;
+    uint shellIndex;
+    uint shellCount;
 };
 
 // Unified surface evaluation context shared between Raster (.slab.shader Shader MainAsset),
@@ -27,11 +31,35 @@ struct VividSlabEvalContext
     float3 geometryNormalWS;
     float4 geometryTangentWS;
     float3 positionWS;
+    float3 positionWSDdx;
+    float3 positionWSDdy;
     float4 positionCS;
     uint parameterAddress;
     uint resourceAddress;
     uint materialIndex;
+    float shellHeight;
+    float shellStep;
+    uint shellIndex;
+    uint shellCount;
 };
+
+// Nonlinear shell height distribution matching VividFurShellRenderer.FillShellHeights:
+// h(0) = 0 (base skin), h(N - 1) = 1 (outer tip), h(i) = pow(i / (N - 1), heightPower).
+float VividComputeSlabShellHeight(const uint shellIndex, const uint shellCount, const float heightPower)
+{
+    const uint count = max(shellCount, 1u);
+    if (count <= 1u || shellIndex == 0u)
+        return 0.0f;
+    if (shellIndex >= count - 1u)
+        return 1.0f;
+    const float u = saturate((float)shellIndex / (float)(count - 1u));
+    return pow(u, clamp(heightPower, 0.5f, 2.0f));
+}
+
+float VividComputeSlabShellStep(const uint shellCount)
+{
+    return shellCount > 1u ? rcp((float)(shellCount - 1u)) : 1.0f;
+}
 
 // Multi-Closure evaluation result (Phase S2: up to 4 closures, 3 operators -> Substrate Tier 3).
 struct VividSlabMultiClosureOutput

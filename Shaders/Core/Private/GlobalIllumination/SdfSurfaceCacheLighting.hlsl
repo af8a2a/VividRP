@@ -353,7 +353,7 @@ bool TryLoadScreenCardIndirect(uint2 pixel, float3 position, float3 normal, floa
     out float3 radiance, inout VividMeshSdfHit matchedHit)
 {
     radiance = 0.0;
-    uint index = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+    uint index = UnpackVisibilityBufferInstanceID(_SdfReceiverVisibility.Load(int3(pixel, 0)).x);
     if (index >= _SdfReceiverCount)
         return false;
     uint3 source = _SdfReceiverEntities[index].xyz;

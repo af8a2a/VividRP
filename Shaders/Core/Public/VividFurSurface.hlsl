@@ -242,11 +242,13 @@ float2 VividFurProjectWorldDeltaToUV(
     return sx * dUvDx + sy * dUvDy;
 }
 
-// Hybrid Shells: marches along the view ray through a sparse volumetric slab [hTop - shellStep, hTop]
-// using stratified spatio-temporal IGN jitter. Preserves shell-level Early-Z in GBuffer & MotionVectors
-// while multiplying effective vertical slicing resolution by stepCount (e.g. 6 shells x 4 steps = 24 slices).
-VividFurHybridHit VividEvaluateFurHybridSlab(
+// Hybrid Shells (compute-safe core): marches along the view ray through a sparse volumetric slab
+// [hTop - shellStep, hTop] using explicit screen-space position/UV derivatives so both Raster
+// fragment passes and GPUDriven Compute Resolve execute the exact same algorithm.
+VividFurHybridHit VividEvaluateFurHybridSlabWithDerivatives(
     float3 positionWS,
+    float3 positionWSDdx,
+    float3 positionWSDdy,
     float3 geomNormalWS,
     float3 cameraPosWS,
     float2 uv0,
@@ -303,12 +305,10 @@ VividFurHybridHit VividEvaluateFurHybridSlab(
     float3 bendDeltaWS = gravityWS * (2.0f * hTop * slabDeltaH * max(furLength, 0.0f) * max(gravityStrength, 0.0f));
     float3 tangentBendDeltaWS = bendDeltaWS - nWS * dot(bendDeltaWS, nWS);
 
-    float3 dPosDx = ddx(positionWS);
-    float3 dPosDy = ddy(positionWS);
     float2 uvDeltaPerSlab = VividFurProjectWorldDeltaToUV(
         tangentRayDeltaWS + tangentBendDeltaWS,
-        dPosDx,
-        dPosDy,
+        positionWSDdx,
+        positionWSDdy,
         uv0Ddx,
         uv0Ddy);
 
@@ -353,6 +353,62 @@ VividFurHybridHit VividEvaluateFurHybridSlab(
 
     return hitResult;
 }
+
+#if !defined(VIVID_SLAB_TARGET_GPUDRIVEN_COMPUTE)
+// Fragment-shader convenience overload using hardware ddx/ddy on positionWS.
+VividFurHybridHit VividEvaluateFurHybridSlab(
+    float3 positionWS,
+    float3 geomNormalWS,
+    float3 cameraPosWS,
+    float2 uv0,
+    float2 uv0Ddx,
+    float2 uv0Ddy,
+    float2 uvTiling,
+    float density,
+    float shellHeightTop,
+    float shellStep,
+    float furLength,
+    float3 gravityWS,
+    float gravityStrength,
+    float strandThickness,
+    float strandTaper,
+    float lengthVariance,
+    float clumpStrength,
+    float densityMask,
+    float alphaCutoff,
+    float ditherStrength,
+    float ign,
+    int stepCount,
+    float maxParallaxScale)
+{
+    return VividEvaluateFurHybridSlabWithDerivatives(
+        positionWS,
+        ddx(positionWS),
+        ddy(positionWS),
+        geomNormalWS,
+        cameraPosWS,
+        uv0,
+        uv0Ddx,
+        uv0Ddy,
+        uvTiling,
+        density,
+        shellHeightTop,
+        shellStep,
+        furLength,
+        gravityWS,
+        gravityStrength,
+        strandThickness,
+        strandTaper,
+        lengthVariance,
+        clumpStrength,
+        densityMask,
+        alphaCutoff,
+        ditherStrength,
+        ign,
+        stepCount,
+        maxParallaxScale);
+}
+#endif
 
 // Converts Fur shell parameters into OpenPBR V2 single-closure Substrate inputs
 // (EON diffuse + Keratin anisotropic specular + OpenPBR Disney LTC Fuzz rim).

@@ -23,7 +23,7 @@ bool ScreenMaterialSideVisible(uint2 pixel, float3 position, float3 normal, floa
 {
     float cullMode = 2.0; // Raster geometry without a Meshlet material lookup is single-sided.
     #if defined(VIVID_SDF_RECEIVER)
-        uint index = _SdfReceiverVisibility.Load(int3(pixel, 0)).x - VIVID_VISIBILITY_BUFFER_INSTANCE_ID_BIAS;
+        uint index = UnpackVisibilityBufferInstanceID(_SdfReceiverVisibility.Load(int3(pixel, 0)).x);
         if (index < _SdfReceiverCount)
         {
             uint instance = _SdfReceiverEntities[index].z;

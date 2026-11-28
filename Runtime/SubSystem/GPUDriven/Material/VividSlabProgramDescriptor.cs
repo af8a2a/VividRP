@@ -111,6 +111,7 @@ namespace VividRP.Runtime.GPUDriven
     public sealed class VividSlabProgramDescriptor : ScriptableObject
     {
         public const string DefaultResolveKernelName = "ResolveVisibilityBufferSlab";
+        public const int MaxSupportedShellLayerCount = 16;
 
         [SerializeField]
         private Shader m_RasterShader;
@@ -166,6 +167,9 @@ namespace VividRP.Runtime.GPUDriven
 
         [SerializeField]
         private string[] m_WorldPositionOffsetPaddingProperties = Array.Empty<string>();
+
+        [SerializeField]
+        private int m_ShellLayerCount = 1;
 
         [SerializeField]
         private uint m_SourceContentHash;
@@ -233,8 +237,10 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<string> WorldPositionOffsetPaddingProperties =>
             m_WorldPositionOffsetPaddingProperties ?? Array.Empty<string>();
 
+        public int ShellLayerCount => Mathf.Clamp(m_ShellLayerCount, 1, MaxSupportedShellLayerCount);
+
         public bool RequiresProgrammableVisibilityRaster =>
-            m_HasCustomCoverage || m_HasVertexOffset;
+            m_HasCustomCoverage || m_HasVertexOffset || m_ShellLayerCount > 1;
 
         public uint SourceContentHash => m_SourceContentHash;
 
@@ -272,7 +278,8 @@ namespace VividRP.Runtime.GPUDriven
             bool hasCustomCoverage = false,
             bool hasVertexOffset = false,
             float worldPositionOffsetPadding = 0.0f,
-            string[] worldPositionOffsetPaddingProperties = null)
+            string[] worldPositionOffsetPaddingProperties = null,
+            int shellLayerCount = 1)
         {
             m_RasterShader = rasterShader;
             m_ResolveComputeShader = resolveComputeShader;
@@ -298,6 +305,7 @@ namespace VividRP.Runtime.GPUDriven
                 ? Mathf.Max(0.0f, worldPositionOffsetPadding)
                 : 0.0f;
             m_WorldPositionOffsetPaddingProperties = worldPositionOffsetPaddingProperties ?? Array.Empty<string>();
+            m_ShellLayerCount = Mathf.Clamp(shellLayerCount, 1, MaxSupportedShellLayerCount);
             m_WpoPaddingPropertyIds = null;
             m_SourceContentHash = sourceContentHash;
             m_HasImportErrors = hasImportErrors;

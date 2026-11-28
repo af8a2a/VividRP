@@ -437,6 +437,10 @@ SubShader
                     vctx.parameterAddress = runtimeHeader.ParameterAddress;
                     vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
                     vctx.materialIndex = instanceData.MaterialIndex;
+                    vctx.shellHeight = 0.0f;
+                    vctx.shellStep = 1.0f;
+                    vctx.shellIndex = 0u;
+                    vctx.shellCount = 1u;
                     positionWS += VividSlabEvaluateVertexOffset(vctx);
                 }
                 #endif
@@ -484,10 +488,16 @@ SubShader
                         SafeNormalize(input.geometricTangentWS.xyz),
                         input.geometricTangentWS.w);
                     ctx.positionWS = input.positionWS;
+                    ctx.positionWSDdx = ddx(input.positionWS);
+                    ctx.positionWSDdy = ddy(input.positionWS);
                     ctx.positionCS = input.positionCS;
                     ctx.parameterAddress = input.materialIds.x;
                     ctx.resourceAddress = input.materialIds.y;
                     ctx.materialIndex = input.materialIds.z;
+                    ctx.shellHeight = 0.0f;
+                    ctx.shellStep = 1.0f;
+                    ctx.shellIndex = 0u;
+                    ctx.shellCount = 1u;
 
                     float alpha = 1.0f;
                     float cutoff = 0.5f;

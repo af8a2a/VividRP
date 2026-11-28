@@ -116,6 +116,8 @@ namespace VividRP.Runtime
                     s_FrameData.Get<VividSubstrateMaterialFrameData>().Reset();
                 if (s_FrameData.Contains<StrandHairFrameData>())
                     s_FrameData.Get<StrandHairFrameData>().Reset();
+                if (s_FrameData.Contains<VividRefractionFrameData>())
+                    s_FrameData.Get<VividRefractionFrameData>().Reset();
             }
 
             VividRenderingData renderingData;

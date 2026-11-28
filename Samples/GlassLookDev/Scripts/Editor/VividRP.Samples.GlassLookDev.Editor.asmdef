@@ -1,0 +1,22 @@
+{
+    "name": "VividRP.Samples.GlassLookDev.Editor",
+    "rootNamespace": "VividRP.Samples.GlassLookDev.Editor",
+    "references": [
+        "VividRP.Runtime",
+        "VividRP.Editor",
+        "VividRP.Samples.GlassLookDev",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

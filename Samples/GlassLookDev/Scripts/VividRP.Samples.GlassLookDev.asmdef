@@ -1,0 +1,19 @@
+{
+    "name": "VividRP.Samples.GlassLookDev",
+    "rootNamespace": "VividRP.Samples.GlassLookDev",
+    "references": [
+        "VividRP.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.TextMeshPro",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

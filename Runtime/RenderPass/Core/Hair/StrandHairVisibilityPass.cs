@@ -7,11 +7,13 @@ using UnityEngine.Rendering.RenderGraphModule;
 namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
-    /// Phase S1 Strand-Based Hair Visibility Pass (IJGC SIGGRAPH 2025 architecture):
+    /// Strand-Based Hair Visibility Pass (IJGC SIGGRAPH 2025 architecture):
     /// 1) Allocates 64x64 tiles in the bounded 32-bit 3-Layer + Coverage Visibility Atlas.
     /// 2) Transforms rest vertices to global clip-space + world-space caches.
-    /// 3) Performs frustum + conservative HZB segment culling with wave-aggregated append.
-    /// 4) Conservatively software-rasterizes visible segments into the tiled Visibility Atlas.
+    /// 3) Performs frustum + conservative HZB segment culling with wave-aggregated append,
+    ///    tile histogram accumulation, and visible-vertex bitmask marking.
+    /// 4) Phase S3: Runs 1024-bin Global Counting Sort + Natural-Order Vertex Compaction +
+    ///    Dual LDS Pixel Request Stack software rasterizer (or S2 direct rasterizer when disabled).
     /// Implements IAsyncComputeSupportedPass for async overlap with opaque lighting/GI.
     /// </summary>
     public sealed class StrandHairVisibilityPass : ComputePass, IAsyncComputeSupportedPass
@@ -20,16 +22,26 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string TransformVerticesKernelName = "KTransformVertices";
         private const string ClearCullArgsKernelName = "KClearCullArgs";
         private const string ClearVisibleVertexMaskKernelName = "KClearVisibleVertexMask";
+        private const string ClearSortBinsKernelName = "KClearSortBins";
         private const string CullSegmentsKernelName = "KCullSegments";
+        private const string PrefixSumSortBinsKernelName = "KPrefixSumSortBins";
+        private const string ScatterSortedSegmentsKernelName = "KScatterSortedSegments";
+        private const string CompactVisibleVerticesKernelName = "KCompactVisibleVertices";
         private const string RasterizeSegmentsKernelName = "KRasterizeSegments";
+        private const string RasterizeSegmentsLdsKernelName = "KRasterizeSegmentsLDS";
 
         private static readonly int RestVerticesId = Shader.PropertyToID("_HairRestVertices");
         private static readonly int SegmentIndicesId = Shader.PropertyToID("_HairSegmentIndices");
         private static readonly int PostTransformClipId = Shader.PropertyToID("_HairPostTransformClip");
         private static readonly int WorldPosRadiusId = Shader.PropertyToID("_HairWorldPosRadius");
         private static readonly int VisibleSegmentListId = Shader.PropertyToID("_HairVisibleSegmentList");
+        private static readonly int SegmentSortBinId = Shader.PropertyToID("_HairSegmentSortBin");
+        private static readonly int SortedSegmentListId = Shader.PropertyToID("_HairSortedSegmentList");
+        private static readonly int TileHistogramId = Shader.PropertyToID("_HairTileHistogram");
         private static readonly int IndirectRasterArgsId = Shader.PropertyToID("_HairIndirectRasterArgs");
         private static readonly int VisibleVertexMaskId = Shader.PropertyToID("_HairVisibleVertexMask");
+        private static readonly int VisibleVertexListId = Shader.PropertyToID("_HairVisibleVertexList");
+        private static readonly int IndirectShadeArgsId = Shader.PropertyToID("_HairIndirectShadeArgs");
         private static readonly int VisAtlasId = Shader.PropertyToID("_HairVisAtlas");
         private static readonly int SceneDepthId = Shader.PropertyToID("_HairSceneDepth");
         private static readonly int HzbTextureId = Shader.PropertyToID("_HairHZBTexture");
@@ -41,6 +53,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SegmentCountId = Shader.PropertyToID("_HairSegmentCount");
         private static readonly int AllocatedTileCountId = Shader.PropertyToID("_HairAllocatedTileCount");
         private static readonly int FirstAtlasTileId = Shader.PropertyToID("_HairFirstAtlasTile");
+        private static readonly int SortBinCountId = Shader.PropertyToID("_HairSortBinCount");
+        private static readonly int UseSortedSegmentsId = Shader.PropertyToID("_HairUseSortedSegments");
         private static readonly int AtlasTileRectId = Shader.PropertyToID("_HairAtlasTileRect");
         private static readonly int DownscaleFactorId = Shader.PropertyToID("_HairDownscaleFactor");
         private static readonly int EnableHzbId = Shader.PropertyToID("_HairEnableHZB");
@@ -64,8 +78,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_TransformVerticesKernel = -1;
         private int m_ClearCullArgsKernel = -1;
         private int m_ClearVisibleVertexMaskKernel = -1;
+        private int m_ClearSortBinsKernel = -1;
         private int m_CullSegmentsKernel = -1;
+        private int m_PrefixSumSortBinsKernel = -1;
+        private int m_ScatterSortedSegmentsKernel = -1;
+        private int m_CompactVisibleVerticesKernel = -1;
         private int m_RasterizeSegmentsKernel = -1;
+        private int m_RasterizeSegmentsLdsKernel = -1;
 
         private readonly StrandHairGpuPool m_GpuPool = new StrandHairGpuPool();
         private StrandHairFrameData m_FrameData;
@@ -92,7 +111,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool EnsureShaderLoaded()
         {
-            if (m_Compute != null && m_RasterizeSegmentsKernel >= 0)
+            if (m_Compute != null && m_RasterizeSegmentsLdsKernel >= 0)
                 return true;
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
@@ -104,9 +123,17 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TransformVerticesKernel = m_Compute.FindKernel(TransformVerticesKernelName);
             m_ClearCullArgsKernel = m_Compute.FindKernel(ClearCullArgsKernelName);
             m_ClearVisibleVertexMaskKernel = m_Compute.FindKernel(ClearVisibleVertexMaskKernelName);
+            m_ClearSortBinsKernel = m_Compute.FindKernel(ClearSortBinsKernelName);
             m_CullSegmentsKernel = m_Compute.FindKernel(CullSegmentsKernelName);
+            m_PrefixSumSortBinsKernel = m_Compute.FindKernel(PrefixSumSortBinsKernelName);
+            m_ScatterSortedSegmentsKernel = m_Compute.FindKernel(ScatterSortedSegmentsKernelName);
+            m_CompactVisibleVerticesKernel = m_Compute.FindKernel(CompactVisibleVerticesKernelName);
             m_RasterizeSegmentsKernel = m_Compute.FindKernel(RasterizeSegmentsKernelName);
-            return m_RasterizeSegmentsKernel >= 0 && m_ClearVisibleVertexMaskKernel >= 0;
+            m_RasterizeSegmentsLdsKernel = m_Compute.FindKernel(RasterizeSegmentsLdsKernelName);
+            return m_RasterizeSegmentsKernel >= 0
+                && m_RasterizeSegmentsLdsKernel >= 0
+                && m_ClearVisibleVertexMaskKernel >= 0
+                && m_CompactVisibleVerticesKernel >= 0;
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -223,6 +250,10 @@ namespace VividRP.Runtime.RenderPass.Core
             float atlasWidth = Mathf.Max(1, (m_FrameData.ScreenWidth + downscale - 1) / downscale);
             float atlasHeight = Mathf.Max(1, (m_FrameData.ScreenHeight + downscale - 1) / downscale);
             bool useHzb = hzbHandle.IsValid() && m_HzbWidth > 0 && m_HzbHeight > 0;
+            bool useS3 = StrandHairGpuPool.EnablePhaseS3Optimizations;
+            bool useTileSort = useS3 && StrandHairGpuPool.EnableTileSorting;
+            bool useLdsStack = useS3 && StrandHairGpuPool.EnableLdsRasterStack;
+            bool useCompactShade = useS3 && StrandHairGpuPool.EnableCompactShading;
 
             using (new ProfilingScope(cmd, profilingSampler))
             {
@@ -243,7 +274,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeFloatParam(m_Compute, ProjScaleYId, m_FrameData.ProjScaleY);
                 cmd.SetComputeFloatParam(m_Compute, NearClipPlaneId, m_NearClipPlane);
 
-                // 2. Transform, Cull, and Software-Rasterize each visible hair model
+                // 2. Transform, Cull, Sort, Compact, and Software-Rasterize each visible hair model
                 int allocCount = m_FrameData.Allocations.Count;
                 for (int slotIdx = 0; slotIdx < allocCount; slotIdx++)
                 {
@@ -265,11 +296,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     }
 
                     StrandHairModelScratchSlot slot = m_GpuPool.GetOrCreateSlot(slotIdx, vertexCount, segmentCount);
+                    int sortBinCount = Mathf.Clamp(alloc.TileCount, 1, StrandHairAtlasContract.MaxSortBins);
 
                     cmd.SetComputeMatrixParam(m_Compute, LocalToWorldId, entry.LocalToWorld);
                     cmd.SetComputeIntParam(m_Compute, VertexCountId, vertexCount);
                     cmd.SetComputeIntParam(m_Compute, SegmentCountId, segmentCount);
                     cmd.SetComputeIntParam(m_Compute, FirstAtlasTileId, alloc.FirstAtlasTile);
+                    cmd.SetComputeIntParam(m_Compute, SortBinCountId, sortBinCount);
+                    cmd.SetComputeIntParam(m_Compute, UseSortedSegmentsId, useTileSort ? 1 : 0);
                     cmd.SetComputeVectorParam(
                         m_Compute,
                         AtlasTileRectId,
@@ -284,19 +318,25 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeBufferParam(m_Compute, m_TransformVerticesKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
                     cmd.DispatchCompute(m_Compute, m_TransformVerticesKernel, (vertexCount + 63) / 64, 1, 1);
 
-                    // 2b. Reset indirect raster arguments & visible vertex bitmask
+                    // 2b. Reset indirect args, visible vertex bitmask, and sort histogram
                     cmd.SetComputeBufferParam(m_Compute, m_ClearCullArgsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, m_ClearCullArgsKernel, IndirectShadeArgsId, slot.IndirectShadeArgsBuffer);
                     cmd.DispatchCompute(m_Compute, m_ClearCullArgsKernel, 1, 1, 1);
 
                     int maskUints = (vertexCount + 31) >> 5;
                     cmd.SetComputeBufferParam(m_Compute, m_ClearVisibleVertexMaskKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
                     cmd.DispatchCompute(m_Compute, m_ClearVisibleVertexMaskKernel, (maskUints + 63) / 64, 1, 1);
 
-                    // 2c. Coarse frustum + HZB segment culling (also marks visible vertices for Strand-Space Shading)
+                    cmd.SetComputeBufferParam(m_Compute, m_ClearSortBinsKernel, TileHistogramId, slot.TileHistogramBuffer);
+                    cmd.DispatchCompute(m_Compute, m_ClearSortBinsKernel, (StrandHairAtlasContract.TileHistogramBufferUints + 63) / 64, 1, 1);
+
+                    // 2c. Coarse frustum + HZB segment culling (also fills tile histogram & visible vertex mask)
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, SegmentSortBinId, slot.SegmentSortBinBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, TileHistogramId, slot.TileHistogramBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
                     if (useHzb)
@@ -305,15 +345,55 @@ namespace VividRP.Runtime.RenderPass.Core
                         cmd.SetComputeTextureParam(m_Compute, m_CullSegmentsKernel, HzbTextureId, depthHandle);
                     cmd.DispatchCompute(m_Compute, m_CullSegmentsKernel, (segmentCount + 63) / 64, 1, 1);
 
-                    // 2d. Conservative software rasterization into 3-Layer VisAtlas + Coverage
-                    cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
-                    cmd.SetComputeTextureParam(m_Compute, m_RasterizeSegmentsKernel, SceneDepthId, depthHandle);
-                    cmd.DispatchCompute(m_Compute, m_RasterizeSegmentsKernel, slot.IndirectRasterArgsBuffer, 0u);
+                    if (useTileSort)
+                    {
+                        // 2d-S3. Global 1024-bin Tile Counting Sort (1-group prefix sum + indirect scatter)
+                        cmd.SetComputeBufferParam(m_Compute, m_PrefixSumSortBinsKernel, TileHistogramId, slot.TileHistogramBuffer);
+                        cmd.DispatchCompute(m_Compute, m_PrefixSumSortBinsKernel, 1, 1, 1);
+
+                        cmd.SetComputeBufferParam(m_Compute, m_ScatterSortedSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_ScatterSortedSegmentsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_ScatterSortedSegmentsKernel, SegmentSortBinId, slot.SegmentSortBinBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_ScatterSortedSegmentsKernel, TileHistogramId, slot.TileHistogramBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_ScatterSortedSegmentsKernel, SortedSegmentListId, slot.SortedSegmentListBuffer);
+                        cmd.DispatchCompute(m_Compute, m_ScatterSortedSegmentsKernel, slot.IndirectRasterArgsBuffer, 0u);
+                    }
+
+                    if (useCompactShade)
+                    {
+                        // 2e-S3. Natural-order visible vertex compaction for 100%-active indirect shading
+                        cmd.SetComputeBufferParam(m_Compute, m_CompactVisibleVerticesKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_CompactVisibleVerticesKernel, VisibleVertexListId, slot.VisibleVertexListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_CompactVisibleVerticesKernel, IndirectShadeArgsId, slot.IndirectShadeArgsBuffer);
+                        cmd.DispatchCompute(m_Compute, m_CompactVisibleVerticesKernel, (maskUints + 63) / 64, 1, 1);
+                    }
+
+                    if (useLdsStack)
+                    {
+                        // 2f-S3. Wave32 Dual LDS Pixel Request Stack software rasterizer (byte offset 16 = 32-wide groupX)
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, SortedSegmentListId, slot.SortedSegmentListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
+                        cmd.SetComputeTextureParam(m_Compute, m_RasterizeSegmentsLdsKernel, SceneDepthId, depthHandle);
+                        cmd.DispatchCompute(m_Compute, m_RasterizeSegmentsLdsKernel, slot.IndirectRasterArgsBuffer, 16u);
+                    }
+                    else
+                    {
+                        // Direct flattened trapezoid software rasterization (64-wide groupX at byte offset 0)
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, SortedSegmentListId, slot.SortedSegmentListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
+                        cmd.SetComputeTextureParam(m_Compute, m_RasterizeSegmentsKernel, SceneDepthId, depthHandle);
+                        cmd.DispatchCompute(m_Compute, m_RasterizeSegmentsKernel, slot.IndirectRasterArgsBuffer, 0u);
+                    }
                 }
 
                 m_FrameData.VisibilityRecordedThisFrame = true;
@@ -328,8 +408,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TransformVerticesKernel = -1;
             m_ClearCullArgsKernel = -1;
             m_ClearVisibleVertexMaskKernel = -1;
+            m_ClearSortBinsKernel = -1;
             m_CullSegmentsKernel = -1;
+            m_PrefixSumSortBinsKernel = -1;
+            m_ScatterSortedSegmentsKernel = -1;
+            m_CompactVisibleVerticesKernel = -1;
             m_RasterizeSegmentsKernel = -1;
+            m_RasterizeSegmentsLdsKernel = -1;
             m_FrameData = null;
         }
     }

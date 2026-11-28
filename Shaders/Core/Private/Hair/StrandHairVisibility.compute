@@ -4,9 +4,16 @@
 #pragma kernel KCullSegments
 #pragma kernel KRasterizeSegments
 #pragma kernel KClearVisibleVertexMask
+#pragma kernel KClearSortBins
+#pragma kernel KPrefixSumSortBins
+#pragma kernel KScatterSortedSegments
+#pragma kernel KCompactVisibleVertices
+#pragma kernel KRasterizeSegmentsLDS
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Hair/VividStrandHairCommon.hlsl"
+
+#define VIVID_HAIR_MAX_SORT_BINS 1024u
 
 // Groom source buffers (owned by HairGroomGpuResource)
 StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
@@ -16,10 +23,15 @@ StructuredBuffer<HairGroomSegmentIndex> _HairSegmentIndices;
 RWStructuredBuffer<float4> _HairPostTransformClip;
 RWStructuredBuffer<float4> _HairWorldPosRadius;
 
-// Culling & indirect dispatch buffers
+// Culling, tile counting sort & natural-order compaction buffers
 RWStructuredBuffer<uint> _HairVisibleSegmentList;
-RWStructuredBuffer<uint> _HairIndirectRasterArgs; // [0]=groupX, [1]=1, [2]=1, [3]=visibleCount
-RWStructuredBuffer<uint> _HairVisibleVertexMask;  // 1 bit per vertex marked visible by KCullSegments
+RWStructuredBuffer<uint> _HairSegmentSortBin;
+RWStructuredBuffer<uint> _HairSortedSegmentList;
+RWStructuredBuffer<uint> _HairTileHistogram;       // [0..1023] bin counts, [1024..2047] prefix offsets / scatter cursors
+RWStructuredBuffer<uint> _HairIndirectRasterArgs;  // [0]=groupX, [1]=1, [2]=1, [3]=visibleSegCount
+RWStructuredBuffer<uint> _HairVisibleVertexMask;   // 1 bit per vertex marked visible by KCullSegments
+RWStructuredBuffer<uint> _HairVisibleVertexList;   // Natural ascending vertex order list
+RWStructuredBuffer<uint> _HairIndirectShadeArgs;   // [0]=groupX, [1]=1, [2]=1, [3]=visibleVertCount
 
 // 32-bit Tiled 3-Layer Visibility Atlas + 1 Additive Coverage Layer
 // Layout per 64x64 tile: 4 slices * 4096 uints = 16384 uints/tile
@@ -38,6 +50,8 @@ uint _HairVertexCount;
 uint _HairSegmentCount;
 uint _HairAllocatedTileCount;
 uint _HairFirstAtlasTile;
+uint _HairSortBinCount;
+uint _HairUseSortedSegments;
 
 float4 _HairAtlasTileRect;   // xy = tileOrigin, zw = tileGridSize
 uint _HairDownscaleFactor;
@@ -94,10 +108,20 @@ void KTransformVertices(uint3 tid : SV_DispatchThreadID)
 [numthreads(1, 1, 1)]
 void KClearCullArgs(uint3 tid : SV_DispatchThreadID)
 {
+    // [0..3] = 64-thread indirect dispatch args; [4..7] = 32-thread (Wave32 LDS) indirect dispatch args
     _HairIndirectRasterArgs[0] = 0u;
     _HairIndirectRasterArgs[1] = 1u;
     _HairIndirectRasterArgs[2] = 1u;
     _HairIndirectRasterArgs[3] = 0u;
+    _HairIndirectRasterArgs[4] = 0u;
+    _HairIndirectRasterArgs[5] = 1u;
+    _HairIndirectRasterArgs[6] = 1u;
+    _HairIndirectRasterArgs[7] = 0u;
+
+    _HairIndirectShadeArgs[0] = 0u;
+    _HairIndirectShadeArgs[1] = 1u;
+    _HairIndirectShadeArgs[2] = 1u;
+    _HairIndirectShadeArgs[3] = 0u;
 }
 
 [numthreads(64, 1, 1)]
@@ -106,6 +130,13 @@ void KClearVisibleVertexMask(uint3 tid : SV_DispatchThreadID)
     uint maskUints = (_HairVertexCount + 31u) >> 5u;
     if (tid.x < maskUints)
         _HairVisibleVertexMask[tid.x] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void KClearSortBins(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x < VIVID_HAIR_MAX_SORT_BINS * 2u)
+        _HairTileHistogram[tid.x] = 0u;
 }
 
 bool TestSegmentHZB(float2 minPx, float2 maxPx, float nearestDeviceZ)
@@ -131,7 +162,6 @@ bool TestSegmentHZB(float2 minPx, float2 maxPx, float nearestDeviceZ)
     float d11 = _HairHZBTexture.Load(int3(c1.x, c1.y, mip));
 
 #if UNITY_REVERSED_Z
-    // Reversed-Z: smaller value = farther away. Conservative occluder depth = min of 4 texels.
     float farOccluderZ = min(min(d00, d10), min(d01, d11));
     return nearestDeviceZ >= farOccluderZ - 1e-5f;
 #else
@@ -145,17 +175,18 @@ void KCullSegments(uint3 tid : SV_DispatchThreadID)
 {
     uint segId = tid.x;
     bool visible = false;
+    uint binId = 0u;
+    uint v0 = 0u;
 
     if (segId < _HairSegmentCount)
     {
         HairGroomSegmentIndex seg = _HairSegmentIndices[segId];
-        uint v0 = seg.vertexIndex0;
+        v0 = seg.vertexIndex0;
         uint v1 = v0 + 1u;
 
         float4 clip0 = _HairPostTransformClip[v0];
         float4 clip1 = _HairPostTransformClip[v1];
 
-        // Reject segments completely behind the near plane
         if (clip0.w > _HairNearClipPlane && clip1.w > _HairNearClipPlane)
         {
             float2 p0 = VividHairClipToScreenPixel(clip0, _HairAtlasScreenSize);
@@ -183,11 +214,23 @@ void KCullSegments(uint3 tid : SV_DispatchThreadID)
                 float nearestZ = min(z0, z1);
 #endif
                 visible = TestSegmentHZB(minPx, maxPx, nearestZ);
+                if (visible)
+                {
+                    // IJGC Slide 47: screen-space 64x64 tile bin for Global Counting Sort
+                    float2 midPx = clamp(0.5f * (p0 + p1), atlasMin, atlasMax - 1.0f);
+                    uint2 localTile = (uint2(midPx) / VIVID_HAIR_ATLAS_TILE_SIZE) - tileOrigin;
+                    localTile = min(localTile, max(tileGridSize, uint2(1u, 1u)) - 1u);
+                    binId = min(localTile.y * tileGridSize.x + localTile.x, VIVID_HAIR_MAX_SORT_BINS - 1u);
+                }
             }
         }
     }
 
     // Wave-aggregated atomic append (1 global atomic per wave)
+    // IndirectRasterArgs: [0]=groupX64 (for 64-lane kernels), [1]=1, [2]=1, [3]=visibleSegCount
+    // Store Wave32 groupX in [4] (not needed if KRasterizeSegmentsLDS uses separate IndirectLdsArgs,
+    // OR simply dispatch 2x groupX via KPrefixSumSortBins? Even simpler: store [4..7] in IndirectRasterArgs
+    // or have IndirectRasterArgs count=8 where offset 0 = 64-wide args, offset 16 = 32-wide args!)
     uint activeCount = WaveActiveCountBits(visible);
     if (activeCount > 0u)
     {
@@ -196,25 +239,112 @@ void KCullSegments(uint3 tid : SV_DispatchThreadID)
         {
             InterlockedAdd(_HairIndirectRasterArgs[3], activeCount, baseOffset);
             uint newTotal = baseOffset + activeCount;
-            uint newGroups = (newTotal + 63u) >> 6u;
-            InterlockedMax(_HairIndirectRasterArgs[0], newGroups);
+            uint newGroups64 = (newTotal + 63u) >> 6u;
+            uint newGroups32 = (newTotal + 31u) >> 5u;
+            InterlockedMax(_HairIndirectRasterArgs[0], newGroups64);
+            InterlockedMax(_HairIndirectRasterArgs[4], newGroups32);
         }
         baseOffset = WaveReadLaneFirst(baseOffset);
         if (visible)
         {
             uint localRank = WavePrefixCountBits(visible);
-            _HairVisibleSegmentList[baseOffset + localRank] = segId;
+            uint dstIdx = baseOffset + localRank;
+            _HairVisibleSegmentList[dstIdx] = segId;
+            _HairSegmentSortBin[dstIdx] = binId;
+            InterlockedAdd(_HairTileHistogram[binId], 1u);
 
-            HairGroomSegmentIndex visSeg = _HairSegmentIndices[segId];
-            uint mv0 = visSeg.vertexIndex0;
-            uint mv1 = mv0 + 1u;
-            InterlockedOr(_HairVisibleVertexMask[mv0 >> 5u], 1u << (mv0 & 31u));
+            uint mv1 = v0 + 1u;
+            InterlockedOr(_HairVisibleVertexMask[v0 >> 5u], 1u << (v0 & 31u));
             InterlockedOr(_HairVisibleVertexMask[mv1 >> 5u], 1u << (mv1 & 31u));
         }
     }
 }
 
-void WritePixelToVisAtlas(uint pixelBase, uint pixelPayload, float coverage)
+// Single-group exclusive prefix sum over up to 1024 tile sort bins (4 bins per lane x 256 lanes)
+groupshared uint gs_PrefixBlockSums[256];
+
+[numthreads(256, 1, 1)]
+void KPrefixSumSortBins(uint3 gtid : SV_GroupThreadID)
+{
+    uint lane = gtid.x;
+    uint b0 = lane * 4u;
+    uint c0 = _HairTileHistogram[b0 + 0u];
+    uint c1 = _HairTileHistogram[b0 + 1u];
+    uint c2 = _HairTileHistogram[b0 + 2u];
+    uint c3 = _HairTileHistogram[b0 + 3u];
+
+    uint sum4 = c0 + c1 + c2 + c3;
+    gs_PrefixBlockSums[lane] = sum4;
+    GroupMemoryBarrierWithGroupSync();
+
+    // Hillis-Steele inclusive scan across 256 block sums
+    [unroll]
+    for (uint stride = 1u; stride < 256u; stride <<= 1u)
+    {
+        uint val = (lane >= stride) ? gs_PrefixBlockSums[lane - stride] : 0u;
+        GroupMemoryBarrierWithGroupSync();
+        gs_PrefixBlockSums[lane] += val;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    uint blockOffset = (lane > 0u) ? gs_PrefixBlockSums[lane - 1u] : 0u;
+    _HairTileHistogram[VIVID_HAIR_MAX_SORT_BINS + b0 + 0u] = blockOffset;
+    _HairTileHistogram[VIVID_HAIR_MAX_SORT_BINS + b0 + 1u] = blockOffset + c0;
+    _HairTileHistogram[VIVID_HAIR_MAX_SORT_BINS + b0 + 2u] = blockOffset + c0 + c1;
+    _HairTileHistogram[VIVID_HAIR_MAX_SORT_BINS + b0 + 3u] = blockOffset + c0 + c1 + c2;
+}
+
+// Scatters visible segments into tile-coherent order for high L2 cache locality during SW rasterization
+[numthreads(64, 1, 1)]
+void KScatterSortedSegments(uint3 tid : SV_DispatchThreadID)
+{
+    uint visibleCount = _HairIndirectRasterArgs[3];
+    if (tid.x >= visibleCount)
+        return;
+
+    uint segId = _HairVisibleSegmentList[tid.x];
+    uint binId = _HairSegmentSortBin[tid.x];
+    uint dst = 0u;
+    InterlockedAdd(_HairTileHistogram[VIVID_HAIR_MAX_SORT_BINS + binId], 1u, dst);
+    _HairSortedSegmentList[dst] = segId;
+}
+
+// IJGC Slide 52-53: Natural-order compaction of visible vertices for 100% active, L2-coalesced shading
+[numthreads(64, 1, 1)]
+void KCompactVisibleVertices(uint3 tid : SV_DispatchThreadID)
+{
+    uint maskUints = (_HairVertexCount + 31u) >> 5u;
+    uint wordIdx = tid.x;
+    uint bits = (wordIdx < maskUints) ? _HairVisibleVertexMask[wordIdx] : 0u;
+    uint cnt = countbits(bits);
+
+    uint waveTotal = WaveActiveSum(cnt);
+    if (waveTotal == 0u)
+        return;
+
+    uint waveBase = 0u;
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(_HairIndirectShadeArgs[3], waveTotal, waveBase);
+        uint newTotal = waveBase + waveTotal;
+        uint newGroups = (newTotal + 63u) >> 6u;
+        InterlockedMax(_HairIndirectShadeArgs[0], newGroups);
+    }
+    waveBase = WaveReadLaneFirst(waveBase);
+
+    uint outCursor = waveBase + WavePrefixSum(cnt);
+    uint vertexBase = wordIdx << 5u;
+    while (bits != 0u)
+    {
+        uint bit = firstbitlow(bits);
+        uint vIdx = vertexBase + bit;
+        if (vIdx < _HairVertexCount)
+            _HairVisibleVertexList[outCursor++] = vIdx;
+        bits &= bits - 1u;
+    }
+}
+
+void WritePixelToVisAtlasFixed(uint pixelBase, uint pixelPayload, uint covFixed)
 {
     // IJGC Slide 33: non-atomic cached early cull against Layer 2 before issuing atomic chain.
     uint lastLayer = _HairVisAtlas[pixelBase + 2u * VIVID_HAIR_ATLAS_TILE_PIXELS];
@@ -236,10 +366,10 @@ void WritePixelToVisAtlas(uint pixelBase, uint pixelPayload, float coverage)
     }
 
     // Always accumulate additive coverage (fixed-point 10-bit, IJGC Slide 31).
-    uint covFixed = (uint)max(1, (int)round(coverage * 1024.0f));
     InterlockedAdd(_HairVisAtlas[pixelBase + 3u * VIVID_HAIR_ATLAS_TILE_PIXELS], covFixed);
 }
 
+// Phase S1/S2 direct software rasterizer (retained for A/B benchmarking against Phase S3 LDS stack)
 [numthreads(64, 1, 1)]
 void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
 {
@@ -247,7 +377,9 @@ void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
     if (tid.x >= visibleCount)
         return;
 
-    uint segId = _HairVisibleSegmentList[tid.x];
+    uint segId = _HairUseSortedSegments != 0u
+        ? _HairSortedSegmentList[tid.x]
+        : _HairVisibleSegmentList[tid.x];
     HairGroomSegmentIndex seg = _HairSegmentIndices[segId];
     uint v0 = seg.vertexIndex0;
     uint v1 = v0 + 1u;
@@ -267,7 +399,6 @@ void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
     float r0Px = wr0.w * _HairProjScaleY * rcp(clip0.w);
     float r1Px = wr1.w * _HairProjScaleY * rcp(clip1.w);
 
-    // Positive view-space distance along camera forward for 12-bit normalized depth
     float viewZ0 = abs(mul(_HairViewMatrix, float4(wr0.xyz, 1.0f)).z);
     float viewZ1 = abs(mul(_HairViewMatrix, float4(wr1.xyz, 1.0f)).z);
 
@@ -284,13 +415,11 @@ void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
     int2 atlasMaxPx = int2((tileOrigin + tileGridSize) * VIVID_HAIR_ATLAS_TILE_SIZE) - 1;
     atlasMaxPx = min(atlasMaxPx, int2(_HairAtlasScreenSize) - 1);
 
-    // Clamp overly large single-segment screen footprints as a safety guard
     int2 minPx = max(int2(floor(min(p0, p1) - pad)), atlasMinPx);
     int2 maxPx = min(int2(ceil(max(p0, p1) + pad)), atlasMaxPx);
     if (minPx.x > maxPx.x || minPx.y > maxPx.y)
         return;
 
-    // Conservative trapezoid/slice traversal flattened into a single loop (IJGC Slide 35)
     bool steep = abs(segVec.y) > abs(segVec.x);
     float2 a = steep ? p0.yx : p0.xy;
     float2 b = steep ? p1.yx : p1.xy;
@@ -316,7 +445,6 @@ void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
     int minorMax = min((int)ceil(centerMinor + minorHalfBand), minorClampMax);
     int minor = minorMin;
 
-    // Cap per-segment iteration count to guard against extreme near-clip slivers
     const uint kMaxSteps = 512u;
     uint steps = 0u;
     int2 fullDepthMax = int2(_HairScreenSize) - 1;
@@ -361,11 +489,270 @@ void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
                     tileOrigin,
                     tileGridSize,
                     _HairFirstAtlasTile);
-                WritePixelToVisAtlas(pixelBase, payload, coverage);
+                uint covFixed = (uint)max(1, (int)round(coverage * 1024.0f));
+                WritePixelToVisAtlasFixed(pixelBase, payload, covFixed);
             }
         }
 
         minor++;
         steps++;
+    }
+}
+
+// =============================================================================
+// Phase S3: IJGC Wave-Local Dual LDS Pixel Request Stack (Slides 38-44)
+//   - [numthreads(32, 1, 1)]: 1 native Wave32 per threadgroup on desktop RTX GPUs
+//     (zero cross-warp stalls, zero LDS atomics: stack pointers live in scalar
+//     registers updated via 1-cycle WaveActiveCountBits / WavePrefixCountBits!).
+//   - 1.75 KB LDS per group -> maximum SM occupancy; safely handles Wave32 and
+//     Wave64 (on Wave64 only 32 lanes of a wave are active per group).
+// =============================================================================
+groupshared uint gs_DepthPxPacked[64];
+groupshared float gs_DepthHairZ[64];
+groupshared uint gs_DepthPayload[64];
+groupshared uint gs_DepthCovFixed[64];
+
+groupshared uint gs_WritePixelBase[64];
+groupshared uint gs_WritePayload[64];
+groupshared uint gs_WriteCovFixed[64];
+
+[numthreads(32, 1, 1)]
+void KRasterizeSegmentsLDS(uint3 tid : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+{
+    uint lane = gtid.x;
+
+    uint2 tileOrigin = uint2(_HairAtlasTileRect.xy);
+    uint2 tileGridSize = uint2(_HairAtlasTileRect.zw);
+    int2 atlasMinPx = int2(tileOrigin * VIVID_HAIR_ATLAS_TILE_SIZE);
+    int2 atlasMaxPx = int2((tileOrigin + tileGridSize) * VIVID_HAIR_ATLAS_TILE_SIZE) - 1;
+    atlasMaxPx = min(atlasMaxPx, int2(_HairAtlasScreenSize) - 1);
+    int2 fullDepthMax = int2(_HairScreenSize) - 1;
+
+    bool laneActive = false;
+    uint segId = 0u;
+    float2 p0 = 0.0f, segVec = 0.0f;
+    float invSegLenSq = 0.0f;
+    float z0 = 0.0f, z1 = 0.0f;
+    float r0Px = 0.0f, r1Px = 0.0f;
+    float viewZ0 = 0.0f, viewZ1 = 0.0f;
+    bool steep = false;
+    float2 a = 0.0f;
+    float dx = 1.0f, slope = 0.0f, minorHalfBand = 0.0f;
+    int major = 0, majorMax = -1;
+    int minorClampMin = 0, minorClampMax = -1;
+    int minor = 0, minorMax = -1;
+    uint steps = 0u;
+    const uint kMaxSteps = 512u;
+
+    uint visibleCount = _HairIndirectRasterArgs[3];
+    if (tid.x < visibleCount)
+    {
+        segId = _HairUseSortedSegments != 0u
+            ? _HairSortedSegmentList[tid.x]
+            : _HairVisibleSegmentList[tid.x];
+        HairGroomSegmentIndex seg = _HairSegmentIndices[segId];
+        uint v0 = seg.vertexIndex0;
+        uint v1 = v0 + 1u;
+
+        float4 clip0 = _HairPostTransformClip[v0];
+        float4 clip1 = _HairPostTransformClip[v1];
+        if (clip0.w > _HairNearClipPlane && clip1.w > _HairNearClipPlane)
+        {
+            p0 = VividHairClipToScreenPixel(clip0, _HairAtlasScreenSize);
+            float2 p1 = VividHairClipToScreenPixel(clip1, _HairAtlasScreenSize);
+            z0 = VividHairClipToDeviceZ(clip0);
+            z1 = VividHairClipToDeviceZ(clip1);
+
+            float4 wr0 = _HairWorldPosRadius[v0];
+            float4 wr1 = _HairWorldPosRadius[v1];
+            r0Px = wr0.w * _HairProjScaleY * rcp(clip0.w);
+            r1Px = wr1.w * _HairProjScaleY * rcp(clip1.w);
+
+            viewZ0 = abs(mul(_HairViewMatrix, float4(wr0.xyz, 1.0f)).z);
+            viewZ1 = abs(mul(_HairViewMatrix, float4(wr1.xyz, 1.0f)).z);
+
+            segVec = p1 - p0;
+            float segLenSq = dot(segVec, segVec);
+            invSegLenSq = segLenSq > 1e-6f ? rcp(segLenSq) : 0.0f;
+
+            float pad = max(r0Px, r1Px) + 0.6f;
+            int2 minPx = max(int2(floor(min(p0, p1) - pad)), atlasMinPx);
+            int2 maxPx = min(int2(ceil(max(p0, p1) + pad)), atlasMaxPx);
+            if (minPx.x <= maxPx.x && minPx.y <= maxPx.y)
+            {
+                steep = abs(segVec.y) > abs(segVec.x);
+                a = steep ? p0.yx : p0.xy;
+                float2 b = steep ? p1.yx : p1.xy;
+                if (a.x > b.x)
+                {
+                    float2 tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+
+                int majorMin = steep ? minPx.y : minPx.x;
+                majorMax = steep ? maxPx.y : maxPx.x;
+                minorClampMin = steep ? minPx.x : minPx.y;
+                minorClampMax = steep ? maxPx.x : maxPx.y;
+
+                dx = max(b.x - a.x, 1e-5f);
+                slope = (b.y - a.y) / dx;
+                minorHalfBand = pad * sqrt(1.0f + slope * slope) + 0.5f;
+
+                major = majorMin;
+                float centerMinor = a.y + slope * clamp((float)major + 0.5f - a.x, 0.0f, dx);
+                int minorMin = max((int)floor(centerMinor - minorHalfBand), minorClampMin);
+                minorMax = min((int)ceil(centerMinor + minorHalfBand), minorClampMax);
+                minor = minorMin;
+                laneActive = true;
+            }
+        }
+    }
+
+    // Uniform scalar stack depths across all 32 lanes (zero LDS atomics!)
+    uint depthCount = 0u;
+    uint writeCount = 0u;
+
+    while (true)
+    {
+        bool hasHit = false;
+        uint hitPxPacked = 0u;
+        float hitHairZ = 0.0f;
+        uint hitPayload = VIVID_HAIR_VIS_EMPTY;
+        uint hitCovFixed = 0u;
+
+        // Stage A: Divergent trapezoid advance -> 1 candidate pixel per active lane
+        while (laneActive && !hasHit)
+        {
+            if (steps >= kMaxSteps)
+            {
+                laneActive = false;
+                break;
+            }
+
+            if (minor > minorMax)
+            {
+                major++;
+                if (major > majorMax)
+                {
+                    laneActive = false;
+                    break;
+                }
+                float centerMinor = a.y + slope * clamp((float)major + 0.5f - a.x, 0.0f, dx);
+                int minorMin = max((int)floor(centerMinor - minorHalfBand), minorClampMin);
+                minorMax = min((int)ceil(centerMinor + minorHalfBand), minorClampMax);
+                minor = minorMin;
+                if (minor > minorMax)
+                    continue;
+            }
+
+            int2 px = steep ? int2(minor, major) : int2(major, minor);
+            float2 pxCenter = float2(px) + 0.5f;
+            float t = saturate(dot(pxCenter - p0, segVec) * invSegLenSq);
+            float2 closest = p0 + segVec * t;
+            float distPx = length(pxCenter - closest);
+            float rPx = lerp(r0Px, r1Px, t);
+            float coverage = VividHairComputeAnalyticCoverage(rPx, distPx);
+
+            minor++;
+            steps++;
+
+            if (coverage > 1e-3f)
+            {
+                hasHit = true;
+                hitPxPacked = (uint(px.x) & 0xFFFFu) | ((uint(px.y) & 0xFFFFu) << 16u);
+                hitHairZ = lerp(z0, z1, t);
+                float viewZ = lerp(viewZ0, viewZ1, t);
+                float normDepth = saturate((viewZ - _HairDepthRangeNear) * _HairDepthRangeInvSpan);
+                hitPayload = VividHairPackVisPayload(normDepth, segId);
+                hitCovFixed = (uint)max(1, (int)round(coverage * 1024.0f));
+            }
+        }
+
+        // Push into LDS Depth Stack using 1-cycle wave intrinsics (zero atomics!)
+        uint waveHits = WaveActiveCountBits(hasHit);
+        uint hitPrefix = WavePrefixCountBits(hasHit);
+        if (hasHit)
+        {
+            uint slot = depthCount + hitPrefix;
+            gs_DepthPxPacked[slot] = hitPxPacked;
+            gs_DepthHairZ[slot] = hitHairZ;
+            gs_DepthPayload[slot] = hitPayload;
+            gs_DepthCovFixed[slot] = hitCovFixed;
+        }
+        depthCount += waveHits;
+
+        bool anyActive = WaveActiveAnyTrue(laneActive);
+
+        // Stage B: Pop 32 coherent depth tests when full (or draining)
+        if (depthCount >= 32u || (!anyActive && depthCount > 0u))
+        {
+            GroupMemoryBarrierWithGroupSync();
+            uint popCount = min(depthCount, 32u);
+            uint popBase = depthCount - popCount;
+            depthCount = popBase;
+
+            bool depthPassed = false;
+            uint passPixelBase = 0u;
+            uint passPayload = VIVID_HAIR_VIS_EMPTY;
+            uint passCovFixed = 0u;
+
+            if (lane < popCount)
+            {
+                uint srcSlot = popBase + lane;
+                uint pxPacked = gs_DepthPxPacked[srcSlot];
+                int2 px = int2(pxPacked & 0xFFFFu, (pxPacked >> 16u) & 0xFFFFu);
+                float hairZ = gs_DepthHairZ[srcSlot];
+
+                int2 depthCoord = min(px * (int)_HairDownscaleFactor + (int)(_HairDownscaleFactor >> 1u), fullDepthMax);
+                float sceneDeviceZ = _HairSceneDepth.Load(int3(depthCoord, 0));
+
+                if (VividHairDepthPassesOpaque(hairZ, sceneDeviceZ))
+                {
+                    depthPassed = true;
+                    passPixelBase = VividHairComputeAtlasPixelBase(
+                        uint2(px),
+                        tileOrigin,
+                        tileGridSize,
+                        _HairFirstAtlasTile);
+                    passPayload = gs_DepthPayload[srcSlot];
+                    passCovFixed = gs_DepthCovFixed[srcSlot];
+                }
+            }
+            GroupMemoryBarrierWithGroupSync(); // WAR guard before next Stage A writes gs_Depth*
+
+            uint wavePass = WaveActiveCountBits(depthPassed);
+            uint passPrefix = WavePrefixCountBits(depthPassed);
+            if (depthPassed)
+            {
+                uint wSlot = writeCount + passPrefix;
+                gs_WritePixelBase[wSlot] = passPixelBase;
+                gs_WritePayload[wSlot] = passPayload;
+                gs_WriteCovFixed[wSlot] = passCovFixed;
+            }
+            writeCount += wavePass;
+        }
+
+        // Stage C: Pop 32 coherent VisAtlas atomic writes when full (or draining)
+        if (writeCount >= 32u || (!anyActive && depthCount == 0u && writeCount > 0u))
+        {
+            GroupMemoryBarrierWithGroupSync();
+            uint popCount = min(writeCount, 32u);
+            uint popBase = writeCount - popCount;
+            writeCount = popBase;
+
+            if (lane < popCount)
+            {
+                uint srcSlot = popBase + lane;
+                WritePixelToVisAtlasFixed(
+                    gs_WritePixelBase[srcSlot],
+                    gs_WritePayload[srcSlot],
+                    gs_WriteCovFixed[srcSlot]);
+            }
+            GroupMemoryBarrierWithGroupSync(); // WAR guard before next Stage B writes gs_Write*
+        }
+
+        if (!anyActive && depthCount == 0u && writeCount == 0u)
+            break;
     }
 }

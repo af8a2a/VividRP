@@ -12,6 +12,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
         private RenderGraphTexture m_DepthAttachment;
 
+        internal RenderGraphTexture DepthTexture => m_DepthAttachment;
+
         public PreDepthPass()
         {
             m_RenderList = new RenderGraphRenderList

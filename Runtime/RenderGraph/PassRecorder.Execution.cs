@@ -1491,6 +1491,33 @@ namespace VividRP.Runtime
                         if (computePass is RenderPass.Core.HZBGeneratePass hzbPass)
                         {
                             s_LastRecordedHzbTexture = hzbPass.HzbTexture;
+
+                            // Trigger early Async Compute StrandHairVisibilityPass right after the final
+                            // active HZBGeneratePass before DeferredLightingPass so it overlaps with
+                            // GTAO, VSM, Lumen GI, CSM, and DeferredLighting.
+                            bool hasLaterHzbBeforeDeferred = false;
+                            for (int nextIdx = passIndex + 1; nextIdx < s_RenderPasses.Count; nextIdx++)
+                            {
+                                var nextPass = s_RenderPasses[nextIdx];
+                                if (nextPass is RenderPass.Core.DeferredLightingPass)
+                                    break;
+                                if (nextPass is RenderPass.Core.HZBGeneratePass
+                                    && (nextIdx >= passActiveStates.Length || passActiveStates[nextIdx]))
+                                {
+                                    hasLaterHzbBeforeDeferred = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasLaterHzbBeforeDeferred && s_LastRecordedPreDepthTexture != null)
+                            {
+                                RenderPass.Core.StrandHairRenderGraphHook.TryRecordEarlyVisibilityAfterHZB(
+                                    renderGraph,
+                                    s_FrameData,
+                                    s_LastRecordedPreDepthTexture,
+                                    s_LastRecordedHzbTexture,
+                                    enableAsyncCompute);
+                            }
                         }
                         else if (computePass is RenderPass.Core.DeferredLightingPass deferredLightingPass)
                         {
@@ -1511,7 +1538,8 @@ namespace VividRP.Runtime
                                 deferredLightingPass,
                                 s_LastRecordedHzbTexture,
                                 s_LastRecordedCsmShadowAtlas,
-                                deferCompositionUntilAfterSky: hasActiveSkyInjection);
+                                deferCompositionUntilAfterSky: hasActiveSkyInjection,
+                                enableAsyncCompute: enableAsyncCompute);
                         }
                     }
                     else if (pass is RasterPass rasterPass)
@@ -1524,6 +1552,11 @@ namespace VividRP.Runtime
                             bufferCache,
                             renderListCache,
                             accelerationStructureCache);
+
+                        if (rasterPass is RenderPass.Core.PreDepthPass preDepthPass)
+                        {
+                            s_LastRecordedPreDepthTexture = preDepthPass.DepthTexture;
+                        }
                     }
                     else if (pass is UnsafePass unsafePass)
                     {
@@ -1559,11 +1592,13 @@ namespace VividRP.Runtime
             }
         }
 
+        private static RenderGraphTexture s_LastRecordedPreDepthTexture;
         private static RenderGraphTexture s_LastRecordedHzbTexture;
         private static RenderGraphTexture s_LastRecordedCsmShadowAtlas;
 
         private static void ClearRecordGraphResourceCaches()
         {
+            s_LastRecordedPreDepthTexture = null;
             s_LastRecordedHzbTexture = null;
             s_LastRecordedCsmShadowAtlas = null;
             RenderPass.Core.StrandHairRenderGraphHook.ClearPerFrameState();

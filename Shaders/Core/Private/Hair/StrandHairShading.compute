@@ -1,4 +1,5 @@
 #pragma kernel KShadeHairVertices
+#pragma kernel KShadeCompactHairVertices
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
@@ -118,6 +119,8 @@ StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
 StructuredBuffer<HairGroomVisibilitySH> _HairVisibilitySH;
 StructuredBuffer<float4> _HairWorldPosRadius;
 StructuredBuffer<uint> _HairVisibleVertexMask;
+StructuredBuffer<uint> _HairVisibleVertexList;
+StructuredBuffer<uint> _HairIndirectShadeArgs;
 RWStructuredBuffer<float4> _HairVertexShading; // rgb = pre-exposed radiance, a = primary self-shadow factor
 
 // Scene world-space CSM shadow atlas (never screen-space opaque _DirectionalShadowTexture)
@@ -271,18 +274,8 @@ float3 AccumulateHairLight(
     return max(unshadowedRadiance, 0.0f.xxx) * (singleScatter + dualScatter + volumeScatter);
 }
 
-[numthreads(64, 1, 1)]
-void KShadeHairVertices(uint3 tid : SV_DispatchThreadID)
+void ShadeHairVertex(uint vIdx)
 {
-    uint vIdx = tid.x;
-    if (vIdx >= _HairVertexCount)
-        return;
-
-    // Skip frustum/HZB-culled vertices (only shade vertices belonging to visible segments)
-    uint maskWord = _HairVisibleVertexMask[vIdx >> 5u];
-    if ((maskWord & (1u << (vIdx & 31u))) == 0u)
-        return;
-
     HairGroomRestVertex rv = _HairRestVertices[vIdx];
     float3 posWS = _HairWorldPosRadius[vIdx].xyz;
     float3 tangentWS = VividHairSafeNormalize(mul((float3x3)_HairLocalToWorld, rv.tangentOS), float3(0.0f, 1.0f, 0.0f));
@@ -439,4 +432,31 @@ void KShadeHairVertices(uint3 tid : SV_DispatchThreadID)
 
     float preExposure = VividGetPreExposure();
     _HairVertexShading[vIdx] = float4(max(totalRadiance, 0.0f.xxx) * preExposure, saturate(primarySelfShadow));
+}
+
+[numthreads(64, 1, 1)]
+void KShadeHairVertices(uint3 tid : SV_DispatchThreadID)
+{
+    uint vIdx = tid.x;
+    if (vIdx >= _HairVertexCount)
+        return;
+
+    uint maskWord = _HairVisibleVertexMask[vIdx >> 5u];
+    if ((maskWord & (1u << (vIdx & 31u))) == 0u)
+        return;
+
+    ShadeHairVertex(vIdx);
+}
+
+// Phase S3: 100% active natural-order compacted visible vertex shading via Indirect Dispatch
+[numthreads(64, 1, 1)]
+void KShadeCompactHairVertices(uint3 tid : SV_DispatchThreadID)
+{
+    uint visibleVertCount = _HairIndirectShadeArgs[3];
+    if (tid.x >= visibleVertCount)
+        return;
+
+    uint vIdx = _HairVisibleVertexList[tid.x];
+    if (vIdx < _HairVertexCount)
+        ShadeHairVertex(vIdx);
 }

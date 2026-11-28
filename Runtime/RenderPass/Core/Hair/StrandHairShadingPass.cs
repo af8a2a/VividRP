@@ -16,12 +16,15 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class StrandHairShadingPass : ComputePass, IAsyncComputeSupportedPass
     {
         private const string ShadeKernelName = "KShadeHairVertices";
+        private const string ShadeCompactKernelName = "KShadeCompactHairVertices";
         public const float DefaultSelfShadowExtinction = 0.72f;
 
         private static readonly int RestVerticesId = Shader.PropertyToID("_HairRestVertices");
         private static readonly int VisibilitySHId = Shader.PropertyToID("_HairVisibilitySH");
         private static readonly int WorldPosRadiusId = Shader.PropertyToID("_HairWorldPosRadius");
         private static readonly int VisibleVertexMaskId = Shader.PropertyToID("_HairVisibleVertexMask");
+        private static readonly int VisibleVertexListId = Shader.PropertyToID("_HairVisibleVertexList");
+        private static readonly int IndirectShadeArgsId = Shader.PropertyToID("_HairIndirectShadeArgs");
         private static readonly int VertexShadingId = Shader.PropertyToID("_HairVertexShading");
 
         private static readonly int DirectionalLightsId = Shader.PropertyToID("_DirectionalLights");
@@ -60,6 +63,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_Compute;
         private int m_ShadeKernel = -1;
+        private int m_ShadeCompactKernel = -1;
 
         private StrandHairFrameData m_FrameData;
         private StrandHairGpuPool m_GpuPool;
@@ -100,7 +104,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool EnsureShaderLoaded()
         {
-            if (m_Compute != null && m_ShadeKernel >= 0)
+            if (m_Compute != null && m_ShadeKernel >= 0 && m_ShadeCompactKernel >= 0)
                 return true;
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
@@ -109,7 +113,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
 
             m_ShadeKernel = m_Compute.FindKernel(ShadeKernelName);
-            return m_ShadeKernel >= 0;
+            m_ShadeCompactKernel = m_Compute.FindKernel(ShadeCompactKernelName);
+            return m_ShadeKernel >= 0 && m_ShadeCompactKernel >= 0;
         }
 
         private void EnsureDummyLightBuffers()
@@ -261,13 +266,16 @@ namespace VividRP.Runtime.RenderPass.Core
 
             EnsureDummyLightBuffers();
 
+            bool useCompact = StrandHairGpuPool.EnablePhaseS3Optimizations && StrandHairGpuPool.EnableCompactShading;
+            int activeKernel = useCompact ? m_ShadeCompactKernel : m_ShadeKernel;
+
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 if (m_PreExposureBuffer != null)
                 {
                     cmd.SetComputeBufferParam(
                         m_Compute,
-                        m_ShadeKernel,
+                        activeKernel,
                         VividAutoExposureSystem.PreExposureBufferId,
                         m_PreExposureBuffer);
                 }
@@ -278,19 +286,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 bool hasArea = areaLights.IsValid() && m_AreaLightCount > 0;
 
                 if (hasDir)
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, DirectionalLightsId, directionalLights);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, DirectionalLightsId, directionalLights);
                 else
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, DirectionalLightsId, m_DummyDirectionalLightBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, DirectionalLightsId, m_DummyDirectionalLightBuffer);
 
                 if (hasPunc)
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, PunctualLightsId, punctualLights);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, PunctualLightsId, punctualLights);
                 else
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, PunctualLightsId, m_DummyPunctualLightBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, PunctualLightsId, m_DummyPunctualLightBuffer);
 
                 if (hasArea)
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, AreaLightsId, areaLights);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, AreaLightsId, areaLights);
                 else
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, AreaLightsId, m_DummyAreaLightBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, AreaLightsId, m_DummyAreaLightBuffer);
 
                 cmd.SetComputeIntParam(m_Compute, DirectionalLightCountId, hasDir ? m_DirectionalLightCount : 0);
                 cmd.SetComputeIntParam(m_Compute, MainDirectionalLightIndexId, hasDir ? m_MainDirectionalLightIndex : -1);
@@ -301,7 +309,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 // World-space CSM shadow atlas (always bound to a RenderGraph-declared TextureHandle)
                 bool hasCsm = csmShadowAtlas.IsValid() && m_CSMCascadeCount > 0 && m_CSMCascadeResolution > 0;
                 if (csmShadowAtlas.IsValid())
-                    cmd.SetComputeTextureParam(m_Compute, m_ShadeKernel, CSMShadowAtlasId, csmShadowAtlas);
+                    cmd.SetComputeTextureParam(m_Compute, activeKernel, CSMShadowAtlasId, csmShadowAtlas);
 
                 cmd.SetComputeIntParam(m_Compute, CSMCascadeCountId, hasCsm ? m_CSMCascadeCount : 0);
                 cmd.SetComputeFloatParam(m_Compute, CSMMaxShadowDistanceId, hasCsm ? m_CSMMaxShadowDistance : 0.0f);
@@ -316,7 +324,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 // Sky IBL cubemap (DeferredLightingPass always provides a valid Cube TextureHandle)
                 bool hasSky = skyIblCubemap.IsValid() && m_SkyTextureParams.w > 0.5f;
                 if (skyIblCubemap.IsValid())
-                    cmd.SetComputeTextureParam(m_Compute, m_ShadeKernel, SkyTextureId, skyIblCubemap);
+                    cmd.SetComputeTextureParam(m_Compute, activeKernel, SkyTextureId, skyIblCubemap);
 
                 cmd.SetComputeVectorParam(m_Compute, SkyTextureTintId, m_SkyTextureTint);
                 cmd.SetComputeVectorParam(
@@ -387,13 +395,22 @@ namespace VividRP.Runtime.RenderPass.Core
                             selfShadowExtinction,
                             0.0f));
 
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, RestVerticesId, gpuRes.RestVertexBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, VisibilitySHId, gpuRes.VisibilitySHBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, m_ShadeKernel, VertexShadingId, slot.VertexShadingBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, RestVerticesId, gpuRes.RestVertexBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, VisibilitySHId, gpuRes.VisibilitySHBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, activeKernel, VertexShadingId, slot.VertexShadingBuffer);
 
-                    cmd.DispatchCompute(m_Compute, m_ShadeKernel, (gpuRes.VertexCount + 63) / 64, 1, 1);
+                    if (useCompact)
+                    {
+                        cmd.SetComputeBufferParam(m_Compute, activeKernel, VisibleVertexListId, slot.VisibleVertexListBuffer);
+                        cmd.SetComputeBufferParam(m_Compute, activeKernel, IndirectShadeArgsId, slot.IndirectShadeArgsBuffer);
+                        cmd.DispatchCompute(m_Compute, activeKernel, slot.IndirectShadeArgsBuffer, 0u);
+                    }
+                    else
+                    {
+                        cmd.SetComputeBufferParam(m_Compute, activeKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
+                        cmd.DispatchCompute(m_Compute, activeKernel, (gpuRes.VertexCount + 63) / 64, 1, 1);
+                    }
                 }
             }
         }
@@ -408,6 +425,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DummyAreaLightBuffer = null;
             m_Compute = null;
             m_ShadeKernel = -1;
+            m_ShadeCompactKernel = -1;
             m_FrameData = null;
             m_GpuPool = null;
             m_PreExposureBuffer = null;

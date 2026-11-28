@@ -26,6 +26,8 @@ namespace VividRP.Runtime
         public const int TileUintStride = TilePixels * LayerCount; // 16384 uints = 64 KB/tile
         public const int DefaultMaxAtlasTiles = 512; // 2M pixels = 32 MB
         public const int HighMaxAtlasTiles = 1024;   // 4M pixels = 64 MB
+        public const int MaxSortBins = 1024;         // 1 bin per atlas tile (matches HighMaxAtlasTiles)
+        public const int TileHistogramBufferUints = MaxSortBins * 2; // [0..1023] counts, [1024..2047] prefix offsets
     }
 
     /// <summary>
@@ -320,8 +322,13 @@ namespace VividRP.Runtime
         public GraphicsBuffer PostTransformClipBuffer { get; private set; }
         public GraphicsBuffer WorldPosRadiusBuffer { get; private set; }
         public GraphicsBuffer VisibleSegmentListBuffer { get; private set; }
+        public GraphicsBuffer SegmentSortBinBuffer { get; private set; }
+        public GraphicsBuffer SortedSegmentListBuffer { get; private set; }
+        public GraphicsBuffer TileHistogramBuffer { get; private set; }
         public GraphicsBuffer IndirectRasterArgsBuffer { get; private set; }
         public GraphicsBuffer VisibleVertexMaskBuffer { get; private set; }
+        public GraphicsBuffer VisibleVertexListBuffer { get; private set; }
+        public GraphicsBuffer IndirectShadeArgsBuffer { get; private set; }
         public GraphicsBuffer VertexShadingBuffer { get; private set; }
 
         public void EnsureCapacity(int vertexCount, int segmentCount)
@@ -371,12 +378,54 @@ namespace VividRP.Runtime
                 };
             }
 
-            if (IndirectRasterArgsBuffer == null || !IndirectRasterArgsBuffer.IsValid())
+            if (SegmentSortBinBuffer == null
+                || !SegmentSortBinBuffer.IsValid()
+                || SegmentSortBinBuffer.count < segmentCount)
+            {
+                SegmentSortBinBuffer?.Dispose();
+                SegmentSortBinBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    segmentCount,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_SegmentSortBin",
+                };
+            }
+
+            if (SortedSegmentListBuffer == null
+                || !SortedSegmentListBuffer.IsValid()
+                || SortedSegmentListBuffer.count < segmentCount)
+            {
+                SortedSegmentListBuffer?.Dispose();
+                SortedSegmentListBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    segmentCount,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_SortedSegmentList",
+                };
+            }
+
+            if (TileHistogramBuffer == null
+                || !TileHistogramBuffer.IsValid()
+                || TileHistogramBuffer.count < StrandHairAtlasContract.TileHistogramBufferUints)
+            {
+                TileHistogramBuffer?.Dispose();
+                TileHistogramBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    StrandHairAtlasContract.TileHistogramBufferUints,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_TileHistogram",
+                };
+            }
+
+            if (IndirectRasterArgsBuffer == null || !IndirectRasterArgsBuffer.IsValid() || IndirectRasterArgsBuffer.count < 8)
             {
                 IndirectRasterArgsBuffer?.Dispose();
                 IndirectRasterArgsBuffer = new GraphicsBuffer(
                     GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
-                    4,
+                    8,
                     sizeof(uint))
                 {
                     name = "StrandHair_IndirectRasterArgs",
@@ -395,6 +444,32 @@ namespace VividRP.Runtime
                     sizeof(uint))
                 {
                     name = "StrandHair_VisibleVertexMask",
+                };
+            }
+
+            if (VisibleVertexListBuffer == null
+                || !VisibleVertexListBuffer.IsValid()
+                || VisibleVertexListBuffer.count < vertexCount)
+            {
+                VisibleVertexListBuffer?.Dispose();
+                VisibleVertexListBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    vertexCount,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_VisibleVertexList",
+                };
+            }
+
+            if (IndirectShadeArgsBuffer == null || !IndirectShadeArgsBuffer.IsValid())
+            {
+                IndirectShadeArgsBuffer?.Dispose();
+                IndirectShadeArgsBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
+                    4,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_IndirectShadeArgs",
                 };
             }
 
@@ -421,10 +496,20 @@ namespace VividRP.Runtime
             WorldPosRadiusBuffer = null;
             VisibleSegmentListBuffer?.Dispose();
             VisibleSegmentListBuffer = null;
+            SegmentSortBinBuffer?.Dispose();
+            SegmentSortBinBuffer = null;
+            SortedSegmentListBuffer?.Dispose();
+            SortedSegmentListBuffer = null;
+            TileHistogramBuffer?.Dispose();
+            TileHistogramBuffer = null;
             IndirectRasterArgsBuffer?.Dispose();
             IndirectRasterArgsBuffer = null;
             VisibleVertexMaskBuffer?.Dispose();
             VisibleVertexMaskBuffer = null;
+            VisibleVertexListBuffer?.Dispose();
+            VisibleVertexListBuffer = null;
+            IndirectShadeArgsBuffer?.Dispose();
+            IndirectShadeArgsBuffer = null;
             VertexShadingBuffer?.Dispose();
             VertexShadingBuffer = null;
         }
@@ -470,6 +555,11 @@ namespace VividRP.Runtime
     {
         public static StrandHairDebugViewMode GlobalDebugViewMode { get; set; } = StrandHairDebugViewMode.ShadedPreview;
         public static int GlobalMaxAtlasTiles { get; set; } = StrandHairAtlasContract.HighMaxAtlasTiles;
+        public static bool EnablePhaseS3Optimizations { get; set; } = true;
+        public static bool EnableTileSorting { get; set; } = true;
+        public static bool EnableLdsRasterStack { get; set; } = true;
+        public static bool EnableCompactShading { get; set; } = true;
+        public static bool EnableAsyncCompute { get; set; } = true;
 
         private GraphicsBuffer m_VisAtlasBuffer;
         private int m_VisAtlasTileCapacity;

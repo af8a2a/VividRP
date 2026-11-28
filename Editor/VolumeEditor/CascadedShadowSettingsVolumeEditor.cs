@@ -59,6 +59,10 @@ namespace VividRP.Editor
 
         private SerializedDataParameter m_EnableCSM;
         private SerializedDataParameter m_EnableVirtualShadowMapPrototype;
+        private SerializedDataParameter m_VirtualShadowMapLocalLights;
+        private SerializedDataParameter m_VirtualShadowMapLocalResolution;
+        private SerializedDataParameter m_VirtualShadowMapResolutionLodBiasLocal;
+        private SerializedDataParameter m_VirtualShadowMapDistantLightPixelThreshold;
         private SerializedDataParameter m_VirtualShadowMapResolution;
         private SerializedDataParameter m_VirtualShadowMapPhysicalPageBudget;
         private SerializedDataParameter m_VirtualShadowMapLastLevel;
@@ -102,6 +106,10 @@ namespace VividRP.Editor
             var fetcher = new PropertyFetcher<CascadedShadowSettingsVolume>(serializedObject);
             m_EnableCSM = Unpack(fetcher.Find(x => x.enableCSM));
             m_EnableVirtualShadowMapPrototype = Unpack(fetcher.Find(x => x.enableVirtualShadowMapPrototype));
+            m_VirtualShadowMapLocalLights = Unpack(fetcher.Find(x => x.virtualShadowMapLocalLights));
+            m_VirtualShadowMapLocalResolution = Unpack(fetcher.Find(x => x.virtualShadowMapLocalResolution));
+            m_VirtualShadowMapResolutionLodBiasLocal = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBiasLocal));
+            m_VirtualShadowMapDistantLightPixelThreshold = Unpack(fetcher.Find(x => x.virtualShadowMapDistantLightPixelThreshold));
             m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
             m_VirtualShadowMapPhysicalPageBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPhysicalPageBudget));
             m_VirtualShadowMapLastLevel = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapLastLevel));
@@ -137,6 +145,10 @@ namespace VividRP.Editor
         {
             PropertyField(m_EnableCSM, s_StateLabel);
             PropertyField(m_EnableVirtualShadowMapPrototype, s_EnableVirtualShadowMapPrototypeLabel);
+            PropertyField(m_VirtualShadowMapLocalLights);
+            PropertyField(m_VirtualShadowMapLocalResolution);
+            PropertyField(m_VirtualShadowMapResolutionLodBiasLocal);
+            PropertyField(m_VirtualShadowMapDistantLightPixelThreshold);
             PropertyField(m_VirtualShadowMapResolution);
             PropertyField(m_VirtualShadowMapPhysicalPageBudget);
             PropertyField(m_VirtualShadowMapFirstLevel);

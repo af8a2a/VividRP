@@ -21,6 +21,7 @@ uint _VSMLocalForcedLODDepth;
 float _VSMLocalLODErrorThreshold;
 int _VSMLocalUseDrawSet;
 
+StructuredBuffer<uint> _VSMPageRequestFlagsRO;
 StructuredBuffer<uint> _VSMLocalDrawSetIndices;
 RWStructuredBuffer<VividVSMActiveView> _VSMUnifiedActiveViewsRW;
 StructuredBuffer<VividVSMActiveView> _VSMUnifiedActiveViews;
@@ -31,7 +32,10 @@ StructuredBuffer<uint2> _VSMLocalInstanceJobs;
 RWByteAddressBuffer _VSMLocalJobDispatchArgsRW;
 RWStructuredBuffer<uint4> _VSMLocalMeshletPageRequestsRW;
 RWByteAddressBuffer _VSMLocalMeshletPageIndirectArgsRW;
-RWStructuredBuffer<uint> _VSMLocalAllocatedCountRW;
+
+// Slot 4 of _VSMPrototypeAllocatorCounters tracks retained + newly allocated local physical pages,
+// keeping VSMAllocateNewPageMappingsUnified strictly within the 8-UAV hardware/Unity dispatch limit.
+#define VIVID_VSM_ALLOC_COUNTER_LOCAL_PAGES 4u
 
 // Decodes linear localEntry within a VSM's mip chain into (mipLevel, pageXY).
 bool VividVSMDecodeProjectionLocalEntry(VividVSMProjection proj, uint localEntry,
@@ -75,7 +79,7 @@ void VSMUpdatePhysicalPagesUnified(uint3 id : SV_DispatchThreadID)
 {
     uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
     if (id.x >= capacity) return;
-    if (id.x == 0u) _VSMLocalAllocatedCountRW[0] = 0u;
+    if (id.x == 0u) _VSMPrototypeAllocatorCounters[VIVID_VSM_ALLOC_COUNTER_LOCAL_PAGES] = 0u;
     uint slot = _VSMPhysicalPageLists[id.x];
     uint owner = _VSMPrototypePhysicalPageOwners[slot];
     bool requested = false;
@@ -85,7 +89,7 @@ void VSMUpdatePhysicalPagesUnified(uint3 id : SV_DispatchThreadID)
         uint page = owner - 1u;
         uint4 metadata = _VSMPrototypePageMetadata[page];
         metadata.w = metadata.x;
-        requested = (_VSMPageRequestFlags[page] & kVSMPageRequested) != 0u;
+        requested = (_VSMPageRequestFlagsRO[page] & kVSMPageRequested) != 0u;
         if (!requested && (uint)_VSMPrototypeFeedbackFrameIndex - metadata.z > 1000u)
         {
             _VSMPrototypeWritablePageTable[page] = 0u;
@@ -112,7 +116,7 @@ void VSMUpdatePhysicalPagesUnified(uint3 id : SV_DispatchThreadID)
         }
     }
     if (owner != 0u) InterlockedAdd(_VSMPrototypeAllocatorCounters[0], 1u);
-    if (isLocalRetained) InterlockedAdd(_VSMLocalAllocatedCountRW[0], 1u);
+    if (isLocalRetained) InterlockedAdd(_VSMPrototypeAllocatorCounters[VIVID_VSM_ALLOC_COUNTER_LOCAL_PAGES], 1u);
     if (requested) VSMPushPhysicalPageList(2u * capacity, 4u * capacity + 1u, slot);
     if (owner == 0u) VSMPushPhysicalPageList(3u * capacity, 4u * capacity + 2u, slot);
     _VSMPhysicalPageLists[id.x] = requested || owner == 0u ? 0xffffffffu : slot;
@@ -120,6 +124,7 @@ void VSMUpdatePhysicalPagesUnified(uint3 id : SV_DispatchThreadID)
 
 // Unified 2D physical page allocator: (DivRoundUp(_VSMUnifiedMaxEntriesPerVSM, 64), _VSMProjectionCount, 1).
 // Writes authoritative _VSMPhysicalPageDescriptors[slot] and enforces optional local page budget cap.
+// Uses exactly 7 UAVs (<= 8 Unity dispatch limit) by reading _VSMPageRequestFlagsRO as SRV.
 [numthreads(64, 1, 1)]
 void VSMAllocateNewPageMappingsUnified(uint3 id : SV_DispatchThreadID)
 {
@@ -135,7 +140,7 @@ void VSMAllocateNewPageMappingsUnified(uint3 id : SV_DispatchThreadID)
     if (page >= (uint)_VSMPrototypePageTableEntryCount)
         return;
 
-    uint request = _VSMPageRequestFlags[page];
+    uint request = _VSMPageRequestFlagsRO[page];
     if ((request & kVSMPageRequested) == 0u)
         return;
 
@@ -150,9 +155,6 @@ void VSMAllocateNewPageMappingsUnified(uint3 id : SV_DispatchThreadID)
 
     uint capacity = (uint)_VSMPrototypePhysicalPageCapacity;
     InterlockedAdd(_VSMPrototypeAllocatorCounters[1], 1u);
-    InterlockedAdd(_VSMPagePressureRW[0].z, 1u);
-    bool primary = (request & kVSMPagePrimaryRequested) != 0u;
-    if (primary) InterlockedAdd(_VSMPagePressureRW[1].x, 1u);
 
     uint4 metadata = _VSMPrototypePageMetadata[page];
     if ((metadata.x & kVSMPageAllocated) == 0u)
@@ -161,10 +163,10 @@ void VSMAllocateNewPageMappingsUnified(uint3 id : SV_DispatchThreadID)
         if (!isDirectional && !isEssential && _VSMLocalMaxPhysicalPages > 0)
         {
             uint prevLocal = 0u;
-            InterlockedAdd(_VSMLocalAllocatedCountRW[0], 1u, prevLocal);
+            InterlockedAdd(_VSMPrototypeAllocatorCounters[VIVID_VSM_ALLOC_COUNTER_LOCAL_PAGES], 1u, prevLocal);
             if (prevLocal >= (uint)_VSMLocalMaxPhysicalPages)
             {
-                InterlockedAdd(_VSMLocalAllocatedCountRW[0], 0xffffffffu);
+                InterlockedAdd(_VSMPrototypeAllocatorCounters[VIVID_VSM_ALLOC_COUNTER_LOCAL_PAGES], 0xffffffffu);
                 allowAllocate = false;
             }
         }
@@ -221,11 +223,8 @@ void VSMAllocateNewPageMappingsUnified(uint3 id : SV_DispatchThreadID)
             metadata.w |= kVSMPageDebugOverflow;
             _VSMPrototypePageMetadata[page] = metadata;
             InterlockedAdd(_VSMPrototypeAllocatorCounters[3], 1u);
-            InterlockedAdd(_VSMPagePressureRW[0].w, 1u);
         }
     }
-    if (primary && (metadata.x & kVSMPageAllocated) != 0u)
-        InterlockedAdd(_VSMPagePressureRW[1].y, 1u);
 }
 
 // Clears unified per-(VSMId, Mip) UncachedPageRectBounds and H-mip hierarchy nodes.

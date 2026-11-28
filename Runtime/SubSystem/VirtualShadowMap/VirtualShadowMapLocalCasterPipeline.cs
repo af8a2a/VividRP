@@ -54,6 +54,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static readonly int PageMetadataId = Shader.PropertyToID("_VSMPrototypePageMetadata");
         private static readonly int RemapPageMetadataId = Shader.PropertyToID("_VSMRemapPageMetadata");
         private static readonly int PageRequestFlagsId = Shader.PropertyToID("_VSMPageRequestFlags");
+        private static readonly int PageRequestFlagsROId = Shader.PropertyToID("_VSMPageRequestFlagsRO");
         private static readonly int PhysicalPageOwnersId = Shader.PropertyToID("_VSMPrototypePhysicalPageOwners");
         private static readonly int AllocatorCountersId = Shader.PropertyToID("_VSMPrototypeAllocatorCounters");
         private static readonly int PageWorkListId = Shader.PropertyToID("_VSMPageWorkList");
@@ -329,9 +330,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                     cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, VirtualShadowMapPrototypeRuntime.PhysicalPageDescriptorsId, m_PhysicalPageDescriptors);
                     cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, PageMetadataId, m_PageMetadata);
                     cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, WritablePageTableId, m_PageTable);
-                    cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, PageRequestFlagsId, localGrid.LocalPageRequestFlags);
+                    cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, PageRequestFlagsROId, localGrid.LocalPageRequestFlags);
                     cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, AllocatorCountersId, m_AllocatorCounters);
-                    cmd.SetComputeBufferParam(shader, kernels.UpdatePhysicalPagesUnified, LocalAllocatedCountRWId, m_LocalAllocatedCount);
                     cmd.DispatchCompute(shader, kernels.UpdatePhysicalPagesUnified, physGroups, 1, 1);
 
                     cmd.SetComputeBufferParam(shader, kernels.PackAvailablePages, VirtualShadowMapPrototypeRuntime.PhysicalPageListsId, m_PhysicalPageLists);
@@ -344,7 +344,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                     cmd.SetComputeIntParam(shader, AllocateStartVSMId, dirCount);
                     cmd.SetComputeIntParam(shader, LocalMaxPhysicalPagesId, 0);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, VirtualShadowMapProjectionSet.BufferId, localGrid.UnifiedProjections);
-                    cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, PageRequestFlagsId, localGrid.LocalPageRequestFlags);
+                    cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, PageRequestFlagsROId, localGrid.LocalPageRequestFlags);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, PageMetadataId, m_PageMetadata);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, WritablePageTableId, m_PageTable);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, PhysicalPageOwnersId, m_PhysicalPageOwners);
@@ -352,8 +352,6 @@ namespace VividRP.Runtime.VirtualShadowMap
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasksId, m_PhysicalReceiverMasks);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, VirtualShadowMapPrototypeRuntime.PhysicalPageListsId, m_PhysicalPageLists);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, AllocatorCountersId, m_AllocatorCounters);
-                    cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, VirtualShadowMapReceiverQuality.PressureRWId, m_PagePressure);
-                    cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, LocalAllocatedCountRWId, m_LocalAllocatedCount);
 
                     int entryGroups = CoreUtils.DivRoundUp(m_MaxEntriesPerVSM, 64);
                     // Only allocate local projections (Pass 1 coarse/single-page first, then Pass 2 fine pages).
@@ -561,6 +559,8 @@ namespace VividRP.Runtime.VirtualShadowMap
 
             cmd.SetGlobalInt(CasterLayerId, casterLayer);
             cmd.SetGlobalInt(UnifiedViewModeId, 1);
+            cmd.SetGlobalInt(PageSizeId, VirtualShadowMapPrototypeRuntime.PageSize);
+            cmd.SetGlobalInt(RasterWindowPagesId, VirtualShadowMapPrototypeRuntime.RasterWindowScale);
             cmd.SetGlobalBuffer(UnifiedActiveViewsId, m_UnifiedActiveViews);
             cmd.SetGlobalBuffer(VirtualShadowMapProjectionSet.BufferId, localGrid.UnifiedProjections);
             cmd.SetGlobalBuffer(PageTableId, m_PageTable);
@@ -722,10 +722,10 @@ namespace VividRP.Runtime.VirtualShadowMap
 
         private void EnsureStaticWorkBuffers()
         {
-            if (m_AllocatorCounters == null || !m_AllocatorCounters.IsValid())
+            if (m_AllocatorCounters == null || !m_AllocatorCounters.IsValid() || m_AllocatorCounters.count < 8)
             {
                 m_AllocatorCounters?.Dispose();
-                m_AllocatorCounters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint))
+                m_AllocatorCounters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, sizeof(uint))
                 { name = "VSMLocalAllocatorCounters" };
             }
             if (m_PagePressure == null || !m_PagePressure.IsValid())

@@ -8,6 +8,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
+    [FrameResourceSlot(FrameResourceSlots.ClusteredLightGridName, AccessFlags.Write)]
     public class LightGridPass : ComputePass
     {
         internal const int ClusterTileSize = 32;

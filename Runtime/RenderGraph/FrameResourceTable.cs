@@ -72,6 +72,8 @@ namespace VividRP.Runtime
         public const string LumenSpecularReflectionName = "Vivid.Frame.LumenSpecularReflection";
         public const string LumenDebugOutputName = "Vivid.Frame.LumenDebugOutput";
         public const string SceneColorPrePostProcessName = "Vivid.Frame.SceneColorPrePostProcess";
+        public const string ClusteredLightGridName = "Vivid.Frame.ClusteredLightGrid";
+        public const string VirtualShadowMapLocalMaskName = "Vivid.Frame.VirtualShadowMapLocalMask";
 
         public static readonly FrameResourceSlotId SubstrateClosureBuffer =
             FrameResourceSlotId.Create(SubstrateClosureBufferName);

@@ -10,6 +10,7 @@ namespace VividRP.Runtime.RenderPass.Core
     [FrameResourceSlot(FrameResourceSlots.LumenBentNormalName, AccessFlags.Read, Optional = true)]
     [FrameResourceSlot(FrameResourceSlots.LumenRoughSpecularName, AccessFlags.Read, Optional = true)]
     [FrameResourceSlot(FrameResourceSlots.LumenSpecularReflectionName, AccessFlags.Read, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.VirtualShadowMapLocalMaskName, AccessFlags.Read, Optional = true)]
     public class DeferredLightingPass : ComputePass, IStablePassResourceLayout
     {
         private const int ClearThreadGroupSizeX = 8;

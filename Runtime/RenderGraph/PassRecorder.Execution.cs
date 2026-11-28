@@ -1039,6 +1039,8 @@ namespace VividRP.Runtime
                         indexedPasses,
                         indexedPassTypes);
                 }
+
+                EnsureFrameResourceSlotOrdering(session);
             }
 
             foreach (var pass in session.RenderPasses)
@@ -1056,6 +1058,188 @@ namespace VividRP.Runtime
                 s_CompiledSessions[graphAsset] = session;
 
             ActivateSession(session);
+        }
+
+        // Enforces [FrameResourceSlot] Write -> ReadWrite -> Read ordering even for pre-imported
+        // RenderGraph assets that have not yet been reimported after new slot attributes are added.
+        private static void EnsureFrameResourceSlotOrdering(CompiledRenderGraphSession session)
+        {
+            if (session == null || session.RenderPasses.Count <= 1)
+                return;
+
+            int count = session.RenderPasses.Count;
+            var slotMaps = new Dictionary<string, AccessFlags>[count];
+            bool hasAnySlot = false;
+            for (int i = 0; i < count; i++)
+            {
+                var pass = session.RenderPasses[i];
+                if (pass == null)
+                    continue;
+                Dictionary<string, AccessFlags> map = null;
+                foreach (var attr in pass.GetType().EnumerateFrameResourceSlotAccesses())
+                {
+                    if (string.IsNullOrWhiteSpace(attr.SlotName))
+                        continue;
+                    map ??= new Dictionary<string, AccessFlags>(StringComparer.Ordinal);
+                    map[attr.SlotName] = map.TryGetValue(attr.SlotName, out var existing)
+                        ? existing | attr.Access
+                        : attr.Access;
+                    hasAnySlot = true;
+                }
+                slotMaps[i] = map;
+            }
+
+            if (!hasAnySlot)
+                return;
+
+            var deps = new HashSet<int>[count];
+            for (int i = 0; i < count; i++)
+                deps[i] = new HashSet<int>();
+
+            bool needsReorder = false;
+            for (int i = 0; i < count; i++)
+            {
+                var readerMap = slotMaps[i];
+                if (readerMap == null)
+                    continue;
+                foreach (var kv in readerMap)
+                {
+                    var access = kv.Value;
+                    if ((access & AccessFlags.Read) == 0)
+                        continue;
+                    bool currentWrites = (access & AccessFlags.Write) != 0;
+                    for (int j = 0; j < count; j++)
+                    {
+                        if (j == i)
+                            continue;
+                        var writerMap = slotMaps[j];
+                        if (writerMap == null || !writerMap.TryGetValue(kv.Key, out var writerAccess))
+                            continue;
+                        if ((writerAccess & AccessFlags.Write) == 0)
+                            continue;
+                        if (!currentWrites || (writerAccess & AccessFlags.Read) == 0)
+                        {
+                            deps[i].Add(j);
+                            if (j > i)
+                                needsReorder = true;
+                        }
+                    }
+                }
+            }
+
+            if (!needsReorder)
+                return;
+
+            static bool BindingWritesResource(CompiledRenderGraphSession s, IRenderPass pass, RenderGraphPassResourceBinding b)
+            {
+                if (pass == null || b == null || string.IsNullOrEmpty(b.FieldName))
+                    return false;
+                var meta = PassTypeMetadataCache.GetOrCreate(pass.GetType());
+                if (meta == null || !meta.TryGetResourceField(b.FieldName, out var fieldMeta) || fieldMeta?.ResourceAttribute == null)
+                    return false;
+                AccessFlags access = fieldMeta.ResourceAttribute.Access;
+                if (s.PassResourceAccessOverrides.TryGetValue(pass, out var overrides)
+                    && overrides != null
+                    && overrides.TryGetValue(fieldMeta.Field.Name, out var overrideAccess))
+                {
+                    access = overrideAccess;
+                }
+                return (access & AccessFlags.Write) != 0;
+            }
+
+            // Preserve existing PassField and shared-resource WAW/WAR/RAW dependencies (excluding benign RAR).
+            for (int i = 0; i < count; i++)
+            {
+                var passI = session.RenderPasses[i];
+                var defI = i < session.RuntimePassDefinitions.Count ? session.RuntimePassDefinitions[i] : null;
+                if (defI?.ResourceBindings == null)
+                    continue;
+                for (int b = 0; b < defI.ResourceBindings.Count; b++)
+                {
+                    var binding = defI.ResourceBindings[b];
+                    if (binding == null)
+                        continue;
+                    if (binding.SourceKind == RenderGraphPassBindingSourceKind.PassField)
+                    {
+                        if (binding.SourcePassIndex >= 0 && binding.SourcePassIndex < count && binding.SourcePassIndex != i)
+                            deps[i].Add(binding.SourcePassIndex);
+                        continue;
+                    }
+                    if (binding.SourceKind != RenderGraphPassBindingSourceKind.Resource)
+                        continue;
+                    bool iWrites = BindingWritesResource(session, passI, binding);
+                    for (int j = 0; j < i; j++)
+                    {
+                        var passJ = session.RenderPasses[j];
+                        var defJ = j < session.RuntimePassDefinitions.Count ? session.RuntimePassDefinitions[j] : null;
+                        if (defJ?.ResourceBindings == null)
+                            continue;
+                        for (int bj = 0; bj < defJ.ResourceBindings.Count; bj++)
+                        {
+                            var other = defJ.ResourceBindings[bj];
+                            if (other == null || other.SourceKind != RenderGraphPassBindingSourceKind.Resource)
+                                continue;
+                            if (other.ResourceKind == binding.ResourceKind && other.ResourceIndex == binding.ResourceIndex)
+                            {
+                                if (iWrites || BindingWritesResource(session, passJ, other))
+                                    deps[i].Add(j);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Stable Kahn topological sort (always pick lowest original index among ready nodes).
+            var indegree = new int[count];
+            var dependents = new List<int>[count];
+            for (int i = 0; i < count; i++)
+                dependents[i] = new List<int>();
+            for (int i = 0; i < count; i++)
+            {
+                indegree[i] = deps[i].Count;
+                foreach (int dep in deps[i])
+                    dependents[dep].Add(i);
+            }
+
+            var ordered = new List<int>(count);
+            var visited = new bool[count];
+            for (int step = 0; step < count; step++)
+            {
+                int next = -1;
+                for (int i = 0; i < count; i++)
+                {
+                    if (!visited[i] && indegree[i] == 0)
+                    {
+                        next = i;
+                        break;
+                    }
+                }
+                if (next < 0)
+                    return; // Cycle guard: leave existing order unchanged.
+                visited[next] = true;
+                ordered.Add(next);
+                var nextDependents = dependents[next];
+                for (int k = 0; k < nextDependents.Count; k++)
+                    indegree[nextDependents[k]]--;
+            }
+
+            var reorderedPasses = new List<IRenderPass>(count);
+            var reorderedDefs = new List<RenderGraphPassDefinition>(count);
+            for (int newIdx = 0; newIdx < count; newIdx++)
+            {
+                int oldIdx = ordered[newIdx];
+                reorderedPasses.Add(session.RenderPasses[oldIdx]);
+                reorderedDefs.Add(oldIdx < session.RuntimePassDefinitions.Count ? session.RuntimePassDefinitions[oldIdx] : null);
+            }
+
+            session.RenderPasses.Clear();
+            session.RenderPasses.AddRange(reorderedPasses);
+            session.RuntimePassDefinitions.Clear();
+            session.RuntimePassDefinitions.AddRange(reorderedDefs);
+            session.PassIndices.Clear();
+            for (int i = 0; i < count; i++)
+                session.PassIndices[session.RenderPasses[i]] = i;
         }
 
         internal static bool[] GetPassActiveStatesBuffer(int passCount)

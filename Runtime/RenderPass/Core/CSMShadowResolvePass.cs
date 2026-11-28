@@ -6,6 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [FrameResourceSlot(FrameResourceSlots.VirtualShadowMapLocalMaskName, AccessFlags.ReadWrite, Optional = true)]
     public sealed class CSMShadowResolvePass : ComputePass, IBlueNoiseConsumerPass
     {
 #if UNITY_EDITOR

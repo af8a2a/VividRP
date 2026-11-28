@@ -150,9 +150,8 @@ namespace VividRP.Editor.Tests
             using var physDescs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(uint) * 2);
             using var physLists = new GraphicsBuffer(GraphicsBuffer.Target.Structured, listWords, sizeof(uint));
             using var physMasks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(uint) * 2);
-            using var allocCounters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, sizeof(uint));
+            using var allocCounters = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, sizeof(uint));
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint) * 4);
-            using var localAllocCount = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
             using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, totalHierarchy, sizeof(uint) * 3);
             using var boundRects = new GraphicsBuffer(GraphicsBuffer.Target.Structured, totalBoundRects * 2, sizeof(uint) * 4);
             using var activeViews = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 32, VividVSMActiveView.Stride);
@@ -169,7 +168,6 @@ namespace VividRP.Editor.Tests
                 physDescs.SetData(new uint2[capacity]);
                 physMasks.SetData(new uint2[capacity]);
                 pressure.SetData(new uint4[3]);
-                localAllocCount.SetData(new uint[] { 0u });
 
                 var initLists = new uint[listWords];
                 for (int s = 0; s < capacity; s++) initLists[s] = (uint)s;
@@ -221,9 +219,8 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kUpdate, "_VSMPhysicalPageDescriptors", physDescs);
                 shader.SetBuffer(kUpdate, "_VSMPrototypePageMetadata", pageMeta);
                 shader.SetBuffer(kUpdate, "_VSMPrototypeWritablePageTable", pageTable);
-                shader.SetBuffer(kUpdate, "_VSMPageRequestFlags", reqFlags);
+                shader.SetBuffer(kUpdate, "_VSMPageRequestFlagsRO", reqFlags);
                 shader.SetBuffer(kUpdate, "_VSMPrototypeAllocatorCounters", allocCounters);
-                shader.SetBuffer(kUpdate, "_VSMLocalAllocatedCountRW", localAllocCount);
                 shader.Dispatch(kUpdate, 1, 1, 1);
 
                 shader.SetBuffer(kPack, "_VSMPhysicalPageLists", physLists);
@@ -233,7 +230,7 @@ namespace VividRP.Editor.Tests
                 shader.Dispatch(kAppendEmpty, 1, 1, 1);
 
                 shader.SetBuffer(kAlloc, "_VSMProjections", projBuf);
-                shader.SetBuffer(kAlloc, "_VSMPageRequestFlags", reqFlags);
+                shader.SetBuffer(kAlloc, "_VSMPageRequestFlagsRO", reqFlags);
                 shader.SetBuffer(kAlloc, "_VSMPrototypePageMetadata", pageMeta);
                 shader.SetBuffer(kAlloc, "_VSMPrototypeWritablePageTable", pageTable);
                 shader.SetBuffer(kAlloc, "_VSMPrototypePhysicalPageOwners", physOwners);
@@ -241,8 +238,6 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kAlloc, "_VSMPhysicalReceiverMasks", physMasks);
                 shader.SetBuffer(kAlloc, "_VSMPhysicalPageLists", physLists);
                 shader.SetBuffer(kAlloc, "_VSMPrototypeAllocatorCounters", allocCounters);
-                shader.SetBuffer(kAlloc, "_VSMPagePressureRW", pressure);
-                shader.SetBuffer(kAlloc, "_VSMLocalAllocatedCountRW", localAllocCount);
                 shader.Dispatch(kAlloc, 1, projCount, 1);
 
                 // Verify authoritative descriptors written for both allocated slots.

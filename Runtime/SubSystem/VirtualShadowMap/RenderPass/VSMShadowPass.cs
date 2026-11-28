@@ -12,6 +12,8 @@ using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [FrameResourceSlot(FrameResourceSlots.ClusteredLightGridName, AccessFlags.Read, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.VirtualShadowMapLocalMaskName, AccessFlags.Write)]
     public sealed class VSMShadowPass : ShadowCasterPass
     {
         private static readonly int RasterWindowPagesId = Shader.PropertyToID("_VSMRasterWindowPages");

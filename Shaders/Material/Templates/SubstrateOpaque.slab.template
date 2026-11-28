@@ -458,6 +458,30 @@ SubShader
             }
             #else
             {
+                #if defined(VIVID_SLAB_SUPPORTS_HAIR_CLOSURE)
+                {
+                    VividSubstrateHairInputs hairInputs = VividCreateDefaultSubstrateHairInputs();
+                    float3 hairSummaryNormalWS = ctx.geometryNormalWS;
+                    if (VividSlabTryEvaluateHairClosure(ctx, hairInputs, hairSummaryNormalWS))
+                    {
+                        if (_WriteSubstrateClosureBuffer != 0u)
+                        {
+                            VividWriteSubstrateHair(
+                                _OutSubstrateClosureBuffer,
+                                pixelCoord,
+                                hairInputs,
+                                VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS);
+                        }
+                        VividSurfaceSummaryData hairSummary = VividBuildHairSubstrateTopLayerSummary(
+                            hairInputs,
+                            hairSummaryNormalWS,
+                            true,
+                            true);
+                        return VividPackSurfaceSummaryGBuffer(hairSummary);
+                    }
+                }
+                #endif
+
                 VividOpenPBRV2Inputs v2Inputs;
                 float ambientOcclusion = 1.0f;
                 VividSlabEvaluateGraphSurface(ctx, v2Inputs, ambientOcclusion);
@@ -678,6 +702,30 @@ SubShader
             }
             #else
             {
+                #if defined(VIVID_SLAB_SUPPORTS_HAIR_CLOSURE)
+                {
+                    VividSubstrateHairInputs hairInputs = VividCreateDefaultSubstrateHairInputs();
+                    float3 hairSummaryNormalWS = ctx.geometryNormalWS;
+                    if (VividSlabTryEvaluateHairClosure(ctx, hairInputs, hairSummaryNormalWS))
+                    {
+                        if (_WriteSubstrateClosureBuffer != 0u)
+                        {
+                            VividWriteSubstrateHair(
+                                _OutSubstrateClosureBuffer,
+                                pixelCoord,
+                                hairInputs,
+                                VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS);
+                        }
+                        VividSurfaceSummaryData hairSummary = VividBuildHairSubstrateTopLayerSummary(
+                            hairInputs,
+                            hairSummaryNormalWS,
+                            true,
+                            true);
+                        return VividPackSurfaceSummaryGBuffer(hairSummary);
+                    }
+                }
+                #endif
+
                 VividOpenPBRV2Inputs v2Inputs;
                 float ambientOcclusion = 1.0f;
                 VividSlabEvaluateGraphSurface(ctx, v2Inputs, ambientOcclusion);

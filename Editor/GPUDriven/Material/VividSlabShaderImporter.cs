@@ -49,7 +49,7 @@ namespace VividRP.Editor.GPUDriven
     /// </list>
     /// Automatically reimports when linked <c>.vmatg</c> MaterialGraphs or base templates change.
     /// </summary>
-    [ScriptedImporter(12, Extension)]
+    [ScriptedImporter(13, Extension)]
     internal sealed class VividSlabShaderImporter : ScriptedImporter
     {
         internal const string Extension = "slab.shader";
@@ -67,6 +67,8 @@ namespace VividRP.Editor.GPUDriven
             "Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl",
             "Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl",
             "Shaders/Core/Public/VividSlabSurfaceContract.hlsl",
+            "Shaders/Core/Public/VividSubstrateBuffer.hlsl",
+            "Shaders/Core/Public/VividHairFurBSDF.hlsl",
         };
 
         public override void OnImportAsset(AssetImportContext ctx)

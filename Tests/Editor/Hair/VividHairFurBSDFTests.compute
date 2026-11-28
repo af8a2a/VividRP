@@ -2,10 +2,13 @@
 #pragma kernel EvaluateWhiteFurnace
 #pragma kernel EvaluateMedullaAndDualScatter
 #pragma kernel EvaluateDegenerateCases
+#pragma kernel WriteSubstrateHairClosure
+#pragma kernel ReadAndEvalSubstrateHairClosure
 #pragma use_dxc
 #pragma target 5.0
 
 #include "../../../Shaders/Core/Public/VividHairFurBSDF.hlsl"
+#include "../../../Shaders/Core/Public/VividSubstrateBuffer.hlsl"
 #include "../../../Shaders/Material/Hair/Vendor/RTXCR/HairChiangBSDF.hlsli"
 
 // Output buffer layout:
@@ -20,6 +23,8 @@
 //   EvaluateDegenerateCases:
 //     [0..7]    : Finite/non-negative checks for extreme grazing / parallel / zero-color inputs
 RWStructuredBuffer<float4> _Output;
+RWTexture2DArray<uint> _HairClosureRW;
+Texture2DArray<uint> _HairClosureSRV;
 
 // 8-point symmetric Gauss-Legendre nodes/weights on [0, 1] -> 16-point quadrature on [-1, 1]
 static const float k_GLNodes[8] =
@@ -313,4 +318,91 @@ void EvaluateDegenerateCases(uint3 dispatchThreadId : SV_DispatchThreadID)
     _Output[2] = float4(r2, 1.0f);
     _Output[3] = float4(r3, 1.0f);
     _Output[4] = float4(r4, 1.0f);
+}
+
+VividSubstrateHairInputs BuildReferenceSubstrateHairInputs()
+{
+    VividSubstrateHairInputs hair = VividCreateDefaultSubstrateHairInputs();
+    hair.baseColor = float3(0.72f, 0.44f, 0.21f);
+    hair.tangentWS = normalize(float3(0.35f, 0.85f, -0.39f));
+    hair.roughness = 0.32f;
+    hair.radialRoughness = 0.48f;
+    hair.cuticleAngleRad = 0.06f;
+    hair.specular = 0.60f;
+    hair.scatter = 0.85f;
+    hair.backlit = 0.75f;
+    hair.medullaWeight = 0.60f;
+    hair.medullaRoughness = 0.55f;
+    hair.shellDepth = 0.65f;
+    hair.ambientOcclusion = 0.82f;
+    return hair;
+}
+
+[numthreads(1, 1, 1)]
+void WriteSubstrateHairClosure(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    VividSubstrateHairInputs hair = BuildReferenceSubstrateHairInputs();
+    VividWriteSubstrateHair(_HairClosureRW, uint2(0u, 0u), hair, VIVID_SUBSTRATE_FLAG_RECEIVE_DECALS);
+}
+
+[numthreads(1, 1, 1)]
+void ReadAndEvalSubstrateHairClosure(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    VividSubstrateHairInputs refHair = BuildReferenceSubstrateHairInputs();
+
+    uint rawHeaderWord = _HairClosureSRV.Load(int4(0, 0, 0, 0));
+    uint tileClassBit = VividGetSubstrateTileClassBit(rawHeaderWord);
+
+    VividSubstrateHairInputs unpacked;
+    VividSubstratePixelHeader header;
+    bool ok = VividTryLoadSubstrateHair(_HairClosureSRV, uint2(0u, 0u), unpacked, header);
+
+    float3 N = normalize(float3(0.0f, 0.2f, 0.98f));
+    float3 V = normalize(float3(-0.25f, 0.15f, 0.956f));
+    float3 L = normalize(float3(0.45f, 0.55f, 0.703f));
+
+    VividHairFurBSDFInputs refBsdf = VividCreateDefaultHairFurBSDFInputs();
+    refBsdf.baseColor = refHair.baseColor;
+    refBsdf.tangentWS = refHair.tangentWS;
+    refBsdf.geomNormalWS = N;
+    refBsdf.roughness = refHair.roughness;
+    refBsdf.radialRoughness = refHair.radialRoughness;
+    refBsdf.cuticleAngleRad = refHair.cuticleAngleRad;
+    refBsdf.specular = refHair.specular;
+    refBsdf.scatter = refHair.scatter;
+    refBsdf.backlit = refHair.backlit;
+    refBsdf.medullaWeight = refHair.medullaWeight;
+    refBsdf.medullaRoughness = refHair.medullaRoughness;
+    refBsdf.shellDepth = refHair.shellDepth;
+    refBsdf.ambientOcclusion = refHair.ambientOcclusion;
+
+    VividHairFurBSDFInputs unpackedBsdf = VividCreateDefaultHairFurBSDFInputs();
+    unpackedBsdf.baseColor = unpacked.baseColor;
+    unpackedBsdf.tangentWS = unpacked.tangentWS;
+    unpackedBsdf.geomNormalWS = N;
+    unpackedBsdf.roughness = unpacked.roughness;
+    unpackedBsdf.radialRoughness = unpacked.radialRoughness;
+    unpackedBsdf.cuticleAngleRad = unpacked.cuticleAngleRad;
+    unpackedBsdf.specular = unpacked.specular;
+    unpackedBsdf.scatter = unpacked.scatter;
+    unpackedBsdf.backlit = unpacked.backlit;
+    unpackedBsdf.medullaWeight = unpacked.medullaWeight;
+    unpackedBsdf.medullaRoughness = unpacked.medullaRoughness;
+    unpackedBsdf.shellDepth = unpacked.shellDepth;
+    unpackedBsdf.ambientOcclusion = unpacked.ambientOcclusion;
+
+    float3 refEval = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(refBsdf, V, L, 0.75f));
+    float3 unpackedEval = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(unpackedBsdf, V, L, 0.75f));
+
+    VividSurfaceSummaryData summary = VividBuildHairSubstrateTopLayerSummary(unpacked, N, false, true);
+
+    _Output[0] = float4(ok ? 1.0f : 0.0f, (float)header.mode, (float)tileClassBit, (float)header.payloadUintCount);
+    _Output[1] = float4(unpacked.baseColor, unpacked.ambientOcclusion);
+    _Output[2] = float4(unpacked.tangentWS, dot(normalize(unpacked.tangentWS), refHair.tangentWS));
+    _Output[3] = float4(unpacked.roughness, unpacked.radialRoughness, unpacked.cuticleAngleRad, unpacked.specular);
+    _Output[4] = float4(unpacked.scatter, unpacked.backlit, unpacked.medullaWeight, unpacked.medullaRoughness);
+    _Output[5] = float4(unpacked.shellDepth, summary.perceptualRoughness, summary.specularF0.r,
+        (float)VividGetDeferredExportClass(summary.deferredExportHeader));
+    _Output[6] = float4(refEval, 1.0f);
+    _Output[7] = float4(unpackedEval, 1.0f);
 }

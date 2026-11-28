@@ -12,6 +12,7 @@ namespace VividRP.Runtime.GPUDriven
         SingleSimple = 1u,
         SingleComplex = 2u,
         MultiClosure = 3u,
+        Hair = 4u,
         Error = 15u,
     }
 
@@ -92,6 +93,11 @@ namespace VividRP.Runtime.GPUDriven
         internal const int HeaderSliceCount = 1;
         internal const int OpenPBRCoreUintCount = 5;
         internal const int OpenPBROpaqueSingleTotalSlices = HeaderSliceCount + OpenPBRCoreUintCount; // 6 uints = 24 B/px
+        internal const int HairCoreUintCount = 5;
+        internal const int HairSingleTotalSlices = HeaderSliceCount + HairCoreUintCount; // 6 uints = 24 B/px
+        internal const uint HairFlagDualScatter = 1u << 0;
+        internal const uint HairFlagMedulla = 1u << 1;
+        internal const float HairMaxCuticleAngleRad = 0.20943951f; // 12 degrees
 
         // Phase 2.1 optional single-closure extension slice counts (written in canonical bit order: Coat -> Fuzz -> Anisotropy)
         internal const int CoatBaseExtUintCount = 2;      // weight/rough/darkening/ior + coatColor/flags
@@ -247,6 +253,87 @@ namespace VividRP.Runtime.GPUDriven
         {
             float range = OpenPBROpaqueContract.MaximumSpecularIor - OpenPBROpaqueContract.MinimumSpecularIor;
             return OpenPBROpaqueContract.MinimumSpecularIor + UnpackUNorm(quantized & 0xFFu, 0xFFu) * range;
+        }
+
+        internal static void PackHairWords(
+            float3 baseColorSrgb,
+            float ambientOcclusion,
+            float roughness,
+            float radialRoughness,
+            float cuticleAngleRad,
+            float specular,
+            float scatter,
+            float backlit,
+            float medullaWeight,
+            float medullaRoughness,
+            float shellDepth,
+            out uint word0,
+            out uint word1,
+            out uint word3,
+            out uint word4)
+        {
+            uint hairFlags = 0u;
+            if (scatter > 1e-4f) hairFlags |= HairFlagDualScatter;
+            if (medullaWeight > 1e-4f) hairFlags |= HairFlagMedulla;
+
+            word0 = ((uint)VividSubstrateClosureType.Hair & ClosureTypeMask) << ClosureTypeShift
+                | (hairFlags & ClosureFeatureBitsMask) << ClosureFeatureBitsShift
+                | PackUNorm(shellDepth, 0xFFu) << ClosureWeightShift
+                | PackUNorm(medullaRoughness, 0xFFu) << ClosureBaseWeightShift;
+
+            word1 = PackUNorm(baseColorSrgb.x, 0xFFu)
+                | (PackUNorm(baseColorSrgb.y, 0xFFu) << 8)
+                | (PackUNorm(baseColorSrgb.z, 0xFFu) << 16)
+                | (PackUNorm(ambientOcclusion, 0xFFu) << 24);
+
+            word3 = PackUNorm(roughness, 0xFFu)
+                | (PackUNorm(radialRoughness, 0xFFu) << 8)
+                | (PackUNorm(cuticleAngleRad / HairMaxCuticleAngleRad, 0xFFu) << 16)
+                | (PackUNorm(specular, 0xFFu) << 24);
+
+            word4 = PackUNorm(scatter, 0xFFu)
+                | (PackUNorm(backlit, 0xFFu) << 8)
+                | (PackUNorm(medullaWeight, 0xFFu) << 16);
+        }
+
+        internal static void UnpackHairWords(
+            uint word0,
+            uint word1,
+            uint word3,
+            uint word4,
+            out VividSubstrateClosureType closureType,
+            out uint hairFlags,
+            out float3 baseColorSrgb,
+            out float ambientOcclusion,
+            out float roughness,
+            out float radialRoughness,
+            out float cuticleAngleRad,
+            out float specular,
+            out float scatter,
+            out float backlit,
+            out float medullaWeight,
+            out float medullaRoughness,
+            out float shellDepth)
+        {
+            closureType = (VividSubstrateClosureType)((word0 >> ClosureTypeShift) & ClosureTypeMask);
+            hairFlags = (word0 >> ClosureFeatureBitsShift) & ClosureFeatureBitsMask;
+            shellDepth = UnpackUNorm((word0 >> ClosureWeightShift) & 0xFFu, 0xFFu);
+            medullaRoughness = UnpackUNorm((word0 >> ClosureBaseWeightShift) & 0xFFu, 0xFFu);
+
+            baseColorSrgb = new float3(
+                UnpackUNorm(word1 & 0xFFu, 0xFFu),
+                UnpackUNorm((word1 >> 8) & 0xFFu, 0xFFu),
+                UnpackUNorm((word1 >> 16) & 0xFFu, 0xFFu));
+            ambientOcclusion = UnpackUNorm((word1 >> 24) & 0xFFu, 0xFFu);
+
+            roughness = UnpackUNorm(word3 & 0xFFu, 0xFFu);
+            radialRoughness = UnpackUNorm((word3 >> 8) & 0xFFu, 0xFFu);
+            cuticleAngleRad = UnpackUNorm((word3 >> 16) & 0xFFu, 0xFFu) * HairMaxCuticleAngleRad;
+            specular = UnpackUNorm((word3 >> 24) & 0xFFu, 0xFFu);
+
+            scatter = UnpackUNorm(word4 & 0xFFu, 0xFFu);
+            backlit = UnpackUNorm((word4 >> 8) & 0xFFu, 0xFFu);
+            medullaWeight = UnpackUNorm((word4 >> 16) & 0xFFu, 0xFFu);
         }
 
         internal static int ComputeSingleClosureExtensionSlices(VividSubstrateFeatureMask features)

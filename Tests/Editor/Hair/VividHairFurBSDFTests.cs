@@ -3,6 +3,8 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.Tests
@@ -148,6 +150,87 @@ namespace VividRP.Editor.Tests
 
             // Pitch-black hair (case 3) still retains non-zero dielectric specular R
             Assert.That(results[3].x, Is.GreaterThan(0.0f), "Pitch-black hair must retain achromatic cuticle R specular.");
+        }
+
+        [Test]
+        public void SubstrateHairClosure_Gpu6SliceRoundTrip_PreservesFieldsRoutingAndBsdfResponse()
+        {
+            ComputeShader compute = LoadComputeOrIgnore();
+
+            var closureTex = new RenderTexture(1, 1, 0, GraphicsFormat.R32_UInt)
+            {
+                dimension = TextureDimension.Tex2DArray,
+                volumeDepth = VividSubstrateContract.HairSingleTotalSlices,
+                enableRandomWrite = true,
+            };
+            closureTex.Create();
+
+            try
+            {
+                int writeKernel = compute.FindKernel("WriteSubstrateHairClosure");
+                int readKernel = compute.FindKernel("ReadAndEvalSubstrateHairClosure");
+
+                using var outputBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 8, sizeof(float) * 4);
+                outputBuffer.SetData(new float4[8]);
+
+                compute.SetTexture(writeKernel, "_HairClosureRW", closureTex);
+                compute.Dispatch(writeKernel, 1, 1, 1);
+
+                compute.SetTexture(readKernel, "_HairClosureSRV", closureTex);
+                compute.SetBuffer(readKernel, "_Output", outputBuffer);
+                compute.Dispatch(readKernel, 1, 1, 1);
+
+                var results = new float4[8];
+                outputBuffer.GetData(results);
+
+                // [0]: ok, header.mode (4 = HAIR), tileClassBit (8 = VIVID_DEFERRED_CLASS_BIT_CATCH_ALL), payloadUintCount (5)
+                Assert.That(results[0].x, Is.EqualTo(1.0f), "VividTryLoadSubstrateHair must succeed.");
+                Assert.That(results[0].y, Is.EqualTo((float)VividSubstratePixelMode.Hair), "Header mode must decode as VIVID_SUBSTRATE_MODE_HAIR (4).");
+                Assert.That(results[0].z, Is.EqualTo(8.0f), "Hair mode must classify into Tier 3 (VIVID_DEFERRED_CLASS_BIT_CATCH_ALL = 8).");
+                Assert.That(results[0].w, Is.EqualTo((float)VividSubstrateContract.HairCoreUintCount), "Hair payloadUintCount must be 5.");
+
+                // [1]: baseColor (linear via sRGB8) + AO
+                Assert.That(Mathf.Abs(results[1].x - 0.72f), Is.LessThan(0.01f), $"baseColor.r={results[1].x:F4}");
+                Assert.That(Mathf.Abs(results[1].y - 0.44f), Is.LessThan(0.01f), $"baseColor.g={results[1].y:F4}");
+                Assert.That(Mathf.Abs(results[1].z - 0.21f), Is.LessThan(0.01f), $"baseColor.b={results[1].z:F4}");
+                Assert.That(Mathf.Abs(results[1].w - 0.82f), Is.LessThan(0.006f), $"AO={results[1].w:F4}");
+
+                // [2]: 16x16 octahedral tangent precision
+                Assert.That(results[2].w, Is.GreaterThan(0.9999f), $"Tangent oct16 round-trip dot={results[2].w:F6}");
+
+                // [3]: roughness, radialRoughness, cuticleAngleRad, specular
+                const float tol8 = 1.0f / 255.0f + 1e-3f;
+                Assert.That(Mathf.Abs(results[3].x - 0.32f), Is.LessThanOrEqualTo(tol8));
+                Assert.That(Mathf.Abs(results[3].y - 0.48f), Is.LessThanOrEqualTo(tol8));
+                Assert.That(Mathf.Abs(results[3].z - 0.06f), Is.LessThanOrEqualTo(VividSubstrateContract.HairMaxCuticleAngleRad / 255.0f + 1e-3f));
+                Assert.That(Mathf.Abs(results[3].w - 0.60f), Is.LessThanOrEqualTo(tol8));
+
+                // [4]: scatter, backlit, medullaWeight, medullaRoughness
+                Assert.That(Mathf.Abs(results[4].x - 0.85f), Is.LessThanOrEqualTo(tol8));
+                Assert.That(Mathf.Abs(results[4].y - 0.75f), Is.LessThanOrEqualTo(tol8));
+                Assert.That(Mathf.Abs(results[4].z - 0.60f), Is.LessThanOrEqualTo(tol8));
+                Assert.That(Mathf.Abs(results[4].w - 0.55f), Is.LessThanOrEqualTo(tol8));
+
+                // [5]: shellDepth & TopLayer Summary export class (OpenPBR Opaque = 6u so DeferredLit routes to Substrate)
+                Assert.That(Mathf.Abs(results[5].x - 0.65f), Is.LessThanOrEqualTo(tol8));
+                Assert.That(results[5].w, Is.EqualTo(6.0f), "Hair TopLayer Summary must export VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE (6).");
+
+                // [6] vs [7]: Direct BSDF RGB before vs after 6-slice GPU quantization must agree within 2%
+                float3 refRgb = results[6].xyz;
+                float3 unpackedRgb = results[7].xyz;
+                Assert.That(refRgb.x, Is.GreaterThan(0.01f), "Reference BSDF evaluation must be non-trivial.");
+                Assert.That(Mathf.Abs(unpackedRgb.x - refRgb.x) / math.max(refRgb.x, 1e-4f), Is.LessThan(0.02f),
+                    $"BSDF R drift: ref={refRgb.x:F5} vs unpacked={unpackedRgb.x:F5}");
+                Assert.That(Mathf.Abs(unpackedRgb.y - refRgb.y) / math.max(refRgb.y, 1e-4f), Is.LessThan(0.02f),
+                    $"BSDF G drift: ref={refRgb.y:F5} vs unpacked={unpackedRgb.y:F5}");
+                Assert.That(Mathf.Abs(unpackedRgb.z - refRgb.z) / math.max(refRgb.z, 1e-4f), Is.LessThan(0.02f),
+                    $"BSDF B drift: ref={refRgb.z:F5} vs unpacked={unpackedRgb.z:F5}");
+            }
+            finally
+            {
+                closureTex.Release();
+                UnityEngine.Object.DestroyImmediate(closureTex);
+            }
         }
 
         private static ComputeShader LoadComputeOrIgnore()

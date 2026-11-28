@@ -4,6 +4,7 @@
 #include "AutoExposure.hlsl"
 #include "SurfaceSummaryGBuffer.hlsl"
 #include "VividSubstrateBuffer.hlsl"
+#include "VividHairFurBSDF.hlsl"
 #include "VividSimpleSlabDirectLighting.hlsl"
 #include "VividSimpleSlabDeferredLighting.hlsl"
 #include "VividOpenPBROpaqueDeferredLighting.hlsl"
@@ -955,30 +956,197 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     return result;
 }
 
+// Stage 3.2 Tier 3 Hair/Fur BCSDF evaluator (UE5 Karis Far-Field Marschner +
+// Zinke Dual Scattering + Yan Medulla + Lumen Diffuse GI / Reflections).
+bool TryEvaluateDeferredHairLighting(
+    VividSurfaceSummaryData summary,
+    uint2 pixelCoord,
+    float3 positionWS,
+    out VividSimpleSlabDeferredLighting result,
+    out float3 diffuseBounce)
+{
+    result = (VividSimpleSlabDeferredLighting)0;
+    diffuseBounce = 0.0f.xxx;
+    if (_SubstrateClosureBufferEnabled == 0u)
+        return false;
+
+    VividSubstrateHairInputs hair;
+    VividSubstratePixelHeader header;
+    if (!VividTryLoadSubstrateHair(_SubstrateClosureBuffer, pixelCoord, hair, header))
+        return false;
+
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceCameraViewDir(positionWS));
+
+    // summary.ambientOcclusion already carries hair.ambientOcclusion * SampleGTAO(pixelCoord).
+    VividHairFurBSDFInputs bsdfIn = VividCreateDefaultHairFurBSDFInputs();
+    bsdfIn.baseColor = hair.baseColor;
+    bsdfIn.tangentWS = hair.tangentWS;
+    bsdfIn.geomNormalWS = summary.normalWS;
+    bsdfIn.roughness = hair.roughness;
+    bsdfIn.radialRoughness = hair.radialRoughness;
+    bsdfIn.cuticleAngleRad = hair.cuticleAngleRad;
+    bsdfIn.specular = hair.specular;
+    bsdfIn.scatter = hair.scatter;
+    bsdfIn.backlit = hair.backlit;
+    bsdfIn.medullaWeight = hair.medullaWeight;
+    bsdfIn.medullaRoughness = hair.medullaRoughness;
+    bsdfIn.shellDepth = hair.shellDepth;
+    bsdfIn.ambientOcclusion = saturate(summary.ambientOcclusion);
+
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+
+    // 1. Indirect Lighting (Lumen Diffuse GI / ProbeVolume / Sky + Reflections via cylinder normal V_perp)
+    float3 cylNormal = VividComputeHairCylinderNormal(bsdfIn.tangentWS, viewDirectionWS, summary.normalWS);
+    float4 realtimeDiffuseGI = LoadVividRealtimeDiffuseGI(pixelCoord, summary.diffuseAlbedo);
+    float3 diffuseIrradiance;
+    if (realtimeDiffuseGI.a >= 1.0f)
+        diffuseIrradiance = realtimeDiffuseGI.rgb;
+    else if (VividHasDeferredExportFlag(summary.deferredExportHeader,
+            VIVID_DEFERRED_EXPORT_FLAG_HAS_DIFFUSE_IRRADIANCE))
+        diffuseIrradiance = summary.diffuseIrradiance;
+    else if (VividHasProbeVolumeGI())
+        diffuseIrradiance = SampleVividProbeVolume(positionWS,
+            cylNormal, viewDirectionWS, 0xFFFFFFFFu, VividAllowUnoccludedSkyFallback());
+    else
+        diffuseIrradiance = VividAllowUnoccludedSkyFallback() ? VividSampleAmbientProbe(cylNormal) : 0.0f.xxx;
+    if (realtimeDiffuseGI.a > 0.0f && realtimeDiffuseGI.a < 1.0f)
+        diffuseIrradiance = lerp(diffuseIrradiance, realtimeDiffuseGI.rgb, realtimeDiffuseGI.a);
+
+    float3 reflDir = GetSpecularDominantDir(
+        cylNormal,
+        reflect(-viewDirectionWS, cylNormal),
+        bsdfIn.roughness,
+        saturate(dot(cylNormal, viewDirectionWS)));
+    float3 specRadiance = VividSampleSimpleSlabEnvironment(
+        lightLoop,
+        positionWS,
+        cylNormal,
+        reflDir,
+        bsdfIn.roughness,
+        LoadVividRealtimeRoughSpecular(pixelCoord),
+        realtimeDiffuseGI.a,
+        VividHasRealtimeRoughSpecular(),
+        LoadVividRealtimeLumenReflections(pixelCoord),
+        VividHasRealtimeLumenReflections());
+
+    float f0 = VividHairF0FromSpecular(bsdfIn.specular);
+    float sinThetaV = clamp(dot(bsdfIn.tangentWS, viewDirectionWS), -1.0f, 1.0f);
+    float cosThetaV = sqrt(saturate(1.0f - sinThetaV * sinThetaV));
+    float F_env = VividHairFresnelSchlick(f0, cosThetaV * 0.70710678f);
+    float3 envDiffuseAlbedo = lerp(
+        bsdfIn.baseColor,
+        sqrt(max(bsdfIn.baseColor, 1e-4f.xxx)) * bsdfIn.baseColor,
+        0.5f * saturate(bsdfIn.scatter));
+    envDiffuseAlbedo = lerp(envDiffuseAlbedo, bsdfIn.baseColor * 0.85f, saturate(bsdfIn.medullaWeight) * 0.5f);
+
+    result.indirectDiffuseLighting = max(diffuseIrradiance, 0.0f.xxx) * envDiffuseAlbedo * (1.0f - F_env) * bsdfIn.ambientOcclusion;
+    result.indirectSpecularLighting = max(specRadiance, 0.0f.xxx) * F_env * lerp(0.35f, 1.0f, bsdfIn.ambientOcclusion);
+    result.diffuseLighting = result.indirectDiffuseLighting;
+    result.specularLighting = result.indirectSpecularLighting;
+    result.screenSpaceReflectionFGD = F_env.xxx;
+
+    // 2. Direct Directional Lights (Marschner R/TT/TRT + Medulla + Dual Scattering shadow penetration)
+    [loop]
+    for (uint i = 0u; i < _DirectionalLightCount; ++i)
+    {
+        DirectionalLightData light = GetDirectionalLight(i);
+        float shadow = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, i, light);
+        float3 lightDir = SafeNormalize(light.directionWS);
+        float3 unshadowed = max(light.color, 0.0f.xxx);
+
+        VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, lightDir, shadow);
+        float3 directSpec = unshadowed * (resp.lobeR + resp.lobeTRT) * saturate(shadow);
+        float3 directDiff = unshadowed * ((resp.lobeTT + resp.lobeMedulla) * saturate(shadow) + resp.lobeDualScatter);
+        result.specularLighting += directSpec;
+        result.diffuseLighting += directDiff;
+        diffuseBounce += directDiff;
+    }
+
+    // 3. Direct Punctual Lights
+    uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < punctualCount; ++i)
+    {
+        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, i);
+        float3 direction;
+        float4 distances;
+        GetVividPunctualLightVectors(positionWS, light, direction, distances);
+        if (distances.y <= VIVID_SIMPLE_SLAB_MIN_PUNCTUAL_DISTANCE_SQ)
+            continue;
+        float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+            light, positionWS - light.positionWS, distances);
+        if (attenuation > 0.0f)
+        {
+            float3 radiance = max(light.color, 0.0f.xxx) * attenuation;
+            VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, direction, 1.0f);
+            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT);
+            float3 directDiff = radiance * (resp.lobeTT + resp.lobeMedulla + resp.lobeDualScatter);
+            result.specularLighting += directSpec;
+            result.diffuseLighting += directDiff;
+            diffuseBounce += directDiff;
+        }
+    }
+
+    // 4. Direct Area Lights (representative direction + projected solid-angle energy)
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+    [loop]
+    for (uint i = 0u; i < areaCount; ++i)
+    {
+        AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, i);
+        ApplyRectangularAreaLightBarnDoor(light, positionWS);
+        float intensity = EvaluateAreaLightIntensity(light, positionWS);
+        if (intensity <= 0.0f)
+            continue;
+        float3 toLight = light.positionWS - positionWS;
+        float distSq = max(dot(toLight, toLight), 1e-4f);
+        float dist = sqrt(distSq);
+        float3 lightDir = toLight / dist;
+        float area = max(light.width * light.height, 1e-4f);
+        float frontFacing = saturate(dot(light.forwardWS, -lightDir));
+        float solidAngle = saturate(area * frontFacing / (distSq + area * VIVID_HAIR_INV_PI));
+        if (solidAngle > 1e-5f)
+        {
+            float3 radiance = max(light.color, 0.0f.xxx) * (intensity * solidAngle);
+            VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, lightDir, 1.0f);
+            float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT);
+            float3 directDiff = radiance * (resp.lobeTT + resp.lobeMedulla + resp.lobeDualScatter);
+            result.specularLighting += directSpec;
+            result.diffuseLighting += directDiff;
+            diffuseBounce += directDiff;
+        }
+    }
+
+    return true;
+}
+
 // Compile-time tile tier specialization for DeferredLit compute kernels:
 //   Tier 0 (VIVID_DEFERRED_TIER_0): FastSlab only (minimal VGPR footprint)
 //   Tier 1 (VIVID_DEFERRED_TIER_1): FastSlab + OpenPBR Single Simple
 //   Tier 2 (VIVID_DEFERRED_TIER_2): FastSlab + OpenPBR Single Simple/Complex (Coat/Fuzz/Aniso) + DualSlab
-//   Tier 3 (default):               Full catch-all (Multi-Closure / Error fallback)
+//   Tier 3 (default):               Full catch-all (Multi-Closure / Hair BCSDF / Error fallback)
 #if defined(VIVID_DEFERRED_TIER_0)
     #define VIVID_DEFERRED_ENABLE_OPENPBR 0
     #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 0
     #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 0
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR 0
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 0
 #elif defined(VIVID_DEFERRED_TIER_1)
     #define VIVID_DEFERRED_ENABLE_OPENPBR 1
     #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 0
     #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 0
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR 0
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 0
 #elif defined(VIVID_DEFERRED_TIER_2)
     #define VIVID_DEFERRED_ENABLE_OPENPBR 1
     #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 1
     #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 0
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR 0
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 1
 #else
     #define VIVID_DEFERRED_ENABLE_OPENPBR 1
     #define VIVID_DEFERRED_ENABLE_OPENPBR_V2 1
     #define VIVID_DEFERRED_ENABLE_SUBSTRATE_MULTI_CLOSURE 1
+    #define VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR 1
     #define VIVID_DEFERRED_ENABLE_DUAL_SLAB 1
 #endif
 
@@ -1044,6 +1212,13 @@ float3 VividEvaluateDeferredSurfacePixel(
             else if (subHeader.mode == VIVID_SUBSTRATE_MODE_MULTI_CLOSURE)
             {
                 evaluatedOpenPbr = TryEvaluateDeferredSubstrateMultiClosureLighting(
+                    summary, pixelCoord, positionWS, lightLoopOutput, nativeDiffuseBounce);
+            }
+            #endif
+            #if VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR
+            else if (subHeader.mode == VIVID_SUBSTRATE_MODE_HAIR)
+            {
+                evaluatedOpenPbr = TryEvaluateDeferredHairLighting(
                     summary, pixelCoord, positionWS, lightLoopOutput, nativeDiffuseBounce);
             }
             #endif

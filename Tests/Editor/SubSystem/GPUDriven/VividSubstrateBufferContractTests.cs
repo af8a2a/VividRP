@@ -38,6 +38,10 @@ namespace VividRP.Editor.Tests
             "Shaders/Material/ShaderPass/VividShaderPassGBuffer.hlsl";
         private const string GPUDrivenDecalGBufferPath =
             "Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl";
+        private const string SubstrateOpaqueTemplatePath =
+            "Shaders/Material/Templates/SubstrateOpaque.slab.template";
+        private const string SlabShaderAssemblerPath =
+            "Editor/GPUDriven/Material/VividSlabShaderAssembler.cs";
 
         [Test]
         public void PixelHeader_PackUnpack_RoundTripsAllFieldsBitExactly()
@@ -409,6 +413,131 @@ namespace VividRP.Editor.Tests
                 classifyPass.Dispose();
                 deferredPass.Dispose();
             }
+        }
+
+        [Test]
+        public void HairClosure_PackUnpack_RoundTrips6SliceLayoutAndTier3Routing()
+        {
+            Assert.That((uint)VividSubstratePixelMode.Hair, Is.EqualTo(4u));
+            Assert.That(VividSubstrateContract.HairCoreUintCount, Is.EqualTo(5));
+            Assert.That(VividSubstrateContract.HairSingleTotalSlices, Is.EqualTo(6));
+            Assert.That(
+                VividSubstrateContract.FitsSliceBudget(
+                    VividSubstrateContract.HairSingleTotalSlices,
+                    VividSubstrateContract.DefaultSliceCount),
+                Is.True,
+                "6-slice (24 B/px) Hair closure must fit well within the default 16-slice (64 B/px) budget.");
+
+            var header = new VividSubstratePixelHeader
+            {
+                Mode = VividSubstratePixelMode.Hair,
+                ClosureCount = 1u,
+                TopologyOp = VividSubstrateTopologyOp.None,
+                FeatureMask = VividSubstrateFeatureMask.None,
+                PayloadUintCount = VividSubstrateContract.HairCoreUintCount,
+                Flags = VividSubstrateHeaderFlags.ReceiveDecals,
+                AbiVersion = VividSubstrateContract.AbiVersion,
+            };
+            uint packedHeader = VividSubstrateContract.PackPixelHeader(in header);
+            Assert.That(VividSubstrateContract.IsHeaderValid(packedHeader), Is.True);
+            VividSubstratePixelHeader unpackedHeader = VividSubstrateContract.UnpackPixelHeader(packedHeader);
+            Assert.That(unpackedHeader.Mode, Is.EqualTo(VividSubstratePixelMode.Hair));
+            Assert.That(unpackedHeader.ClosureCount, Is.EqualTo(1u));
+            Assert.That(unpackedHeader.PayloadUintCount, Is.EqualTo(5u));
+
+            var expectedColorSrgb = new float3(0.86f, 0.69f, 0.49f);
+            const float expectedAo = 0.82f;
+            const float expectedRough = 0.32f;
+            const float expectedRadialRough = 0.48f;
+            const float expectedCuticleRad = 0.06f;
+            const float expectedSpecular = 0.60f;
+            const float expectedScatter = 0.85f;
+            const float expectedBacklit = 0.75f;
+            const float expectedMedullaWeight = 0.60f;
+            const float expectedMedullaRough = 0.55f;
+            const float expectedShellDepth = 0.65f;
+
+            VividSubstrateContract.PackHairWords(
+                expectedColorSrgb,
+                expectedAo,
+                expectedRough,
+                expectedRadialRough,
+                expectedCuticleRad,
+                expectedSpecular,
+                expectedScatter,
+                expectedBacklit,
+                expectedMedullaWeight,
+                expectedMedullaRough,
+                expectedShellDepth,
+                out uint word0,
+                out uint word1,
+                out uint word3,
+                out uint word4);
+
+            VividSubstrateContract.UnpackHairWords(
+                word0,
+                word1,
+                word3,
+                word4,
+                out VividSubstrateClosureType closureType,
+                out uint hairFlags,
+                out float3 colorSrgb,
+                out float ao,
+                out float rough,
+                out float radialRough,
+                out float cuticleRad,
+                out float specular,
+                out float scatter,
+                out float backlit,
+                out float medullaWeight,
+                out float medullaRough,
+                out float shellDepth);
+
+            const float tol8 = 1.0f / 255.0f + 1e-4f;
+            Assert.That(closureType, Is.EqualTo(VividSubstrateClosureType.Hair));
+            Assert.That(hairFlags, Is.EqualTo(VividSubstrateContract.HairFlagDualScatter | VividSubstrateContract.HairFlagMedulla));
+            Assert.That(Mathf.Abs(colorSrgb.x - expectedColorSrgb.x), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(colorSrgb.y - expectedColorSrgb.y), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(colorSrgb.z - expectedColorSrgb.z), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(ao - expectedAo), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(rough - expectedRough), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(radialRough - expectedRadialRough), Is.LessThanOrEqualTo(tol8));
+            Assert.That(
+                Mathf.Abs(cuticleRad - expectedCuticleRad),
+                Is.LessThanOrEqualTo(VividSubstrateContract.HairMaxCuticleAngleRad / 255.0f + 1e-4f));
+            Assert.That(Mathf.Abs(specular - expectedSpecular), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(scatter - expectedScatter), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(backlit - expectedBacklit), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(medullaWeight - expectedMedullaWeight), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(medullaRough - expectedMedullaRough), Is.LessThanOrEqualTo(tol8));
+            Assert.That(Mathf.Abs(shellDepth - expectedShellDepth), Is.LessThanOrEqualTo(tol8));
+
+            // Verify HLSL & Slab assembler/template Stage 3.2 contracts
+            string substrateSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(SubstrateBufferHlslPath));
+            string deferredHlslSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(DeferredLightingHlslPath));
+            string templateSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(SubstrateOpaqueTemplatePath));
+            string assemblerSource = File.ReadAllText(VividPackagePathUtility.GetPreferredAssetPath(SlabShaderAssemblerPath));
+
+            StringAssert.Contains("#define VIVID_SUBSTRATE_MODE_HAIR 4u", substrateSource);
+            StringAssert.Contains("#define VIVID_SUBSTRATE_HAIR_CORE_UINT_COUNT 5u", substrateSource);
+            StringAssert.Contains("#define VIVID_SUBSTRATE_HAIR_SINGLE_TOTAL_SLICES 6u", substrateSource);
+            StringAssert.Contains("VividWriteSubstrateHair(", substrateSource);
+            StringAssert.Contains("VividTryLoadSubstrateHair(", substrateSource);
+            StringAssert.Contains("VividBuildHairSubstrateTopLayerSummary(", substrateSource);
+
+            StringAssert.Contains("#include \"VividHairFurBSDF.hlsl\"", deferredHlslSource);
+            StringAssert.Contains("TryEvaluateDeferredHairLighting(", deferredHlslSource);
+            StringAssert.Contains("#define VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR 0", deferredHlslSource);
+            StringAssert.Contains("#define VIVID_DEFERRED_ENABLE_SUBSTRATE_HAIR 1", deferredHlslSource);
+            StringAssert.Contains("subHeader.mode == VIVID_SUBSTRATE_MODE_HAIR", deferredHlslSource);
+
+            StringAssert.Contains("VIVID_SLAB_SUPPORTS_HAIR_CLOSURE", templateSource);
+            StringAssert.Contains("VividSlabTryEvaluateHairClosure(", templateSource);
+            StringAssert.Contains("VividWriteSubstrateHair(", templateSource);
+
+            StringAssert.Contains("VIVID_SLAB_SUPPORTS_HAIR_CLOSURE", assemblerSource);
+            StringAssert.Contains("VividSlabTryEvaluateHairClosure(", assemblerSource);
+            StringAssert.Contains("VividWriteSubstrateHair(", assemblerSource);
         }
     }
 }

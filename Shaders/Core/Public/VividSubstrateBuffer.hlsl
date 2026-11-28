@@ -18,6 +18,11 @@
 #define VIVID_SUBSTRATE_HEADER_SLICE_COUNT 1u
 #define VIVID_SUBSTRATE_OPENPBR_CORE_UINT_COUNT 5u
 #define VIVID_SUBSTRATE_OPENPBR_SINGLE_TOTAL_SLICES 6u
+#define VIVID_SUBSTRATE_HAIR_CORE_UINT_COUNT 5u
+#define VIVID_SUBSTRATE_HAIR_SINGLE_TOTAL_SLICES 6u
+#define VIVID_SUBSTRATE_HAIR_FLAG_DUAL_SCATTER (1u << 0)
+#define VIVID_SUBSTRATE_HAIR_FLAG_MEDULLA (1u << 1)
+#define VIVID_SUBSTRATE_HAIR_MAX_CUTICLE_RAD 0.20943951f // 12 degrees
 #define VIVID_SUBSTRATE_COAT_BASE_EXT_UINTS 2u
 #define VIVID_SUBSTRATE_COAT_DUAL_NORMAL_EXT_UINTS 3u
 #define VIVID_SUBSTRATE_FUZZ_EXT_UINTS 2u
@@ -32,6 +37,7 @@
 #define VIVID_SUBSTRATE_MODE_SINGLE_SIMPLE 1u
 #define VIVID_SUBSTRATE_MODE_SINGLE_COMPLEX 2u
 #define VIVID_SUBSTRATE_MODE_MULTI_CLOSURE 3u
+#define VIVID_SUBSTRATE_MODE_HAIR 4u
 #define VIVID_SUBSTRATE_MODE_ERROR 15u
 
 // Multi-closure topology operator (4 bits, Phase 2+)
@@ -961,6 +967,158 @@ bool VividTryLoadSubstrateMultiClosure(
         }
     }
     return true;
+}
+
+// Stage 3.2 Substrate Hair/Fur Closure payload (6 slices total = 24 B/px, routed to Tier 3).
+struct VividSubstrateHairInputs
+{
+    float3 baseColor;        // Linear hair/fur absorption color
+    float3 tangentWS;        // Unit 3D strand growth tangent (root -> tip)
+    float  roughness;        // Longitudinal roughness beta_m in [0.05, 1.0]
+    float  radialRoughness;  // Azimuthal roughness beta_n in [0.05, 1.0]
+    float  cuticleAngleRad;  // Cuticle tilt angle alpha in [0, 12 deg]
+    float  specular;         // Keratin specular scale (0.5 -> F0 = 0.0465)
+    float  scatter;          // Zinke Dual Scattering weight in [0, 1]
+    float  backlit;          // TT backlit transmission weight in [0, 1]
+    float  medullaWeight;    // Animal fur medulla scattering fraction in [0, 1]
+    float  medullaRoughness; // Medulla scattering softness in [0.1, 1.0]
+    float  shellDepth;       // Normalized depth along fur coat (0 = root, 1 = tip)
+    float  ambientOcclusion; // Macro + root self-occlusion AO in [0, 1]
+};
+
+VividSubstrateHairInputs VividCreateDefaultSubstrateHairInputs()
+{
+    VividSubstrateHairInputs inputs;
+    inputs.baseColor = float3(0.32f, 0.20f, 0.12f);
+    inputs.tangentWS = float3(0.0f, 1.0f, 0.0f);
+    inputs.roughness = 0.35f;
+    inputs.radialRoughness = 0.45f;
+    inputs.cuticleAngleRad = 0.035f;
+    inputs.specular = 0.5f;
+    inputs.scatter = 1.0f;
+    inputs.backlit = 1.0f;
+    inputs.medullaWeight = 0.0f;
+    inputs.medullaRoughness = 0.75f;
+    inputs.shellDepth = 1.0f;
+    inputs.ambientOcclusion = 1.0f;
+    return inputs;
+}
+
+void VividWriteSubstrateHair(
+    RWTexture2DArray<uint> closureBuffer,
+    uint2 pixelCoord,
+    VividSubstrateHairInputs inputs,
+    uint headerFlags)
+{
+    uint hairFlags = 0u;
+    if (inputs.scatter > 1e-4f)
+        hairFlags |= VIVID_SUBSTRATE_HAIR_FLAG_DUAL_SCATTER;
+    if (inputs.medullaWeight > 1e-4f)
+        hairFlags |= VIVID_SUBSTRATE_HAIR_FLAG_MEDULLA;
+
+    VividSubstratePixelHeader header;
+    header.mode = VIVID_SUBSTRATE_MODE_HAIR;
+    header.closureCount = 1u;
+    header.topologyOp = VIVID_SUBSTRATE_TOPOLOGY_NONE;
+    header.featureMask = hairFlags;
+    header.payloadUintCount = VIVID_SUBSTRATE_HAIR_CORE_UINT_COUNT;
+    header.flags = headerFlags;
+    header.abiVersion = VIVID_SUBSTRATE_ABI_VERSION;
+
+    uint word0 = ((VIVID_SUBSTRATE_CLOSURE_TYPE_HAIR & VIVID_SUBSTRATE_CLOSURE_TYPE_MASK) << VIVID_SUBSTRATE_CLOSURE_TYPE_SHIFT)
+        | ((hairFlags & VIVID_SUBSTRATE_CLOSURE_FEATURES_MASK) << VIVID_SUBSTRATE_CLOSURE_FEATURES_SHIFT)
+        | (VividSubstratePackUNorm(inputs.shellDepth, 0xFFu) << VIVID_SUBSTRATE_CLOSURE_WEIGHT_SHIFT)
+        | (VividSubstratePackUNorm(inputs.medullaRoughness, 0xFFu) << VIVID_SUBSTRATE_CLOSURE_BASE_WEIGHT_SHIFT);
+
+    float3 srgbBase = LinearToSRGB(saturate(inputs.baseColor));
+    uint word1 = VividSubstratePackRGBA8(float4(srgbBase, saturate(inputs.ambientOcclusion)));
+    uint word2 = VividSubstratePackNormalOct16x2(inputs.tangentWS);
+
+    uint word3 = VividSubstratePackUNorm(inputs.roughness, 0xFFu)
+        | (VividSubstratePackUNorm(inputs.radialRoughness, 0xFFu) << 8u)
+        | (VividSubstratePackUNorm(inputs.cuticleAngleRad / VIVID_SUBSTRATE_HAIR_MAX_CUTICLE_RAD, 0xFFu) << 16u)
+        | (VividSubstratePackUNorm(inputs.specular, 0xFFu) << 24u);
+
+    uint word4 = VividSubstratePackUNorm(inputs.scatter, 0xFFu)
+        | (VividSubstratePackUNorm(inputs.backlit, 0xFFu) << 8u)
+        | (VividSubstratePackUNorm(inputs.medullaWeight, 0xFFu) << 16u);
+
+    closureBuffer[uint3(pixelCoord, 0u)] = VividPackSubstratePixelHeader(header);
+    closureBuffer[uint3(pixelCoord, 1u)] = word0;
+    closureBuffer[uint3(pixelCoord, 2u)] = word1;
+    closureBuffer[uint3(pixelCoord, 3u)] = word2;
+    closureBuffer[uint3(pixelCoord, 4u)] = word3;
+    closureBuffer[uint3(pixelCoord, 5u)] = word4;
+}
+
+bool VividTryLoadSubstrateHair(
+    Texture2DArray<uint> closureBuffer,
+    uint2 pixelCoord,
+    out VividSubstrateHairInputs inputs,
+    out VividSubstratePixelHeader header)
+{
+    inputs = VividCreateDefaultSubstrateHairInputs();
+    uint headerWord = closureBuffer.Load(int4(pixelCoord, 0, 0));
+    header = VividUnpackSubstratePixelHeader(headerWord);
+    if (!VividIsSubstrateHeaderValid(header)
+        || header.mode != VIVID_SUBSTRATE_MODE_HAIR
+        || header.closureCount != 1u
+        || header.payloadUintCount < VIVID_SUBSTRATE_HAIR_CORE_UINT_COUNT)
+    {
+        return false;
+    }
+
+    uint word0 = closureBuffer.Load(int4(pixelCoord, 1, 0));
+    uint closureType = (word0 >> VIVID_SUBSTRATE_CLOSURE_TYPE_SHIFT) & VIVID_SUBSTRATE_CLOSURE_TYPE_MASK;
+    if (closureType != VIVID_SUBSTRATE_CLOSURE_TYPE_HAIR)
+        return false;
+
+    uint word1 = closureBuffer.Load(int4(pixelCoord, 2, 0));
+    uint word2 = closureBuffer.Load(int4(pixelCoord, 3, 0));
+    uint word3 = closureBuffer.Load(int4(pixelCoord, 4, 0));
+    uint word4 = closureBuffer.Load(int4(pixelCoord, 5, 0));
+
+    inputs.shellDepth = VividSubstrateUnpackUNorm((word0 >> VIVID_SUBSTRATE_CLOSURE_WEIGHT_SHIFT) & 0xFFu, 0xFFu);
+    inputs.medullaRoughness = VividSubstrateUnpackUNorm((word0 >> VIVID_SUBSTRATE_CLOSURE_BASE_WEIGHT_SHIFT) & 0xFFu, 0xFFu);
+
+    float4 baseAo = VividSubstrateUnpackRGBA8(word1);
+    inputs.baseColor = saturate(SRGBToLinear(baseAo.rgb));
+    inputs.ambientOcclusion = baseAo.a;
+    inputs.tangentWS = VividSubstrateUnpackNormalOct16x2(word2);
+
+    inputs.roughness = VividSubstrateUnpackUNorm(word3 & 0xFFu, 0xFFu);
+    inputs.radialRoughness = VividSubstrateUnpackUNorm((word3 >> 8u) & 0xFFu, 0xFFu);
+    inputs.cuticleAngleRad = VividSubstrateUnpackUNorm((word3 >> 16u) & 0xFFu, 0xFFu) * VIVID_SUBSTRATE_HAIR_MAX_CUTICLE_RAD;
+    inputs.specular = VividSubstrateUnpackUNorm((word3 >> 24u) & 0xFFu, 0xFFu);
+
+    inputs.scatter = VividSubstrateUnpackUNorm(word4 & 0xFFu, 0xFFu);
+    inputs.backlit = VividSubstrateUnpackUNorm((word4 >> 8u) & 0xFFu, 0xFFu);
+    inputs.medullaWeight = VividSubstrateUnpackUNorm((word4 >> 16u) & 0xFFu, 0xFFu);
+    return true;
+}
+
+// Builds a TopLayer Surface Summary for Lumen Diffuse GI, GTAO, Reflections, and Tile Classification
+// from a Substrate Hair/Fur closure without changing GBuffer0..3 ABI.
+VividSurfaceSummaryData VividBuildHairSubstrateTopLayerSummary(
+    VividSubstrateHairInputs inputs,
+    float3 summaryNormalWS,
+    bool receiveSSR,
+    bool receiveDecals)
+{
+    VividSurfaceSummaryData summary = (VividSurfaceSummaryData)0;
+    summary.diffuseAlbedo = saturate(inputs.baseColor);
+    summary.specularF0 = (saturate(inputs.specular) * 0.093f).xxx;
+    summary.perceptualRoughness = clamp(inputs.roughness, 0.05f, 1.0f);
+    summary.normalWS = VividSanitizeSurfaceSummaryNormal(summaryNormalWS);
+    summary.ambientOcclusion = saturate(inputs.ambientOcclusion);
+    summary.emissive = 0.0f.xxx;
+    summary.deferredExportHeader = VividBuildDeferredExportHeader(
+        VIVID_DEFERRED_EXPORT_CLASS_OPENPBR_OPAQUE,
+        false,
+        false,
+        receiveSSR,
+        receiveDecals);
+    return summary;
 }
 
 // Maps Slice 0 Substrate header directly to the 4-tier deferred tile mask.

@@ -1,0 +1,19 @@
+Yan et al. (2017) Fur Reflectance Fitted Dataset
+================================================
+
+Source:
+  Ling-Qi Yan, Henrik Wann Jensen, and Ravi Ramamoorthi,
+  "An Efficient and Practical Near and Far Field Fur Reflectance Model",
+  ACM Transactions on Graphics (Proceedings of SIGGRAPH 2017), 36(4).
+  Project page: https://sites.cs.ucsb.edu/~lingqi/project_page/fur2/index.html
+
+Included fitted reflectance tables (phi in [70..290] -> [-20..200] deg,
+theta in [40..80] -> [50..10] deg, gantry coordinates):
+  - HumanFitted.txt   (negligible medulla reference, kappa ~ 0)
+  - CatFitted.txt     (moderate medulla animal fur)
+  - RabbitFitted.txt  (prominent turbid medulla fur)
+  - RaccoonFitted.txt (high medulla / banded guard fur)
+  - DeerFitted.txt    (wide-angle air-filled medulla fur)
+
+Included strictly for non-commercial validation and visual/numerical
+comparison inside VividRP's FurLookDev benchmark scene.

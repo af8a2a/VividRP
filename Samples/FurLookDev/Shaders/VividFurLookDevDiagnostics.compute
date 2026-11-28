@@ -1,0 +1,475 @@
+#pragma kernel EvaluateGoniometer2D
+#pragma kernel EvaluateGoniometerStats
+#pragma kernel EvaluateWhiteFurnaceGrid
+#pragma kernel RenderWhiteFurnaceBoard
+#pragma kernel EvaluateMedullaSweep
+#pragma kernel RenderYanGantryComparison
+#pragma use_dxc
+#pragma target 5.0
+
+#include "../../../Shaders/Core/Public/VividHairFurBSDF.hlsl"
+
+// Case 01 / 02 / 03 diagnostic parameters
+float4 _BaseColor;              // xyz = linear baseColor, w = specular
+float4 _RoughnessParams;        // x = betaM, y = betaN, z = cuticleAngleDeg, w = backlit
+float4 _MedullaParams;          // x = medullaWeight (kappa^2), y = medullaRoughness, z = scatter, w = shellDepth
+float4 _GonioParams;            // x = thetaVDeg, y = logGain, z = yanSpeciesKappa, w = unused
+float4 _YanMedullaParams;       // x = kappa, y = sigmaS, z = sigmaA, w = anisotropyG
+
+// UAVs (strictly <= 5 per kernel to stay well within D3D11/D3D12 limits)
+RWTexture2D<float4> _OutR;
+RWTexture2D<float4> _OutTT;
+RWTexture2D<float4> _OutTRT;
+RWTexture2D<float4> _OutMedulla;
+RWTexture2D<float4> _OutTotal;
+RWStructuredBuffer<float4> _MetricsOut;
+StructuredBuffer<float4> _FurnaceGridSRV;
+
+static const float kDegToRad = 0.01745329252f;
+
+// Smooth perceptual Inferno-like scientific colormap for log-scale BCSDF goniometer heatmaps
+float3 ScientificHeatmap(float t)
+{
+    float s = saturate(t);
+    const float3 c0 = float3(0.015f, 0.012f, 0.045f);
+    const float3 c1 = float3(0.240f, 0.040f, 0.360f);
+    const float3 c2 = float3(0.700f, 0.145f, 0.250f);
+    const float3 c3 = float3(0.960f, 0.520f, 0.070f);
+    const float3 c4 = float3(0.990f, 0.960f, 0.650f);
+    if (s < 0.25f) return lerp(c0, c1, s * 4.0f);
+    if (s < 0.50f) return lerp(c1, c2, (s - 0.25f) * 4.0f);
+    if (s < 0.75f) return lerp(c2, c3, (s - 0.50f) * 4.0f);
+    return lerp(c3, c4, (s - 0.75f) * 4.0f);
+}
+
+float3 FurnaceConservationColor(float val)
+{
+    // < 0.60: blue->cyan (truncation loss)
+    // [0.60, 1.00]: emerald green (energy conserving)
+    // (1.00, 1.05]: amber (quadrature margin)
+    // > 1.05: bright red (energy gain violation)
+    if (val > 1.05f)
+        return float3(0.95f, 0.12f, 0.12f);
+    if (val > 1.00f)
+        return lerp(float3(0.20f, 0.85f, 0.35f), float3(0.95f, 0.75f, 0.12f), saturate((val - 1.00f) / 0.05f));
+    if (val >= 0.60f)
+        return lerp(float3(0.10f, 0.62f, 0.55f), float3(0.18f, 0.86f, 0.36f), saturate((val - 0.60f) / 0.40f));
+    return lerp(float3(0.05f, 0.10f, 0.32f), float3(0.10f, 0.62f, 0.55f), saturate(val / 0.60f));
+}
+
+float MapLogResponse(float v, float gain)
+{
+    return saturate(log2(1.0f + max(v, 0.0f) * max(gain, 1.0f)) / log2(1.0f + max(gain, 1.0f) * 1.5f));
+}
+
+VividHairFurBSDFInputs BuildBaseInputs()
+{
+    VividHairFurBSDFInputs inp = VividCreateDefaultHairFurBSDFInputs();
+    inp.baseColor = saturate(_BaseColor.xyz);
+    inp.tangentWS = float3(0.0f, 1.0f, 0.0f);
+    inp.geomNormalWS = float3(0.0f, 0.0f, 1.0f);
+    inp.roughness = clamp(_RoughnessParams.x, VIVID_HAIR_MIN_ROUGHNESS, 1.0f);
+    inp.radialRoughness = clamp(_RoughnessParams.y, VIVID_HAIR_MIN_ROUGHNESS, 1.0f);
+    inp.cuticleAngleRad = clamp(_RoughnessParams.z * kDegToRad, 0.0f, VIVID_HAIR_MAX_CUTICLE_RAD);
+    inp.specular = saturate(_BaseColor.w);
+    inp.backlit = saturate(_RoughnessParams.w);
+    inp.medullaWeight = saturate(_MedullaParams.x);
+    inp.medullaRoughness = clamp(_MedullaParams.y, 0.1f, 1.0f);
+    inp.scatter = saturate(_MedullaParams.z);
+    inp.shellDepth = saturate(_MedullaParams.w);
+    inp.ambientOcclusion = 1.0f;
+    return inp;
+}
+
+float3 DirFromThetaPhi(float thetaRad, float phiRad)
+{
+    float ct = cos(thetaRad);
+    return float3(ct * sin(phiRad), sin(thetaRad), ct * cos(phiRad));
+}
+
+// =============================================================================
+// Case 01a: 256x256 Single Strand Goniometer 2D Heatmaps (phi x thetaL)
+//   Outputs: R, TT, TRT, Medulla, Total BCSDF with cuticle shift guides
+// =============================================================================
+[numthreads(8, 8, 1)]
+void EvaluateGoniometer2D(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= 256u || tid.y >= 256u)
+        return;
+
+    float u = ((float)tid.x + 0.5f) / 256.0f;
+    float v = ((float)tid.y + 0.5f) / 256.0f;
+
+    float phiDeg = lerp(-180.0f, 180.0f, u);
+    float thetaLDeg = lerp(-80.0f, 80.0f, v);
+    float thetaVDeg = _GonioParams.x;
+    float logGain = max(_GonioParams.y, 12.0f);
+
+    float3 V = DirFromThetaPhi(thetaVDeg * kDegToRad, 0.0f);
+    float3 L = DirFromThetaPhi(thetaLDeg * kDegToRad, phiDeg * kDegToRad);
+
+    VividHairFurBSDFInputs inp = BuildBaseInputs();
+    VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(inp, V, L, 1.0f);
+    float3 total = VividCombineHairFurBSDFResponse(resp);
+
+    // Subtle scientific reticle lines at phi = 0, theta = 0, and theoretical cuticle shifts
+    float alphaDeg = _RoughnessParams.z;
+    float gridMask = 0.0f;
+    if (abs(phiDeg) < 1.2f || abs(thetaLDeg) < 0.7f)
+        gridMask = 0.22f;
+
+    float rGuide = abs(thetaLDeg + thetaVDeg - 2.0f * alphaDeg) < 0.75f ? 0.45f : 0.0f;
+    float ttGuide = abs(thetaLDeg + thetaVDeg + alphaDeg) < 0.75f ? 0.45f : 0.0f;
+    float trtGuide = abs(thetaLDeg + thetaVDeg + 4.0f * alphaDeg) < 0.75f ? 0.45f : 0.0f;
+
+    float lumR = dot(resp.lobeR, float3(0.2126f, 0.7152f, 0.0722f));
+    float lumTT = dot(resp.lobeTT, float3(0.2126f, 0.7152f, 0.0722f));
+    float lumTRT = dot(resp.lobeTRT, float3(0.2126f, 0.7152f, 0.0722f));
+    float lumMed = dot(resp.lobeMedulla, float3(0.2126f, 0.7152f, 0.0722f));
+    float lumTot = dot(total, float3(0.2126f, 0.7152f, 0.0722f));
+
+    float3 colR = lerp(ScientificHeatmap(MapLogResponse(lumR, logGain)), float3(0.45f, 0.85f, 1.0f), max(gridMask, rGuide));
+    float3 colTT = lerp(ScientificHeatmap(MapLogResponse(lumTT, logGain)), float3(0.45f, 1.0f, 0.65f), max(gridMask, ttGuide));
+    float3 colTRT = lerp(ScientificHeatmap(MapLogResponse(lumTRT, logGain)), float3(1.0f, 0.75f, 0.35f), max(gridMask, trtGuide));
+    float3 colMed = lerp(ScientificHeatmap(MapLogResponse(lumMed, logGain)), float3(0.85f, 0.60f, 1.0f), gridMask);
+    float3 colTot = lerp(ScientificHeatmap(MapLogResponse(lumTot, logGain)), float3(1.0f, 1.0f, 1.0f), gridMask);
+
+    _OutR[tid.xy] = float4(colR, 1.0f);
+    _OutTT[tid.xy] = float4(colTT, 1.0f);
+    _OutTRT[tid.xy] = float4(colTRT, 1.0f);
+    _OutMedulla[tid.xy] = float4(colMed, 1.0f);
+    _OutTotal[tid.xy] = float4(colTot, 1.0f);
+}
+
+// =============================================================================
+// Case 01b: Single Strand Goniometer 1D Meridian Sweeps + Spherical Integrals
+//   Layout in _MetricsOut (264 entries):
+//     [0..127]   : Front meridian (phi=0), thetaL in [-80, +80] -> (R.r, TRT.r, Medulla.r, Total.r)
+//     [128..255] : Backlit meridian (phi=180), thetaL in [-80, +80] -> (TT.r, TT.b, Medulla.r, Total.r)
+//     [256..260] : Spherical energy integrals over S^2 (2048 Fibonacci samples):
+//                  256 = (E_R.r, E_R.g, E_R.b, E_R_lum)
+//                  257 = (E_TT.r, E_TT.g, E_TT.b, E_TT_lum)
+//                  258 = (E_TRT.r, E_TRT.g, E_TRT.b, E_TRT_lum)
+//                  259 = (E_Med.r, E_Med.g, E_Med.b, E_Med_lum)
+//                  260 = (E_Tot.r, E_Tot.g, E_Tot.b, E_Dual_lum)
+//     [261]      : TRT tint check at front peak thetaL = -4*alpha -> (TRT.r, TRT.g, TRT.b, R.r)
+// =============================================================================
+[numthreads(64, 1, 1)]
+void EvaluateGoniometerStats(uint3 tid : SV_DispatchThreadID)
+{
+    uint idx = tid.x;
+    VividHairFurBSDFInputs inp = BuildBaseInputs();
+    float thetaVDeg = _GonioParams.x;
+    float3 V = DirFromThetaPhi(thetaVDeg * kDegToRad, 0.0f);
+
+    if (idx < 128u)
+    {
+        float t = (float)idx / 127.0f;
+        float thetaL = lerp(-80.0f, 80.0f, t) * kDegToRad;
+
+        float3 Lfront = DirFromThetaPhi(thetaL, 0.0f);
+        VividHairFurBSDFResponse rf = VividEvaluateHairFurDirect(inp, V, Lfront, 1.0f);
+        float3 totF = VividCombineHairFurBSDFResponse(rf);
+        _MetricsOut[idx] = float4(rf.lobeR.r, rf.lobeTRT.r, rf.lobeMedulla.r, totF.r);
+
+        float3 Lback = DirFromThetaPhi(thetaL, VIVID_HAIR_PI);
+        VividHairFurBSDFResponse rb = VividEvaluateHairFurDirect(inp, V, Lback, 1.0f);
+        float3 totB = VividCombineHairFurBSDFResponse(rb);
+        _MetricsOut[128u + idx] = float4(rb.lobeTT.r, rb.lobeTT.b, rb.lobeMedulla.r, totB.r);
+    }
+
+    if (idx == 0u)
+    {
+        const uint N = 2048u;
+        const float dOmega = (4.0f * VIVID_HAIR_PI) / (float)N;
+        const float goldenAngle = 2.399963229728653f;
+        float3 eR = 0.0f.xxx, eTT = 0.0f.xxx, eTRT = 0.0f.xxx, eMed = 0.0f.xxx, eDual = 0.0f.xxx;
+
+        [loop]
+        for (uint s = 0u; s < N; ++s)
+        {
+            float y = 1.0f - (2.0f * ((float)s + 0.5f) / (float)N);
+            float r = sqrt(saturate(1.0f - y * y));
+            float phi = goldenAngle * (float)s;
+            float3 L = float3(cos(phi) * r, y, sin(phi) * r);
+
+            VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(inp, V, L, 1.0f);
+            eR += resp.lobeR * dOmega;
+            eTT += resp.lobeTT * dOmega;
+            eTRT += resp.lobeTRT * dOmega;
+            eMed += resp.lobeMedulla * dOmega;
+            eDual += resp.lobeDualScatter * dOmega;
+        }
+
+        float3 eTot = eR + eTT + eTRT + eMed + eDual;
+        const float3 lumaW = float3(0.2126f, 0.7152f, 0.0722f);
+        _MetricsOut[256u] = float4(eR, dot(eR, lumaW));
+        _MetricsOut[257u] = float4(eTT, dot(eTT, lumaW));
+        _MetricsOut[258u] = float4(eTRT, dot(eTRT, lumaW));
+        _MetricsOut[259u] = float4(eMed, dot(eMed, lumaW));
+        _MetricsOut[260u] = float4(eTot, dot(eDual, lumaW));
+
+        float3 Ltrt = DirFromThetaPhi((-thetaVDeg - 4.0f * _RoughnessParams.z) * kDegToRad, 0.0f);
+        VividHairFurBSDFResponse rTrt = VividEvaluateHairFurDirect(inp, V, Ltrt, 1.0f);
+        _MetricsOut[261u] = float4(rTrt.lobeTRT, rTrt.lobeR.r);
+    }
+}
+
+// =============================================================================
+// Case 02a: 16x16 White Furnace Conservation Grid (roughness x medullaWeight)
+//   Unit uniform incident radiance, baseColor=(1,1,1), AO=1, shadow=1, no GI/tonemap.
+// =============================================================================
+[numthreads(8, 8, 1)]
+void EvaluateWhiteFurnaceGrid(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= 16u || tid.y >= 16u)
+        return;
+
+    float rough = lerp(0.08f, 0.98f, (float)tid.x / 15.0f);
+    float medulla = (float)tid.y / 15.0f;
+
+    VividHairFurBSDFInputs inp = VividCreateDefaultHairFurBSDFInputs();
+    inp.baseColor = 1.0f.xxx; // Zero absorption (White Furnace)
+    inp.tangentWS = float3(0.0f, 1.0f, 0.0f);
+    inp.geomNormalWS = float3(0.0f, 0.0f, 1.0f);
+    inp.roughness = rough;
+    inp.radialRoughness = rough;
+    inp.cuticleAngleRad = clamp(_RoughnessParams.z * kDegToRad, 0.0f, VIVID_HAIR_MAX_CUTICLE_RAD);
+    inp.specular = saturate(_BaseColor.w);
+    inp.backlit = 1.0f;
+    inp.medullaWeight = medulla;
+    inp.medullaRoughness = clamp(_MedullaParams.y, 0.1f, 1.0f);
+    inp.scatter = saturate(_MedullaParams.z);
+    inp.shellDepth = 0.5f;
+    inp.ambientOcclusion = 1.0f;
+
+    // Oblique view 25 deg from normal plane
+    float3 V = DirFromThetaPhi(25.0f * kDegToRad, 0.0f);
+
+    const uint N = 2048u;
+    const float dOmega = (4.0f * VIVID_HAIR_PI) / (float)N;
+    const float goldenAngle = 2.399963229728653f;
+
+    float sumTotal = 0.0f;
+    float sumSingle = 0.0f;
+    float sumDual = 0.0f;
+    float anyBad = 0.0f;
+
+    [loop]
+    for (uint s = 0u; s < N; ++s)
+    {
+        float y = 1.0f - (2.0f * ((float)s + 0.5f) / (float)N);
+        float r = sqrt(saturate(1.0f - y * y));
+        float phi = goldenAngle * (float)s;
+        float3 L = float3(cos(phi) * r, y, sin(phi) * r);
+
+        VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(inp, V, L, 1.0f);
+        float singleR = resp.lobeR.r + resp.lobeTT.r + resp.lobeTRT.r + resp.lobeMedulla.r;
+        float dualR = resp.lobeDualScatter.r;
+        float totalR = singleR + dualR;
+
+        if (isnan(totalR) || isinf(totalR) || totalR < -1e-6f)
+            anyBad = 1.0f;
+
+        sumSingle += singleR * dOmega;
+        sumDual += dualR * dOmega;
+        sumTotal += totalR * dOmega;
+    }
+
+    _MetricsOut[tid.y * 16u + tid.x] = float4(sumTotal, sumSingle, sumDual, anyBad);
+}
+
+[numthreads(8, 8, 1)]
+void RenderWhiteFurnaceBoard(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= 256u || tid.y >= 256u)
+        return;
+
+    uint gx = min(tid.x / 16u, 15u);
+    uint gy = min(tid.y / 16u, 15u);
+    float4 m = _FurnaceGridSRV[gy * 16u + gx];
+
+    // Cell border lines for crisp HDRP studio chart readability
+    bool isBorder = (tid.x % 16u == 0u) || (tid.y % 16u == 0u);
+    float3 colTotal = isBorder ? float3(0.06f, 0.07f, 0.09f) : FurnaceConservationColor(m.x);
+    float3 colSingle = isBorder ? float3(0.06f, 0.07f, 0.09f) : FurnaceConservationColor(m.y);
+
+    _OutTotal[tid.xy] = float4(colTotal, 1.0f);
+    _OutR[tid.xy] = float4(colSingle, 1.0f);
+}
+
+// =============================================================================
+// Case 03a: Medulla Parameter Sweep + Yan Parametric Double-Cylinder Coupling
+//           + 16 Extreme Corner Stress Checks (NaN / Inf / Negative / Continuity)
+//   Layout in _MetricsOut (272 entries):
+//     [0..63]    : Axis 0 - Medulla radius ratio kappa in [0, 0.95] -> (R, Cortex_TT+TRT, Medulla_Side, Total_Wide)
+//     [64..127]  : Axis 1 - Medulla scattering sigma_s in [0, 8.0]  -> (Medulla_Back, Medulla_Fwd, AlbedoEff, Total)
+//     [128..191] : Axis 2 - Medulla absorption sigma_a in [0, 4.0]  -> (Medulla_R, Medulla_B, Attenuation, Total)
+//     [192..255] : Axis 3 - Medulla anisotropy g in [-0.85, +0.85]  -> (Back_Phi0, Side_Phi90, Fwd_Phi180, Integral)
+//     [256..271] : 16 extreme corner stress evaluations -> (Total.r, Total.g, Total.b, finiteNonNegFlag)
+// =============================================================================
+float4 EvaluateYanParametricMedullaPoint(
+    float kappa,
+    float sigmaS,
+    float sigmaA,
+    float gAniso,
+    float3 baseColor,
+    float3 V,
+    float3 L)
+{
+    // Physical double-cylinder mapping onto VividHairFurBSDF:
+    //   - Effective medullary interception fraction scales with kappa (0 -> exact zero medulla!)
+    //   - Single-scattering albedo w_m = sigmaS / (sigmaS + sigmaA)
+    //   - Optical thickness tau = 2 * kappa * (sigmaS + sigmaA) drives diffuse softening
+    float k = saturate(kappa);
+    float ss = max(sigmaS, 0.0f);
+    float sa = max(sigmaA, 0.0f);
+    float ext = ss + sa;
+    float singleScatterAlbedo = ext > 1e-5f ? ss / ext : 0.0f;
+    float tau = 2.0f * k * ext;
+    float scatterProb = 1.0f - exp(-tau);
+    float effectiveMedullaWeight = k * scatterProb;
+
+    // Map (sigmaS, sigmaA, g) cleanly into VividHairFurBSDF parameters
+    float medullaRough = saturate(0.20f + 0.75f * (1.0f - exp(-0.35f * tau)) * (1.0f - 0.35f * abs(gAniso)));
+
+    VividHairFurBSDFInputs inp = BuildBaseInputs();
+    inp.baseColor = saturate(baseColor * exp(-0.18f * sa * k));
+    inp.medullaWeight = effectiveMedullaWeight;
+    inp.medullaRoughness = clamp(medullaRough, 0.1f, 1.0f);
+    inp.scatter = 0.0f; // Isolate single-fiber medulla coupling
+
+    VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(inp, V, L, 1.0f);
+
+    // Modulate azimuthal directional preference by physical Henyey-Greenstein anisotropy g
+    float3 T = float3(0.0f, 1.0f, 0.0f);
+    float3 Lp = L - dot(L, T) * T;
+    float3 Vp = V - dot(V, T) * T;
+    float denom = dot(Lp, Lp) * dot(Vp, Vp);
+    float cosPhi = denom > 1e-10f ? clamp(dot(Lp, Vp) * rsqrt(denom), -1.0f, 1.0f) : 1.0f;
+
+    // Note: cosPhi = -1 is forward transmission (backlit), cosPhi = +1 is back-reflection.
+    // Positive HG g favors forward scattering (cosPhi -> -1), so Poisson parameter is -g.
+    float phaseRatio = VividHairAzimuthalPoisson(cosPhi, clamp(-gAniso * 0.75f, -0.88f, 0.88f)) * VIVID_HAIR_TWO_PI;
+    float3 medAniso = resp.lobeMedulla * singleScatterAlbedo * clamp(phaseRatio, 0.05f, 4.0f);
+    float3 total = resp.lobeR + resp.lobeTT + resp.lobeTRT + medAniso;
+
+    return float4(resp.lobeR.r, resp.lobeTT.r + resp.lobeTRT.r, medAniso.r, total.r);
+}
+
+[numthreads(64, 1, 1)]
+void EvaluateMedullaSweep(uint3 tid : SV_DispatchThreadID)
+{
+    uint idx = tid.x;
+    float t = (float)idx / 63.0f;
+
+    float3 V = DirFromThetaPhi(15.0f * kDegToRad, 0.0f);
+    float3 Lside = DirFromThetaPhi(10.0f * kDegToRad, 90.0f * kDegToRad);
+    float3 Lback = DirFromThetaPhi(-5.0f * kDegToRad, 180.0f * kDegToRad);
+    float3 Lfront = DirFromThetaPhi(-10.0f * kDegToRad, 0.0f);
+    float3 baseCol = saturate(_BaseColor.xyz);
+
+    // Axis 0: kappa in [0.0, 0.95] (exact degeneration at idx == 0 -> kappa == 0!)
+    {
+        float kappa = lerp(0.0f, 0.95f, t);
+        float4 rSide = EvaluateYanParametricMedullaPoint(kappa, 3.0f, 0.35f, 0.15f, baseCol, V, Lside);
+        _MetricsOut[idx] = rSide;
+    }
+
+    // Axis 1: sigma_s in [0.0, 8.0] at kappa = 0.65, sigma_a = 0.4
+    {
+        float sigmaS = lerp(0.0f, 8.0f, t);
+        float4 rFront = EvaluateYanParametricMedullaPoint(0.65f, sigmaS, 0.4f, 0.1f, baseCol, V, Lfront);
+        float4 rBack = EvaluateYanParametricMedullaPoint(0.65f, sigmaS, 0.4f, 0.1f, baseCol, V, Lback);
+        float wEff = (sigmaS + 0.4f) > 1e-5f ? sigmaS / (sigmaS + 0.4f) : 0.0f;
+        _MetricsOut[64u + idx] = float4(rFront.z, rBack.z, wEff, rFront.w);
+    }
+
+    // Axis 2: sigma_a in [0.0, 4.0] at kappa = 0.65, sigma_s = 3.0
+    {
+        float sigmaA = lerp(0.0f, 4.0f, t);
+        float4 rSide = EvaluateYanParametricMedullaPoint(0.65f, 3.0f, sigmaA, 0.1f, baseCol, V, Lside);
+        float atten = exp(-0.18f * sigmaA * 0.65f);
+        _MetricsOut[128u + idx] = float4(rSide.z, rSide.y, atten, rSide.w);
+    }
+
+    // Axis 3: anisotropy g in [-0.85, +0.85] at kappa = 0.65, sigma_s = 3.0, sigma_a = 0.3
+    {
+        float g = lerp(-0.85f, 0.85f, t);
+        float4 rFront = EvaluateYanParametricMedullaPoint(0.65f, 3.0f, 0.3f, g, baseCol, V, Lfront);
+        float4 rSide = EvaluateYanParametricMedullaPoint(0.65f, 3.0f, 0.3f, g, baseCol, V, Lside);
+        float4 rBack = EvaluateYanParametricMedullaPoint(0.65f, 3.0f, 0.3f, g, baseCol, V, Lback);
+        _MetricsOut[192u + idx] = float4(rFront.z, rSide.z, rBack.z, rFront.w + rSide.w + rBack.w);
+    }
+
+    // 16 Extreme Stress Cases
+    if (idx < 16u)
+    {
+        VividHairFurBSDFInputs st = BuildBaseInputs();
+        float3 sV = V;
+        float3 sL = Lside;
+        float kVal = 0.5f, ssVal = 3.0f, saVal = 0.3f, gVal = 0.0f;
+
+        if (idx == 0u)      { kVal = 0.0f; } // Exact zero medulla
+        else if (idx == 1u) { kVal = 1.0f; } // Full-shaft medulla
+        else if (idx == 2u) { ssVal = 0.0f; saVal = 0.0f; } // Zero extinction
+        else if (idx == 3u) { ssVal = 100.0f; saVal = 0.0f; } // Extreme scattering
+        else if (idx == 4u) { ssVal = 0.0f; saVal = 100.0f; } // Extreme absorption
+        else if (idx == 5u) { gVal = 0.99f; } // Extreme forward anisotropy
+        else if (idx == 6u) { gVal = -0.99f; } // Extreme backward anisotropy
+        else if (idx == 7u) { st.roughness = 0.0f; st.radialRoughness = 0.0f; }
+        else if (idx == 8u) { st.roughness = 1.0f; st.radialRoughness = 1.0f; }
+        else if (idx == 9u) { st.baseColor = 0.0f.xxx; }
+        else if (idx == 10u){ st.baseColor = 1.0f.xxx; }
+        else if (idx == 11u){ sV = float3(0.0f, 1.0f, 0.0f); } // V || T pole
+        else if (idx == 12u){ sL = float3(0.0f, 1.0f, 0.0f); } // L || T pole
+        else if (idx == 13u){ sL = -sV; } // Exact backlit
+        else if (idx == 14u){ st.cuticleAngleRad = 0.0f; kVal = 0.95f; }
+        else                { st.cuticleAngleRad = VIVID_HAIR_MAX_CUTICLE_RAD; kVal = 0.95f; }
+
+        float4 res = EvaluateYanParametricMedullaPoint(kVal, ssVal, saVal, gVal, st.baseColor, sV, sL);
+        VividHairFurBSDFResponse direct = VividEvaluateHairFurDirect(st, sV, sL, 1.0f);
+        float3 tot = VividCombineHairFurBSDFResponse(direct);
+
+        bool ok = all(isfinite(res)) && all(isfinite(tot))
+            && res.x >= -1e-6f && res.y >= -1e-6f && res.z >= -1e-6f && res.w >= -1e-6f
+            && tot.x >= -1e-6f && tot.y >= -1e-6f && tot.z >= -1e-6f;
+        _MetricsOut[256u + idx] = float4(res.w, tot.r, tot.g, ok ? 1.0f : 0.0f);
+    }
+}
+
+// =============================================================================
+// Case 03b: Yan 2017 Gantry Domain Renderer (phi in [-20, 200], theta in [10, 50])
+//   Matches Yan et al. (2017) fitted dataset coordinates so side-by-side comparison
+//   on Bay 03 is aligned 1:1 with the UCSB/UCSD fur2 measurements!
+// =============================================================================
+[numthreads(8, 8, 1)]
+void RenderYanGantryComparison(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= 256u || tid.y >= 128u)
+        return;
+
+    float u = ((float)tid.x + 0.5f) / 256.0f;
+    float v = ((float)tid.y + 0.5f) / 128.0f;
+
+    // Yan 2017 gantry domain: phi in [-20, 200] deg, thetaL in [10, 50] deg
+    float phiDeg = lerp(-20.0f, 200.0f, u);
+    float thetaLDeg = lerp(10.0f, 50.0f, v);
+    float thetaVDeg = -40.0f; // Fixed detector angle on Yan gantry (mirror peak at thetaL = +40 deg)
+
+    float3 V = DirFromThetaPhi(thetaVDeg * kDegToRad, 0.0f);
+    float3 L = DirFromThetaPhi(thetaLDeg * kDegToRad, phiDeg * kDegToRad);
+
+    float4 evalVal = EvaluateYanParametricMedullaPoint(
+        _YanMedullaParams.x,
+        _YanMedullaParams.y,
+        _YanMedullaParams.z,
+        _YanMedullaParams.w,
+        saturate(_BaseColor.xyz),
+        V,
+        L);
+
+    float logGain = max(_GonioParams.y, 18.0f);
+    float3 heat = ScientificHeatmap(MapLogResponse(evalVal.w, logGain));
+    _OutTotal[tid.xy] = float4(heat, 1.0f);
+}

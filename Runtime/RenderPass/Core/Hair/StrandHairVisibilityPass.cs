@@ -19,6 +19,8 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class StrandHairVisibilityPass : ComputePass, IAsyncComputeSupportedPass
     {
         private const string ClearAtlasKernelName = "KClearAtlasTiles";
+        private const string BuildFarthestDepth8x8KernelName = "KBuildFarthestDepth8x8";
+        private const string BuildFarthestDepth32x32KernelName = "KBuildFarthestDepth32x32";
         private const string TransformVerticesKernelName = "KTransformVertices";
         private const string ClearCullArgsKernelName = "KClearCullArgs";
         private const string ClearVisibleVertexMaskKernelName = "KClearVisibleVertexMask";
@@ -44,7 +46,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int IndirectShadeArgsId = Shader.PropertyToID("_HairIndirectShadeArgs");
         private static readonly int VisAtlasId = Shader.PropertyToID("_HairVisAtlas");
         private static readonly int SceneDepthId = Shader.PropertyToID("_HairSceneDepth");
-        private static readonly int HzbTextureId = Shader.PropertyToID("_HairHZBTexture");
+        private static readonly int FarthestDepth8x8Id = Shader.PropertyToID("_HairFarthestDepth8x8");
+        private static readonly int FarthestDepth32x32Id = Shader.PropertyToID("_HairFarthestDepth32x32");
+        private static readonly int FarthestDepth8x8SrvId = Shader.PropertyToID("_HairFarthestDepth8x8SRV");
+        private static readonly int FarthestDepth32x32SrvId = Shader.PropertyToID("_HairFarthestDepth32x32SRV");
 
         private static readonly int LocalToWorldId = Shader.PropertyToID("_HairLocalToWorld");
         private static readonly int ViewMatrixId = Shader.PropertyToID("_HairViewMatrix");
@@ -60,7 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int EnableHzbId = Shader.PropertyToID("_HairEnableHZB");
         private static readonly int ScreenSizeId = Shader.PropertyToID("_HairScreenSize");
         private static readonly int AtlasScreenSizeId = Shader.PropertyToID("_HairAtlasScreenSize");
-        private static readonly int HzbSizeId = Shader.PropertyToID("_HairHZBSize");
+        private static readonly int DepthTileCountsId = Shader.PropertyToID("_HairDepthTileCounts");
         private static readonly int RadiusScaleId = Shader.PropertyToID("_HairRadiusScale");
         private static readonly int ProjScaleYId = Shader.PropertyToID("_HairProjScaleY");
         private static readonly int DepthRangeNearId = Shader.PropertyToID("_HairDepthRangeNear");
@@ -75,6 +80,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_Compute;
         private int m_ClearAtlasKernel = -1;
+        private int m_BuildFarthestDepth8x8Kernel = -1;
+        private int m_BuildFarthestDepth32x32Kernel = -1;
         private int m_TransformVerticesKernel = -1;
         private int m_ClearCullArgsKernel = -1;
         private int m_ClearVisibleVertexMaskKernel = -1;
@@ -91,9 +98,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_ViewMatrix;
         private Matrix4x4 m_GpuViewProjMatrix;
         private float m_NearClipPlane = 0.05f;
-        private int m_HzbWidth;
-        private int m_HzbHeight;
-        private int m_HzbMaxMip;
+        private GraphicsBuffer m_FarthestDepth8x8Buffer;
+        private GraphicsBuffer m_FarthestDepth32x32Buffer;
+        private readonly int[] m_DepthTileCounts = new int[4];
+        private int m_DepthTiles8x8X;
+        private int m_DepthTiles8x8Y;
+        private int m_DepthTiles32x32X;
+        private int m_DepthTiles32x32Y;
 
         internal StrandHairGpuPool GpuPool => m_GpuPool;
 
@@ -111,7 +122,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool EnsureShaderLoaded()
         {
-            if (m_Compute != null && m_RasterizeSegmentsLdsKernel >= 0)
+            if (m_Compute != null && m_RasterizeSegmentsLdsKernel >= 0 && m_BuildFarthestDepth32x32Kernel >= 0)
                 return true;
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
@@ -120,6 +131,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
 
             m_ClearAtlasKernel = m_Compute.FindKernel(ClearAtlasKernelName);
+            m_BuildFarthestDepth8x8Kernel = m_Compute.FindKernel(BuildFarthestDepth8x8KernelName);
+            m_BuildFarthestDepth32x32Kernel = m_Compute.FindKernel(BuildFarthestDepth32x32KernelName);
             m_TransformVerticesKernel = m_Compute.FindKernel(TransformVerticesKernelName);
             m_ClearCullArgsKernel = m_Compute.FindKernel(ClearCullArgsKernelName);
             m_ClearVisibleVertexMaskKernel = m_Compute.FindKernel(ClearVisibleVertexMaskKernelName);
@@ -132,6 +145,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RasterizeSegmentsLdsKernel = m_Compute.FindKernel(RasterizeSegmentsLdsKernelName);
             return m_RasterizeSegmentsKernel >= 0
                 && m_RasterizeSegmentsLdsKernel >= 0
+                && m_BuildFarthestDepth8x8Kernel >= 0
+                && m_BuildFarthestDepth32x32Kernel >= 0
                 && m_ClearVisibleVertexMaskKernel >= 0
                 && m_CompactVisibleVerticesKernel >= 0;
         }
@@ -174,7 +189,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_ViewMatrix = cameraData.GetViewMatrix();
             Matrix4x4 projMatrix = cameraData.GetProjectionMatrix();
-            Matrix4x4 gpuProj = GL.GetGPUProjectionMatrix(projMatrix, true);
+            Matrix4x4 gpuProj = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
             m_GpuViewProjMatrix = gpuProj * m_ViewMatrix;
             m_NearClipPlane = Mathf.Max(cameraData.camera.nearClipPlane, 1e-3f);
 
@@ -203,18 +218,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameData.ProjScaleY = Mathf.Abs(projMatrix.m11) * 0.5f * atlasHeight;
             m_FrameData.HasVisibleHair = true;
 
-            if (hzbDesc != null && hzbDesc.Width > 0 && hzbDesc.Height > 0)
-            {
-                m_HzbWidth = hzbDesc.Width;
-                m_HzbHeight = hzbDesc.Height;
-                m_HzbMaxMip = Mathf.Max(0, hzbDesc.MipCount - 1);
-            }
-            else
-            {
-                m_HzbWidth = 0;
-                m_HzbHeight = 0;
-                m_HzbMaxMip = 0;
-            }
+            m_DepthTiles8x8X = Mathf.Max(1, (width + 7) >> 3);
+            m_DepthTiles8x8Y = Mathf.Max(1, (height + 7) >> 3);
+            m_DepthTiles32x32X = Mathf.Max(1, (m_DepthTiles8x8X + 3) >> 2);
+            m_DepthTiles32x32Y = Mathf.Max(1, (m_DepthTiles8x8Y + 3) >> 2);
+            m_FarthestDepth8x8Buffer = m_GpuPool.EnsureFarthestDepth8x8Buffer(m_DepthTiles8x8X * m_DepthTiles8x8Y);
+            m_FarthestDepth32x32Buffer = m_GpuPool.EnsureFarthestDepth32x32Buffer(m_DepthTiles32x32X * m_DepthTiles32x32Y);
 
             return true;
         }
@@ -249,7 +258,12 @@ namespace VividRP.Runtime.RenderPass.Core
             int downscale = Mathf.Max(1, m_FrameData.DownscaleFactor);
             float atlasWidth = Mathf.Max(1, (m_FrameData.ScreenWidth + downscale - 1) / downscale);
             float atlasHeight = Mathf.Max(1, (m_FrameData.ScreenHeight + downscale - 1) / downscale);
-            bool useHzb = hzbHandle.IsValid() && m_HzbWidth > 0 && m_HzbHeight > 0;
+            bool useFarthestOcclusion = m_FarthestDepth8x8Buffer != null
+                && m_FarthestDepth8x8Buffer.IsValid()
+                && m_FarthestDepth32x32Buffer != null
+                && m_FarthestDepth32x32Buffer.IsValid()
+                && m_DepthTiles8x8X > 0
+                && m_DepthTiles8x8Y > 0;
             bool useS3 = StrandHairGpuPool.EnablePhaseS3Optimizations;
             bool useTileSort = useS3 && StrandHairGpuPool.EnableTileSorting;
             bool useLdsStack = useS3 && StrandHairGpuPool.EnableLdsRasterStack;
@@ -267,12 +281,33 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeMatrixParam(m_Compute, ViewMatrixId, m_ViewMatrix);
                 cmd.SetComputeMatrixParam(m_Compute, ViewProjMatrixId, m_GpuViewProjMatrix);
                 cmd.SetComputeIntParam(m_Compute, DownscaleFactorId, downscale);
-                cmd.SetComputeIntParam(m_Compute, EnableHzbId, useHzb ? 1 : 0);
+                cmd.SetComputeIntParam(m_Compute, EnableHzbId, useFarthestOcclusion ? 1 : 0);
                 cmd.SetComputeVectorParam(m_Compute, ScreenSizeId, new Vector4(m_FrameData.ScreenWidth, m_FrameData.ScreenHeight, 0f, 0f));
                 cmd.SetComputeVectorParam(m_Compute, AtlasScreenSizeId, new Vector4(atlasWidth, atlasHeight, 0f, 0f));
-                cmd.SetComputeVectorParam(m_Compute, HzbSizeId, new Vector4(m_HzbWidth, m_HzbHeight, m_HzbMaxMip, 0f));
+                m_DepthTileCounts[0] = m_DepthTiles8x8X;
+                m_DepthTileCounts[1] = m_DepthTiles8x8Y;
+                m_DepthTileCounts[2] = m_DepthTiles32x32X;
+                m_DepthTileCounts[3] = m_DepthTiles32x32Y;
+                cmd.SetComputeIntParams(m_Compute, DepthTileCountsId, m_DepthTileCounts);
                 cmd.SetComputeFloatParam(m_Compute, ProjScaleYId, m_FrameData.ProjScaleY);
                 cmd.SetComputeFloatParam(m_Compute, NearClipPlaneId, m_NearClipPlane);
+
+                // 1b. Build conservative farthest-Z (min-Z in Reversed-Z) occlusion tiles from scene depth
+                if (useFarthestOcclusion)
+                {
+                    cmd.SetComputeTextureParam(m_Compute, m_BuildFarthestDepth8x8Kernel, SceneDepthId, depthHandle);
+                    cmd.SetComputeBufferParam(m_Compute, m_BuildFarthestDepth8x8Kernel, FarthestDepth8x8Id, m_FarthestDepth8x8Buffer);
+                    cmd.DispatchCompute(m_Compute, m_BuildFarthestDepth8x8Kernel, m_DepthTiles8x8X, m_DepthTiles8x8Y, 1);
+
+                    cmd.SetComputeBufferParam(m_Compute, m_BuildFarthestDepth32x32Kernel, FarthestDepth8x8SrvId, m_FarthestDepth8x8Buffer);
+                    cmd.SetComputeBufferParam(m_Compute, m_BuildFarthestDepth32x32Kernel, FarthestDepth32x32Id, m_FarthestDepth32x32Buffer);
+                    cmd.DispatchCompute(
+                        m_Compute,
+                        m_BuildFarthestDepth32x32Kernel,
+                        (m_DepthTiles32x32X + 7) >> 3,
+                        (m_DepthTiles32x32Y + 7) >> 3,
+                        1);
+                }
 
                 // 2. Transform, Cull, Sort, Compact, and Software-Rasterize each visible hair model
                 int allocCount = m_FrameData.Allocations.Count;
@@ -330,7 +365,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeBufferParam(m_Compute, m_ClearSortBinsKernel, TileHistogramId, slot.TileHistogramBuffer);
                     cmd.DispatchCompute(m_Compute, m_ClearSortBinsKernel, (StrandHairAtlasContract.TileHistogramBufferUints + 63) / 64, 1, 1);
 
-                    // 2c. Coarse frustum + HZB segment culling (also fills tile histogram & visible vertex mask)
+                    // 2c. Coarse frustum + conservative farthest-Z occlusion segment culling (also fills tile histogram & visible vertex mask)
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
@@ -339,10 +374,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, TileHistogramId, slot.TileHistogramBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
-                    if (useHzb)
-                        cmd.SetComputeTextureParam(m_Compute, m_CullSegmentsKernel, HzbTextureId, hzbHandle);
-                    else
-                        cmd.SetComputeTextureParam(m_Compute, m_CullSegmentsKernel, HzbTextureId, depthHandle);
+                    if (useFarthestOcclusion)
+                    {
+                        cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, FarthestDepth8x8SrvId, m_FarthestDepth8x8Buffer);
+                        cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, FarthestDepth32x32SrvId, m_FarthestDepth32x32Buffer);
+                    }
                     cmd.DispatchCompute(m_Compute, m_CullSegmentsKernel, (segmentCount + 63) / 64, 1, 1);
 
                     if (useTileSort)
@@ -405,6 +441,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GpuPool.Dispose();
             m_Compute = null;
             m_ClearAtlasKernel = -1;
+            m_BuildFarthestDepth8x8Kernel = -1;
+            m_BuildFarthestDepth32x32Kernel = -1;
             m_TransformVerticesKernel = -1;
             m_ClearCullArgsKernel = -1;
             m_ClearVisibleVertexMaskKernel = -1;
@@ -415,6 +453,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CompactVisibleVerticesKernel = -1;
             m_RasterizeSegmentsKernel = -1;
             m_RasterizeSegmentsLdsKernel = -1;
+            m_FarthestDepth8x8Buffer = null;
+            m_FarthestDepth32x32Buffer = null;
             m_FrameData = null;
         }
     }

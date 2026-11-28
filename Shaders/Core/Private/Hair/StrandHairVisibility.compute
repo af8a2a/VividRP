@@ -1,4 +1,6 @@
 #pragma kernel KClearAtlasTiles
+#pragma kernel KBuildFarthestDepth8x8
+#pragma kernel KBuildFarthestDepth32x32
 #pragma kernel KTransformVertices
 #pragma kernel KClearCullArgs
 #pragma kernel KCullSegments
@@ -37,9 +39,12 @@ RWStructuredBuffer<uint> _HairIndirectShadeArgs;   // [0]=groupX, [1]=1, [2]=1, 
 // Layout per 64x64 tile: 4 slices * 4096 uints = 16384 uints/tile
 RWStructuredBuffer<uint> _HairVisAtlas;
 
-// Scene depth & optional HZB for conservative occlusion culling
+// Scene depth & self-built conservative farthest-Z occlusion pyramid (min-Z in Reversed-Z)
 Texture2D<float> _HairSceneDepth;
-Texture2D<float> _HairHZBTexture;
+RWStructuredBuffer<float> _HairFarthestDepth8x8;
+RWStructuredBuffer<float> _HairFarthestDepth32x32;
+StructuredBuffer<float> _HairFarthestDepth8x8SRV;
+StructuredBuffer<float> _HairFarthestDepth32x32SRV;
 
 // Per-dispatch uniforms
 float4x4 _HairLocalToWorld;
@@ -59,7 +64,7 @@ uint _HairEnableHZB;
 
 float2 _HairScreenSize;      // Full-res camera pixel size
 float2 _HairAtlasScreenSize; // Full-res / _HairDownscaleFactor
-float4 _HairHZBSize;         // xy = mip0 size, z = maxMip, w = unused
+uint4 _HairDepthTileCounts;  // xy = 8x8 tile grid, zw = 32x32 tile grid
 
 float _HairRadiusScale;
 float _HairProjScaleY;       // abs(proj[1][1]) * 0.5 * atlasHeight
@@ -139,33 +144,127 @@ void KClearSortBins(uint3 tid : SV_DispatchThreadID)
         _HairTileHistogram[tid.x] = 0u;
 }
 
-bool TestSegmentHZB(float2 minPx, float2 maxPx, float nearestDeviceZ)
+// Conservative farthest-Z reduction per 8x8 full-res screen tile (min-Z in Reversed-Z).
+// Built directly from _HairSceneDepth because VividRP's global HZBGeneratePass builds a
+// closest-Z (max-Z) pyramid for SSR/Lumen screen-space tracing, which is non-conservative
+// for occlusion culling and falsely culls hair near curved opaque occluders (head/core).
+groupshared float gs_FarthestDepth64[64];
+
+float ReduceFarthestDeviceZ(float a, float b)
 {
-    if (_HairEnableHZB == 0u || _HairHZBSize.x < 1.0f || _HairHZBSize.y < 1.0f)
+#if UNITY_REVERSED_Z
+    return min(a, b);
+#else
+    return max(a, b);
+#endif
+}
+
+[numthreads(8, 8, 1)]
+void KBuildFarthestDepth8x8(
+    uint3 gid : SV_GroupID,
+    uint3 gtid : SV_GroupThreadID,
+    uint gidx : SV_GroupIndex)
+{
+    if (gid.x >= _HairDepthTileCounts.x || gid.y >= _HairDepthTileCounts.y)
+        return;
+
+    int2 screenMax = max(int2(_HairScreenSize) - 1, int2(0, 0));
+    int2 px = min(int2(gid.xy * 8u + gtid.xy), screenMax);
+    gs_FarthestDepth64[gidx] = _HairSceneDepth.Load(int3(px, 0));
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint stride = 32u; stride > 0u; stride >>= 1u)
+    {
+        if (gidx < stride)
+            gs_FarthestDepth64[gidx] = ReduceFarthestDeviceZ(gs_FarthestDepth64[gidx], gs_FarthestDepth64[gidx + stride]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (gidx == 0u)
+    {
+        _HairFarthestDepth8x8[gid.y * _HairDepthTileCounts.x + gid.x] = gs_FarthestDepth64[0];
+    }
+}
+
+[numthreads(8, 8, 1)]
+void KBuildFarthestDepth32x32(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= _HairDepthTileCounts.z || tid.y >= _HairDepthTileCounts.w)
+        return;
+
+    uint2 base8 = tid.xy * 4u;
+    uint2 max8 = max(_HairDepthTileCounts.xy, uint2(1u, 1u)) - 1u;
+    uint stride8 = _HairDepthTileCounts.x;
+
+    float farZ = _HairFarthestDepth8x8SRV[min(base8.y, max8.y) * stride8 + min(base8.x, max8.x)];
+    [unroll]
+    for (uint dy = 0u; dy < 4u; dy++)
+    {
+        uint sy = min(base8.y + dy, max8.y);
+        uint row = sy * stride8;
+        [unroll]
+        for (uint dx = 0u; dx < 4u; dx++)
+        {
+            uint sx = min(base8.x + dx, max8.x);
+            farZ = ReduceFarthestDeviceZ(farZ, _HairFarthestDepth8x8SRV[row + sx]);
+        }
+    }
+
+    _HairFarthestDepth32x32[tid.y * _HairDepthTileCounts.z + tid.x] = farZ;
+}
+
+bool TestSegmentHZB(float2 minPxAtlas, float2 maxPxAtlas, float nearestDeviceZ)
+{
+    if (_HairEnableHZB == 0u || _HairDepthTileCounts.x == 0u || _HairDepthTileCounts.y == 0u)
         return true;
 
-    float2 uvMin = saturate(minPx / _HairAtlasScreenSize);
-    float2 uvMax = saturate(maxPx / _HairAtlasScreenSize);
-    float2 hzbMin = uvMin * _HairHZBSize.xy;
-    float2 hzbMax = uvMax * _HairHZBSize.xy;
-    float2 extent = max(hzbMax - hzbMin, 1.0f);
-    float maxExtent = max(extent.x, extent.y);
-    uint mip = (uint)clamp(ceil(log2(maxExtent)), 0.0f, _HairHZBSize.z);
+    float downscale = (float)max(_HairDownscaleFactor, 1u);
+    float2 screenMaxF = max(_HairScreenSize - 1.0f, 0.0f.xx);
+    float2 minPxFull = clamp(floor(minPxAtlas * downscale), 0.0f.xx, screenMaxF);
+    float2 maxPxFull = clamp(ceil(maxPxAtlas * downscale) + (downscale - 1.0f), 0.0f.xx, screenMaxF);
 
-    uint2 mipSize = max(uint2(1u, 1u), uint2(_HairHZBSize.xy) >> mip);
-    int2 c0 = clamp(int2(floor(hzbMin / exp2((float)mip))), int2(0, 0), int2(mipSize) - 1);
-    int2 c1 = clamp(int2(floor(hzbMax / exp2((float)mip))), int2(0, 0), int2(mipSize) - 1);
+    uint2 maxTile8 = _HairDepthTileCounts.xy - 1u;
+    uint2 t0 = min(uint2(minPxFull) >> 3u, maxTile8);
+    uint2 t1 = min(uint2(maxPxFull) >> 3u, maxTile8);
 
-    float d00 = _HairHZBTexture.Load(int3(c0.x, c0.y, mip));
-    float d10 = _HairHZBTexture.Load(int3(c1.x, c0.y, mip));
-    float d01 = _HairHZBTexture.Load(int3(c0.x, c1.y, mip));
-    float d11 = _HairHZBTexture.Load(int3(c1.x, c1.y, mip));
+    float farOccluderZ;
+    if ((t1.x - t0.x) <= 1u && (t1.y - t0.y) <= 1u)
+    {
+        uint stride = _HairDepthTileCounts.x;
+        float d00 = _HairFarthestDepth8x8SRV[t0.y * stride + t0.x];
+        float d10 = _HairFarthestDepth8x8SRV[t0.y * stride + t1.x];
+        float d01 = _HairFarthestDepth8x8SRV[t1.y * stride + t0.x];
+        float d11 = _HairFarthestDepth8x8SRV[t1.y * stride + t1.x];
+        farOccluderZ = ReduceFarthestDeviceZ(
+            ReduceFarthestDeviceZ(d00, d10),
+            ReduceFarthestDeviceZ(d01, d11));
+    }
+    else if (_HairDepthTileCounts.z > 0u && _HairDepthTileCounts.w > 0u)
+    {
+        uint2 maxTile32 = _HairDepthTileCounts.zw - 1u;
+        uint2 c0 = min(t0 >> 2u, maxTile32);
+        uint2 c1 = min(t1 >> 2u, maxTile32);
+        if ((c1.x - c0.x) > 1u || (c1.y - c0.y) > 1u)
+            return true;
+
+        uint stride = _HairDepthTileCounts.z;
+        float d00 = _HairFarthestDepth32x32SRV[c0.y * stride + c0.x];
+        float d10 = _HairFarthestDepth32x32SRV[c0.y * stride + c1.x];
+        float d01 = _HairFarthestDepth32x32SRV[c1.y * stride + c0.x];
+        float d11 = _HairFarthestDepth32x32SRV[c1.y * stride + c1.x];
+        farOccluderZ = ReduceFarthestDeviceZ(
+            ReduceFarthestDeviceZ(d00, d10),
+            ReduceFarthestDeviceZ(d01, d11));
+    }
+    else
+    {
+        return true;
+    }
 
 #if UNITY_REVERSED_Z
-    float farOccluderZ = min(min(d00, d10), min(d01, d11));
     return nearestDeviceZ >= farOccluderZ - 1e-5f;
 #else
-    float farOccluderZ = max(max(d00, d10), max(d01, d11));
     return nearestDeviceZ <= farOccluderZ + 1e-5f;
 #endif
 }

@@ -563,6 +563,10 @@ namespace VividRP.Runtime
 
         private GraphicsBuffer m_VisAtlasBuffer;
         private int m_VisAtlasTileCapacity;
+        private GraphicsBuffer m_FarthestDepth8x8Buffer;
+        private int m_FarthestDepth8x8Capacity;
+        private GraphicsBuffer m_FarthestDepth32x32Buffer;
+        private int m_FarthestDepth32x32Capacity;
         private readonly List<StrandHairModelScratchSlot> m_Slots = new List<StrandHairModelScratchSlot>(8);
 
         public GraphicsBuffer EnsureVisAtlasBuffer(int maxTiles)
@@ -586,6 +590,48 @@ namespace VividRP.Runtime
             return m_VisAtlasBuffer;
         }
 
+        public GraphicsBuffer EnsureFarthestDepth8x8Buffer(int tileCount)
+        {
+            int target = Mathf.Max(64, tileCount);
+            if (m_FarthestDepth8x8Buffer == null
+                || !m_FarthestDepth8x8Buffer.IsValid()
+                || m_FarthestDepth8x8Capacity < target)
+            {
+                m_FarthestDepth8x8Buffer?.Dispose();
+                m_FarthestDepth8x8Buffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    target,
+                    sizeof(float))
+                {
+                    name = "StrandHair_FarthestDepth8x8",
+                };
+                m_FarthestDepth8x8Capacity = target;
+            }
+
+            return m_FarthestDepth8x8Buffer;
+        }
+
+        public GraphicsBuffer EnsureFarthestDepth32x32Buffer(int tileCount)
+        {
+            int target = Mathf.Max(16, tileCount);
+            if (m_FarthestDepth32x32Buffer == null
+                || !m_FarthestDepth32x32Buffer.IsValid()
+                || m_FarthestDepth32x32Capacity < target)
+            {
+                m_FarthestDepth32x32Buffer?.Dispose();
+                m_FarthestDepth32x32Buffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    target,
+                    sizeof(float))
+                {
+                    name = "StrandHair_FarthestDepth32x32",
+                };
+                m_FarthestDepth32x32Capacity = target;
+            }
+
+            return m_FarthestDepth32x32Buffer;
+        }
+
         public StrandHairModelScratchSlot GetOrCreateSlot(int index, int vertexCount, int segmentCount)
         {
             while (m_Slots.Count <= index)
@@ -601,6 +647,12 @@ namespace VividRP.Runtime
             m_VisAtlasBuffer?.Dispose();
             m_VisAtlasBuffer = null;
             m_VisAtlasTileCapacity = 0;
+            m_FarthestDepth8x8Buffer?.Dispose();
+            m_FarthestDepth8x8Buffer = null;
+            m_FarthestDepth8x8Capacity = 0;
+            m_FarthestDepth32x32Buffer?.Dispose();
+            m_FarthestDepth32x32Buffer = null;
+            m_FarthestDepth32x32Capacity = 0;
             for (int i = 0; i < m_Slots.Count; i++)
                 m_Slots[i]?.Dispose();
             m_Slots.Clear();

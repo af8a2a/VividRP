@@ -1,0 +1,316 @@
+#pragma kernel EvaluateLobeSweep
+#pragma kernel EvaluateWhiteFurnace
+#pragma kernel EvaluateMedullaAndDualScatter
+#pragma kernel EvaluateDegenerateCases
+#pragma use_dxc
+#pragma target 5.0
+
+#include "../../../Shaders/Core/Public/VividHairFurBSDF.hlsl"
+#include "../../../Shaders/Material/Hair/Vendor/RTXCR/HairChiangBSDF.hlsli"
+
+// Output buffer layout:
+//   EvaluateLobeSweep:
+//     [0..63]   : Karis Marschner (R.x, TT.x, TRT.x, Total.x) for 64 elevation angles thetaL in [-80, +80] deg
+//     [64..127] : RTXCR Chiang 16-pt h-quadrature reference (Total.r, Total.g, Total.b, 0) for same 64 angles
+//     (Split into two sweeps: front phi=0 [0..31] and backlit phi=pi [32..63])
+//   EvaluateWhiteFurnace:
+//     [0..11]   : (totalReflectance.r, singleReflectance.r, dualReflectance.r, maxSampleVal) for 12 parameter combos
+//   EvaluateMedullaAndDualScatter:
+//     [0..7]    : Medulla sweep & Dual Scattering light vs dark fur metrics
+//   EvaluateDegenerateCases:
+//     [0..7]    : Finite/non-negative checks for extreme grazing / parallel / zero-color inputs
+RWStructuredBuffer<float4> _Output;
+
+// 8-point symmetric Gauss-Legendre nodes/weights on [0, 1] -> 16-point quadrature on [-1, 1]
+static const float k_GLNodes[8] =
+{
+    0.0950125098376374f,
+    0.2816035507792589f,
+    0.4580167776572274f,
+    0.6178762444026438f,
+    0.7554044083550030f,
+    0.8656312023878318f,
+    0.9445750230732326f,
+    0.9894009349916499f
+};
+
+static const float k_GLWeights[8] =
+{
+    0.1894506104550685f,
+    0.1826034150449236f,
+    0.1691565193950025f,
+    0.1495959888165767f,
+    0.1246289712555339f,
+    0.0951585116824928f,
+    0.0622535239386479f,
+    0.0271524594117541f
+};
+
+// Integrates RTXCR near-field Chiang BCSDF over h in [-1, 1] via 16-point Gauss-Legendre
+// to produce a far-field reference BCSDF (1/2 * integral_{-1}^{1} f(h) dh).
+float3 EvaluateChiangFarFieldReference(
+    float3 baseColor,
+    float betaM,
+    float betaN,
+    float cuticleDeg,
+    float3 wiLocal,
+    float3 woLocal)
+{
+    RTXCR_HairMaterialData mat;
+    mat.baseColor = max(baseColor, 1e-4f.xxx);
+    mat.longitudinalRoughness = betaM;
+    mat.azimuthalRoughness = betaN;
+    mat.ior = 1.55f;
+    mat.eta = rcp(1.55f);
+    mat.fresnelApproximation = 1u;
+    mat.absorptionModel = RTXCR_HairAbsorptionModel_Color;
+    mat.melanin = 0.0f;
+    mat.melaninRedness = 0.0f;
+    mat.cuticleAngleInDegrees = cuticleDeg;
+
+    RTXCR_HairInteractionSurface dummySurf;
+    dummySurf.incidentRayDirection = woLocal;
+    dummySurf.shadingNormal = float3(0.0f, 0.0f, 1.0f);
+    dummySurf.tangent = float3(1.0f, 0.0f, 0.0f);
+    RTXCR_HairMaterialInteraction inter = RTXCR_CreateHairMaterialInteraction(mat, dummySurf);
+
+    float3 sum = 0.0f.xxx;
+    [loop]
+    for (int i = 0; i < 8; ++i)
+    {
+        float hPos = k_GLNodes[i];
+        float w = k_GLWeights[i];
+
+        inter.h = hPos;
+        inter.gammaI = asin(hPos);
+        sum += w * RTXCR_HairChiangBsdfEval(inter, wiLocal, woLocal);
+
+        inter.h = -hPos;
+        inter.gammaI = asin(-hPos);
+        sum += w * RTXCR_HairChiangBsdfEval(inter, wiLocal, woLocal);
+    }
+
+    // Divide by 2 to average over h in [-1, 1] (length 2).
+    return 0.5f * sum;
+}
+
+[numthreads(64, 1, 1)]
+void EvaluateLobeSweep(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint idx = dispatchThreadId.x;
+    if (idx >= 64u)
+        return;
+
+    bool isBacklit = idx >= 32u;
+    uint localIdx = idx & 31u;
+    float t = (float)localIdx / 31.0f;
+    float thetaDeg = lerp(-75.0f, 75.0f, t);
+    float thetaRad = thetaDeg * (VIVID_HAIR_PI / 180.0f);
+    float phiRad = isBacklit ? VIVID_HAIR_PI : 0.0f;
+
+    // Strand tangent T = +Y (world), view V = +Z (thetaV = 0, phiV = 0).
+    // In RTXCR local frame: x = tangent, y = bitangent, z = normal -> V_local = (0, 0, 1).
+    float3 T = float3(0.0f, 1.0f, 0.0f);
+    float3 V = float3(0.0f, 0.0f, 1.0f);
+    float3 L = float3(
+        cos(thetaRad) * sin(phiRad),
+        sin(thetaRad),
+        cos(thetaRad) * cos(phiRad));
+
+    VividHairFurBSDFInputs inputs = VividCreateDefaultHairFurBSDFInputs();
+    inputs.baseColor = float3(0.65f, 0.35f, 0.15f); // Warm chestnut hair
+    inputs.tangentWS = T;
+    inputs.geomNormalWS = V;
+    inputs.roughness = 0.28f;
+    inputs.radialRoughness = 0.35f;
+    inputs.cuticleAngleRad = 3.0f * (VIVID_HAIR_PI / 180.0f); // 3 degrees
+    inputs.specular = 0.5f;
+    inputs.scatter = 0.0f; // Single-scatter parity check vs Chiang
+    inputs.backlit = 1.0f;
+    inputs.medullaWeight = 0.0f;
+
+    VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(inputs, V, L, 1.0f);
+    float3 totalKaris = VividCombineHairFurBSDFResponse(resp);
+    _Output[idx] = float4(resp.lobeR.r, resp.lobeTT.r, resp.lobeTRT.r, totalKaris.r);
+
+    // Reference RTXCR Chiang far-field (local: x=T, y=B, z=N)
+    float3 woLocal = float3(0.0f, 0.0f, 1.0f);
+    float3 wiLocal = float3(sin(thetaRad), cos(thetaRad) * sin(phiRad), cos(thetaRad) * cos(phiRad));
+    float3 chiangRef = EvaluateChiangFarFieldReference(
+        inputs.baseColor,
+        inputs.roughness,
+        inputs.radialRoughness,
+        3.0f,
+        wiLocal,
+        woLocal);
+    _Output[64u + idx] = float4(chiangRef, resp.lobeTRT.b);
+}
+
+[numthreads(12, 1, 1)]
+void EvaluateWhiteFurnace(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint idx = dispatchThreadId.x;
+    if (idx >= 12u)
+        return;
+
+    // 12 combinations:
+    //   0..3: roughness = {0.15, 0.35, 0.65, 0.90}, medulla = 0.0, scatter = 0.0
+    //   4..7: roughness = {0.15, 0.35, 0.65, 0.90}, medulla = 0.0, scatter = 1.0
+    //   8..11: roughness = 0.40, medulla = {0.25, 0.50, 0.75, 1.00}, scatter = 1.0
+    static const float kRoughs[4] = { 0.15f, 0.35f, 0.65f, 0.90f };
+    static const float kMedullas[4] = { 0.25f, 0.50f, 0.75f, 1.00f };
+
+    VividHairFurBSDFInputs inputs = VividCreateDefaultHairFurBSDFInputs();
+    inputs.baseColor = float3(1.0f, 1.0f, 1.0f); // White furnace
+    inputs.tangentWS = float3(0.0f, 1.0f, 0.0f);
+    inputs.geomNormalWS = float3(0.0f, 0.0f, 1.0f);
+    inputs.cuticleAngleRad = 2.5f * (VIVID_HAIR_PI / 180.0f);
+    inputs.specular = 0.5f;
+    inputs.backlit = 1.0f;
+    inputs.shellDepth = 0.5f;
+    inputs.ambientOcclusion = 1.0f;
+
+    if (idx < 4u)
+    {
+        inputs.roughness = kRoughs[idx];
+        inputs.radialRoughness = kRoughs[idx];
+        inputs.medullaWeight = 0.0f;
+        inputs.scatter = 0.0f;
+    }
+    else if (idx < 8u)
+    {
+        inputs.roughness = kRoughs[idx - 4u];
+        inputs.radialRoughness = kRoughs[idx - 4u];
+        inputs.medullaWeight = 0.0f;
+        inputs.scatter = 1.0f;
+    }
+    else
+    {
+        inputs.roughness = 0.40f;
+        inputs.radialRoughness = 0.50f;
+        inputs.medullaWeight = kMedullas[idx - 8u];
+        inputs.scatter = 1.0f;
+    }
+
+    // View at oblique 25 degrees from normal plane
+    float3 V = normalize(float3(0.0f, sin(0.4363f), cos(0.4363f)));
+
+    // Integrate over full sphere S^2 using 2048 Fibonacci lattice directions (dOmega = 4*pi / N)
+    const uint N = 2048u;
+    const float dOmega = (4.0f * VIVID_HAIR_PI) / (float)N;
+    const float goldenAngle = 2.399963229728653f;
+
+    float sumTotal = 0.0f;
+    float sumSingle = 0.0f;
+    float sumDual = 0.0f;
+    float maxVal = 0.0f;
+
+    [loop]
+    for (uint s = 0u; s < N; ++s)
+    {
+        float y = 1.0f - (2.0f * ((float)s + 0.5f) / (float)N);
+        float r = sqrt(saturate(1.0f - y * y));
+        float phi = goldenAngle * (float)s;
+        float3 L = float3(cos(phi) * r, y, sin(phi) * r);
+
+        VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(inputs, V, L, 1.0f);
+        float singleR = resp.lobeR.r + resp.lobeTT.r + resp.lobeTRT.r + resp.lobeMedulla.r;
+        float dualR = resp.lobeDualScatter.r;
+        float totalR = singleR + dualR;
+
+        sumSingle += singleR * dOmega;
+        sumDual += dualR * dOmega;
+        sumTotal += totalR * dOmega;
+        maxVal = max(maxVal, totalR);
+    }
+
+    _Output[idx] = float4(sumTotal, sumSingle, sumDual, maxVal);
+}
+
+[numthreads(1, 1, 1)]
+void EvaluateMedullaAndDualScatter(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float3 T = float3(0.0f, 1.0f, 0.0f);
+    float3 V = float3(0.0f, 0.0f, 1.0f);
+    float3 Lside = normalize(float3(0.7f, 0.15f, 0.7f));
+    float3 Lback = normalize(float3(0.0f, -0.05f, -0.9987f));
+
+    // 0: Pure cortex (medulla = 0) at side & back
+    VividHairFurBSDFInputs fur = VividCreateDefaultHairFurBSDFInputs();
+    fur.baseColor = float3(0.85f, 0.75f, 0.55f); // Light blonde/plush fur
+    fur.tangentWS = T;
+    fur.geomNormalWS = V;
+    fur.roughness = 0.35f;
+    fur.radialRoughness = 0.45f;
+    fur.scatter = 0.0f;
+    fur.medullaWeight = 0.0f;
+    VividHairFurBSDFResponse r0Side = VividEvaluateHairFurDirect(fur, V, Lside, 1.0f);
+    VividHairFurBSDFResponse r0Back = VividEvaluateHairFurDirect(fur, V, Lback, 1.0f);
+    _Output[0] = float4(r0Side.lobeR.r, r0Side.lobeTRT.r, r0Side.lobeMedulla.r, r0Back.lobeTT.r);
+
+    // 1: High medulla animal fur (medulla = 0.75) at side & back
+    fur.medullaWeight = 0.75f;
+    VividHairFurBSDFResponse r1Side = VividEvaluateHairFurDirect(fur, V, Lside, 1.0f);
+    VividHairFurBSDFResponse r1Back = VividEvaluateHairFurDirect(fur, V, Lback, 1.0f);
+    _Output[1] = float4(r1Side.lobeR.r, r1Side.lobeTRT.r, r1Side.lobeMedulla.r, r1Back.lobeTT.r);
+
+    // 2: Dual Scattering penetration in partial shadow (shadow = 0.2): Light blonde fur vs Dark brown fur
+    fur.medullaWeight = 0.35f;
+    fur.scatter = 1.0f;
+    fur.shellDepth = 0.7f;
+    fur.ambientOcclusion = 0.85f;
+    float3 lightFurShadowed = VividEvaluateHairFurDirectRadiance(fur, V, Lside, 1.0f.xxx, 0.2f);
+    fur.scatter = 0.0f;
+    float3 lightFurNoScatter = VividEvaluateHairFurDirectRadiance(fur, V, Lside, 1.0f.xxx, 0.2f);
+    _Output[2] = float4(lightFurShadowed, lightFurNoScatter.r);
+
+    // 3: Dark brown fur with Dual Scattering at same conditions
+    fur.baseColor = float3(0.05f, 0.03f, 0.02f);
+    fur.scatter = 1.0f;
+    float3 darkFurShadowed = VividEvaluateHairFurDirectRadiance(fur, V, Lside, 1.0f.xxx, 0.2f);
+    _Output[3] = float4(darkFurShadowed, 1.0f);
+
+    // 4: Melanin helper check (melanin = 0.0 -> white, melanin = 0.5 -> warm brown, melanin = 0.95 -> near-black)
+    float3 melWhite = VividHairColorFromMelanin(0.0f, 0.3f, 0.4f);
+    float3 melMid = VividHairColorFromMelanin(0.5f, 0.5f, 0.4f);
+    float3 melDark = VividHairColorFromMelanin(0.95f, 0.2f, 0.4f);
+    _Output[4] = float4(melWhite.r, melMid.r, melMid.b, melDark.r);
+
+    // 5: Indirect IBL / Lumen helper check (white environment)
+    fur.baseColor = float3(0.6f, 0.4f, 0.2f);
+    fur.ambientOcclusion = 0.8f;
+    float3 indirect = VividEvaluateHairFurIndirect(fur, V, 1.0f.xxx, 1.0f.xxx);
+    float3 cylN = VividComputeHairCylinderNormal(T, normalize(float3(0.0f, 0.5f, 0.866f)), V);
+    _Output[5] = float4(indirect, abs(dot(cylN, T)));
+}
+
+[numthreads(1, 1, 1)]
+void EvaluateDegenerateCases(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float3 T = float3(0.0f, 1.0f, 0.0f);
+    VividHairFurBSDFInputs inputs = VividCreateDefaultHairFurBSDFInputs();
+    inputs.tangentWS = T;
+    inputs.geomNormalWS = float3(0.0f, 0.0f, 1.0f);
+
+    // 0: V parallel to T (grazing pole singularity)
+    float3 r0 = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(inputs, T, float3(0.0f, 0.0f, 1.0f), 1.0f));
+    // 1: L parallel to T
+    float3 r1 = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(inputs, float3(0.0f, 0.0f, 1.0f), T, 1.0f));
+    // 2: V == -L (exact backlit)
+    float3 r2 = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(inputs, float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f), 1.0f));
+    // 3: Zero baseColor (pitch-black hair should still reflect specular R and produce zero NaN)
+    inputs.baseColor = 0.0f.xxx;
+    float3 r3 = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(inputs, float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.1f, 0.995f), 1.0f));
+    // 4: Zero roughness & zero radialRoughness & zero tangent (clamped safely)
+    inputs.baseColor = float3(0.5f, 0.4f, 0.3f);
+    inputs.roughness = 0.0f;
+    inputs.radialRoughness = 0.0f;
+    inputs.tangentWS = 0.0f.xxx;
+    float3 r4 = VividCombineHairFurBSDFResponse(VividEvaluateHairFurDirect(inputs, float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, 1.0f), 0.0f));
+
+    _Output[0] = float4(r0, 1.0f);
+    _Output[1] = float4(r1, 1.0f);
+    _Output[2] = float4(r2, 1.0f);
+    _Output[3] = float4(r3, 1.0f);
+    _Output[4] = float4(r4, 1.0f);
+}

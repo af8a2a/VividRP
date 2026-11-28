@@ -92,7 +92,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             texture.Create();
             Texture = RTHandles.Alloc(texture, transferOwnership: true);
             PreviousTable = new GraphicsBuffer(GraphicsBuffer.Target.Structured, entries, 4) { name = "VSMHZBPreviousTable" };
-            PreviousProjections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, projections, 160) { name = "VSMHZBPreviousProjections" };
+            PreviousProjections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, projections, VirtualShadowMapProjection.Stride) { name = "VSMHZBPreviousProjections" };
             BuildArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 6, 4)
                 { name = "VSMHZBBuildArgs" };
             DeferredArgs = new GraphicsBuffer(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 5, 4)

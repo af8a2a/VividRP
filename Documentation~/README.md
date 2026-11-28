@@ -59,6 +59,7 @@
 | [SponzaNoonLook.md](SponzaNoonLook.md) | Sponza 正午基准场景构图对齐、自动曝光与 APV / 反射探针调优记录 |
 | [VirtualShadowMapCodeLayout.md](VirtualShadowMapCodeLayout.md) | VSM Runtime 子系统与 `Shaders/Core` Public/Private 目录职责、独立 `VSMShadowPass`、布局重映射、当帧请求与常驻状态分离、动态缓存与工作列表补绘顺序 |
 | [VirtualShadowMapShaderReference.md](VirtualShadowMapShaderReference.md) | VividRP VSM Shader 与 Unreal Engine 5.7.4 `ReferenceVSM`（37 个文件）的主链路对照、函数级映射表与差异说明 |
+| [UnifiedVirtualShadowMapArchitecture.md](UnifiedVirtualShadowMapArchitecture.md) | Directional + Point + Spot 统一 VSM 架构设计：VSMHandle 分段、256B 统一投影 ABI、LightGrid 裁剪标页、透视剔除与 `(VSMId, Mip)` 视图压缩、One-Pass Projection、跨面 SMRT 与分阶段落地路线 |
 | [SMRTAdaptiveRays.md](SMRTAdaptiveRays.md) | `VSMShadowResolveAdaptive` 生产自适应射线退出策略：首条射线全亮退出、双射线全暗退出、缺页投票保护与历史失效规则 |
 | [SMRTReceiverPreparation.md](SMRTReceiverPreparation.md) | SMRT 接收面法线、投影参数、随机相位与起始纹素坐标在射线循环外的准备与跨层复用 |
 | [SMRTCostDiagnostics.md](SMRTCostDiagnostics.md) | `smrt-cost` 诊断工具用法、32 项逐像素源码级工作量计数器、R16_SFloat 重放一致性校验与性能测量注意事项 |

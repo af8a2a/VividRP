@@ -456,7 +456,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void VSMProjectionABI_AndAllocatorAreNotLimitedToFourCSMCascades()
         {
-            Assert.That(Marshal.SizeOf<VirtualShadowMapProjection>(), Is.EqualTo(160));
+            Assert.That(Marshal.SizeOf<VirtualShadowMapProjection>(), Is.EqualTo(VirtualShadowMapProjection.Stride));
             Assert.That(Marshal.OffsetOf<VirtualShadowMapProjection>("Parameters").ToInt32(), Is.EqualTo(144));
             Assert.That(VirtualShadowMapPrototypeRuntime.BuildUnmappedPageTable(8, 7).Length,
                 Is.EqualTo(8 * 8 * 7));
@@ -985,7 +985,7 @@ namespace VividRP.Editor.Tests
                     shader.SetInt("_VSMPrototypePageSize", 128);
                     shader.SetInt("_VSMPrototypePagesPerAxis", 4);
                     shader.SetInt("_VSMPrototypePageTableEntryCount", metadataData.Length);
-                    using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+                    using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VirtualShadowMapProjection.Stride);
                     projections.SetData(new[]
                     {
                         new VirtualShadowMapProjection { WorldToShadow = Matrix4x4.identity }
@@ -2228,7 +2228,7 @@ namespace VividRP.Editor.Tests
             shader.SetInt("_VSMPrototypePagesPerAxis", 8);
             shader.SetInt("_VSMPrototypePageSize", 128);
             shader.SetInt("_InstanceDataCount", 1); shader.SetInt("_MeshletCount", 3);
-            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, 160);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 4, VirtualShadowMapProjection.Stride);
             var projectionData = new VirtualShadowMapProjection[4];
             for (int i = 0; i < projectionData.Length; i++)
                 projectionData[i].WorldToShadow = Matrix4x4.identity;

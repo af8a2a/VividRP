@@ -405,7 +405,7 @@ namespace VividRP.Editor.Tests
             internal readonly GraphicsBuffer Counters = new(GraphicsBuffer.Target.Structured, 4, 4);
             internal readonly GraphicsBuffer Pressure = new(GraphicsBuffer.Target.Structured, 3, 16);
             private readonly GraphicsBuffer m_PageOffsets = new(GraphicsBuffer.Target.Structured, 9, 8);
-            private readonly GraphicsBuffer m_Projections = new(GraphicsBuffer.Target.Structured, 3, 160);
+            private readonly GraphicsBuffer m_Projections = new(GraphicsBuffer.Target.Structured, 3, VirtualShadowMapProjection.Stride);
             // Integer pools support Load/Store, not filtered Sample. Texture2D's
             // constructor validates Sample usage on Unity 6.7; use the same UAV
             // resource type as production and upload through a tiny test kernel.

@@ -177,7 +177,7 @@ namespace VividRP.Editor.Tests
             var shader = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
             using var receiverMasks = new VirtualShadowMapReceiverMaskTestBuffers(shader);
-            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levelCount, 160);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levelCount, VirtualShadowMapProjection.Stride);
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
             using var normals = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);

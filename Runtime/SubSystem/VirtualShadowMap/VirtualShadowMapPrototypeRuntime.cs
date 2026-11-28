@@ -49,6 +49,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static RTHandle s_RasterDepth;
         private static RTHandle s_UnityRasterDepth;
         internal static readonly VirtualShadowMapProjectionSet Projections = new();
+        internal static readonly VirtualShadowMapRegistry Registry = new();
         private static GraphicsBuffer s_RemapPageMetadata;
         private static GraphicsBuffer s_PageTable;
         private static GraphicsBuffer s_PageMetadata;
@@ -74,6 +75,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly int UncachedPageRectBoundsRWId = Shader.PropertyToID("_VSMUncachedPageRectBoundsRW");
         internal static readonly int UncachedPageRectBoundsEnabledId = Shader.PropertyToID("_VSMUncachedPageRectBoundsEnabled");
         private static GraphicsBuffer s_PhysicalPageOwners;
+        private static GraphicsBuffer s_PhysicalPageDescriptors;
+        internal static readonly int PhysicalPageDescriptorsId = Shader.PropertyToID("_VSMPhysicalPageDescriptors");
         private static GraphicsBuffer s_AllocatorCounters;
         private static GraphicsBuffer s_AllocationRequests;
         private static GraphicsBuffer s_PhysicalPageLists;
@@ -143,6 +146,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static GraphicsBuffer PageCullDispatchArgs => s_PageCullDispatchArgs;
         internal static readonly int PageCullDispatchArgsRWId = Shader.PropertyToID("_VSMPageCullDispatchArgsRW");
         internal static GraphicsBuffer PhysicalPageOwners => s_PhysicalPageOwners;
+        internal static GraphicsBuffer PhysicalPageDescriptors => s_PhysicalPageDescriptors;
         internal static GraphicsBuffer AllocatorCounters => s_AllocatorCounters;
         internal static GraphicsBuffer AllocationRequests => s_AllocationRequests;
         internal static GraphicsBuffer AllocationSummary => s_AllocationSummary;
@@ -316,6 +320,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
             EnsureReceiverMaskBuffer(ref s_PageReceiverMasks, pageCount, "VSMPageReceiverMasks");
             EnsureReceiverMaskBuffer(ref s_PhysicalReceiverMasks, Mathf.Max(s_PhysicalPageCapacity, 1), "VSMPhysicalReceiverMasks");
+            EnsureReceiverMaskBuffer(ref s_PhysicalPageDescriptors, Mathf.Max(s_PhysicalPageCapacity, 1), "VSMPhysicalPageDescriptors");
             int hierarchyCount = CalculateHierarchyNodesPerLevel(s_PagesPerAxis) * Mathf.Max(s_CascadeCount, 1);
             if (s_PageCullHierarchy == null || !s_PageCullHierarchy.IsValid() || s_PageCullHierarchy.count != hierarchyCount)
             {
@@ -638,6 +643,9 @@ namespace VividRP.Runtime.VirtualShadowMap
                 && s_PhysicalPageOwners.IsValid()
                 && s_PhysicalPageOwners.count == physicalPageCapacity
                 && s_PhysicalPageOwnersUpload?.Length == physicalPageCapacity
+                && s_PhysicalPageDescriptors != null
+                && s_PhysicalPageDescriptors.IsValid()
+                && s_PhysicalPageDescriptors.count == physicalPageCapacity
                 && s_AllocatorCounters != null
                 && s_AllocatorCounters.IsValid()
                 && s_AllocatorCounters.count == s_AllocatorCountersUpload.Length
@@ -1003,6 +1011,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             if (s_DynamicInvalidationScratch.IsCreated)
                 s_DynamicInvalidationScratch.Dispose();
             Projections.InvalidateLayout();
+            Registry.InvalidateHistory();
             s_RemapPageMetadata?.Dispose();
             s_RemapPageMetadata = null;
             InvalidateCache();
@@ -1028,6 +1037,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             s_PageCullDispatchArgs?.Dispose(); s_PageCullDispatchArgs = null;
             s_PhysicalPageOwners?.Dispose();
             s_PhysicalPageOwners = null;
+            s_PhysicalPageDescriptors?.Dispose();
+            s_PhysicalPageDescriptors = null;
             s_AllocatorCounters?.Dispose();
             s_AllocatorCounters = null;
             s_AllocationRequests?.Dispose();

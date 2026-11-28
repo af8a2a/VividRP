@@ -214,7 +214,7 @@ namespace VividRP.Editor.Tests
                 args = new(GraphicsBuffer.Target.Raw, 8, 4);
                 dispatchArgs = new(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments, 3, 4);
                 metadata = new(GraphicsBuffer.Target.Structured, 16, 16);
-                projections = new(GraphicsBuffer.Target.Structured, 1, 160);
+                projections = new(GraphicsBuffer.Target.Structured, 1, VirtualShadowMapProjection.Stride);
                 projections.SetData(new[] { new VirtualShadowMapProjection { WorldToShadow = Matrix4x4.identity } });
                 table = new(GraphicsBuffer.Target.Structured, 16, 4);
                 hzb = new(256, 256, 2, TextureFormat.RFloat, true, true);

@@ -2092,3 +2092,167 @@ void VSMCullMeshletsToPagesThrottle(uint3 id : SV_DispatchThreadID) { RunVSMCull
 void VSMPostCullMeshletsToPagesThrottle(uint3 id : SV_DispatchThreadID) { VSMPostCullMeshletsToPagesHZB(id); }
 #endif
 #endif
+
+// Phase 0: Unified cross-frame physical page remapping for Directional + Point + Spot.
+// Preserves cached depth texels across clipmap scrolling and local-light ID reordering
+// while isolating per-light invalidations.
+[numthreads(64, 1, 1)]
+void VSMUpdatePhysicalPageAddressesUnified(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = id.x;
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    uint nextOwner = 0u;
+    uint2 nextDesc = 0u;
+    uint4 metadata = 0u;
+    if (owner != 0u)
+    {
+        uint source = owner - 1u;
+        uint prevVsmId = 0u, mipLevel = 0u, ownerFlags = 0u;
+        uint2 pageXY = 0u;
+        VividVSMDecodePhysicalOwnerDesc(_VSMPhysicalPageDescriptors[slot], prevVsmId, mipLevel, pageXY, ownerFlags);
+        if ((ownerFlags & VIVID_VSM_OWNER_FLAG_VALID) == 0u)
+        {
+            // Fallback decode for legacy directional clipmap slots without descriptors.
+            uint axis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+            uint perLevel = axis * axis;
+            prevVsmId = source / perLevel;
+            uint local = source % perLevel;
+            pageXY = uint2(local % axis, local / axis);
+            mipLevel = 0u;
+            ownerFlags = VIVID_VSM_OWNER_FLAG_VALID;
+        }
+
+        if (prevVsmId < (uint)_VSMNextMapCount)
+        {
+            VividVSMNextMapEntry next = _VSMNextMap[prevVsmId];
+            bool valid = (next.flags & VIVID_VSM_NEXT_MAP_FLAG_VALID) != 0u
+                && (next.flags & VIVID_VSM_NEXT_MAP_FLAG_INVALIDATE_ALL) == 0u
+                && next.nextVsmId < (uint)_VSMProjectionCount;
+            if (valid)
+            {
+                VividVSMProjection nextProj = _VSMProjections[next.nextVsmId];
+                bool isSingle = VividVSMProjectionIsSinglePage(nextProj);
+                uint targetMip = isSingle ? 0u : mipLevel;
+                uint mipAxis = isSingle ? 1u : VividVSMMipPagesPerAxis(nextProj.addressing.z, targetMip);
+                int2 destXY = isSingle ? int2(0, 0) : (int2(pageXY) - int2(next.pageOffsetX, next.pageOffsetY));
+                bool inBounds = isSingle || (targetMip < nextProj.addressing.w
+                    && all(destXY >= 0) && all(destXY < (int)mipAxis));
+                if (inBounds)
+                {
+                    uint nextPage = VividVSMCalcProjectionPageIndex(nextProj, targetMip, (uint2)destXY);
+                    uint retainedFlags = (ownerFlags | VIVID_VSM_OWNER_FLAG_VALID)
+                        & ~(VIVID_VSM_OWNER_FLAG_SINGLE_PAGE | VIVID_VSM_OWNER_FLAG_REMAPPED);
+                    if (isSingle) retainedFlags |= VIVID_VSM_OWNER_FLAG_SINGLE_PAGE;
+                    if (nextPage == source && next.nextVsmId == prevVsmId)
+                    {
+                        // Mapping did not move: preserve in-place without clear/scatter round trip.
+                        _VSMPhysicalPageDescriptors[slot] = VividVSMEncodePhysicalOwnerDesc(
+                            next.nextVsmId, targetMip, (uint2)destXY, retainedFlags);
+                        return;
+                    }
+                    nextOwner = nextPage + 1u;
+                    metadata = _VSMPrototypePageMetadata[source];
+                    nextDesc = VividVSMEncodePhysicalOwnerDesc(
+                        next.nextVsmId, targetMip, (uint2)destXY, retainedFlags | VIVID_VSM_OWNER_FLAG_REMAPPED);
+                }
+            }
+        }
+        _VSMPrototypeWritablePageTable[source] = 0u;
+        _VSMPrototypePageMetadata[source] = 0u;
+    }
+    _VSMRemapPageMetadata[slot] = metadata;
+    _VSMPrototypePhysicalPageOwners[slot] = nextOwner;
+    _VSMPhysicalPageDescriptors[slot] = nextDesc;
+}
+
+[numthreads(64, 1, 1)]
+void VSMRemapPagesUnified(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = id.x;
+    if (slot >= (uint)_VSMPrototypePhysicalPageCapacity) return;
+    uint owner = _VSMPrototypePhysicalPageOwners[slot];
+    if (owner == 0u) return;
+    uint vsmId = 0u, mipLevel = 0u, flags = 0u;
+    uint2 pageXY = 0u;
+    VividVSMDecodePhysicalOwnerDesc(_VSMPhysicalPageDescriptors[slot], vsmId, mipLevel, pageXY, flags);
+    if ((flags & VIVID_VSM_OWNER_FLAG_REMAPPED) == 0u) return;
+    _VSMPhysicalPageDescriptors[slot] = VividVSMEncodePhysicalOwnerDesc(
+        vsmId, mipLevel, pageXY, flags & ~VIVID_VSM_OWNER_FLAG_REMAPPED);
+    _VSMPrototypeWritablePageTable[owner - 1u] = VividVSMEncodeNativePage(
+        slot, (uint)_VSMPrototypePhysicalPagesPerRow, true);
+    _VSMPrototypePageMetadata[owner - 1u] = _VSMRemapPageMetadata[slot];
+}
+
+// Phase 0: Unified PropagateMappedMips supporting both Directional Clipmap chains
+// and Point/Spot Mip chains (aligned with UE VirtualShadowMapPageManagement.usf).
+// Dispatch: (DivRoundUp(maxMip0Pages, 64), _VSMProjectionCount, 1).
+[numthreads(64, 1, 1)]
+void VSMPropagateMappedMips(uint3 id : SV_DispatchThreadID)
+{
+    uint vsmId = id.y;
+    if (vsmId >= (uint)_VSMProjectionCount) return;
+    VividVSMProjection proj = _VSMProjections[vsmId];
+    if (VividVSMProjectionIsSinglePage(proj)) return;
+
+    if (VividVSMProjectionIsDirectional(proj))
+    {
+        uint axis = proj.addressing.z;
+        if (id.x >= axis * axis) return;
+        int2 basePage = int2(id.x % axis, id.x / axis);
+        uint sourceAddr = VividVSMCalcProjectionPageIndex(proj, 0u, (uint2)basePage);
+        if (VividVSMPageTableIsNative(_VSMPrototypeWritablePageTable[sourceAddr])) return;
+
+        uint remaining = proj.meta.w;
+        uint baseDir = proj.identityAndOrigin.x;
+        uint dirLocal = vsmId - baseDir;
+        uint dirTotal = dirLocal + remaining;
+        uint result = 0u;
+        [loop]
+        for (uint offset = 1u; offset < remaining; offset++)
+        {
+            uint targetId = vsmId + offset;
+            if (targetId >= (uint)_VSMProjectionCount) break;
+            int2 delta = _VSMClipmapPageOffsets[dirLocal * dirTotal + (dirLocal + offset)];
+            int2 parentPage = (basePage + delta) >> offset;
+            if (any(parentPage < 0) || any(parentPage >= (int)axis)) continue;
+            uint targetAddr = VividVSMCalcProjectionPageIndex(_VSMProjections[targetId], 0u, (uint2)parentPage);
+            uint entry = _VSMPrototypeWritablePageTable[targetAddr];
+            if (!VividVSMPageTableIsNative(entry)) continue;
+            result = VividVSMEncodePageTable(VividVSMPageTableAddress(entry), offset);
+            break;
+        }
+        _VSMPrototypeWritablePageTable[sourceAddr] = result;
+    }
+    else
+    {
+        uint minMip = proj.meta.z;
+        uint maxMips = proj.addressing.w;
+        if (maxMips <= 1u || minMip >= maxMips) return;
+        uint minMipAxis = VividVSMMipPagesPerAxis(proj.addressing.z, minMip);
+        if (id.x >= minMipAxis * minMipAxis) return;
+        uint2 minLevelPage = uint2(id.x % minMipAxis, id.x / minMipAxis);
+
+        int mappedLevel = -1;
+        uint2 mappedPhys = 0u;
+        [loop]
+        for (int mip = (int)maxMips - 1; mip >= (int)minMip; --mip)
+        {
+            uint delta = (uint)(mip - (int)minMip);
+            uint2 vPage = minLevelPage >> delta;
+            uint addr = VividVSMCalcProjectionPageIndex(proj, (uint)mip, vPage);
+            uint entry = _VSMPrototypeWritablePageTable[addr];
+            if (VividVSMPageTableIsNative(entry))
+            {
+                mappedLevel = mip;
+                mappedPhys = VividVSMPageTableAddress(entry);
+            }
+            else if (all((vPage << delta) == minLevelPage))
+            {
+                _VSMPrototypeWritablePageTable[addr] = mappedLevel >= 0
+                    ? VividVSMEncodePageTable(mappedPhys, (uint)(mappedLevel - mip))
+                    : 0u;
+            }
+        }
+    }
+}

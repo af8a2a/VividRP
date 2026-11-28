@@ -105,7 +105,7 @@ namespace VividRP.Editor.Tests
             using var previous = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels + 2, 16);
             using var current = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels + 2, 16);
             using var feedback = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels + 1, 8);
-            using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels, 160);
+            using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, levels, VirtualShadowMapProjection.Stride);
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             try
             {
@@ -282,7 +282,7 @@ namespace VividRP.Editor.Tests
         {
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute"));
-            using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 5, 160);
+            using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 5, VirtualShadowMapProjection.Stride);
             using var pressure = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             using var input = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 16);
             using var output = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, 8);

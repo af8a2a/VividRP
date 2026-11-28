@@ -1,15 +1,64 @@
 #ifndef VIVIDRP_VIRTUAL_SHADOW_MAP_PROJECTION_INCLUDED
 #define VIVIDRP_VIRTUAL_SHADOW_MAP_PROJECTION_INCLUDED
 
+#include "VividVirtualShadowMapAddressing.hlsl"
+
+// Unified 256-byte GPU ABI (16 x float4) matching C# VirtualShadowMapProjection.
+// Offsets 0..144 preserve legacy Directional Clipmap field names and layout.
 struct VividVSMProjection
 {
-    float4x4 worldToClip;
-    float4x4 worldToShadow;
-    float4 selectionSphere; // clipmaps: unsnapped camera xyz, negative level radius
-    float4 parameters; // world texel size, normal bias, performance LOD bias, max distance
+    float4x4 worldToClip;           // Offset 0   (64B)
+    float4x4 worldToShadow;         // Offset 64  (64B)
+    float4   selectionSphere;       // Offset 128 (16B): Directional=(camPosWS.xyz, -levelRadius); Local=(lightPosWS.xyz, lightRange)
+    float4   parameters;            // Offset 144 (16B): Directional=(worldTexelSize, normalBias, perfLodBias, maxDistance); Local=(sourceRadius, normalBias, resolutionLodBias, nearPlane)
+    float4   lightDirectionAndSpot; // Offset 160 (16B): Directional=(toLightDirWS, sinHalfAngularDiam); Local=(lightForwardWS, cosOuterSpotAngle or -2 for Point)
+    float4   projectionScales;      // Offset 176 (16B): (proj.m00, proj.m11, proj.m22, proj.m23)
+    uint4    addressing;            // Offset 192 (16B): (pageTableBaseOffset, hierarchyBaseOffset, pagesPerAxis, maxMipLevels)
+    uint4    meta;                  // Offset 208 (16B): (lightType, flags, minMipLevel, clipmapRemainingOrFace)
+    uint4    identityAndOrigin;     // Offset 224 (16B): (baseVsmId, prevVsmId, clipmapOriginRelX, clipmapOriginRelY)
+    uint4    extended;              // Offset 240 (16B): (asuint(texelDitherScale), boundRectBaseOffset, lightIndex, reserved)
 };
+
+// Cross-frame VSM remap entry (16 bytes), indexed by previous frame's VSMId.
+struct VividVSMNextMapEntry
+{
+    uint nextVsmId;
+    int  pageOffsetX;
+    int  pageOffsetY;
+    uint flags;
+};
+
+// Compacted active (VSMId, MipLevel) work item (16 bytes).
+struct VividVSMActiveView
+{
+    uint vsmId;
+    uint mipLevel;
+    uint virtualResolution;
+    uint boundRectIndex;
+};
+
 StructuredBuffer<VividVSMProjection> _VSMProjections;
 int _VSMProjectionCount;
+
+bool VividVSMProjectionIsSinglePage(VividVSMProjection p)
+{
+    return (p.meta.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) != 0u;
+}
+
+bool VividVSMProjectionIsDirectional(VividVSMProjection p)
+{
+    return p.meta.x == VIVID_VSM_LIGHT_TYPE_DIRECTIONAL;
+}
+
+uint VividVSMCalcProjectionPageIndex(VividVSMProjection p, uint mipLevel, uint2 pageXY)
+{
+    return VividVSMCalcPageIndex(
+        p.addressing.x,
+        p.addressing.z,
+        VividVSMProjectionIsSinglePage(p),
+        mipLevel,
+        pageXY);
+}
 
 // Preserve full virtual-map pixel density while rasterizing into a bounded target.
 float4 VividVSMToRasterClip(float4 positionCS, uint2 origin, uint resolution, uint tileSize)

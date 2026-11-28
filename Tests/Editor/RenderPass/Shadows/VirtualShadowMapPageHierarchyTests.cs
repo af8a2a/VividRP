@@ -262,7 +262,7 @@ namespace VividRP.Editor.Tests
             {
                 using var inputs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
                 using var extents = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
-                using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+                using var projection = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VirtualShadowMapProjection.Stride);
                 using var rects = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 16);
                 using var results = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 8);
                 Vector3 center = new(.1f, -.2f, .05f), extent = new(.08f, .025f, .04f);
@@ -306,7 +306,7 @@ namespace VividRP.Editor.Tests
             Assume.That(VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform(), Is.True);
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GPUDriven/GPUInstanceCulling.compute"));
-            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 160);
+            using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VirtualShadowMapProjection.Stride);
             using var hierarchy = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 12);
             using var bounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 16);
             using var instances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1,
@@ -463,7 +463,7 @@ namespace VividRP.Editor.Tests
             {
                 using var masks = new VirtualShadowMapReceiverMaskTestBuffers(shader, 32, 1, true);
                 using var requests = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 32, 4);
-                using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, 160);
+                using var projections = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, VirtualShadowMapProjection.Stride);
                 var data = new uint[32];
                 for (int i = 0; i < data.Length; i++) data[i] = 1u | 512u;
                 requests.SetData(data);

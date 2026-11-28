@@ -12,6 +12,159 @@
 #define VIVID_VSM_RASTER_MAX_LEVELS 24
 #define VIVID_VSM_RASTER_PAGE_HEADER_SIZE (1 + 2 * VIVID_VSM_RASTER_MAX_LEVELS)
 
+// Unified Directional + Point + Spot VSM addressing and handle constants.
+// Low ID range [0, VIVID_VSM_MAX_SINGLE_PAGE_SHADOW_MAPS) is reserved for single-page (distant) lights.
+#define VIVID_VSM_MAX_SINGLE_PAGE_SHADOW_MAPS 512u
+#define VIVID_VSM_INVALID_ID 0xFFFFFFFFu
+
+#define VIVID_VSM_LIGHT_TYPE_DIRECTIONAL 0u
+#define VIVID_VSM_LIGHT_TYPE_POINT 1u
+#define VIVID_VSM_LIGHT_TYPE_SPOT 2u
+
+#define VIVID_VSM_PROJ_FLAG_SINGLE_PAGE (1u << 0)
+#define VIVID_VSM_PROJ_FLAG_UNREFERENCED (1u << 1)
+#define VIVID_VSM_PROJ_FLAG_USE_RECEIVER_MASK (1u << 2)
+#define VIVID_VSM_PROJ_FLAG_IS_COARSE_CLIP_LEVEL (1u << 3)
+#define VIVID_VSM_PROJ_FLAG_UNCACHED (1u << 4)
+#define VIVID_VSM_PROJ_FLAG_SKIP_DYNAMIC_INVALID (1u << 5)
+
+#define VIVID_VSM_NEXT_MAP_FLAG_VALID (1u << 0)
+#define VIVID_VSM_NEXT_MAP_FLAG_INVALIDATE_ALL (1u << 1)
+
+#define VIVID_VSM_OWNER_FLAG_VALID (1u << 0)
+#define VIVID_VSM_OWNER_FLAG_SINGLE_PAGE (1u << 1)
+#define VIVID_VSM_OWNER_FLAG_UNREFERENCED (1u << 2)
+#define VIVID_VSM_OWNER_FLAG_DETAIL_GEOMETRY (1u << 3)
+#define VIVID_VSM_OWNER_FLAG_REMAPPED (1u << 4)
+
+// One-Pass Projection packed shadow mask: 4-bit x 32 local lights per pixel in uint4.
+#define VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS 32u
+
+struct VividVSMHandle
+{
+    uint id;
+    bool isSinglePage;
+};
+
+VividVSMHandle VividVSMMakeHandle(uint vsmId)
+{
+    VividVSMHandle handle;
+    handle.id = vsmId;
+    handle.isSinglePage = vsmId < VIVID_VSM_MAX_SINGLE_PAGE_SHADOW_MAPS;
+    return handle;
+}
+
+VividVSMHandle VividVSMMakeDirectionalHandle(uint vsmId)
+{
+    VividVSMHandle handle;
+    handle.id = vsmId;
+    handle.isSinglePage = false;
+    return handle;
+}
+
+VividVSMHandle VividVSMMakeInvalidHandle()
+{
+    VividVSMHandle handle;
+    handle.id = VIVID_VSM_INVALID_ID;
+    handle.isSinglePage = false;
+    return handle;
+}
+
+bool VividVSMHandleIsValid(VividVSMHandle handle)
+{
+    return handle.id != VIVID_VSM_INVALID_ID;
+}
+
+VividVSMHandle VividVSMHandleOffset(VividVSMHandle handle, int offset)
+{
+    VividVSMHandle result;
+    result.id = (uint)((int)handle.id + offset);
+    result.isSinglePage = handle.isSinglePage;
+    return result;
+}
+
+// Unity left-handed Y-up cube face selection: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
+// dirFromLight = positionWS - lightPositionWS.
+uint VividVSMGetCubeFace(float3 dirFromLight)
+{
+    float3 a = abs(dirFromLight);
+    if (a.x >= a.y && a.x >= a.z) return dirFromLight.x > 0.0 ? 0u : 1u;
+    if (a.y > a.z) return dirFromLight.y > 0.0 ? 2u : 3u;
+    return dirFromLight.z > 0.0 ? 4u : 5u;
+}
+
+// Unified mip-chain virtual page addressing (power-of-two pagesPerAxis).
+uint VividVSMMipPagesPerAxis(uint pagesPerAxis, uint mipLevel)
+{
+    return max(pagesPerAxis >> mipLevel, 1u);
+}
+
+uint VividVSMMipTexelsPerAxis(uint pagesPerAxis, uint mipLevel, uint pageSize)
+{
+    return VividVSMMipPagesPerAxis(pagesPerAxis, mipLevel) * pageSize;
+}
+
+uint VividVSMMipEntryOffset(uint pagesPerAxis, uint mipLevel)
+{
+    uint mipAxis = pagesPerAxis >> mipLevel;
+    return (4u * (pagesPerAxis * pagesPerAxis - mipAxis * mipAxis)) / 3u;
+}
+
+uint VividVSMTotalMipChainEntries(uint pagesPerAxis)
+{
+    return (4u * pagesPerAxis * pagesPerAxis - 1u) / 3u;
+}
+
+uint VividVSMCalcPageIndex(uint baseOffset, uint pagesPerAxis, bool isSinglePage, uint mipLevel, uint2 pageXY)
+{
+    if (isSinglePage) return baseOffset;
+    uint mipAxis = pagesPerAxis >> mipLevel;
+    return baseOffset + VividVSMMipEntryOffset(pagesPerAxis, mipLevel) + pageXY.y * mipAxis + pageXY.x;
+}
+
+// Structured physical slot descriptor (64-bit uint2) paired with uint PhysicalPageOwners[slot].
+// word0: [0..15]=vsmId, [16..19]=mipLevel, [20..27]=flags, [28..31]=reserved
+// word1: [0..15]=pageX, [16..31]=pageY
+uint2 VividVSMEncodePhysicalOwnerDesc(uint vsmId, uint mipLevel, uint2 pageXY, uint flags)
+{
+    uint word0 = (vsmId & 0xFFFFu) | ((mipLevel & 0xFu) << 16u) | ((flags & 0xFFu) << 20u);
+    uint word1 = (pageXY.x & 0xFFFFu) | ((pageXY.y & 0xFFFFu) << 16u);
+    return uint2(word0, word1);
+}
+
+void VividVSMDecodePhysicalOwnerDesc(uint2 desc, out uint vsmId, out uint mipLevel, out uint2 pageXY, out uint flags)
+{
+    vsmId = desc.x & 0xFFFFu;
+    mipLevel = (desc.x >> 16u) & 0xFu;
+    flags = (desc.x >> 20u) & 0xFFu;
+    pageXY = uint2(desc.y & 0xFFFFu, (desc.y >> 16u) & 0xFFFFu);
+}
+
+// 4-bit x 32 lights/pixel shadow mask packing with blue-noise dither (matches UE One-Pass Projection).
+void VividVSMPackShadowMask4Bit(inout uint4 maskBits, float shadowFactor, uint lightSlot, float blueNoise)
+{
+    if (lightSlot >= VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS) return;
+    float dithered = saturate(shadowFactor + (blueNoise - 0.5) * (1.0 / 15.0));
+    uint quantized = min((uint)floor(dithered * 15.0 + 0.5), 15u);
+    uint wordIndex = lightSlot >> 3u;
+    uint bitOffset = (lightSlot & 7u) * 4u;
+    uint clearMask = ~(0xFu << bitOffset);
+    uint shifted = quantized << bitOffset;
+    if (wordIndex == 0u) maskBits.x = (maskBits.x & clearMask) | shifted;
+    else if (wordIndex == 1u) maskBits.y = (maskBits.y & clearMask) | shifted;
+    else if (wordIndex == 2u) maskBits.z = (maskBits.z & clearMask) | shifted;
+    else maskBits.w = (maskBits.w & clearMask) | shifted;
+}
+
+float VividVSMUnpackShadowMask4Bit(uint4 maskBits, uint lightSlot)
+{
+    if (lightSlot >= VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS) return 1.0;
+    uint wordIndex = lightSlot >> 3u;
+    uint bitOffset = (lightSlot & 7u) * 4u;
+    uint word = wordIndex == 0u ? maskBits.x : (wordIndex == 1u ? maskBits.y : (wordIndex == 2u ? maskBits.z : maskBits.w));
+    return (float)((word >> bitOffset) & 0xFu) * (1.0 / 15.0);
+}
+
 // Bounded HW raster windows. Keep RasterWindowPages in the runtime in sync.
 #define VIVID_VSM_RASTER_WINDOW_PAGES 4u
 #define VIVID_VSM_PAGE_WINDOW_FLAG 0x80000000u

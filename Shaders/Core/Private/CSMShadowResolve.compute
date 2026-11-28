@@ -105,6 +105,9 @@ StructuredBuffer<uint4> _VSMUncachedPageRectBounds;
 RWStructuredBuffer<uint4> _VSMUncachedPageRectBoundsRW;
 int _VSMUncachedPageRectBoundsEnabled;
 RWStructuredBuffer<uint> _VSMPrototypePhysicalPageOwners;
+RWStructuredBuffer<uint2> _VSMPhysicalPageDescriptors;
+StructuredBuffer<VividVSMNextMapEntry> _VSMNextMap;
+int _VSMNextMapCount;
 RWStructuredBuffer<uint> _VSMPrototypeAllocatorCounters;
 RWStructuredBuffer<uint> _VSMAllocationRequests;
 StructuredBuffer<uint> _VSMPageWorkList;
@@ -1440,3 +1443,8 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 // Throttle-only variants keep cluster accounting out of the disabled hot path.
 #pragma kernel VSMCullMeshletsToPagesThrottle VIVID_VSM_COMPACT_VIEWS VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB VIVID_VSM_CLUSTER_FEEDBACK
 #pragma kernel VSMPostCullMeshletsToPagesThrottle VIVID_VSM_AFFINE_BOUNDS VIVID_VSM_GEOMETRY_BOUNDS VIVID_VSM_SHADOW_HZB VIVID_VSM_CLUSTER_FEEDBACK
+
+// Phase 0: Unified Directional + Point + Spot remap and mip-chain propagation.
+#pragma kernel VSMUpdatePhysicalPageAddressesUnified
+#pragma kernel VSMRemapPagesUnified
+#pragma kernel VSMPropagateMappedMips

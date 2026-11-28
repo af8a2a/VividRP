@@ -87,6 +87,7 @@ namespace VividRP.Runtime
         internal const float DefaultReGIRDebugOpacity = 0.45f;
         internal const float DefaultVisibilityBufferWireframeThickness = 10f;
         internal const VSMReceiverDebugMode DefaultVSMReceiverDebugMode = VSMReceiverDebugMode.TexelFootprint;
+        internal const int DefaultVSMDebugLocalLightIndex = -1;
         internal const float DefaultVirtualTextureVisualizationWorldPageSize = 1f;
         internal const float DefaultVirtualTextureAdaptiveMipBiasOverride = -1f;
         internal const int DefaultVirtualTextureFeedbackOverflowCountOverride = -1;
@@ -206,6 +207,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private VSMReceiverDebugMode m_VSMReceiverDebugMode = DefaultVSMReceiverDebugMode;
+
+        [SerializeField]
+        private int m_VSMDebugLocalLightIndex = DefaultVSMDebugLocalLightIndex;
 
         [SerializeField]
         private bool m_TSRPairedShadingGuides;
@@ -470,6 +474,12 @@ namespace VividRP.Runtime
             set => m_VSMReceiverDebugMode = VSMReceiverDebugPass.NormalizeMode(value);
         }
 
+        internal int vsmDebugLocalLightIndex
+        {
+            get => Mathf.Clamp(m_VSMDebugLocalLightIndex, -1, 255);
+            set => m_VSMDebugLocalLightIndex = Mathf.Clamp(value, -1, 255);
+        }
+
         internal bool forceMeshletCullingFromMainCamera
         {
             get => m_ForceMeshletCullingFromMainCamera;
@@ -647,6 +657,7 @@ namespace VividRP.Runtime
                 DefaultVisibilityBufferWireframeThickness)
             || m_ForceMeshletCullingFromMainCamera
             || vsmReceiverDebugMode != DefaultVSMReceiverDebugMode
+            || vsmDebugLocalLightIndex != DefaultVSMDebugLocalLightIndex
             || m_TSRPairedShadingGuides
             || reflectionProbeAtlasDebugMode != ReflectionProbeAtlasDebugMode.None
             || m_ReflectionProbeAtlasArraySlice != 0
@@ -708,6 +719,7 @@ namespace VividRP.Runtime
                 DefaultVisibilityBufferWireframeThickness;
             m_ForceMeshletCullingFromMainCamera = false;
             m_VSMReceiverDebugMode = DefaultVSMReceiverDebugMode;
+            m_VSMDebugLocalLightIndex = DefaultVSMDebugLocalLightIndex;
             m_TSRPairedShadingGuides = false;
             m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.None;
             m_ReflectionProbeAtlasArraySlice = 0;
@@ -861,7 +873,12 @@ namespace VividRP.Runtime
             public static readonly NameAndTooltip VSMReceiverMode = new()
             {
                 name = "Receiver Mode",
-                tooltip = "VSM receiver visualization shown by the connected VSMReceiverDebugPass output. Levels are zero-based. Cache State and Virtual Page inspect the preferred page. Magenta means unavailable; black is sky except in Shadow Mask."
+                tooltip = "VSM receiver visualization shown by the connected VSMReceiverDebugPass output. Levels are zero-based. Cache State and Virtual Page inspect the preferred page. Local modes inspect Point/Spot VSM masks, mip levels, cache hits, and SMRT cost."
+            };
+            public static readonly NameAndTooltip VSMLocalLightIndex = new()
+            {
+                name = "Local Light Index",
+                tooltip = "Filter Local VSM receiver debug modes to a specific PunctualLight index (-1 inspects all covering local lights)."
             };
             public const string ReflectionProbeAtlasName = "Reflection Probe Atlas";
             public const string SliderName = "Slider";
@@ -1495,6 +1512,14 @@ namespace VividRP.Runtime
                     Strings.VSMReceiverMode,
                     () => data.vsmReceiverDebugMode,
                     value => data.vsmReceiverDebugMode = value));
+                foldout.children.Add(new DebugUI.IntField
+                {
+                    nameAndTooltip = Strings.VSMLocalLightIndex,
+                    getter = () => data.vsmDebugLocalLightIndex,
+                    setter = value => data.vsmDebugLocalLightIndex = value,
+                    min = () => -1,
+                    max = () => 255,
+                });
                 return foldout;
             }
 

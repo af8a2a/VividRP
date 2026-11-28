@@ -183,6 +183,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 cmd.SetComputeIntParam(shader, PageSizeId, VirtualShadowMapPrototypeRuntime.PageSize);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.ClusterCountId, localGrid.ClusterCount);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.PunctualLightCountId, localGrid.PunctualLightCount);
+                cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.LocalPagePressureEnabledId, 0);
                 cmd.SetComputeIntParam(shader, OutputWidthId, m_Width);
                 cmd.SetComputeIntParam(shader, OutputHeightId, m_Height);
                 cmd.SetComputeIntParam(shader, FrameIndexId, frameIndex);

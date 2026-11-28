@@ -30,6 +30,7 @@ namespace VividRP.Runtime.VirtualShadowMap
     {
         internal const int DefaultLocalMaxResolution = 4096;
         internal const int PointFaceCount = 6;
+        internal const int DefaultMaxDistantPagesPerFrame = 8;
 
         private static readonly Vector3[] s_CubeFaceForwards =
         {
@@ -89,6 +90,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         private ulong m_PreparedCameraId;
         private int m_CurrentRecordCount;
         private int m_CurrentDirCount;
+        private int m_DistantRefreshCursor;
 
         internal VirtualShadowMapProjection[] Projections => m_Projections;
         internal VividVSMNextMapEntry[] NextMap => m_NextMap;
@@ -97,6 +99,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal int DirectionalCount => m_CurrentDirCount;
         internal int FullLocalCount { get; private set; }
         internal int SinglePageCount { get; private set; }
+        internal int DistantRefreshedThisFrame { get; private set; }
         internal int TotalPageTableEntries { get; private set; }
         internal int TotalHierarchyNodes { get; private set; }
         internal int TotalBoundRectCount { get; private set; }
@@ -144,6 +147,22 @@ namespace VividRP.Runtime.VirtualShadowMap
             return Mathf.Clamp(range * 0.002f, 0.02f, 0.2f);
         }
 
+        internal static float CalculateProjectedScreenDiameter(
+            Vector3 lightPosWS,
+            float range,
+            Vector3 cameraPosWS,
+            float cameraVerticalFovDegrees,
+            int viewportHeight)
+        {
+            if (viewportHeight <= 0 || range <= 0.0f)
+                return float.PositiveInfinity;
+            float dist = Vector3.Distance(lightPosWS, cameraPosWS);
+            if (dist <= range * 1.05f)
+                return float.PositiveInfinity;
+            float tanHalfFov = Mathf.Tan(Mathf.Clamp(cameraVerticalFovDegrees, 1.0f, 179.0f) * 0.5f * Mathf.Deg2Rad);
+            return (range * viewportHeight) / Mathf.Max(dist * tanHalfFov, 1e-4f);
+        }
+
         internal static bool ShouldUseSinglePage(
             Vector3 lightPosWS,
             float range,
@@ -152,11 +171,10 @@ namespace VividRP.Runtime.VirtualShadowMap
             int viewportHeight,
             float thresholdPixels = 128.0f)
         {
-            float dist = Vector3.Distance(lightPosWS, cameraPosWS);
-            if (dist <= range * 1.05f || viewportHeight <= 0)
+            if (viewportHeight <= 0 || thresholdPixels <= 0.0f)
                 return false;
-            float tanHalfFov = Mathf.Tan(Mathf.Clamp(cameraVerticalFovDegrees, 1.0f, 179.0f) * 0.5f * Mathf.Deg2Rad);
-            float projectedDiameterPx = (range * viewportHeight) / Mathf.Max(dist * tanHalfFov, 1e-4f);
+            float projectedDiameterPx = CalculateProjectedScreenDiameter(
+                lightPosWS, range, cameraPosWS, cameraVerticalFovDegrees, viewportHeight);
             return projectedDiameterPx <= thresholdPixels;
         }
 
@@ -164,13 +182,15 @@ namespace VividRP.Runtime.VirtualShadowMap
             ulong cameraId,
             VirtualShadowMapClipmapLayout directionalLayout,
             VividVSMLocalLightDescriptor[] localLights = null,
-            int localLightCount = 0)
+            int localLightCount = 0,
+            int maxDistantPagesPerFrame = DefaultMaxDistantPagesPerFrame)
         {
             m_PreparedCameraId = cameraId;
             ProjectionCount = 0;
             m_CurrentDirCount = 0;
             FullLocalCount = 0;
             SinglePageCount = 0;
+            DistantRefreshedThisFrame = 0;
             m_CurrentRecordCount = 0;
             TotalPageTableEntries = 0;
             TotalHierarchyNodes = 0;
@@ -295,6 +315,23 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
 
             // 2. Full Local Lights (Point 6 faces, Spot 1 face), followed by Single-Page Local Lights.
+            // Pre-count single-page faces so Round-Robin refresh wraps cleanly across the active distant set.
+            int totalSinglePageFaces = 0;
+            if (localLights != null && localLightCount > 0)
+            {
+                for (int i = 0; i < localLightCount; i++)
+                {
+                    ref readonly VividVSMLocalLightDescriptor d = ref localLights[i];
+                    if (d.IsSinglePage && (d.LightType == VividVSMLightType.Point || d.LightType == VividVSMLightType.Spot))
+                        totalSinglePageFaces += d.LightType == VividVSMLightType.Point ? PointFaceCount : 1;
+                }
+            }
+            int distantRefreshBudget = maxDistantPagesPerFrame > 0 && totalSinglePageFaces > 0
+                ? Mathf.Min(maxDistantPagesPerFrame, totalSinglePageFaces) : 0;
+            int distantStartCursor = totalSinglePageFaces > 0
+                ? ((m_DistantRefreshCursor % totalSinglePageFaces) + totalSinglePageFaces) % totalSinglePageFaces : 0;
+            int singlePageFaceIndex = 0;
+
             if (localLights != null && localLightCount > 0)
             {
                 for (int pass = 0; pass < 2; pass++)
@@ -356,7 +393,23 @@ namespace VividRP.Runtime.VirtualShadowMap
                         for (int face = 0; face < faceCount; face++)
                         {
                             int vsmId = baseVsmId + face;
-                            int prevVsmId = cacheReusable ? m_PreviousRecords[prevIdx].BaseVSMId + face : -1;
+                            bool roundRobinRefresh = false;
+                            if (desc.IsSinglePage)
+                            {
+                                if (distantRefreshBudget > 0 && cacheReusable)
+                                {
+                                    int offsetFromCursor = (singlePageFaceIndex - distantStartCursor + totalSinglePageFaces) % totalSinglePageFaces;
+                                    if (offsetFromCursor < distantRefreshBudget)
+                                    {
+                                        roundRobinRefresh = true;
+                                        DistantRefreshedThisFrame++;
+                                    }
+                                }
+                                singlePageFaceIndex++;
+                            }
+
+                            bool faceCacheReusable = cacheReusable && !roundRobinRefresh;
+                            int prevVsmId = faceCacheReusable ? m_PreviousRecords[prevIdx].BaseVSMId + face : -1;
                             if (prevVsmId >= 0 && prevVsmId < NextMapCount)
                             {
                                 m_NextMap[prevVsmId] = new VividVSMNextMapEntry
@@ -394,7 +447,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                                 Meta = new uint4((uint)desc.LightType, (uint)flags, Math.Min(desc.MinMipLevel, (uint)(mipCount - 1)), (uint)face),
                                 IdentityAndOrigin = new uint4(
                                     (uint)baseVsmId,
-                                    cacheReusable && prevVsmId >= 0 ? (uint)prevVsmId : VirtualShadowMapAddressing.InvalidVSMId,
+                                    faceCacheReusable && prevVsmId >= 0 ? (uint)prevVsmId : VirtualShadowMapAddressing.InvalidVSMId,
                                     0u,
                                     0u),
                                 Extended = new uint4(ditherBits, boundRectCursor, desc.PunctualLightIndex, 0u),
@@ -457,6 +510,10 @@ namespace VividRP.Runtime.VirtualShadowMap
                 Array.Copy(m_CurrDirDepthMin, m_PrevDirDepthMin, m_CurrentDirCount);
                 Array.Copy(m_CurrDirDepthMax, m_PrevDirDepthMax, m_CurrentDirCount);
             }
+            if (SinglePageCount > 0 && DistantRefreshedThisFrame > 0)
+                m_DistantRefreshCursor = (m_DistantRefreshCursor + DistantRefreshedThisFrame) % SinglePageCount;
+            else if (SinglePageCount == 0)
+                m_DistantRefreshCursor = 0;
             m_RecordedCameraId = m_PreparedCameraId;
             m_PreviousRecordCount = m_CurrentRecordCount;
             m_PreviousProjectionCount = ProjectionCount;
@@ -470,6 +527,8 @@ namespace VividRP.Runtime.VirtualShadowMap
             m_PreviousRecordCount = 0;
             m_PreviousProjectionCount = 0;
             m_PreviousDirCount = 0;
+            m_DistantRefreshCursor = 0;
+            DistantRefreshedThisFrame = 0;
         }
 
         private int FindPreviousRecord(ulong lightEntityId, VividVSMLightType lightType)

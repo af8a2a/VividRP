@@ -26,6 +26,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal static readonly int ClusterCountId = Shader.PropertyToID("_VSMClusterCount");
         internal static readonly int PunctualLightCountId = Shader.PropertyToID("_VSMPunctualLightCount");
         internal static readonly int MarkCoarsePagesLocalId = Shader.PropertyToID("_VSMMarkCoarsePagesLocal");
+        internal static readonly int LocalPagePressureEnabledId = Shader.PropertyToID("_VSMLocalPagePressureEnabled");
         internal static readonly int CameraViewParamsId = Shader.PropertyToID("_VSMCameraViewParams");
         internal static readonly int ClusterParamsId = Shader.PropertyToID("_VSMClusterParams");
         internal static readonly int ClusterDepthParamsId = Shader.PropertyToID("_VSMClusterDepthParams");
@@ -45,6 +46,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         private static readonly ProfilingSampler MarkLocalSampler = new("VSM.MarkLocalReceivers");
 
         private VividVSMLocalLightDescriptor[] m_CollectedDescriptors = new VividVSMLocalLightDescriptor[16];
+        private int[] m_CandidateLightIndices = new int[32];
+        private float[] m_CandidateScreenDiameters = new float[32];
         private int2[] m_PunctualVSMInfoUpload = new int2[16];
         private GraphicsBuffer m_PunctualLightVSMInfo;
         private GraphicsBuffer m_PrunedLightOffsetCount;
@@ -164,11 +167,13 @@ namespace VividRP.Runtime.VirtualShadowMap
                 localMaxResolution > 0 ? localMaxResolution : VirtualShadowMapRegistry.DefaultLocalMaxResolution,
                 VirtualShadowMapRegistry.DefaultLocalMaxResolution);
 
-            int fullVsmUsed = 0;
             int metaLength = lightData.punctualLightShadowMeta.Length;
             int lightLength = lightData.punctualLights.Length;
             int count = Mathf.Min(punctualCount, Mathf.Min(metaLength, lightLength));
 
+            // 1. Gather shadow-casting Point/Spot candidates and score by projected screen diameter.
+            int candidateCount = 0;
+            EnsureCandidateCapacity(Mathf.Max(count, 1));
             for (int i = 0; i < count; i++)
             {
                 ref readonly VividLightData.PunctualLightShadowMeta meta = ref lightData.punctualLightShadowMeta[i];
@@ -178,26 +183,51 @@ namespace VividRP.Runtime.VirtualShadowMap
                 ref readonly VividLightData.PunctualLightData light = ref lightData.punctualLights[i];
                 if (light.shadowStrength <= 0.0f || light.range <= 0.0f)
                     continue;
-
-                VividVSMLightType vsmLightType;
-                int faceCost;
-                if (light.lightType == PunctualTypePoint)
-                {
-                    vsmLightType = VividVSMLightType.Point;
-                    faceCost = VirtualShadowMapRegistry.PointFaceCount;
-                }
-                else if (light.lightType == PunctualTypeSpot)
-                {
-                    vsmLightType = VividVSMLightType.Spot;
-                    faceCost = 1;
-                }
-                else
-                {
+                if (light.lightType != PunctualTypePoint && light.lightType != PunctualTypeSpot)
                     continue;
-                }
 
-                bool isSinglePage = distantThresholdPx > 0.0f && VirtualShadowMapRegistry.ShouldUseSinglePage(
-                    light.positionWS, light.range, cameraPosWS, cameraFovDeg, viewportHeight, distantThresholdPx);
+                m_CandidateLightIndices[candidateCount] = i;
+                m_CandidateScreenDiameters[candidateCount] = VirtualShadowMapRegistry.CalculateProjectedScreenDiameter(
+                    light.positionWS, light.range, cameraPosWS, cameraFovDeg, viewportHeight);
+                candidateCount++;
+            }
+
+            // 2. Stable descending sort (zero-GC insertion sort) so closest/largest lights receive Full VSM slots first.
+            for (int i = 1; i < candidateCount; i++)
+            {
+                int idx = m_CandidateLightIndices[i];
+                float score = m_CandidateScreenDiameters[i];
+                int j = i - 1;
+                while (j >= 0 && m_CandidateScreenDiameters[j] < score)
+                {
+                    m_CandidateLightIndices[j + 1] = m_CandidateLightIndices[j];
+                    m_CandidateScreenDiameters[j + 1] = m_CandidateScreenDiameters[j];
+                    j--;
+                }
+                m_CandidateLightIndices[j + 1] = idx;
+                m_CandidateScreenDiameters[j + 1] = score;
+            }
+
+            // 3. Assign Full VSM slots up to MaxFullLocalVSMs, automatically downgrading distant/overflow lights to Single-Page.
+            int fullVsmUsed = 0;
+            int singlePageVsmUsed = 0;
+            int maxSinglePageVSMs = (int)VirtualShadowMapAddressing.MaxSinglePageShadowMaps;
+
+            for (int c = 0; c < candidateCount; c++)
+            {
+                int i = m_CandidateLightIndices[c];
+                float projectedDiameterPx = m_CandidateScreenDiameters[c];
+                ref readonly VividLightData.PunctualLightShadowMeta meta = ref lightData.punctualLightShadowMeta[i];
+                ref readonly VividLightData.PunctualLightData light = ref lightData.punctualLights[i];
+
+                VividVSMLightType vsmLightType = light.lightType == PunctualTypePoint
+                    ? VividVSMLightType.Point
+                    : VividVSMLightType.Spot;
+                int faceCost = vsmLightType == VividVSMLightType.Point
+                    ? VirtualShadowMapRegistry.PointFaceCount
+                    : 1;
+
+                bool isSinglePage = distantThresholdPx > 0.0f && viewportHeight > 0 && projectedDiameterPx <= distantThresholdPx;
                 if (!isSinglePage && fullVsmUsed + faceCost > MaxFullLocalVSMs)
                 {
                     if (distantThresholdPx > 0.0f)
@@ -205,8 +235,17 @@ namespace VividRP.Runtime.VirtualShadowMap
                     else
                         continue;
                 }
-                if (!isSinglePage)
+
+                if (isSinglePage)
+                {
+                    if (singlePageVsmUsed + faceCost > maxSinglePageVSMs)
+                        continue;
+                    singlePageVsmUsed += faceCost;
+                }
+                else
+                {
                     fullVsmUsed += faceCost;
+                }
 
                 EnsureDescriptorCapacity(m_CollectedCount + 1);
                 Vector3 forward = light.directionWS.sqrMagnitude > 1e-8f ? light.directionWS.normalized : Vector3.forward;
@@ -363,13 +402,28 @@ namespace VividRP.Runtime.VirtualShadowMap
             RTHandle depthTexture,
             RTHandle gbuffer1,
             int directionalProjectionCount,
-            int directionalPageTableEntryCount)
+            int directionalPageTableEntryCount,
+            GraphicsBuffer localPagePressure = null,
+            bool localPagePressureEnabled = false,
+            int frameIndex = 0)
         {
             if (!Active || pruneKernel < 0 || markLocalKernel < 0 || m_SourceRegistry == null)
                 return;
 
             cmd.SetBufferData(m_PunctualLightVSMInfo, m_PunctualVSMInfoUpload, 0, 0, m_PunctualLightCount);
             cmd.SetBufferData(m_UnifiedProjections, m_SourceRegistry.Projections, 0, 0, m_UnifiedProjectionCount);
+
+            if (localPagePressure != null && localPagePressure.IsValid())
+            {
+                VirtualShadowMapPerformanceThrottle.BeginLocalFrame(
+                    cmd,
+                    frameIndex,
+                    m_SourceRegistry.DirectionalCount,
+                    m_UnifiedProjectionCount,
+                    localPagePressureEnabled,
+                    m_UnifiedProjections,
+                    localPagePressure);
+            }
 
             cmd.SetComputeIntParam(shader, PageTableEntryCountId, m_UnifiedPageTableEntryCount);
             cmd.SetComputeIntParam(shader, PageSizeId, VirtualShadowMapPrototypeRuntime.PageSize);
@@ -407,11 +461,13 @@ namespace VividRP.Runtime.VirtualShadowMap
 
             using (new ProfilingScope(cmd, MarkLocalSampler))
             {
+                bool bindPressure = localPagePressureEnabled && localPagePressure != null && localPagePressure.IsValid();
                 cmd.SetComputeIntParam(shader, ClusterCountId, m_ClusterCount);
                 cmd.SetComputeIntParam(shader, PunctualLightCountId, m_PunctualLightCount);
                 cmd.SetComputeIntParam(shader, OutputWidthId, receiverWidth);
                 cmd.SetComputeIntParam(shader, OutputHeightId, receiverHeight);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapReceiverQuality.CullBackfacingPixelsId, cullBackfacingPixels ? 1 : 0);
+                cmd.SetComputeIntParam(shader, LocalPagePressureEnabledId, bindPressure ? 1 : 0);
                 cmd.SetComputeMatrixParam(shader, InvViewProjMatrixId, invViewProjection);
                 cmd.SetComputeVectorParam(shader, CameraViewParamsId, m_CameraViewParams);
                 cmd.SetComputeVectorParam(shader, ClusterParamsId, m_ClusterParams);
@@ -426,6 +482,10 @@ namespace VividRP.Runtime.VirtualShadowMap
                 cmd.SetComputeBufferParam(shader, markLocalKernel, PrunedLightOffsetCountId, m_PrunedLightOffsetCount);
                 cmd.SetComputeBufferParam(shader, markLocalKernel, PrunedLightIndicesId, m_PrunedLightIndices);
                 cmd.SetComputeBufferParam(shader, markLocalKernel, LogBaseBufferId, m_SourceLogBaseBuffer);
+                if (localPagePressure != null && localPagePressure.IsValid())
+                    cmd.SetComputeBufferParam(shader, markLocalKernel, VirtualShadowMapReceiverQuality.PressureId, localPagePressure);
+                else if (VirtualShadowMapPrototypeRuntime.PagePressure != null && VirtualShadowMapPrototypeRuntime.PagePressure.IsValid())
+                    cmd.SetComputeBufferParam(shader, markLocalKernel, VirtualShadowMapReceiverQuality.PressureId, VirtualShadowMapPrototypeRuntime.PagePressure);
                 cmd.SetComputeTextureParam(shader, markLocalKernel, DepthTextureId, depthTexture);
                 cmd.SetComputeTextureParam(shader, markLocalKernel, GBuffer1Id, gbuffer1);
 
@@ -436,6 +496,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             }
 
             // Restore directional uniform values so Phase 1 never perturbs downstream directional passes.
+            cmd.SetComputeIntParam(shader, LocalPagePressureEnabledId, 0);
             cmd.SetComputeIntParam(shader, VirtualShadowMapProjectionSet.CountId, directionalProjectionCount);
             cmd.SetComputeIntParam(shader, PageTableEntryCountId, directionalPageTableEntryCount);
             m_SourceRegistry.CommitRecordedFrame();
@@ -445,6 +506,14 @@ namespace VividRP.Runtime.VirtualShadowMap
         {
             if (m_CollectedDescriptors.Length >= required) return;
             Array.Resize(ref m_CollectedDescriptors, Mathf.NextPowerOfTwo(required));
+        }
+
+        private void EnsureCandidateCapacity(int required)
+        {
+            if (m_CandidateLightIndices.Length >= required) return;
+            int next = Mathf.NextPowerOfTwo(required);
+            Array.Resize(ref m_CandidateLightIndices, next);
+            Array.Resize(ref m_CandidateScreenDiameters, next);
         }
 
         private void EnsurePunctualUploadCapacity(int required)

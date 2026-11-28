@@ -12,6 +12,12 @@ float4 _VSMLocalSMRTParameters;
 // x = extrapolateMaxSlope (dimensionless), y = texelDitherScale, z = adaptiveRayCount, w = useSTBN (1/0)
 float4 _VSMLocalSMRTSettings;
 
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+static uint g_VSMLocalDebugRays;
+static uint g_VSMLocalDebugSamples;
+static uint g_VSMLocalDebugDualFace;
+#endif
+
 struct VSMLocalSampleResult
 {
     bool bValid;
@@ -262,6 +268,9 @@ VSMSMRTSample VSMSMRTFindSample(inout VSMLocalSMRTSingleRayState rayState, float
 
     if (all(uvz.xy == saturate(uvz.xy)))
     {
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+        g_VSMLocalDebugSamples++;
+#endif
         VSMLocalSampleResult smSample = SampleVirtualShadowMapLocal(rayState.VSMId, uvz.xy, rayState.MinMipLevel);
         if (smSample.bValid)
         {
@@ -368,6 +377,9 @@ VSMSMRTResult VSMShadowRayCastPointLight(
 #endif
     if (anyCrossFace)
     {
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+        g_VSMLocalDebugDualFace++;
+#endif
         VSMLocalSMRTTwoCubeFaceRayState rayState = VSMLocalSMRTTwoCubeFaceRayInitialize(
             startFaceId, endFaceId, rayStartWS, rayEndWS, extrapolateSlope, depthBias, mipLevel);
         result = VSMSMRTRayCast(rayState, numSteps, stepOffset);
@@ -460,7 +472,13 @@ float TraceLocalLightVSM(
 
     // Single-Page distant lights or hard-shadow settings use single-tap O(1) lookup.
     if (isSinglePage || (maxRayCount <= 1u && samplesPerRay == 0u))
+    {
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+        g_VSMLocalDebugRays += 1u;
+        g_VSMLocalDebugSamples += 1u;
+#endif
         return SampleLocalLightHardVSM(offsetVsmId, positionWS, worldNormal, viewDepth, mipLevel);
+    }
 
     const float2 depthSlopeUV = ComputeDepthSlopeLocalUV(offsetVsmId, positionWS, worldNormal);
     const float shadowResolutionScale = ComputeShadowResolutionScaleLocal(proj, viewDepth);
@@ -568,6 +586,9 @@ float TraceLocalLightVSM(
     }
 
     uint rayCount = min(i + 1u, maxRayCount);
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+    g_VSMLocalDebugRays += rayCount;
+#endif
     return (float)rayMissCount / (float)rayCount;
 }
 
@@ -682,5 +703,235 @@ void VSMResolveLocalShadows(uint3 id : SV_DispatchThreadID)
 
     _VSMLocalShadowMaskBitsRW[pixelPos] = maskBits;
 }
+
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+#include "../Debug/VSMPageDebug.hlsl"
+
+RWTexture2D<float4> _VSMReceiverDebugOutput;
+RWTexture2D<float4> _VSMReceiverDebugData;
+Texture2D<uint4> _VSMLocalShadowMaskBits;
+int _VSMReceiverDebugMode;
+int _VSMDebugLocalLightIndex;
+
+float3 VSMLocalMipColor(uint mip, bool isSinglePage)
+{
+    if (isSinglePage) return float3(0.95, 0.55, 1.0);
+    static const float3 palette[6] =
+    {
+        float3(1.0, 0.15, 0.1),  // Mip 0 (finest)
+        float3(1.0, 0.65, 0.05), // Mip 1
+        float3(0.9, 0.95, 0.15), // Mip 2
+        float3(0.15, 0.85, 0.3), // Mip 3
+        float3(0.1, 0.6, 1.0),   // Mip 4
+        float3(0.55, 0.25, 1.0), // Mip 5+ (coarsest)
+    };
+    return palette[min(mip, 5u)];
+}
+
+// Phase 4 Opt-in Local VSM Receiver Debug kernel:
+// Mode 11: LocalShadowMask, 12: LocalLightCount, 13: LocalSelectedMip,
+// Mode 14: LocalCacheState, 15: LocalSMRTWork.
+[numthreads(8, 8, 1)]
+void VSMLocalReceiverDebug(uint3 id : SV_DispatchThreadID)
+{
+    uint2 pixelPos = VSMMortonPixel(id.xy);
+    if (pixelPos.x >= (uint)_CSMOutputWidth || pixelPos.y >= (uint)_CSMOutputHeight)
+        return;
+
+    float depth = _DepthTexture.Load(int3(pixelPos, 0));
+    if (IsSkyPixel(depth) || _VSMProjectionCount <= 0 || _VSMClusterCount <= 0)
+    {
+        _VSMReceiverDebugData[pixelPos] = -2.0;
+        _VSMReceiverDebugOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    float3 positionWS = ReconstructWorldPosition(pixelPos, depth);
+    float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelPos, 0)).xy);
+    float normLenSq = dot(normalWS, normalWS);
+    normalWS = normLenSq > 1e-8 ? normalWS * rsqrt(normLenSq) : float3(0.0, 1.0, 0.0);
+
+    float3 positionVS = mul(_VSMCameraViewMatrix, float4(positionWS, 1.0)).xyz;
+    float viewDepth = max(-positionVS.z, max(_VSMClusterDepthParams.x, 0.0001));
+    uint clusterIndex = VividVSMComputeClusterIndex(pixelPos, viewDepth);
+    if (clusterIndex >= (uint)_VSMClusterCount)
+    {
+        _VSMReceiverDebugData[pixelPos] = -1.0;
+        _VSMReceiverDebugOutput[pixelPos] = float4(0.05, 0.05, 0.08, 1.0);
+        return;
+    }
+
+    float3 biasedPosWS = positionWS;
+    if (_VSMReceiverOffsetParameters.x > 0.0)
+    {
+        float eyeDepth = dot(_VSMReceiverViewForward, float4(positionWS, 1.0));
+        float normalBiasLen = VSMReceiverNormalBiasLength(positionWS - _WorldSpaceCameraPos, max(eyeDepth, viewDepth));
+        biasedPosWS += normalWS * normalBiasLen;
+    }
+
+    uint packed = _VSMPrunedLightOffsetCount[clusterIndex];
+    uint startOffset = packed & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+    uint lightCount = (packed >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK;
+    uint4 maskBits = _VSMLocalShadowMaskBits.Load(int3(pixelPos, 0));
+
+    uint activeCount = 0u;
+    uint fullCount = 0u;
+    uint singleCount = 0u;
+    int primarySlot = -1;
+    uint primaryLightIdx = 0u;
+    uint primaryVsmId = 0u;
+    uint primaryFace = 0u;
+    bool primaryIsSingle = false;
+    bool primaryIsPoint = false;
+    float combinedShadow = 1.0;
+
+    [loop]
+    for (uint slot = 0u; slot < lightCount; slot++)
+    {
+        uint lightIdx = _VSMPrunedLightIndices[startOffset + slot];
+        if (lightIdx >= (uint)_VSMPunctualLightCount)
+            continue;
+        int2 vsmInfo = _VSMPunctualLightVSMInfo[lightIdx];
+        if (vsmInfo.x < 0)
+            continue;
+
+        bool isSingle = ((uint)vsmInfo.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) != 0u;
+        if (isSingle) singleCount++;
+        else fullCount++;
+
+        VSMPunctualLightData light = _VSMPunctualLights[lightIdx];
+        bool isPoint = light.lightType == VIVID_VSM_PUNCTUAL_TYPE_POINT;
+        if (!isPoint && light.lightType != VIVID_VSM_PUNCTUAL_TYPE_SPOT)
+            continue;
+
+        float3 toLight = light.positionWS - biasedPosWS;
+        float distSq = dot(toLight, toLight);
+        if (distSq > light.range * light.range || distSq <= 1e-8)
+            continue;
+
+        float invDist = rsqrt(distSq);
+        if (!isPoint)
+        {
+            float spotCos = dot(-toLight * invDist, light.directionWS);
+            if (spotCos * light.angleScale + light.angleOffset <= 0.0)
+                continue;
+        }
+
+        activeCount++;
+        bool matchesFilter = _VSMDebugLocalLightIndex < 0 || (int)lightIdx == _VSMDebugLocalLightIndex;
+        if (matchesFilter && slot < VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS)
+            combinedShadow = min(combinedShadow, VividVSMUnpackShadowMask4Bit(maskBits, slot));
+
+        if (matchesFilter && primarySlot < 0)
+        {
+            uint face = isPoint ? VividVSMGetCubeFace(-toLight) : 0u;
+            primarySlot = (int)slot;
+            primaryLightIdx = lightIdx;
+            primaryVsmId = (uint)vsmInfo.x + face;
+            primaryFace = face;
+            primaryIsSingle = isSingle;
+            primaryIsPoint = isPoint;
+        }
+    }
+
+    float4 data = float4(-1.0, -1.0, -1.0, -1.0);
+    float3 color = float3(0.05, 0.05, 0.08);
+
+    if (_VSMReceiverDebugMode == 11)
+    {
+        data = float4(combinedShadow, (float)primarySlot, (float)activeCount, primarySlot >= 0 ? 1.0 : 0.0);
+        color = primarySlot >= 0 ? combinedShadow.xxx : float3(0.05, 0.05, 0.1);
+    }
+    else if (_VSMReceiverDebugMode == 12)
+    {
+        data = float4((float)activeCount, (float)fullCount, (float)singleCount, (float)lightCount);
+        float t = saturate((float)activeCount / 12.0);
+        color = activeCount == 0u ? float3(0.02, 0.02, 0.03)
+            : (t < 0.5 ? lerp(float3(0.1, 0.35, 1.0), float3(0.15, 0.9, 0.25), t * 2.0)
+                       : lerp(float3(0.15, 0.9, 0.25), float3(1.0, 0.15, 0.1), (t - 0.5) * 2.0));
+    }
+    else if (_VSMReceiverDebugMode == 13 && primarySlot >= 0 && primaryVsmId < (uint)_VSMProjectionCount)
+    {
+        VividVSMProjection proj = _VSMProjections[primaryVsmId];
+        float4 shadowUVz;
+        uint reqMip = primaryIsSingle ? 0u : VividVSMSelectLocalMipLevel(proj, biasedPosWS, viewDepth, shadowUVz);
+        float2 uv = shadowUVz.w > 1e-6 ? shadowUVz.xy / shadowUVz.w : float2(-1.0, -1.0);
+        VSMLocalSampleResult sample = SampleVirtualShadowMapLocal(primaryVsmId, uv, reqMip);
+        uint resolvedMip = sample.bValid ? sample.MipLevel : reqMip;
+        data = float4((float)reqMip, (float)resolvedMip, (float)primaryFace, primaryIsSingle ? 1.0 : 0.0);
+        color = sample.bValid ? VSMLocalMipColor(resolvedMip, primaryIsSingle) : float3(1.0, 0.0, 1.0);
+    }
+    else if (_VSMReceiverDebugMode == 14 && primarySlot >= 0 && primaryVsmId < (uint)_VSMProjectionCount)
+    {
+        VividVSMProjection proj = _VSMProjections[primaryVsmId];
+        float4 shadowUVz = mul(proj.worldToShadow, float4(biasedPosWS, 1.0));
+        uint reqMip = primaryIsSingle ? 0u : VividVSMSelectLocalMipLevel(proj, biasedPosWS, viewDepth, shadowUVz);
+        if (shadowUVz.w > 1e-6)
+        {
+            float2 uv = shadowUVz.xy / shadowUVz.w;
+            if (all(uv >= 0.0) && all(uv < 1.0))
+            {
+                uint mipPages = primaryIsSingle ? 1u : VividVSMMipPagesPerAxis(max(proj.addressing.z, 1u), reqMip);
+                uint2 page = min((uint2)(uv * (float)mipPages), mipPages - 1u);
+                uint pageIdx = VividVSMCalcProjectionPageIndex(proj, primaryIsSingle ? 0u : reqMip, page);
+                if (pageIdx < (uint)_VSMPrototypePageTableEntryCount)
+                {
+                    uint4 metadata = _VSMPrototypePageMetadata[pageIdx];
+                    bool allocated = metadata.y != 0u && (metadata.x & kVSMPageAllocated) != 0u;
+                    data = float4(metadata.x, metadata.w | _VSMPageRequestFlags[pageIdx], allocated ? metadata.y : 0u, (float)primaryVsmId);
+                    color = VSMDebugCacheColor(metadata, allocated, 0u);
+                }
+            }
+        }
+    }
+    else if (_VSMReceiverDebugMode == 15 && primarySlot >= 0)
+    {
+        g_VSMLocalDebugRays = 0u;
+        g_VSMLocalDebugSamples = 0u;
+        g_VSMLocalDebugDualFace = 0u;
+        float ditherNoise = VSMLocalGetScalarNoise(pixelPos, (uint)_CSMFrameIndex);
+        float shadowAcc = 1.0;
+
+        [loop]
+        for (uint slot = 0u; slot < min(lightCount, VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS); slot++)
+        {
+            uint lightIdx = _VSMPrunedLightIndices[startOffset + slot];
+            if (lightIdx >= (uint)_VSMPunctualLightCount) continue;
+            if (_VSMDebugLocalLightIndex >= 0 && (int)lightIdx != _VSMDebugLocalLightIndex) continue;
+            int2 vsmInfo = _VSMPunctualLightVSMInfo[lightIdx];
+            if (vsmInfo.x < 0) continue;
+
+            VSMPunctualLightData light = _VSMPunctualLights[lightIdx];
+            bool isPoint = light.lightType == VIVID_VSM_PUNCTUAL_TYPE_POINT;
+            if (!isPoint && light.lightType != VIVID_VSM_PUNCTUAL_TYPE_SPOT) continue;
+
+            float3 toLight = light.positionWS - biasedPosWS;
+            float distSq = dot(toLight, toLight);
+            if (distSq > light.range * light.range || distSq <= 1e-8) continue;
+            float invDist = rsqrt(distSq);
+            if (!isPoint && (dot(-toLight * invDist, light.directionWS) * light.angleScale + light.angleOffset <= 0.0)) continue;
+            if (VividVSMIsBackfaceToLocalLight(toLight, distSq, invDist, normalWS, light.shapeRadiusSquared)) continue;
+
+            bool isSingle = ((uint)vsmInfo.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) != 0u;
+            float sourceRadius = sqrt(max(light.shapeRadiusSquared, 0.0));
+            float lightNoise = frac(ditherNoise + (float)slot * 0.61803398875);
+            shadowAcc = min(shadowAcc, TraceLocalLightVSM(
+                (uint)vsmInfo.x, isPoint, isSingle, light.positionWS, sourceRadius,
+                pixelPos, viewDepth, biasedPosWS, 0.0, lightNoise, normalWS));
+        }
+
+        float maxRays = max(_VSMLocalSMRTParameters.x, 1.0);
+        float maxSamples = max(maxRays * max(_VSMLocalSMRTParameters.y + 1.0, 1.0), 1.0);
+        data = float4((float)g_VSMLocalDebugRays, (float)g_VSMLocalDebugSamples, (float)g_VSMLocalDebugDualFace, shadowAcc);
+        color = float3(
+            saturate((float)g_VSMLocalDebugRays / maxRays),
+            saturate((float)g_VSMLocalDebugSamples / maxSamples),
+            g_VSMLocalDebugDualFace > 0u ? 1.0 : 0.0);
+    }
+
+    _VSMReceiverDebugData[pixelPos] = data;
+    _VSMReceiverDebugOutput[pixelPos] = float4(color, 1.0);
+}
+#endif
 
 #endif

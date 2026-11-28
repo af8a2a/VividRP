@@ -63,6 +63,8 @@ namespace VividRP.Editor
         private SerializedDataParameter m_VirtualShadowMapLocalResolution;
         private SerializedDataParameter m_VirtualShadowMapResolutionLodBiasLocal;
         private SerializedDataParameter m_VirtualShadowMapDistantLightPixelThreshold;
+        private SerializedDataParameter m_VirtualShadowMapDistantLightRefreshBudget;
+        private SerializedDataParameter m_VirtualShadowMapLocalFinePageQuotaRatio;
         private SerializedDataParameter m_VirtualShadowMapResolution;
         private SerializedDataParameter m_VirtualShadowMapPhysicalPageBudget;
         private SerializedDataParameter m_VirtualShadowMapLastLevel;
@@ -110,6 +112,8 @@ namespace VividRP.Editor
             m_VirtualShadowMapLocalResolution = Unpack(fetcher.Find(x => x.virtualShadowMapLocalResolution));
             m_VirtualShadowMapResolutionLodBiasLocal = Unpack(fetcher.Find(x => x.virtualShadowMapResolutionLodBiasLocal));
             m_VirtualShadowMapDistantLightPixelThreshold = Unpack(fetcher.Find(x => x.virtualShadowMapDistantLightPixelThreshold));
+            m_VirtualShadowMapDistantLightRefreshBudget = Unpack(fetcher.Find(x => x.virtualShadowMapDistantLightRefreshBudget));
+            m_VirtualShadowMapLocalFinePageQuotaRatio = Unpack(fetcher.Find(x => x.virtualShadowMapLocalFinePageQuotaRatio));
             m_VirtualShadowMapResolution = Unpack(fetcher.Find(x => x.virtualShadowMapResolution));
             m_VirtualShadowMapPhysicalPageBudget = Unpack(fetcher.Find(x => x.virtualShadowMapPhysicalPageBudget));
             m_VirtualShadowMapLastLevel = Unpack(fetcher.Find(x => x.virtualShadowMapClipmapLastLevel));
@@ -149,6 +153,8 @@ namespace VividRP.Editor
             PropertyField(m_VirtualShadowMapLocalResolution);
             PropertyField(m_VirtualShadowMapResolutionLodBiasLocal);
             PropertyField(m_VirtualShadowMapDistantLightPixelThreshold);
+            PropertyField(m_VirtualShadowMapDistantLightRefreshBudget);
+            PropertyField(m_VirtualShadowMapLocalFinePageQuotaRatio);
             PropertyField(m_VirtualShadowMapResolution);
             PropertyField(m_VirtualShadowMapPhysicalPageBudget);
             PropertyField(m_VirtualShadowMapFirstLevel);

@@ -50,6 +50,14 @@ namespace VividRP.Runtime.RenderPass.Core
         Layer8, Layer9, Layer10, Layer11, Layer12, Layer13, Layer14, Layer15,
     }
 
+    public enum VSMDebugLightScope
+    {
+        [InspectorName("Directional Clipmap")]
+        Directional = 0,
+        [InspectorName("Local Lights (Point / Spot)")]
+        Local = 1,
+    }
+
     public sealed class VSMDebugPass : RasterPass
     {
         internal const string VSMDebugShaderName = "Hidden/VividRP/VSMDebug";
@@ -73,6 +81,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OutputSizeId = Shader.PropertyToID("_VSMDebugOutputSize");
         private static readonly int DepthLayerId = Shader.PropertyToID("_VSMDebugDepthLayer");
         private static readonly int FrameIndexId = Shader.PropertyToID("_VSMDebugFrameIndex");
+        private static readonly int LocalInfoId = Shader.PropertyToID("_VSMDebugLocalInfo");
+        private static readonly int LocalPagePressureId = Shader.PropertyToID("_VSMPagePressure");
 
         [RenderGraphResource(
             Name = "OutputTexture",
@@ -96,6 +106,24 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField, Tooltip("Legacy depth rank; clamped to zero for UE single-depth storage.")]
         private VSMDebugDepthLayer m_DepthLayer;
 
+        [SerializeField, Tooltip("Inspect either the Directional Clipmap pool or the Local Point/Spot VSM pool.")]
+        private VSMDebugLightScope m_LightScope = VSMDebugLightScope.Directional;
+
+        [SerializeField, Tooltip("When Light Scope is Local: -1 displays all active local VSMs (Mip 0 / Single-Page overview); >= 0 focuses on that local VSM's full Mip pyramid.")]
+        private int m_LocalVSMIndex = -1;
+
+        public VSMDebugLightScope LightScope
+        {
+            get => NormalizeLightScope(m_LightScope);
+            set => m_LightScope = NormalizeLightScope(value);
+        }
+
+        public int LocalVSMIndex
+        {
+            get => Mathf.Max(m_LocalVSMIndex, -1);
+            set => m_LocalVSMIndex = Mathf.Max(value, -1);
+        }
+
         public int DepthLayer
         {
             get => Mathf.Clamp((int)m_DepthLayer, 0, VirtualShadowMapPrototypeRuntime.DepthLayerCount - 1);
@@ -108,6 +136,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_PhysicalPageAvailable;
         private bool m_ShouldSkipExecution;
         private bool m_PageStateResourcesAvailable;
+        private bool m_LocalPageResourcesAvailable;
         private ulong m_CameraEntityId;
         private int m_FrameIndex;
 
@@ -163,36 +192,73 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_PhysicalPageAvailable = false;
             m_PageStateResourcesAvailable = false;
+            m_LocalPageResourcesAvailable = false;
 
             var settings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             bool prototypeEnabled = settings != null
                 && settings.enableVirtualShadowMapPrototype.value;
+            bool localScope = NormalizeLightScope(m_LightScope) == VSMDebugLightScope.Local;
             if (prototypeEnabled
-                && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform()
-                && VirtualShadowMapPrototypeRuntime.EnsurePhysicalPageForBinding())
+                && VirtualShadowMapPrototypeRuntime.IsSupportedOnCurrentPlatform())
             {
-                if (IsPageStateMode(m_VisualizationMode))
+                if (localScope)
                 {
-                    if (VirtualShadowMapPrototypeRuntime.HasPageRequestResources)
+                    var localPipeline = VirtualShadowMapPrototypeRuntime.LocalCasterPipeline;
+                    var localGrid = VirtualShadowMapPrototypeRuntime.LocalLightGrid;
+                    if (localPipeline.Active && localGrid.Active)
                     {
-                        bool tableValid = PassRecorder.ImportBufferForPass(
-                            this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read).IsValid();
-                        bool metadataValid = PassRecorder.ImportBufferForPass(
-                            this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read).IsValid();
-                        bool requestsValid = PassRecorder.ImportBufferForPass(
-                            this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read).IsValid();
-                        bool countersValid = PassRecorder.ImportBufferForPass(
-                            this, VirtualShadowMapPrototypeRuntime.AllocatorCounters, AccessFlags.Read).IsValid();
-                        m_PageStateResourcesAvailable = tableValid && metadataValid && requestsValid && countersValid;
+                        if (IsPageStateMode(m_VisualizationMode))
+                        {
+                            bool valid = localPipeline.PageTable != null && localPipeline.PageTable.IsValid()
+                                && localPipeline.PageMetadata != null && localPipeline.PageMetadata.IsValid()
+                                && localGrid.LocalPageRequestFlags != null && localGrid.LocalPageRequestFlags.IsValid()
+                                && localPipeline.AllocatorCounters != null && localPipeline.AllocatorCounters.IsValid()
+                                && localGrid.UnifiedProjections != null && localGrid.UnifiedProjections.IsValid()
+                                && localPipeline.PagePressure != null && localPipeline.PagePressure.IsValid();
+                            if (valid)
+                            {
+                                bool t = PassRecorder.ImportBufferForPass(this, localPipeline.PageTable, AccessFlags.Read).IsValid();
+                                bool m = PassRecorder.ImportBufferForPass(this, localPipeline.PageMetadata, AccessFlags.Read).IsValid();
+                                bool r = PassRecorder.ImportBufferForPass(this, localGrid.LocalPageRequestFlags, AccessFlags.Read).IsValid();
+                                bool c = PassRecorder.ImportBufferForPass(this, localPipeline.AllocatorCounters, AccessFlags.Read).IsValid();
+                                bool p = PassRecorder.ImportBufferForPass(this, localGrid.UnifiedProjections, AccessFlags.Read).IsValid();
+                                bool pr = PassRecorder.ImportBufferForPass(this, localPipeline.PagePressure, AccessFlags.Read).IsValid();
+                                m_LocalPageResourcesAvailable = t && m && r && c && p && pr;
+                            }
+                        }
+                        else if (localPipeline.PhysicalPagePool?.rt != null)
+                        {
+                            m_PhysicalPagePoolHandle = PassRecorder.ImportTextureForPass(
+                                this,
+                                localPipeline.PhysicalPagePool,
+                                AccessFlags.Read);
+                        }
                     }
                 }
-                else
+                else if (VirtualShadowMapPrototypeRuntime.EnsurePhysicalPageForBinding())
                 {
-                    m_PhysicalPagePoolHandle = PassRecorder.ImportTextureForPass(
-                        this,
-                        VirtualShadowMapPrototypeRuntime.PhysicalPagePool,
-                        AccessFlags.Read);
-
+                    if (IsPageStateMode(m_VisualizationMode))
+                    {
+                        if (VirtualShadowMapPrototypeRuntime.HasPageRequestResources)
+                        {
+                            bool tableValid = PassRecorder.ImportBufferForPass(
+                                this, VirtualShadowMapPrototypeRuntime.PageTable, AccessFlags.Read).IsValid();
+                            bool metadataValid = PassRecorder.ImportBufferForPass(
+                                this, VirtualShadowMapPrototypeRuntime.PageMetadata, AccessFlags.Read).IsValid();
+                            bool requestsValid = PassRecorder.ImportBufferForPass(
+                                this, VirtualShadowMapPrototypeRuntime.PageRequestFlags, AccessFlags.Read).IsValid();
+                            bool countersValid = PassRecorder.ImportBufferForPass(
+                                this, VirtualShadowMapPrototypeRuntime.AllocatorCounters, AccessFlags.Read).IsValid();
+                            m_PageStateResourcesAvailable = tableValid && metadataValid && requestsValid && countersValid;
+                        }
+                    }
+                    else
+                    {
+                        m_PhysicalPagePoolHandle = PassRecorder.ImportTextureForPass(
+                            this,
+                            VirtualShadowMapPrototypeRuntime.PhysicalPagePool,
+                            AccessFlags.Read);
+                    }
                 }
             }
 
@@ -225,7 +291,43 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
-            if (IsPageStateMode(m_VisualizationMode)
+            bool localScope = NormalizeLightScope(m_LightScope) == VSMDebugLightScope.Local;
+            if (localScope
+                && IsPageStateMode(m_VisualizationMode)
+                && m_LocalPageResourcesAvailable
+                && VirtualShadowMapPrototypeRuntime.LocalCasterPipeline.Active
+                && VirtualShadowMapPrototypeRuntime.LocalLightGrid.Active
+                && VirtualShadowMapPrototypeRuntime.HasPageDebugSnapshot(m_CameraEntityId, m_FrameIndex))
+            {
+                var localPipeline = VirtualShadowMapPrototypeRuntime.LocalCasterPipeline;
+                var localGrid = VirtualShadowMapPrototypeRuntime.LocalLightGrid;
+                var registry = VirtualShadowMapPrototypeRuntime.Registry;
+                mpb.SetBuffer(PageTableId, localPipeline.PageTable);
+                mpb.SetBuffer(PageMetadataId, localPipeline.PageMetadata);
+                mpb.SetBuffer(PageRequestFlagsId, localGrid.LocalPageRequestFlags);
+                mpb.SetBuffer(AllocatorCountersId, localPipeline.AllocatorCounters);
+                mpb.SetBuffer(VirtualShadowMapProjectionSet.BufferId, localGrid.UnifiedProjections);
+                mpb.SetBuffer(LocalPagePressureId, localPipeline.PagePressure);
+                mpb.SetVector(PageLayoutId, new Vector4(
+                    localPipeline.PhysicalPagesPerRow,
+                    localGrid.UnifiedPageTableEntryCount,
+                    localPipeline.PhysicalPageCapacity,
+                    0f));
+                mpb.SetVector(LocalInfoId, new Vector4(
+                    registry.DirectionalCount,
+                    registry.ProjectionCount,
+                    Mathf.Max(m_LocalVSMIndex, -1),
+                    localPipeline.PhysicalPageCapacity));
+                mpb.SetInt(VSMDebugVisualizationModeId, (int)NormalizeVisualizationMode(m_VisualizationMode));
+                mpb.SetInt(FrameIndexId, m_FrameIndex);
+                mpb.SetVector(OutputSizeId, new Vector4(
+                    m_OutputTexture.desc.Width, m_OutputTexture.desc.Height, 0f, 0f));
+                CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 2);
+                return;
+            }
+
+            if (!localScope
+                && IsPageStateMode(m_VisualizationMode)
                 && m_PageStateResourcesAvailable
                 && VirtualShadowMapPrototypeRuntime.HasPageRequestResources
                 && VirtualShadowMapPrototypeRuntime.HasPageDebugSnapshot(m_CameraEntityId, m_FrameIndex))
@@ -239,8 +341,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            RTHandle physicalPagePool =
-                VirtualShadowMapPrototypeRuntime.PhysicalPagePool;
+            RTHandle physicalPagePool = localScope
+                ? VirtualShadowMapPrototypeRuntime.LocalCasterPipeline.PhysicalPagePool
+                : VirtualShadowMapPrototypeRuntime.PhysicalPagePool;
             Texture physicalPagePoolTexture = physicalPagePool != null
                 ? physicalPagePool.ResolveTexture()
                 : null;
@@ -278,8 +381,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PhysicalPageAvailable = false;
             m_ShouldSkipExecution = false;
             m_PageStateResourcesAvailable = false;
+            m_LocalPageResourcesAvailable = false;
             m_CameraEntityId = 0ul;
             m_FrameIndex = -1;
+        }
+
+        internal static VSMDebugLightScope NormalizeLightScope(VSMDebugLightScope scope)
+        {
+            return scope == VSMDebugLightScope.Local
+                ? VSMDebugLightScope.Local
+                : VSMDebugLightScope.Directional;
         }
 
         internal static bool IsPageStateMode(VSMDebugVisualizationMode mode)

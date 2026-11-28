@@ -92,6 +92,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             public int PackAvailablePages;
             public int AppendEmptyPhysicalPages;
             public int AllocateNewPageMappingsUnified;
+            public int UpdateLocalPagePressure;
             public int AppendPhysicalPageLists;
             public int ResetPageWorkLists;
             public int BuildPageWorkLists;
@@ -161,13 +162,18 @@ namespace VividRP.Runtime.VirtualShadowMap
         private int m_HierarchyCapacity;
         private int m_BoundRectCapacity;
         private int m_MaxEntriesPerVSM;
+        private int m_LocalFinePageQuota;
+        private bool m_PagePressureEnabled;
 
         internal bool Active { get; private set; }
         internal RTHandle PhysicalPagePool => m_PhysicalPagePool;
         internal GraphicsBuffer PageTable => m_PageTable;
         internal GraphicsBuffer PageMetadata => m_PageMetadata;
         internal GraphicsBuffer PhysicalPageDescriptors => m_PhysicalPageDescriptors;
+        internal GraphicsBuffer AllocatorCounters => m_AllocatorCounters;
+        internal GraphicsBuffer PagePressure => m_PagePressure;
         internal GraphicsBuffer UnifiedActiveViews => m_UnifiedActiveViews;
+        internal VirtualShadowMapRegistry Registry => m_Registry;
         internal int PhysicalPagesPerRow => m_PhysicalPagesPerRow;
         internal int PhysicalPageCapacity => m_PhysicalPageCapacity;
 
@@ -180,7 +186,9 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal bool PrepareForPass(
             IRenderPass pass,
             VirtualShadowMapRegistry registry,
-            int requestedPhysicalBudget)
+            int requestedPhysicalBudget,
+            float localFinePageQuotaRatio = 0.85f,
+            bool pagePressureEnabled = true)
         {
             Active = false;
             if (registry == null || registry.ProjectionCount <= registry.DirectionalCount
@@ -218,6 +226,11 @@ namespace VividRP.Runtime.VirtualShadowMap
 
             m_Registry = registry;
             m_MaxEntriesPerVSM = maxEntries;
+            float clampedQuota = Mathf.Clamp(localFinePageQuotaRatio, 0.1f, 1.0f);
+            m_LocalFinePageQuota = clampedQuota < 0.999f
+                ? Mathf.Clamp(Mathf.RoundToInt(capacity * clampedQuota), 1, capacity)
+                : 0;
+            m_PagePressureEnabled = pagePressureEnabled;
 
             if (pass != null)
             {
@@ -342,7 +355,7 @@ namespace VividRP.Runtime.VirtualShadowMap
 
                     cmd.SetComputeIntParam(shader, UnifiedMaxEntriesPerVSMId, m_MaxEntriesPerVSM);
                     cmd.SetComputeIntParam(shader, AllocateStartVSMId, dirCount);
-                    cmd.SetComputeIntParam(shader, LocalMaxPhysicalPagesId, 0);
+                    cmd.SetComputeIntParam(shader, LocalMaxPhysicalPagesId, m_LocalFinePageQuota);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, VirtualShadowMapProjectionSet.BufferId, localGrid.UnifiedProjections);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, PageRequestFlagsROId, localGrid.LocalPageRequestFlags);
                     cmd.SetComputeBufferParam(shader, kernels.AllocateNewPageMappingsUnified, PageMetadataId, m_PageMetadata);
@@ -359,6 +372,14 @@ namespace VividRP.Runtime.VirtualShadowMap
                     cmd.DispatchCompute(shader, kernels.AllocateNewPageMappingsUnified, entryGroups, projCount, 1);
                     cmd.SetComputeIntParam(shader, AllocatePassModeId, 2);
                     cmd.DispatchCompute(shader, kernels.AllocateNewPageMappingsUnified, entryGroups, projCount, 1);
+
+                    if (kernels.UpdateLocalPagePressure >= 0)
+                    {
+                        cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.LocalPagePressureEnabledId, m_PagePressureEnabled ? 1 : 0);
+                        cmd.SetComputeBufferParam(shader, kernels.UpdateLocalPagePressure, AllocatorCountersId, m_AllocatorCounters);
+                        cmd.SetComputeBufferParam(shader, kernels.UpdateLocalPagePressure, VirtualShadowMapReceiverQuality.PressureRWId, m_PagePressure);
+                        cmd.DispatchCompute(shader, kernels.UpdateLocalPagePressure, 1, 1, 1);
+                    }
 
                     cmd.SetComputeBufferParam(shader, kernels.AppendPhysicalPageLists, VirtualShadowMapPrototypeRuntime.PhysicalPageListsId, m_PhysicalPageLists);
                     cmd.DispatchCompute(shader, kernels.AppendPhysicalPageLists, physGroups, 1, 1);
@@ -551,6 +572,7 @@ namespace VividRP.Runtime.VirtualShadowMap
             cmd.SetComputeBufferParam(shader, kernels.BuildLocalMeshletPages, LocalJobDispatchArgsRWId, m_LocalJobDispatchArgs);
             cmd.SetComputeBufferParam(shader, kernels.BuildLocalMeshletPages, LocalMeshletPageRequestsRWId, m_LocalMeshletPageRequests);
             cmd.SetComputeBufferParam(shader, kernels.BuildLocalMeshletPages, LocalMeshletPageIndirectArgsRWId, m_LocalMeshletPageIndirectArgs);
+            VirtualShadowMapPerformanceThrottle.BindLocalRasterFeedback(cmd, shader, kernels.BuildLocalMeshletPages);
             cmd.DispatchCompute(shader, kernels.BuildLocalMeshletPages, m_LocalJobDispatchArgs, 0);
 
             // 4D. 4x4 windowed HW rasterization into Local VSM PhysicalPagePool.

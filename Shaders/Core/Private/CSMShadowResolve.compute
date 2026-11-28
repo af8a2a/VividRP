@@ -1467,3 +1467,9 @@ void VSMShadowResolveUE11(uint3 id : SV_DispatchThreadID)
 
 // Phase 3: One-Pass Local Light Shadow Projection (4-bit x 32 lights/pixel + blue-noise dither + dual-cube-face SMRT).
 #pragma kernel VSMResolveLocalShadows
+
+// Phase 4: Local pool-pressure bias, per-VSM local raster performance throttling, & local receiver debug.
+#pragma kernel VSMUpdateLocalPagePressure
+#pragma kernel VSMProcessLocalPerformance
+#pragma kernel VSMUpdateLocalPerformanceThrottle
+#pragma kernel VSMLocalReceiverDebug VIVID_VSM_LOCAL_RECEIVER_DEBUG

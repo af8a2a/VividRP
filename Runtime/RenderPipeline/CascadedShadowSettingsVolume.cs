@@ -28,6 +28,10 @@ namespace VividRP.Runtime
         public ClampedFloatParameter virtualShadowMapResolutionLodBiasLocal = new(0f, -4f, 4f);
         [Tooltip("Projected screen diameter threshold (pixels) below which a local light downgrades to a Single-Page (Distant) VSM. Zero disables Single-Page downgrade.")]
         public ClampedFloatParameter virtualShadowMapDistantLightPixelThreshold = new(128f, 0f, 1024f);
+        [Tooltip("Maximum number of cached Single-Page (Distant) local VSM faces refreshed per frame via Round-Robin. Zero disables periodic distant refresh.")]
+        public ClampedIntParameter virtualShadowMapDistantLightRefreshBudget = new(8, 0, 64);
+        [Tooltip("Maximum share of the local physical page pool usable by fine (Pass 2) local pages, protecting coarse/Single-Page slots and keeping directional clipmaps isolated.")]
+        public ClampedFloatParameter virtualShadowMapLocalFinePageQuotaRatio = new(0.85f, 0.1f, 1.0f);
         [Tooltip("Virtual shadow resolution per projection. 0 follows the light's CSM resolution; otherwise rounded up to a power of two (at least 512). Does not resize the CSM atlas or physical page budget.")]
         public ClampedIntParameter virtualShadowMapResolution = new(0, 0, 16384);
         [Tooltip("Maximum resident physical pages shared by the static and dynamic shadow layers. Higher budgets retain more fine detail and use more GPU memory.")]

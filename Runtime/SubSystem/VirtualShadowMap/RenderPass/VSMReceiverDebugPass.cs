@@ -21,6 +21,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [InspectorName("Virtual Page (Preferred Level)")]
         VirtualPage,
         ShadowMask,
+        [InspectorName("Local Shadow Mask")]
+        LocalShadowMask,
+        [InspectorName("Local Light Count (Cluster)")]
+        LocalLightCount,
+        [InspectorName("Local Selected Mip")]
+        LocalSelectedMip,
+        [InspectorName("Local Cache State")]
+        LocalCacheState,
+        [InspectorName("Local SMRT Cost")]
+        LocalSMRTWork,
     }
 
     // Opt-in graph node: absent from the shipping graph means no diagnostic
@@ -48,6 +58,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PageSizeId = Shader.PropertyToID("_VSMPrototypePageSize");
         private static readonly int PagesPerAxisId = Shader.PropertyToID("_VSMPrototypePagesPerAxis");
         private static readonly int PagesPerRowId = Shader.PropertyToID("_VSMPrototypePhysicalPagesPerRow");
+        private static readonly int DebugLocalLightIndexId = Shader.PropertyToID("_VSMDebugLocalLightIndex");
+        private static readonly int PageTableEntryCountId = Shader.PropertyToID("_VSMPrototypePageTableEntryCount");
+        private static readonly int ReceiverOffsetParametersId = Shader.PropertyToID("_VSMReceiverOffsetParameters");
+        private static readonly int ReceiverViewForwardId = Shader.PropertyToID("_VSMReceiverViewForward");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_Depth;
@@ -70,9 +84,18 @@ namespace VividRP.Runtime.RenderPass.Core
             set => VividRenderingDebugDisplaySettings.Data.vsmReceiverDebugMode = value;
         }
 
+        public int LocalLightIndex
+        {
+            get => VividRenderingDebugDisplaySettings.Data.vsmDebugLocalLightIndex;
+            set => VividRenderingDebugDisplaySettings.Data.vsmDebugLocalLightIndex = value;
+        }
+
         private ComputeShader m_Compute;
         private int m_Kernel = -1;
+        private int m_LocalKernel = -1;
         private bool m_Ready;
+        private bool m_LocalReady;
+        private int m_ResolvedLocalLightIndex = -1;
         private ulong m_CameraId;
         private int m_FrameIndex;
         private int m_SMRTSampleIndexOffset;
@@ -81,8 +104,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_Parameters;
         private Vector4 m_Quality;
         private Vector4 m_SMRTParameters, m_SMRTSettings;
+        private Vector4 m_LocalSMRTParameters, m_LocalSMRTSettings;
+        private Vector4 m_ReceiverOffsetParameters, m_ReceiverViewForward;
         private bool m_AdaptiveRays;
         private TextureHandle m_PhysicalPool;
+        private TextureHandle m_LocalPool;
+        private TextureHandle m_LocalMask;
         private BufferHandle m_Table, m_Metadata, m_RequestFlags, m_Projections;
         private VividShadowData m_LevelHintShadowData;
 
@@ -112,13 +139,19 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Compute = PipelineResourceManager.Get<VividRPCoreResources>()?.CSMShadowResolveCompute;
             m_Kernel = m_Compute != null && m_Compute.HasKernel("VSMReceiverDebug")
                 ? m_Compute.FindKernel("VSMReceiverDebug") : -1;
+            m_LocalKernel = m_Compute != null && m_Compute.HasKernel("VSMLocalReceiverDebug")
+                ? m_Compute.FindKernel("VSMLocalReceiverDebug") : -1;
         }
 
         public override void Prepare(ContextContainer frameData)
         {
             m_ResolvedVisualizationMode = VisualizationMode;
+            m_ResolvedLocalLightIndex = LocalLightIndex;
             m_Ready = false;
+            m_LocalReady = false;
             m_PhysicalPool = default;
+            m_LocalPool = default;
+            m_LocalMask = default;
             m_Table = m_Metadata = m_RequestFlags = m_Projections = default;
             var camera = frameData.GetOrCreate<VividCameraData>();
             ConfigureOutputSize(camera.actualWidth, camera.actualHeight);
@@ -145,6 +178,41 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AdaptiveRays = VirtualShadowMapReceiverQuality.BuildSMRTAdaptiveEnabled(settings, m_SMRTParameters);
             m_Parameters = new Vector4(0,
                 shadow.depthBias, shadow.slopeScaleDepthBias, 0);
+
+            if (IsLocalMode(m_ResolvedVisualizationMode))
+            {
+                var localGrid = VirtualShadowMapPrototypeRuntime.LocalLightGrid;
+                var localPipeline = VirtualShadowMapPrototypeRuntime.LocalCasterPipeline;
+                var localResolver = VirtualShadowMapPrototypeRuntime.LocalShadowResolver;
+                if (localGrid.Active && localPipeline.Active && localResolver.Active
+                    && localPipeline.PhysicalPagePool?.rt != null
+                    && localResolver.LocalShadowMaskBits?.rt != null)
+                {
+                    m_LocalSMRTParameters = VirtualShadowMapLocalShadowResolver.BuildLocalSMRTParameters(settings);
+                    m_LocalSMRTSettings = VirtualShadowMapLocalShadowResolver.BuildLocalSMRTSettings(settings, BlueNoise.Instance != null);
+                    var receiverProjection = camera.GetGPUProjectionMatrix(renderIntoTexture: true);
+                    bool orthographic = camera.camera != null && camera.camera.orthographic;
+                    m_ReceiverOffsetParameters = orthographic
+                        ? new Vector4(0.0005f, 0f, 0.01f, 1f)
+                        : new Vector4(0.0005f / Mathf.Abs(receiverProjection.m00),
+                            0.015f / Mathf.Abs(receiverProjection.m11), 0f, 0f);
+                    m_ReceiverViewForward = -camera.GetViewMatrix().GetRow(2);
+                    m_LocalPool = PassRecorder.ImportTextureForPass(this, localPipeline.PhysicalPagePool, AccessFlags.Read);
+                    m_LocalMask = PassRecorder.ImportTextureForPass(this, localResolver.LocalShadowMaskBits, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localPipeline.PageTable, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localPipeline.PageMetadata, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.LocalPageRequestFlags, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.UnifiedProjections, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.PrunedLightOffsetCount, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.PrunedLightIndices, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.PunctualLightVSMInfo, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.SourcePunctualLights, AccessFlags.Read);
+                    PassRecorder.ImportBufferForPass(this, localGrid.SourceLogBaseBuffer, AccessFlags.Read);
+                    m_LocalReady = m_LocalPool.IsValid() && m_LocalMask.IsValid();
+                }
+                return;
+            }
+
             m_PhysicalPool = PassRecorder.ImportTextureForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalPagePool, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PagePressure, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, VirtualShadowMapPrototypeRuntime.PhysicalReceiverMasks, AccessFlags.Read);
@@ -164,12 +232,63 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Data.Resize(Mathf.Max(width, 1), Mathf.Max(height, 1));
         }
 
+        internal static bool IsLocalMode(VSMReceiverDebugMode mode) =>
+            mode >= VSMReceiverDebugMode.LocalShadowMask && mode <= VSMReceiverDebugMode.LocalSMRTWork;
+
         internal static VSMReceiverDebugMode NormalizeMode(VSMReceiverDebugMode mode) =>
-            mode >= VSMReceiverDebugMode.PreferredLevel && mode <= VSMReceiverDebugMode.ShadowMask
+            mode >= VSMReceiverDebugMode.PreferredLevel && mode <= VSMReceiverDebugMode.LocalSMRTWork
                 ? mode : VSMReceiverDebugMode.TexelFootprint;
 
         public override void Record(ComputePassContext context)
         {
+            if (IsLocalMode(m_ResolvedVisualizationMode))
+            {
+                if (!m_LocalReady || m_Compute == null || m_LocalKernel < 0
+                    || !m_Depth.innerHandle.IsValid() || !m_Normal.innerHandle.IsValid()
+                    || !m_Output.innerHandle.IsValid() || !m_Data.innerHandle.IsValid()) return;
+                var localGrid = VirtualShadowMapPrototypeRuntime.LocalLightGrid;
+                var localPipeline = VirtualShadowMapPrototypeRuntime.LocalCasterPipeline;
+                var lcmd = context.cmd;
+                BlueNoise.Instance?.Bind(lcmd, m_Compute, m_LocalKernel);
+                lcmd.SetComputeTextureParam(m_Compute, m_LocalKernel, DepthId, m_Depth.innerHandle);
+                lcmd.SetComputeTextureParam(m_Compute, m_LocalKernel, NormalId, m_Normal.innerHandle);
+                lcmd.SetComputeTextureParam(m_Compute, m_LocalKernel, PhysicalPoolId, m_LocalPool);
+                lcmd.SetComputeTextureParam(m_Compute, m_LocalKernel, VirtualShadowMapLocalShadowResolver.LocalShadowMaskBitsId, m_LocalMask);
+                lcmd.SetComputeTextureParam(m_Compute, m_LocalKernel, OutputId, m_Output.innerHandle);
+                lcmd.SetComputeTextureParam(m_Compute, m_LocalKernel, DataId, m_Data.innerHandle);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, TableId, localPipeline.PageTable);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, MetadataId, localPipeline.PageMetadata);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, RequestFlagsId, localGrid.LocalPageRequestFlags);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, VirtualShadowMapProjectionSet.BufferId, localGrid.UnifiedProjections);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, VirtualShadowMapLocalLightGrid.PrunedLightOffsetCountId, localGrid.PrunedLightOffsetCount);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, VirtualShadowMapLocalLightGrid.PrunedLightIndicesId, localGrid.PrunedLightIndices);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, VirtualShadowMapLocalLightGrid.PunctualLightVSMInfoId, localGrid.PunctualLightVSMInfo);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, VirtualShadowMapLocalLightGrid.PunctualLightsId, localGrid.SourcePunctualLights);
+                lcmd.SetComputeBufferParam(m_Compute, m_LocalKernel, VirtualShadowMapLocalLightGrid.LogBaseBufferId, localGrid.SourceLogBaseBuffer);
+                lcmd.SetComputeIntParam(m_Compute, VirtualShadowMapProjectionSet.CountId, localGrid.UnifiedProjectionCount);
+                lcmd.SetComputeIntParam(m_Compute, PageTableEntryCountId, localGrid.UnifiedPageTableEntryCount);
+                lcmd.SetComputeIntParam(m_Compute, PageSizeId, VirtualShadowMapPrototypeRuntime.PageSize);
+                lcmd.SetComputeIntParam(m_Compute, VirtualShadowMapLocalLightGrid.ClusterCountId, localGrid.ClusterCount);
+                lcmd.SetComputeIntParam(m_Compute, VirtualShadowMapLocalLightGrid.PunctualLightCountId, localGrid.PunctualLightCount);
+                lcmd.SetComputeIntParam(m_Compute, VirtualShadowMapLocalLightGrid.LocalPagePressureEnabledId, 0);
+                lcmd.SetComputeIntParam(m_Compute, ModeId, (int)m_ResolvedVisualizationMode);
+                lcmd.SetComputeIntParam(m_Compute, DebugLocalLightIndexId, m_ResolvedLocalLightIndex);
+                lcmd.SetComputeIntParam(m_Compute, FrameIndexId, m_FrameIndex);
+                lcmd.SetComputeIntParam(m_Compute, WidthId, m_Output.desc.Width);
+                lcmd.SetComputeIntParam(m_Compute, HeightId, m_Output.desc.Height);
+                lcmd.SetComputeMatrixParam(m_Compute, InvViewProjectionId, m_InvViewProjection);
+                lcmd.SetComputeMatrixParam(m_Compute, VirtualShadowMapLocalLightGrid.CameraViewMatrixId, localGrid.CameraViewMatrix);
+                lcmd.SetComputeVectorParam(m_Compute, VirtualShadowMapLocalLightGrid.CameraViewParamsId, localGrid.CameraViewParams);
+                lcmd.SetComputeVectorParam(m_Compute, VirtualShadowMapLocalLightGrid.ClusterParamsId, localGrid.ClusterParams);
+                lcmd.SetComputeVectorParam(m_Compute, VirtualShadowMapLocalLightGrid.ClusterDepthParamsId, localGrid.ClusterDepthParams);
+                lcmd.SetComputeVectorParam(m_Compute, ReceiverOffsetParametersId, m_ReceiverOffsetParameters);
+                lcmd.SetComputeVectorParam(m_Compute, ReceiverViewForwardId, m_ReceiverViewForward);
+                lcmd.SetComputeVectorParam(m_Compute, VirtualShadowMapLocalShadowResolver.LocalSMRTParametersId, m_LocalSMRTParameters);
+                lcmd.SetComputeVectorParam(m_Compute, VirtualShadowMapLocalShadowResolver.LocalSMRTSettingsId, m_LocalSMRTSettings);
+                lcmd.DispatchCompute(m_Compute, m_LocalKernel, CoreUtils.DivRoundUp(m_Output.desc.Width, 8), CoreUtils.DivRoundUp(m_Output.desc.Height, 8), 1);
+                return;
+            }
+
             if (!m_Ready || m_Compute == null || m_Kernel < 0
                 || !VirtualShadowMapPrototypeRuntime.HasReceiverDebugSnapshot(m_CameraId, m_FrameIndex)
                 || !m_Depth.innerHandle.IsValid() || !m_Normal.innerHandle.IsValid()
@@ -225,8 +344,12 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_Compute = null;
             m_Kernel = -1;
+            m_LocalKernel = -1;
             m_Ready = false;
+            m_LocalReady = false;
             m_PhysicalPool = default;
+            m_LocalPool = default;
+            m_LocalMask = default;
             m_Table = m_Metadata = m_RequestFlags = m_Projections = default;
         }
     }

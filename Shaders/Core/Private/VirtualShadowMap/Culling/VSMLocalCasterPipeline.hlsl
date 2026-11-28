@@ -20,6 +20,9 @@ uint _VSMLocalMaxPageRequestsPerList;
 uint _VSMLocalForcedLODDepth;
 float _VSMLocalLODErrorThreshold;
 int _VSMLocalUseDrawSet;
+int _VSMLocalPagePressureEnabled;
+int _VSMLocalThrottleEnabled;
+int _VSMLocalMaxThrottleEntries;
 
 StructuredBuffer<uint> _VSMPageRequestFlagsRO;
 StructuredBuffer<uint> _VSMLocalDrawSetIndices;
@@ -100,19 +103,24 @@ void VSMUpdatePhysicalPagesUnified(uint3 id : SV_DispatchThreadID)
         }
         else
         {
-            if (requested) metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
-            if (requested && _VSMReceiverMaskEnabled != 0)
-                metadata.x = (metadata.x | kVSMPageDynamicDirty) & ~kVSMPageCached;
-            _VSMPrototypePageMetadata[page] = metadata;
             uint vsmId, mip, flags;
             uint2 pageXY;
             VividVSMDecodePhysicalOwnerDesc(_VSMPhysicalPageDescriptors[slot], vsmId, mip, pageXY, flags);
+            bool skipDynamicInvalid = false;
             if ((flags & VIVID_VSM_OWNER_FLAG_VALID) != 0u
-                && vsmId < (uint)_VSMProjectionCount
-                && !VividVSMProjectionIsDirectional(_VSMProjections[vsmId]))
+                && vsmId < (uint)_VSMProjectionCount)
             {
-                isLocalRetained = true;
+                VividVSMProjection ownerProj = _VSMProjections[vsmId];
+                if (!VividVSMProjectionIsDirectional(ownerProj))
+                    isLocalRetained = true;
+                skipDynamicInvalid = (ownerProj.meta.y & VIVID_VSM_PROJ_FLAG_SKIP_DYNAMIC_INVALID) != 0u;
             }
+            if (requested) metadata.z = (uint)_VSMPrototypeFeedbackFrameIndex;
+            // Single-Page (Distant) VSMs carry SkipDynamicInvalid so cached pages incur zero per-frame redraw
+            // until moved or periodically selected by the CPU Round-Robin refresh cursor.
+            if (requested && _VSMReceiverMaskEnabled != 0 && !skipDynamicInvalid)
+                metadata.x = (metadata.x | kVSMPageDynamicDirty) & ~kVSMPageCached;
+            _VSMPrototypePageMetadata[page] = metadata;
         }
     }
     if (owner != 0u) InterlockedAdd(_VSMPrototypeAllocatorCounters[0], 1u);
@@ -225,6 +233,50 @@ void VSMAllocateNewPageMappingsUnified(uint3 id : SV_DispatchThreadID)
             InterlockedAdd(_VSMPrototypeAllocatorCounters[3], 1u);
         }
     }
+}
+
+// GPU-only local physical page pool pressure controller (UE CacheManager 85% hysteresis).
+// Updates _VSMPagePressureRW[0].x (asfloat bias in [0, 4]) after VSMAllocateNewPageMappingsUnified.
+[numthreads(1, 1, 1)]
+void VSMUpdateLocalPagePressure(uint3 id : SV_DispatchThreadID)
+{
+    uint4 state = _VSMPagePressureRW[0];
+    uint4 detail = _VSMPagePressureRW[1];
+    float previous = asfloat(state.x);
+    float bias = previous;
+    uint frame = (uint)_VSMPrototypeFeedbackFrameIndex;
+    uint capacity = (uint)max(_VSMPrototypePhysicalPageCapacity, 1);
+    uint requested = _VSMPrototypeAllocatorCounters[1];
+    uint overflow = _VSMPrototypeAllocatorCounters[3];
+    uint resident = _VSMPrototypeAllocatorCounters[VIVID_VSM_ALLOC_COUNTER_LOCAL_PAGES];
+
+    if (_VSMLocalPagePressureEnabled == 0)
+    {
+        state = uint4(0u, frame, requested, overflow);
+        detail = uint4(resident, capacity, 0u, 0u);
+    }
+    else
+    {
+        float effectiveDemand = (float)max(requested, resident + overflow);
+        float allocation = effectiveDemand / (float)capacity;
+        float target = max(0.0, previous + log2(max(allocation / 0.85, 1e-20)));
+        if (allocation > 0.85 || overflow > 0u)
+        {
+            state.y = frame;
+            float pushedTarget = overflow > 0u ? max(target, previous + 0.5) : target;
+            bias = lerp(bias, pushedTarget, 0.5);
+        }
+        else if (frame >= state.y && (frame - state.y) > 10u)
+        {
+            bias = lerp(bias, target, 0.1);
+        }
+        bias = clamp(bias, 0.0, 4.0);
+        state = uint4(asuint(bias), state.y, requested, overflow);
+        detail = uint4(resident, capacity, asuint(previous), 0u);
+    }
+    _VSMPagePressureRW[0] = state;
+    _VSMPagePressureRW[1] = detail;
+    _VSMPagePressureRW[2] = 0u;
 }
 
 // Clears unified per-(VSMId, Mip) UncachedPageRectBounds and H-mip hierarchy nodes.
@@ -482,7 +534,7 @@ void VSMCullLocalInstancesCS(uint3 id : SV_DispatchThreadID)
 }
 
 void AppendVSMLocalPageWindow(uint rendererListIndex, uint instanceIndex, uint meshletId,
-    uint originPageIndex, uint activeViewIndex, uint2 extent)
+    uint originPageIndex, uint activeViewIndex, uint vsmId, uint2 extent)
 {
     uint argsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
     uint localIdx = 0u;
@@ -501,6 +553,8 @@ void AppendVSMLocalPageWindow(uint rendererListIndex, uint instanceIndex, uint m
         meshletId,
         originPageIndex,
         VividVSMEncodeUnifiedPageWindow(activeViewIndex, extent));
+    if (_VSMLocalThrottleEnabled != 0 && vsmId < (uint)_VSMLocalMaxThrottleEntries)
+        InterlockedAdd(_VSMLocalRasterClusterCountsRW[vsmId], 1u);
 }
 
 // Stage B: Per-(instance, activeView) perspective LOD selection + meshlet perspective bounds +
@@ -620,7 +674,7 @@ void VSMBuildLocalMeshletPagesCS(uint3 groupThreadID : SV_GroupThreadID, uint3 g
                 {
                     uint originPage = VividVSMCalcProjectionPageIndex(proj, view.mipLevel, clippedLow);
                     AppendVSMLocalPageWindow(rendererListIndex, instanceIndex, meshletId,
-                        originPage, activeViewIndex, clippedHigh - clippedLow + 1u);
+                        originPage, activeViewIndex, view.vsmId, clippedHigh - clippedLow + 1u);
                 }
             }
         }

@@ -217,7 +217,12 @@ uint VividVSMSelectLocalMipLevel(VividVSMProjection proj, float3 positionWS, flo
         : _VSMCameraViewParams.z;
     float virtualRes0 = (float)(proj.addressing.z * (uint)_VSMPrototypePageSize);
     float footprintTexels = abs(radiusWorld * proj.projectionScales.x / shadowUVz.w) * (2.0 * virtualRes0);
-    float lod = log2(max(footprintTexels, 1.0)) + proj.parameters.z + _VSMCameraViewParams.w;
+#if defined(VIVID_VSM_PAGE_PRESSURE)
+    float pressureBias = _VSMLocalPagePressureEnabled != 0 ? asfloat(_VSMPagePressure[0].x) : 0.0;
+#else
+    float pressureBias = 0.0;
+#endif
+    float lod = log2(max(footprintTexels, 1.0)) + proj.parameters.z + _VSMCameraViewParams.w + pressureBias;
     int minMip = (int)proj.meta.z;
     int maxMip = max((int)proj.addressing.w - 1, minMip);
     return (uint)clamp((int)floor(lod), minMip, maxMip);

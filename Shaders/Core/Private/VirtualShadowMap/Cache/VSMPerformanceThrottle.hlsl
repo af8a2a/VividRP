@@ -101,3 +101,96 @@ void VSMCaptureRasterFeedback(uint lane : SV_GroupIndex)
     GroupMemoryBarrierWithGroupSync();
     if (lane == 0u) _VSMRasterFeedbackRW[0] += uint2(g_VSMRasterTotalClusters, 0u);
 }
+
+// ============================================================================
+// Phase 4: Local Light (Point / Spot) Per-VSM GPU Raster Performance Throttle
+// Supports arbitrarily many unified local projections (strided 64-lane reduction).
+// ============================================================================
+RWStructuredBuffer<uint> _VSMLocalRasterClusterCountsRW;
+int _VSMLocalThrottleStartVSMId;
+int _VSMLocalThrottleCount;
+int _VSMLocalThrottleMemoryPressureEnabled;
+groupshared uint g_VSMLocalThrottleTotalHW;
+groupshared uint g_VSMLocalThrottleMaxHW;
+
+[numthreads(64, 1, 1)]
+void VSMProcessLocalPerformance(uint lane : SV_GroupIndex)
+{
+    if (lane == 0u)
+    {
+        g_VSMLocalThrottleTotalHW = 0u;
+        g_VSMLocalThrottleMaxHW = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint count = (uint)max(_VSMLocalThrottleCount, 0);
+    uint startVsm = (uint)max(_VSMLocalThrottleStartVSMId, 0);
+    uint localTotal = 0u;
+    uint localMax = 0u;
+    [loop]
+    for (uint v = lane; v < count; v += 64u)
+    {
+        uint countHw = (_VSMThrottlePreviousValid != 0 && _VSMThrottleEntriesValid != 0 && v >= startVsm)
+            ? _VSMLocalRasterClusterCountsRW[v] : 0u;
+        uint intensity = (_VSMThrottlePreviousValid != 0 && _VSMThrottleEntriesValid != 0 && v >= startVsm)
+            ? _VSMPrevThrottle[2u + v].z : 0u;
+        _VSMThrottleRW[2u + v] = uint4(countHw, 0u, intensity, 0u);
+        localTotal += countHw;
+        localMax = max(localMax, countHw);
+        // Clear feedback slot so the current frame accumulates fresh raster clusters.
+        _VSMLocalRasterClusterCountsRW[v] = 0u;
+    }
+    InterlockedAdd(g_VSMLocalThrottleTotalHW, localTotal);
+    InterlockedMax(g_VSMLocalThrottleMaxHW, localMax);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (lane == 0u)
+    {
+        _VSMThrottleRW[0] = uint4(
+            _VSMThrottlePreviousValid != 0 ? g_VSMLocalThrottleTotalHW : 0u,
+            0u,
+            g_VSMLocalThrottleMaxHW,
+            0u);
+    }
+}
+
+[numthreads(64, 1, 1)]
+void VSMUpdateLocalPerformanceThrottle(uint3 id : SV_DispatchThreadID)
+{
+    uint vsmId = id.x;
+    uint count = (uint)max(_VSMLocalThrottleCount, 0);
+    uint startVsm = (uint)max(_VSMLocalThrottleStartVSMId, 0);
+
+    uint4 header = _VSMThrottleRW[0];
+    float global = 0.0;
+    if (_VSMThrottlePreviousValid != 0)
+    {
+        global = _VSMThrottleParameters.w >= 0.0 ? _VSMThrottleParameters.w
+            : saturate(asfloat(_VSMPrevThrottle[1].x)
+                + clamp((VSMRasterCostHeuristic(header.xy) - _VSMThrottleParameters.x) * 0.5, -0.01, 0.2));
+    }
+    if (vsmId == 0u)
+        _VSMThrottleRW[1] = uint4(asuint(global), 0u, 0u, 0u);
+    if (vsmId >= count || vsmId < startVsm)
+        return;
+
+    uint4 entry = _VSMThrottleRW[2u + vsmId];
+    float intensity = global;
+    if (entry.x != 0u && header.z != 0u)
+    {
+        float contribution = VSMRasterCostHeuristic(uint2(entry.x, 0u)) / max(VSMRasterCostHeuristic(uint2(header.z, 0u)), 1e-8);
+        intensity = lerp(saturate(contribution * global), asfloat(entry.z), _VSMThrottleParameters.y);
+    }
+    float memoryBias = _VSMLocalThrottleMemoryPressureEnabled != 0 ? asfloat(_VSMPagePressure[0].x) : 0.0;
+    // Local VSMs support up to +4 mips of combined pressure + performance throttle bias.
+    float bias = intensity * max(0.0, min(4.0, _VSMThrottleParameters.z) - memoryBias);
+    entry.zw = uint2(asuint(intensity), asuint(bias));
+    _VSMThrottleRW[2u + vsmId] = entry;
+
+    VividVSMProjection projection = _VSMThrottleProjectionsRW[vsmId];
+    if (!VividVSMProjectionIsSinglePage(projection))
+    {
+        projection.parameters.z += bias;
+        _VSMThrottleProjectionsRW[vsmId] = projection;
+    }
+}

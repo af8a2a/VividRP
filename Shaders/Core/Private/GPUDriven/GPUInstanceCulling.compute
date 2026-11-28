@@ -95,7 +95,7 @@ struct VSMLodTraversalState
     float pixelsPerObjectUnit, threshold;
     bool automaticErrorBounds;
 };
-VSMLodTraversalState VSMLodState(VividInstanceData instance, uint contextIndex, uint start, uint end)
+VSMLodTraversalState VSMLodState(VividInstanceLODTraversalData instance, uint contextIndex, uint start, uint end)
 {
     uint leafLevel = instance.MeshLODLevelCount - 1u;
     VividGPUCullingContext context = _CullingContexts[contextIndex];
@@ -115,7 +115,7 @@ VSMLodTraversalState VSMLodState(VividInstanceData instance, uint contextIndex, 
     state.threshold = threshold; state.automaticErrorBounds = automaticErrorBounds;
     return state;
 }
-bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint contextIndex,
+bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceLODTraversalData instance, uint contextIndex,
     float4x4 localToShadow, VSMLodTraversalState state)
 {
     bool overlaps = node.Range.x < state.end && node.Range.x + node.Range.y > state.start;
@@ -137,7 +137,7 @@ bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint c
     }
     if (overlaps)
     {
-        const float wpoPadWS = VividGetInstanceWpoPaddingWS(instance);
+        const float wpoPadWS = instance.WpoPaddingWS;
         VividInstanceCullBounds bounds = VividExpandCullBoundsWS(
             VividBuildInstanceCullBounds(node.Min.xyz, node.Max.xyz, instance.ObjectToWorldMatrix),
             wpoPadWS);
@@ -147,14 +147,14 @@ bool VSMLodMayVisit(VSMLodHierarchyNode node, VividInstanceData instance, uint c
     if (overlaps)
         overlaps = VividVSMCasterLocalBoundsOverlaps(contextIndex,
             (node.Min.xyz + node.Max.xyz) * 0.5, (node.Max.xyz - node.Min.xyz) * 0.5, 0.0, false,
-            localToShadow, VividGetInstanceWpoPaddingWS(instance));
+            localToShadow, instance.WpoPaddingWS);
 #endif
     return overlaps;
 }
 
 // Stackless preorder traversal. Every leaf is aligned to a 32-record job in
 // this mesh, so surviving jobs cannot exceed the existing queue capacity.
-void TraverseVSMLodHierarchy(uint instanceID, VividInstanceData instance, uint contextIndex,
+void TraverseVSMLodHierarchy(uint instanceID, VividInstanceLODTraversalData instance, uint contextIndex,
     uint jobsOffset, float4x4 localToShadow)
 {
     uint start = instance.TopMeshLODStartIndex;
@@ -205,7 +205,8 @@ void EnqueueVSMLodTraversal(uint instanceID, uint contextIndex)
 
 void TraverseVSMLodGroup(uint lane, uint instanceID, uint contextIndex)
 {
-    VividInstanceData instance = PullInstanceData(instanceID);
+    VividInstanceLODTraversalData instance;
+    if (!TryPullInstanceLODTraversalData(instanceID, instance)) return;
     uint start = instance.TopMeshLODStartIndex;
     uint count = start < _VSMLodRootCount ? min(instance.TotalMeshLODCount, _VSMLodRootCount - start) : 0u;
     if (count == 0u) return; // Uniform for the entire group.
@@ -376,26 +377,24 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-    const VividInstanceData instanceData = PullInstanceData(instanceID);
     const VividGPUCullingContext cullingContext = _CullingContexts[cullingContextIndex];
-
-    if ((instanceData.Flags & VIVIDINSTANCEFLAGS_DISABLED) != 0u ||
-        (instanceData.PassMask & (uint) cullingContext.PassMask) == 0u)
+    VividInstanceCullHeader cullHeader;
+    if (!TryPullInstanceCullHeader(instanceID, (uint) cullingContext.PassMask, cullHeader))
     {
         return;
     }
 
-    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
+    const float wpoPadWS = cullHeader.WpoPaddingWS;
     VividInstanceCullBounds bounds = VividExpandCullBoundsWS(
         VividBuildInstanceCullBounds(
-            instanceData.AABBMin.xyz, instanceData.AABBMax.xyz, instanceData.ObjectToWorldMatrix),
+            cullHeader.AABBMinOS, cullHeader.AABBMaxOS, cullHeader.ObjectToWorldMatrix),
         wpoPadWS);
     if (!VividInstanceFrustumVisible(bounds, cullingContext.FrustumPlanes)) return;
 
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
-    float3 centerOS = instanceData.AABBMin.xyz * 0.5f + instanceData.AABBMax.xyz * 0.5f;
-    float3 extentOS = instanceData.AABBMax.xyz * 0.5f - instanceData.AABBMin.xyz * 0.5f;
-    float4x4 localToShadow = mul(_VSMProjections[cullingContextIndex].worldToShadow, instanceData.ObjectToWorldMatrix);
+    float3 centerOS = cullHeader.AABBMinOS * 0.5f + cullHeader.AABBMaxOS * 0.5f;
+    float3 extentOS = cullHeader.AABBMaxOS * 0.5f - cullHeader.AABBMinOS * 0.5f;
+    float4x4 localToShadow = mul(_VSMProjections[cullingContextIndex].worldToShadow, cullHeader.ObjectToWorldMatrix);
     if (bounds.Valid && !VividVSMCasterLocalBoundsOverlaps(cullingContextIndex, centerOS, extentOS, 0.0, false, localToShadow, wpoPadWS)) return;
 #else
 #if defined(VIVID_VSM_EARLY_CULL)
@@ -416,11 +415,12 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
 
 #endif
 
-    const uint totalMeshLODCount = instanceData.TotalMeshLODCount;
-    if (totalMeshLODCount == 0u)
+    VividInstanceLODTraversalData lodData;
+    if (!TryPullInstanceLODTraversalFromCullHeader(cullHeader, lodData))
     {
         return;
     }
+    const uint totalMeshLODCount = lodData.TotalMeshLODCount;
 
 #if defined(VIVID_VSM_BATCH)
     // Main view only enqueues here. VSM keeps small ranges on instance lanes.
@@ -433,7 +433,7 @@ void RunCulling(const uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 #endif
 #if defined(VIVID_VSM_LOD_HIERARCHY)
-    TraverseVSMLodHierarchy(instanceID, instanceData, cullingContextIndex, cullingContext.MeshletListBuildJobsOffset, localToShadow);
+    TraverseVSMLodHierarchy(instanceID, lodData, cullingContextIndex, cullingContext.MeshletListBuildJobsOffset, localToShadow);
     return;
 #endif
 

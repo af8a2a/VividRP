@@ -3,11 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.Bindless;
+using VividRP.Runtime.GPUDriven.Meshlets;
 using VividRP.Runtime.PrimitiveScene;
 
 namespace VividRP.Editor.Tests
@@ -1540,6 +1544,340 @@ namespace VividRP.Editor.Tests
             finally
             {
                 cmd.Release();
+            }
+        }
+
+        [Test]
+        public void DrawSet_DirectModeEmitsAbsoluteDrawSectionIndices()
+        {
+            using var scene = new VividPrimitiveScene();
+            var geometryKey = CreateResourceKey(VividPrimitiveResourceDomain.MeshletGeometry, CreateEntity("Direct DrawSet Geo"));
+            var materialKey = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("Direct DrawSet Mat"));
+            EntityId first = CreateEntity("Direct DrawSet First");
+            EntityId second = CreateEntity("Direct DrawSet Second");
+            VividPrimitiveHandle firstHandle = scene.RegisterOrUpdate(CreateDescriptor(
+                first,
+                new[] { CreateSection(0, geometryKey, materialKey) }));
+            VividPrimitiveHandle secondHandle = scene.RegisterOrUpdate(CreateDescriptor(
+                second,
+                new[] { CreateSection(0, geometryKey, materialKey) }));
+            uint firstSection = scene.PrimitiveTable[firstHandle.Index].DrawSectionOffset;
+            uint secondSection = scene.PrimitiveTable[secondHandle.Index].DrawSectionOffset;
+            scene.BeginDrawSetSourceRebuild();
+            scene.SetDrawSetSource((int) firstSection, new VividPrimitiveDrawSourceData
+            {
+                PrimitiveHandle = firstHandle,
+                AbsoluteDrawSectionIndex = firstSection,
+                LegacyInstanceIndex = 100u,
+                RendererListID = VividRendererListID.Default,
+                Flags = VividPrimitiveDrawSourceFlags.Valid,
+            });
+            scene.SetDrawSetSource((int) secondSection, new VividPrimitiveDrawSourceData
+            {
+                PrimitiveHandle = secondHandle,
+                AbsoluteDrawSectionIndex = secondSection,
+                LegacyInstanceIndex = 200u,
+                RendererListID = VividRendererListID.AlphaTest,
+                Flags = VividPrimitiveDrawSourceFlags.Valid,
+            });
+
+            using var planes = new NativeArray<float4>(6, Allocator.TempJob)
+            {
+                [0] = new float4(1f, 0f, 0f, 100f),
+                [1] = new float4(-1f, 0f, 0f, 100f),
+                [2] = new float4(0f, 1f, 0f, 100f),
+                [3] = new float4(0f, -1f, 0f, 100f),
+                [4] = new float4(0f, 0f, 1f, 100f),
+                [5] = new float4(0f, 0f, -1f, 100f),
+            };
+            using var drawSet = new VividPrimitiveDrawSet();
+            drawSet.Build(planes, uint.MaxValue, scene.ActiveCullRecords, scene.DrawSetSources, scene.SceneRevision, 0, useDrawSectionIndices: true);
+
+            Assert.That(drawSet.UsesDrawSectionIndices, Is.True);
+            Assert.That(drawSet.DrawCount, Is.EqualTo(2));
+            var uploaded = new uint[drawSet.DispatchInstanceIndexBuffer.count];
+            drawSet.DispatchInstanceIndexBuffer.GetData(uploaded);
+            Assert.That(uploaded[0], Is.EqualTo(firstSection));
+            Assert.That(uploaded[1], Is.EqualTo(secondSection));
+        }
+
+        [Test]
+        public void DirectPrimitiveSceneMode_SkipsLegacyRebuildAndUploadOnTransformAndRenderStateUpdates()
+        {
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset collection = null;
+            GameObject firstObj = null;
+            GameObject secondObj = null;
+            try
+            {
+                mesh = CreateSingleTriangleMesh("Phase2SkipMesh");
+                material = new Material(Shader.Find("Hidden/InternalErrorShader"));
+                collection = CreateSingleTriangleMeshletAsset("Phase2SkipCollection");
+                firstObj = CreateMeshletGameObject("Phase2SkipA", mesh, material, collection, out MeshletRenderer firstRenderer);
+                secondObj = CreateMeshletGameObject("Phase2SkipB", mesh, material, collection, out MeshletRenderer secondRenderer);
+                firstObj.transform.position = new Vector3(1.0f, 0.0f, 5.0f);
+                secondObj.transform.position = new Vector3(-2.0f, 0.0f, 5.0f);
+
+                VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(firstRenderer);
+                database.UpdateRendererData(secondRenderer);
+
+                using var system = new VividGPUDrivenSystem(new DummyBindlessAllocator());
+                Assert.That(system.UsePrimitiveSceneDirect, Is.True);
+
+                system.PrepareFrame(reportStats: false);
+                Assert.That(system.SceneData.InstanceCount, Is.GreaterThanOrEqualTo(2));
+                Assert.That(system.BufferSet.InstanceDataBuffer, Is.Not.Null);
+                Assert.That(system.BufferSet.InstanceDataBuffer.count, Is.EqualTo(1), "Direct mode should not upload legacy _InstanceData.");
+
+                Assert.That(system.PrimitiveScene.TryGetHandle(firstRenderer.GetEntityId(), out VividPrimitiveHandle firstHandle), Is.True);
+                int firstLegacyIdx = FindLegacyInstanceIndex(system.SceneData, firstRenderer.GetEntityId());
+                Assert.That(firstLegacyIdx, Is.GreaterThanOrEqualTo(0));
+                float initialLegacyX = system.SceneData.Instances[firstLegacyIdx].ObjectToWorldMatrix.c3.x;
+                uint shadowRevBeforeMove = system.ShadowCacheRevision;
+
+                // Pure transform move: PrimitiveScene updates incrementally via scatter upload, legacy SceneData is skipped.
+                firstObj.transform.position = new Vector3(9.5f, 1.0f, 5.0f);
+                database.UpdateRendererTransformData(firstRenderer);
+                system.PrepareFrame(reportStats: false);
+
+                Assert.That(system.PrimitiveScene.TransformTable[firstHandle.Index].ObjectToWorldMatrix.c3.x, Is.EqualTo(9.5f));
+                Assert.That(system.SceneData.Instances[firstLegacyIdx].ObjectToWorldMatrix.c3.x, Is.EqualTo(initialLegacyX),
+                    "Transform-only update must skip legacy SceneData rebuild in direct PrimitiveScene mode.");
+                Assert.That(system.BufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
+                Assert.That(system.ShadowCacheRevision, Is.Not.EqualTo(shadowRevBeforeMove));
+                if (SystemInfo.supportsComputeShaders)
+                    Assert.That(system.PrimitiveSceneBufferSet.LastUploadUsedComputeScatter, Is.True);
+
+                // Render-state flip (negative scale + TwoSided shadows): batch masks stay accurate via PrimitiveScene.
+                firstObj.transform.localScale = new Vector3(-1.0f, 1.0f, 1.0f);
+                firstObj.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.TwoSided;
+                database.UpdateRendererRenderData(firstRenderer);
+                system.PrepareFrame(reportStats: false);
+
+                Assert.That(system.IsMainViewRendererBatchActive(VividRendererListID.CullFront), Is.True);
+                Assert.That(system.IsShadowRendererBatchActive(VividRendererListID.CullOff), Is.True);
+                Assert.That(system.BufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
+            }
+            finally
+            {
+                if (firstObj != null) UnityEngine.Object.DestroyImmediate(firstObj);
+                if (secondObj != null) UnityEngine.Object.DestroyImmediate(secondObj);
+                if (collection != null) UnityEngine.Object.DestroyImmediate(collection);
+                if (material != null) UnityEngine.Object.DestroyImmediate(material);
+                if (mesh != null) UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void DirectPrimitiveSceneMode_GPUCullingMatchesLegacyInstanceDataModeAfterMove()
+        {
+            VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            if (!SystemInfo.supportsComputeShaders
+                || resources?.GPUInstanceCullingCompute == null
+                || resources.MeshletListBuildCompute == null
+                || resources.GPUMeshletCullingCompute == null
+                || resources.FixupVisibleMeshletIndirectDrawArgsCompute == null)
+            {
+                Assert.Ignore("GPUDriven compute shaders are unavailable in this environment.");
+            }
+
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset collection = null;
+            GameObject meshObj = null;
+            GameObject cameraObj = null;
+            CommandBuffer cmd = null;
+            try
+            {
+                mesh = CreateSingleTriangleMesh("Phase2ParityMesh");
+                material = new Material(Shader.Find("Hidden/InternalErrorShader"));
+                collection = CreateSingleTriangleMeshletAsset("Phase2ParityCollection");
+                meshObj = CreateMeshletGameObject("Phase2ParityObj", mesh, material, collection, out MeshletRenderer renderer);
+                meshObj.transform.position = new Vector3(0.0f, 0.0f, 1000.0f); // Initially outside camera frustum.
+
+                cameraObj = new GameObject("Phase2ParityCamera");
+                cameraObj.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                Camera camera = cameraObj.AddComponent<Camera>();
+                camera.nearClipPlane = 0.1f;
+                camera.farClipPlane = 50.0f;
+                camera.fieldOfView = 60.0f;
+                camera.aspect = 1.0f;
+
+                VividMeshletRendererDatabase database = VividMeshletRendererDatabase.instance;
+                database.UpdateRendererData(renderer);
+
+                using var system = new VividGPUDrivenSystem(new DummyBindlessAllocator());
+                system.PrepareFrame(reportStats: false);
+
+                // Move into camera frustum so only PrimitiveScene has the updated transform in direct mode.
+                meshObj.transform.position = new Vector3(0.0f, 0.0f, 5.0f);
+                database.UpdateRendererTransformData(renderer);
+                system.PrepareFrame(reportStats: false);
+
+                cmd = new CommandBuffer { name = "Phase2ParityTest" };
+                system.CullMainView(
+                    camera,
+                    cmd,
+                    resources.GPUInstanceCullingCompute,
+                    resources.MeshletListBuildCompute,
+                    resources.GPUMeshletCullingCompute,
+                    resources.FixupVisibleMeshletIndirectDrawArgsCompute,
+                    default,
+                    frameIndex: 10);
+                Graphics.ExecuteCommandBuffer(cmd);
+                cmd.Clear();
+
+                int argsWordCount = (int) VividRendererListID.Count * VividGPUDrivenCullingBuffers.IndirectDrawArgsWordCount;
+                var directArgs = new uint[argsWordCount];
+                system.VisibleMeshletIndirectDrawArgsBuffer.GetData(directArgs);
+
+                // Switch to legacy mode and rebuild/upload legacy _InstanceData for comparison.
+                system.ForceLegacyInstanceDataForTests = true;
+                system.PrepareFrame(reportStats: false);
+                system.CullMainView(
+                    camera,
+                    cmd,
+                    resources.GPUInstanceCullingCompute,
+                    resources.MeshletListBuildCompute,
+                    resources.GPUMeshletCullingCompute,
+                    resources.FixupVisibleMeshletIndirectDrawArgsCompute,
+                    default,
+                    frameIndex: 11);
+                Graphics.ExecuteCommandBuffer(cmd);
+                cmd.Clear();
+
+                var legacyArgs = new uint[argsWordCount];
+                system.VisibleMeshletIndirectDrawArgsBuffer.GetData(legacyArgs);
+
+                Assert.That(directArgs, Is.EqualTo(legacyArgs));
+                Assert.That(directArgs[1], Is.GreaterThanOrEqualTo(1u), "Moved object must be visible in Default bucket.");
+            }
+            finally
+            {
+                cmd?.Release();
+                if (cameraObj != null) UnityEngine.Object.DestroyImmediate(cameraObj);
+                if (meshObj != null) UnityEngine.Object.DestroyImmediate(meshObj);
+                if (collection != null) UnityEngine.Object.DestroyImmediate(collection);
+                if (material != null) UnityEngine.Object.DestroyImmediate(material);
+                if (mesh != null) UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        private static Mesh CreateSingleTriangleMesh(string name)
+        {
+            var mesh = new Mesh { name = name };
+            mesh.vertices = new[]
+            {
+                new Vector3(-0.5f, -0.5f, 0.0f),
+                new Vector3(0.5f, -0.5f, 0.0f),
+                new Vector3(0.0f, 0.5f, 0.0f),
+            };
+            mesh.triangles = new[] { 0, 1, 2 };
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static VividMeshletCollectionAsset CreateSingleTriangleMeshletAsset(string name)
+        {
+            var asset = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+            var meshLODNodes = new[]
+            {
+                new VividMeshLODNode
+                {
+                    MeshletStartIndex = 0u,
+                    MeshletCount = 1u,
+                    LevelIndex = 0u,
+                    Bounds = new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                    ParentBounds = new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                    ParentError = -1.0f,
+                    Error = 0.0f,
+                },
+            };
+            var meshlets = new[]
+            {
+                new VividMeshlet
+                {
+                    VertexOffset = 0u,
+                    TriangleOffset = 0u,
+                    VertexCount = 3u,
+                    TriangleCount = 1u,
+                    BoundingSphere = new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                    ConeApexCutoff = new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                    ConeAxis = new float4(0.0f, 0.0f, -1.0f, 0.0f),
+                },
+            };
+            var vertices = new[]
+            {
+                VividMeshletVertexPacking.Pack(new float3(-0.5f, -0.5f, 0.0f), new float3(0.0f, 0.0f, -1.0f), new float4(1.0f, 0.0f, 0.0f, 1.0f), new float2(0.0f, 0.0f)),
+                VividMeshletVertexPacking.Pack(new float3(0.5f, -0.5f, 0.0f), new float3(0.0f, 0.0f, -1.0f), new float4(1.0f, 0.0f, 0.0f, 1.0f), new float2(1.0f, 0.0f)),
+                VividMeshletVertexPacking.Pack(new float3(0.0f, 0.5f, 0.0f), new float3(0.0f, 0.0f, -1.0f), new float4(1.0f, 0.0f, 0.0f, 1.0f), new float2(0.5f, 1.0f)),
+            };
+            var indices = new byte[] { 0, 1, 2 };
+            var levelNodeCounts = new[] { 1 };
+            asset.name = name;
+            asset.SourceSubmeshIndex = 0;
+            asset.Bounds = new Bounds(Vector3.zero, Vector3.one);
+            asset.MeshLODLevelCount = 1;
+            asset.LeafMeshletCount = 1;
+            asset.MeshLODLevelNodeCounts = levelNodeCounts;
+            asset.SetMeshData(levelNodeCounts, meshLODNodes, meshlets, vertices, indices);
+            asset.Meshlets = meshlets;
+            asset.VertexBuffer = vertices;
+            asset.IndexBuffer = indices;
+            return asset;
+        }
+
+        private static GameObject CreateMeshletGameObject(
+            string name,
+            Mesh mesh,
+            Material material,
+            VividMeshletCollectionAsset collection,
+            out MeshletRenderer meshletRenderer)
+        {
+            var go = new GameObject(name);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            MeshRenderer sourceRenderer = go.AddComponent<MeshRenderer>();
+            sourceRenderer.sharedMaterials = new[] { material };
+            meshletRenderer = go.AddComponent<MeshletRenderer>();
+            meshletRenderer.CaptureSourceFromRenderer(sourceRenderer);
+            meshletRenderer.SetMeshletCollections(new[] { collection });
+            return go;
+        }
+
+        private static int FindLegacyInstanceIndex(VividGPUDrivenSceneData sceneData, EntityId primitiveEntityId)
+        {
+            IReadOnlyList<VividGPUDrivenInstanceSourceData> sources = sceneData.InstanceSources;
+            for (int index = 0; index < sources.Count; index++)
+            {
+                if (sources[index].PrimitiveEntityId.Equals(primitiveEntityId))
+                    return index;
+            }
+            return -1;
+        }
+
+        private sealed class DummyBindlessAllocator : IBindlessTextureDescriptorAllocator
+        {
+            public bool IsAvailable => true;
+            public uint DescriptorHeapCount => 16u;
+            public uint DescriptorStartIndex => 0u;
+            public uint DescriptorCapacity => 16u;
+            public ulong CompletedFrameFenceValue => 0ul;
+            public ulong PendingFrameFenceValue => 1ul;
+            public string UnavailableReason => string.Empty;
+            public uint CreateSRVDescriptorCallCountThisFrame { get; private set; }
+
+            public void ResetPerFrameStats()
+            {
+                CreateSRVDescriptorCallCountThisFrame = 0u;
+            }
+
+            public bool TryCreateTextureDescriptor(Texture texture, uint index)
+            {
+                CreateSRVDescriptorCallCountThisFrame++;
+                return true;
             }
         }
 

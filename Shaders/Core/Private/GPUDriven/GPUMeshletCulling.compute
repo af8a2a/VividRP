@@ -248,13 +248,12 @@ bool TryResolveCulledMeshlet(
         return false;
     }
 
-    const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
-    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
+    const VividInstanceMeshletCullData instanceData = PullInstanceMeshletCullData(renderRequest.InstanceID_LOD);
     rendererListIndex = min(
-        GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
+        ResolveRendererListID(instanceData.BaseRendererListID, instanceData.InstanceFlags, (uint) cullingContext.PassMask),
         VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
-    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
+    const float wpoPadWS = instanceData.WpoPaddingWS;
 
 #if defined(VIVID_VSM_AFFINE_BOUNDS)
     VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(renderRequest.MeshletID, meshlet.BoundingSphere);
@@ -283,13 +282,18 @@ bool TryResolveCulledMeshlet(
     // mirrored winding in raster state; applying that flip to the local cone twice
     // would reject the visible side of reflected instances.
     // Skip rest-pose cone culling when WPO displacement padding is active.
-    if (cullBounds.Valid && wpoPadWS <= 0.0f && (rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
-        !VividMeshletConeVisible(meshlet.BoundingSphere, meshlet.ConeAxis, meshlet.ConeCutoff,
-            meshlet.ConeValid != 0u, (materialData.RendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u,
-            cullingContext.CameraIsPerspective != 0, cullingContext.CameraPosition.xyz,
-            GetViewForwardDir(cullingContext.ViewMatrix), instanceData.WorldToObjectMatrix))
+    if (cullBounds.Valid && wpoPadWS <= 0.0f && (rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u)
     {
-        return false;
+        const float4x4 worldToObjectMatrix = PullInstanceWorldToObjectMatrix(
+            renderRequest.InstanceID_LOD,
+            instanceData.TransformIndex);
+        if (!VividMeshletConeVisible(meshlet.BoundingSphere, meshlet.ConeAxis, meshlet.ConeCutoff,
+                meshlet.ConeValid != 0u, (instanceData.BaseRendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u,
+                cullingContext.CameraIsPerspective != 0, cullingContext.CameraPosition.xyz,
+                GetViewForwardDir(cullingContext.ViewMatrix), worldToObjectMatrix))
+        {
+            return false;
+        }
     }
 
     return true;
@@ -410,13 +414,14 @@ void ExecuteOcclusionTestCulled(const uint3 dispatchThreadID)
     if (renderRequest.MeshletID >= _MeshletCount)
         return;
 
-    const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
-    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-    const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
+    const VividInstanceMeshletCullData instanceData = PullInstanceMeshletCullData(renderRequest.InstanceID_LOD);
+    const uint rendererListIndex = min(
+        ResolveRendererListID(instanceData.BaseRendererListID, instanceData.InstanceFlags, VIVIDINSTANCEPASSMASK_MAIN),
+        VIVIDRENDERERLISTID_COUNT - 1u);
     const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
     VividInstanceCullBounds cullBounds = VividExpandCullBoundsWS(
         VividBuildMeshletCullBounds(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix),
-        VividGetInstanceWpoPaddingWS(instanceData));
+        instanceData.WpoPaddingWS);
     if (!IsMeshletVisibleAfterOcclusion(cullBounds))
         return;
 

@@ -41,10 +41,11 @@ Shader "Hidden/VividRP/CameraMotionVectors"
             #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/PrimitiveScene/VividPrimitiveSceneTypes.cs.hlsl"
             Texture2D<uint2> _MotionVisibility;
             StructuredBuffer<VividLegacyInstanceMappingData> _VividLegacyInstanceMappingData;
+            StructuredBuffer<VividPrimitiveDrawSectionData> _VividPrimitiveDrawSectionData;
             StructuredBuffer<VividPrimitiveData> _VividPrimitiveData;
             StructuredBuffer<VividPrimitiveTransformData> _VividPrimitiveTransformData;
             StructuredBuffer<VividPrimitivePreviousTransformData> _VividPrimitivePreviousTransformData;
-            uint _VividPrimitiveCount, _VividLegacyInstanceMappingCount;
+            uint _VividPrimitiveCount, _VividPrimitiveDrawSectionCount, _VividLegacyInstanceMappingCount, _VividPrimitiveSceneDirectEnabled;
             #endif
             TEXTURE2D_X_FLOAT(_CameraDepthTexture);
 
@@ -89,26 +90,46 @@ Shader "Hidden/VividRP/CameraMotionVectors"
                 uint objectVelocity = 0u;
                 #if defined(VIVID_MESHLET_MOTION)
                 uint instanceIndex = _MotionVisibility.Load(int3(pixelCoord, 0)).x - 1u;
-                if (instanceIndex < _VividLegacyInstanceMappingCount)
+                uint primitiveIndex = 0xffffffffu;
+                uint primitiveGeneration = 0u;
+                if (_VividPrimitiveSceneDirectEnabled != 0u)
+                {
+                    if (instanceIndex < _VividPrimitiveDrawSectionCount)
+                    {
+                        VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+                        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) != 0u)
+                        {
+                            primitiveIndex = section.PrimitiveIndex;
+                            primitiveGeneration = section.PrimitiveGeneration;
+                        }
+                    }
+                }
+                else if (instanceIndex < _VividLegacyInstanceMappingCount)
                 {
                     VividLegacyInstanceMappingData mapping = _VividLegacyInstanceMappingData[instanceIndex];
-                    if ((mapping.Flags & 1u) != 0u && mapping.PrimitiveIndex < _VividPrimitiveCount)
+                    if ((mapping.Flags & 1u) != 0u)
                     {
-                        VividPrimitiveData primitive = _VividPrimitiveData[mapping.PrimitiveIndex];
-                        if (primitive.Generation == mapping.PrimitiveGeneration)
+                        primitiveIndex = mapping.PrimitiveIndex;
+                        primitiveGeneration = mapping.PrimitiveGeneration;
+                    }
+                }
+
+                if (primitiveIndex < _VividPrimitiveCount)
+                {
+                    VividPrimitiveData primitive = _VividPrimitiveData[primitiveIndex];
+                    if (primitive.Generation == primitiveGeneration)
+                    {
+                        if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_FORCE_NO_MOTION) != 0u)
+                            return 0.0;
+                        if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_OBJECT_MOTION) != 0u
+                            && primitive.PreviousTransformIndex != 0xffffffffu)
                         {
-                            if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_FORCE_NO_MOTION) != 0u)
-                                return 0.0;
-                            if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_OBJECT_MOTION) != 0u
-                                && primitive.PreviousTransformIndex != 0xffffffffu)
+                            float4 local = mul(_VividPrimitiveTransformData[primitive.TransformIndex].WorldToObjectMatrix, float4(positionWS, 1));
+                            float4 previousWS = mul(_VividPrimitivePreviousTransformData[primitive.PreviousTransformIndex].PreviousObjectToWorldMatrix, local);
+                            if (any(abs(previousWS.xyz - positionWS) > 1e-5))
                             {
-                                float4 local = mul(_VividPrimitiveTransformData[primitive.TransformIndex].WorldToObjectMatrix, float4(positionWS, 1));
-                                float4 previousWS = mul(_VividPrimitivePreviousTransformData[primitive.PreviousTransformIndex].PreviousObjectToWorldMatrix, local);
-                                if (any(abs(previousWS.xyz - positionWS) > 1e-5))
-                                {
-                                    previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWS);
-                                    objectVelocity = 1u;
-                                }
+                                previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWS);
+                                objectVelocity = 1u;
                             }
                         }
                     }

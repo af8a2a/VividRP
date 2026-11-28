@@ -117,6 +117,24 @@ namespace VividRP.Runtime.GPUDriven
             out bool instanceDataChanged
         )
         {
+            return Build(
+                sceneData,
+                database,
+                textureBackend,
+                out materialDataChanged,
+                out instanceDataChanged,
+                skipInstanceOnlyRebuild: false);
+        }
+
+        internal bool Build(
+            VividGPUDrivenSceneData sceneData,
+            VividMeshletRendererDatabase database,
+            IGPUDrivenTextureBackend textureBackend,
+            out bool materialDataChanged,
+            out bool instanceDataChanged,
+            bool skipInstanceOnlyRebuild
+        )
+        {
             if (sceneData == null)
             {
                 throw new ArgumentNullException(nameof(sceneData));
@@ -147,7 +165,7 @@ namespace VividRP.Runtime.GPUDriven
                 || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
                 || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision;
 
-            if (CanSkipBuild(database, textureBackend))
+            if (CanSkipBuild(database, textureBackend, skipInstanceOnlyRebuild))
             {
                 materialDataChanged = false;
                 instanceDataChanged = false;
@@ -441,7 +459,8 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool CanSkipBuild(
             VividMeshletRendererDatabase database,
-            IGPUDrivenTextureBackend textureBackend)
+            IGPUDrivenTextureBackend textureBackend,
+            bool skipInstanceOnlyRebuild)
         {
             using var canSkipBuildScope = RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildMarker.Auto();
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCanSkipBuildRevisionGateMarker.Auto())
@@ -450,7 +469,7 @@ namespace VividRP.Runtime.GPUDriven
                     || !ReferenceEquals(m_PreviousTextureBackend, textureBackend)
                     || m_PreviousDatabaseStructureRevision != database.StructureRevision
                     || m_PreviousDatabaseResourceRevision != database.ResourceRevision
-                    || m_PreviousDatabaseInstanceRevision != database.InstanceRevision
+                    || (!skipInstanceOnlyRebuild && m_PreviousDatabaseInstanceRevision != database.InstanceRevision)
                     || m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision)
                 {
                     return false;

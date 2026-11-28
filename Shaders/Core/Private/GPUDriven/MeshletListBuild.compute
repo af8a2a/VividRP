@@ -50,9 +50,8 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
     const VividGPUCullingContext cullingContext = _CullingContexts[cullingContextIndex];
     const VividGPULODSelectionContext lodSelectionContext = _LODSelectionContexts[0];
     const VividMeshletListBuildJob job = _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + groupID.x];
-    const VividInstanceData instanceData = PullInstanceData(job.InstanceID);
-    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
+    const VividInstanceLODBuildData instanceData = PullInstanceLODBuildData(job.InstanceID);
+    const float wpoPadWS = instanceData.WpoPaddingWS;
 
     const uint baseNodeIndex = instanceData.TopMeshLODStartIndex + job.MeshLODNodeOffset;
 
@@ -79,12 +78,14 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
         const float pixelsPerObjectUnit = VividLODOrthographicPixelScale(
             mul(cullingContext.ViewProjectionMatrix, instanceData.ObjectToWorldMatrix), lodSelectionContext.ScreenSizePixels);
         bool selected = shadowTexelLOD
-            ? ShouldSelectShadowMeshLODNode(meshLODNode, instanceData, pixelsPerObjectUnit,
-                _ForcedMeshLODNodeDepth, _MeshLODErrorThreshold, streamingLeaf)
+            ? ShouldSelectShadowMeshLODNode(meshLODNode, instanceData.MeshLODLevelCount, instanceData.LODErrorScale,
+                pixelsPerObjectUnit, _ForcedMeshLODNodeDepth, _MeshLODErrorThreshold, streamingLeaf)
             : ShouldSelectMeshLODNode(
                 lodSelectionContext,
                 meshLODNode,
-                instanceData,
+                instanceData.ObjectToWorldMatrix,
+                instanceData.MeshLODLevelCount,
+                instanceData.LODErrorScale,
                 _ForcedMeshLODNodeDepth,
                 _MeshLODErrorThreshold, streamingLeaf
             );
@@ -109,7 +110,7 @@ void RunCulling(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupI
 #endif
 
         const uint rendererListIndex = min(
-            GetRendererListID(instanceData, materialData, (uint) cullingContext.PassMask),
+            ResolveRendererListID(instanceData.BaseRendererListID, instanceData.InstanceFlags, (uint) cullingContext.PassMask),
             VIVIDRENDERERLISTID_COUNT - 1u);
 
 #if defined(VIVID_VSM_BATCH)

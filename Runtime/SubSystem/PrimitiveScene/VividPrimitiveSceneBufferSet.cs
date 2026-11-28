@@ -204,7 +204,7 @@ namespace VividRP.Runtime.PrimitiveScene
             }
         }
 
-        internal void BindGlobals(CommandBuffer cmd, VividPrimitiveScene scene)
+        internal void BindGlobals(CommandBuffer cmd, VividPrimitiveScene scene, bool directEnabled = false)
         {
             ThrowIfDisposed();
             if (cmd == null)
@@ -219,12 +219,60 @@ namespace VividRP.Runtime.PrimitiveScene
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VividPrimitiveGeometryData, m_GeometryDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VividPrimitiveMaterialData, m_MaterialDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VividLegacyInstanceMappingData, m_LegacyInstanceMappingBuffer);
-            cmd.SetGlobalInt(VividGPUDrivenShaderIDs._VividPrimitiveCount, scene.PrimitiveTable.Count);
-            cmd.SetGlobalInt(VividGPUDrivenShaderIDs._VividPrimitiveDrawSectionCount, scene.DrawSectionTable.Count);
-            cmd.SetGlobalInt(VividGPUDrivenShaderIDs._VividPrimitiveGeometryCount, scene.GeometryTable.Count);
-            cmd.SetGlobalInt(VividGPUDrivenShaderIDs._VividPrimitiveMaterialCount, scene.MaterialTable.Count);
-            cmd.SetGlobalInt(VividGPUDrivenShaderIDs._VividLegacyInstanceMappingCount, scene.LegacyInstanceMappingTable.Count);
-            cmd.SetGlobalInt(VividGPUDrivenShaderIDs._VividPrimitiveSceneRevision, unchecked((int) scene.GetStats().SceneRevision));
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveCount, scene.PrimitiveTable.Count);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveDrawSectionCount, scene.DrawSectionTable.Count);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveGeometryCount, scene.GeometryTable.Count);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveMaterialCount, scene.MaterialTable.Count);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividLegacyInstanceMappingCount, scene.LegacyInstanceMappingTable.Count);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveSceneRevision, unchecked((int) scene.GetStats().SceneRevision));
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveSceneDirectEnabled, directEnabled ? 1 : 0);
+        }
+
+        internal void BindToCompute(
+            CommandBuffer cmd,
+            ComputeShader compute,
+            int kernel,
+            VividPrimitiveScene scene,
+            bool directEnabled)
+        {
+            ThrowIfDisposed();
+            if (cmd == null)
+                throw new ArgumentNullException(nameof(cmd));
+            if (compute == null)
+                throw new ArgumentNullException(nameof(compute));
+
+            EnsurePlaceholderBuffersIfNeeded();
+            cmd.SetComputeBufferParam(compute, kernel, VividGPUDrivenShaderIDs._VividPrimitiveData, m_PrimitiveDataBuffer);
+            cmd.SetComputeBufferParam(compute, kernel, VividGPUDrivenShaderIDs._VividPrimitiveTransformData, m_TransformDataBuffer);
+            cmd.SetComputeBufferParam(compute, kernel, VividGPUDrivenShaderIDs._VividPrimitiveDrawSectionData, m_DrawSectionDataBuffer);
+            cmd.SetComputeBufferParam(compute, kernel, VividGPUDrivenShaderIDs._VividPrimitiveGeometryData, m_GeometryDataBuffer);
+            cmd.SetComputeBufferParam(compute, kernel, VividGPUDrivenShaderIDs._VividPrimitiveMaterialData, m_MaterialDataBuffer);
+            cmd.SetComputeIntParam(compute, VividGPUDrivenShaderIDs._VividPrimitiveCount, scene?.PrimitiveTable.Count ?? 0);
+            cmd.SetComputeIntParam(compute, VividGPUDrivenShaderIDs._VividPrimitiveDrawSectionCount, scene?.DrawSectionTable.Count ?? 0);
+            cmd.SetComputeIntParam(compute, VividGPUDrivenShaderIDs._VividPrimitiveGeometryCount, scene?.GeometryTable.Count ?? 0);
+            cmd.SetComputeIntParam(compute, VividGPUDrivenShaderIDs._VividPrimitiveMaterialCount, scene?.MaterialTable.Count ?? 0);
+            cmd.SetComputeIntParam(compute, VividGPUDrivenShaderIDs._VividPrimitiveSceneDirectEnabled, directEnabled ? 1 : 0);
+        }
+
+        private void EnsurePlaceholderBuffersIfNeeded()
+        {
+            EnsurePlaceholderBuffer(ref m_PrimitiveDataBuffer, UnsafeUtility.SizeOf<VividPrimitiveData>(), "VividPrimitiveScene_Primitives");
+            EnsurePlaceholderBuffer(ref m_TransformDataBuffer, UnsafeUtility.SizeOf<VividPrimitiveTransformData>(), "VividPrimitiveScene_Transforms");
+            EnsurePlaceholderBuffer(ref m_DrawSectionDataBuffer, UnsafeUtility.SizeOf<VividPrimitiveDrawSectionData>(), "VividPrimitiveScene_DrawSections");
+            EnsurePlaceholderBuffer(ref m_GeometryDataBuffer, UnsafeUtility.SizeOf<VividPrimitiveGeometryData>(), "VividPrimitiveScene_Geometries");
+            EnsurePlaceholderBuffer(ref m_MaterialDataBuffer, UnsafeUtility.SizeOf<VividPrimitiveMaterialData>(), "VividPrimitiveScene_Materials");
+        }
+
+        private static void EnsurePlaceholderBuffer(ref GraphicsBuffer buffer, int stride, string name)
+        {
+            if (buffer != null && buffer.IsValid() && buffer.stride == stride && buffer.count >= 1)
+                return;
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, stride)
+            {
+                name = name,
+            };
         }
 
         public void Dispose()

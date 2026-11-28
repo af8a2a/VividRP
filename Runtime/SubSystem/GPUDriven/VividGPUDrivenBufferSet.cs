@@ -99,7 +99,8 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenSceneData sceneData,
             bool uploadInstanceData = true,
             bool uploadMaterialData = true,
-            bool uploadStaticData = true
+            bool uploadStaticData = true,
+            bool skipInstanceBufferUpload = false
         )
         {
             ThrowIfDisposed();
@@ -124,7 +125,8 @@ namespace VividRP.Runtime.GPUDriven
             SharedVertexCount = sceneData.VertexCount;
             SharedIndexCount = sceneData.IndexCount;
 
-            bool shouldUploadInstanceData = uploadInstanceData || RequiresInstanceBufferUpload(sceneData);
+            bool shouldUploadInstanceData = !skipInstanceBufferUpload
+                && (uploadInstanceData || RequiresInstanceBufferUpload(sceneData));
             bool shouldUploadMaterialData = uploadMaterialData || RequiresMaterialBufferUpload(sceneData);
             bool shouldUploadStaticData = uploadStaticData || RequiresStaticBufferUpload(sceneData);
 
@@ -133,6 +135,15 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_InstanceDataBuffer,
                     sceneData.MutableInstances,
+                    UnsafeUtility.SizeOf<VividInstanceData>(),
+                    "VividGPUDriven_InstanceData"
+                );
+            }
+            else if (skipInstanceBufferUpload && (m_InstanceDataBuffer == null || !m_InstanceDataBuffer.IsValid()))
+            {
+                EnsureStructuredBuffer(
+                    ref m_InstanceDataBuffer,
+                    1,
                     UnsafeUtility.SizeOf<VividInstanceData>(),
                     "VividGPUDriven_InstanceData"
                 );
@@ -233,7 +244,14 @@ namespace VividRP.Runtime.GPUDriven
                 UploadRawIndexBuffer(sceneData.MutableIndices);
             }
             bool boundsChanged = VSMGeometryBounds.Update(sceneData, shouldUploadStaticData);
-            VSMLODHierarchy.Update(sceneData.MeshLODNodes, sceneData.MeshLODGroups, sceneData.Instances, boundsChanged, VSMGeometryBounds.CpuLodNodes);
+            if (boundsChanged
+                || shouldUploadInstanceData
+                || shouldUploadStaticData
+                || VSMLODHierarchy.Nodes?.IsValid() != true
+                || VSMLODHierarchy.Roots?.IsValid() != true)
+            {
+                VSMLODHierarchy.Update(sceneData.MeshLODNodes, sceneData.MeshLODGroups, sceneData.Instances, boundsChanged, VSMGeometryBounds.CpuLodNodes);
+            }
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -246,6 +264,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._InstanceData, InstanceDataBuffer);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._VividPrimitiveSceneDirectEnabled, 0);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MaterialData, MaterialDataBuffer);
             cmd.SetGlobalBuffer(
                 VividGPUDrivenShaderIDs._DualSlabMaterialData,

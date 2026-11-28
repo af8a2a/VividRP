@@ -211,10 +211,18 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
 #else
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
 #endif
-                const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+                float4x4 objectToWorldMatrix;
+                uint materialIndex;
+                if (!TryPullInstanceShadowRasterData(
+                        renderRequest.InstanceID_LOD,
+                        objectToWorldMatrix,
+                        materialIndex))
+                {
+                    return output;
+                }
                 VividMaterialRuntimeHeader runtimeHeader;
                 VividMaterialProgramData programData;
-                if (VividGetMaterialProgramStatus(instanceData.MaterialIndex, runtimeHeader, programData) == VIVID_MATERIAL_PROGRAM_KNOWN
+                if (VividGetMaterialProgramStatus(materialIndex, runtimeHeader, programData) == VIVID_MATERIAL_PROGRAM_KNOWN
                     && (programData.CapabilityFlags & VIVIDMATERIALPROGRAMCAPABILITIES_PROGRAMMABLE_RASTER) != 0u)
                 {
                     return output;
@@ -224,7 +232,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 // Large records fan out over all relevant pages. Recheck this
                 // particular page before vertex pulling, as well as in compute.
                 if (all(windowExtent == 1u) && !VividVSMCasterReceiverSphere(virtualPageIndex,
-                        TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix),
+                        TransformSphere(meshlet.BoundingSphere, objectToWorldMatrix),
                         _VSMProjections[cascadeIndex].worldToShadow)) return output;
 #endif
                 const uint indexCount = meshlet.TriangleCount * 3u;
@@ -238,7 +246,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 const VividDecodedMeshletVertex vertex = PullVertex(meshlet, vertexIndex);
 
                 const float3 positionWS = TransformPosition(
-                    instanceData.ObjectToWorldMatrix,
+                    objectToWorldMatrix,
                     vertex.Position.xyz);
 #if defined(VIVID_VSM_PAGE_CASTER)
                 output.positionCS = mul(
@@ -313,10 +321,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 #endif
 #endif
                 #ifdef _ALPHATEST_ON
-                const VividInstanceData instanceData = PullInstanceData(input.instanceIndex);
+                const uint materialIndex = PullInstanceMaterialIndex(input.instanceIndex);
                 VividMaterialCoverageEvaluation coverage;
                 const uint coverageStatus = VividEvaluateCoverageProgram(
-                    instanceData.MaterialIndex,
+                    materialIndex,
                     input.uv0,
                     uv0Ddx,
                     uv0Ddy,
@@ -324,7 +332,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 if (coverageStatus == VIVID_MATERIAL_COVERAGE_LEGACY_FALLBACK)
                 {
                     const VividMaterialData materialData =
-                        PullMaterialData(instanceData.MaterialIndex);
+                        PullMaterialData(materialIndex);
                     const VividSurfaceBindingData surfaceBindingData =
                         PullSurfaceBindingData(materialData.SurfaceBindingIndex);
                     coverage = VividEvaluateBaseColorAlphaCoverage(

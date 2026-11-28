@@ -1039,10 +1039,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 cullKernel,
                 VividGPUDrivenShaderIDs._InstanceData,
                 sceneBuffers.InstanceDataBuffer);
+            bool directPrimitiveMode = system.UsePrimitiveSceneDirect;
+            int instanceDataCount = directPrimitiveMode
+                ? system.PrimitiveScene.DrawSectionTable.Count
+                : sceneBuffers.InstanceCount;
             nativeCmd.SetComputeIntParam(
                 compute,
                 VividGPUDrivenShaderIDs._InstanceDataCount,
-                sceneBuffers.InstanceCount);
+                instanceDataCount);
+            system.PrimitiveSceneBufferSet.BindToCompute(
+                nativeCmd,
+                compute,
+                cullKernel,
+                system.PrimitiveScene,
+                directPrimitiveMode);
             nativeCmd.SetComputeBufferParam(
                 compute,
                 cullKernel,

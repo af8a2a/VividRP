@@ -58,6 +58,7 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _VividPrimitiveMaterialCount = Shader.PropertyToID(nameof(_VividPrimitiveMaterialCount));
         public static readonly int _VividLegacyInstanceMappingCount = Shader.PropertyToID(nameof(_VividLegacyInstanceMappingCount));
         public static readonly int _VividPrimitiveSceneRevision = Shader.PropertyToID(nameof(_VividPrimitiveSceneRevision));
+        public static readonly int _VividPrimitiveSceneDirectEnabled = Shader.PropertyToID(nameof(_VividPrimitiveSceneDirectEnabled));
         public static readonly int _VividPrimitiveDrawSetInstanceCount =
             Shader.PropertyToID(nameof(_VividPrimitiveDrawSetInstanceCount));
         public static readonly int _VividPrimitiveDrawSetEnabled =

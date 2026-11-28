@@ -45,6 +45,7 @@ namespace VividRP.Runtime.PrimitiveScene
         private long m_UploadBytes;
         private int m_FrameIndex = -1;
         private uint m_SceneRevision;
+        private bool m_UsesDrawSectionIndices;
 
         internal int DrawCount => m_DrawCount;
 
@@ -56,11 +57,15 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal uint SceneRevision => m_SceneRevision;
 
+        internal bool UsesDrawSectionIndices => m_UsesDrawSectionIndices;
+
         internal bool IsBuilt => m_IsBuilt && !m_IsDisposed;
 
         internal bool HasPendingBuild => m_HasPendingBuild && !m_IsDisposed;
 
         internal GraphicsBuffer LegacyInstanceIndexBuffer => m_LegacyInstanceIndexBuffer;
+
+        internal GraphicsBuffer DispatchInstanceIndexBuffer => m_LegacyInstanceIndexBuffer;
 
         internal NativeArray<VividPrimitiveDrawSetEntry> Entries =>
             m_Entries.IsCreated ? m_Entries.GetSubArray(0, m_DrawCount) : default;
@@ -88,7 +93,8 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex)
+            int frameIndex,
+            bool useDrawSectionIndices = false)
         {
             ThrowIfDisposed();
             if (camera == null)
@@ -118,6 +124,7 @@ namespace VividRP.Runtime.PrimitiveScene
                     drawSources,
                     sceneRevision,
                     frameIndex,
+                    useDrawSectionIndices,
                     dependency);
             }
         }
@@ -128,7 +135,8 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex)
+            int frameIndex,
+            bool useDrawSectionIndices = false)
         {
             ThrowIfDisposed();
             if (!frustumPlanes.IsCreated || frustumPlanes.Length < FrustumPlaneCount)
@@ -149,6 +157,7 @@ namespace VividRP.Runtime.PrimitiveScene
                     drawSources,
                     sceneRevision,
                     frameIndex,
+                    useDrawSectionIndices,
                     dependency);
             }
         }
@@ -165,7 +174,8 @@ namespace VividRP.Runtime.PrimitiveScene
             uint sceneRevision,
             int frameIndex,
             VividPrimitiveFlags requiredPrimitiveFlags = VividPrimitiveFlags.None,
-            VividPrimitiveFlags excludedPrimitiveFlags = VividPrimitiveFlags.None)
+            VividPrimitiveFlags excludedPrimitiveFlags = VividPrimitiveFlags.None,
+            bool useDrawSectionIndices = false)
         {
             ThrowIfDisposed();
             if (camera == null)
@@ -205,6 +215,7 @@ namespace VividRP.Runtime.PrimitiveScene
                     drawSources,
                     sceneRevision,
                     frameIndex,
+                    useDrawSectionIndices,
                     dependency);
             }
         }
@@ -214,9 +225,10 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex)
+            int frameIndex,
+            bool useDrawSectionIndices = false)
         {
-            Schedule(camera, cullingRecords, drawSources, sceneRevision, frameIndex);
+            Schedule(camera, cullingRecords, drawSources, sceneRevision, frameIndex, useDrawSectionIndices);
             CompleteScheduledBuild();
         }
 
@@ -226,7 +238,8 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex)
+            int frameIndex,
+            bool useDrawSectionIndices = false)
         {
             Schedule(
                 frustumPlanes,
@@ -234,7 +247,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 cullingRecords,
                 drawSources,
                 sceneRevision,
-                frameIndex);
+                frameIndex,
+                useDrawSectionIndices);
             CompleteScheduledBuild();
         }
 
@@ -505,6 +519,7 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
             int frameIndex,
+            bool useDrawSectionIndices,
             JobHandle dependency)
         {
             m_InputPrimitiveCount = cullingRecords.Length;
@@ -516,6 +531,7 @@ namespace VividRP.Runtime.PrimitiveScene
             m_UploadBytes = 0L;
             m_FrameIndex = frameIndex;
             m_SceneRevision = sceneRevision;
+            m_UsesDrawSectionIndices = useDrawSectionIndices;
             m_IsBuilt = false;
 
             JobHandle cullHandle = dependency;
@@ -551,6 +567,7 @@ namespace VividRP.Runtime.PrimitiveScene
                     BucketWriteCursors = m_BucketWriteCursors,
                     Result = m_BuildResult,
                     RequiredPassMask = requiredPassMask,
+                    EmitDrawSectionIndices = useDrawSectionIndices,
                 }.Schedule(cullHandle);
                 m_HasPendingBuild = true;
                 JobHandle.ScheduleBatchedJobs();
@@ -683,7 +700,8 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex = -1)
+            int frameIndex = -1,
+            bool useDrawSectionIndices = false)
         {
             if (camera == null)
                 throw new ArgumentNullException(nameof(camera));
@@ -695,7 +713,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 cullingRecords,
                 drawSources,
                 sceneRevision,
-                frameIndex >= 0 ? frameIndex : Time.frameCount);
+                frameIndex >= 0 ? frameIndex : Time.frameCount,
+                useDrawSectionIndices);
             return drawSet;
         }
 
@@ -704,14 +723,16 @@ namespace VividRP.Runtime.PrimitiveScene
             NativeArray<VividPrimitiveCullRecord> cullingRecords,
             NativeArray<VividPrimitiveDrawSourceData> drawSources,
             uint sceneRevision,
-            int frameIndex = -1)
+            int frameIndex = -1,
+            bool useDrawSectionIndices = false)
         {
             VividPrimitiveDrawSet drawSet = Schedule(
                 camera,
                 cullingRecords,
                 drawSources,
                 sceneRevision,
-                frameIndex);
+                frameIndex,
+                useDrawSectionIndices);
             drawSet.CompleteScheduledBuild();
             return drawSet;
         }
@@ -728,7 +749,8 @@ namespace VividRP.Runtime.PrimitiveScene
             uint sceneRevision,
             int frameIndex = -1,
             VividPrimitiveFlags requiredPrimitiveFlags = VividPrimitiveFlags.None,
-            VividPrimitiveFlags excludedPrimitiveFlags = VividPrimitiveFlags.None)
+            VividPrimitiveFlags excludedPrimitiveFlags = VividPrimitiveFlags.None,
+            bool useDrawSectionIndices = false)
         {
             if (camera == null)
                 throw new ArgumentNullException(nameof(camera));
@@ -747,7 +769,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 sceneRevision,
                 frameIndex >= 0 ? frameIndex : Time.frameCount,
                 requiredPrimitiveFlags,
-                excludedPrimitiveFlags);
+                excludedPrimitiveFlags,
+                useDrawSectionIndices);
             return drawSet;
         }
 

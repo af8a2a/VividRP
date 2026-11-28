@@ -86,10 +86,20 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
                 const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
-                const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+                float4x4 objectToWorldMatrix;
+                float4x4 worldToObjectMatrix;
+                uint materialIndex;
+                if (!TryPullInstanceMainRasterData(
+                        renderRequest.InstanceID_LOD,
+                        objectToWorldMatrix,
+                        worldToObjectMatrix,
+                        materialIndex))
+                {
+                    return output;
+                }
                 VividMaterialRuntimeHeader runtimeHeader;
                 VividMaterialProgramData programData;
-                if (VividGetMaterialProgramStatus(instanceData.MaterialIndex, runtimeHeader, programData) == VIVID_MATERIAL_PROGRAM_KNOWN
+                if (VividGetMaterialProgramStatus(materialIndex, runtimeHeader, programData) == VIVID_MATERIAL_PROGRAM_KNOWN
                     && (programData.CapabilityFlags & VIVIDMATERIALPROGRAMCAPABILITIES_PROGRAMMABLE_RASTER) != 0u)
                 {
                     return output;
@@ -105,7 +115,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 const uint vertexIndex = PullIndex(meshlet, vertexID);
                 const VividDecodedMeshletVertex vertex = PullVertex(meshlet, vertexIndex);
 
-                output.positionCS = TransformWorldToHClip(TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz));
+                output.positionCS = TransformWorldToHClip(TransformPosition(objectToWorldMatrix, vertex.Position.xyz));
 
                 VividVisibilityBufferValue visibilityBufferValue;
                 visibilityBufferValue.InstanceID = renderRequest.InstanceID_LOD;
@@ -114,7 +124,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 output.visibilityValue = PackVisibilityBufferValue(visibilityBufferValue);
                 output.uv0 = vertex.UV.xy;
                 output.geometricNormalWS = SafeNormalize(
-                    mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
+                    mul(vertex.Normal.xyz, (float3x3)worldToObjectMatrix));
 
                 return output;
             }
@@ -127,10 +137,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 const float2 uv0Ddy = ddy(input.uv0);
                 #ifdef _ALPHATEST_ON
                 const VividVisibilityBufferValue visibilityBufferValue = UnpackVisibilityBufferValue(input.visibilityValue);
-                const VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
+                const uint materialIndex = PullInstanceMaterialIndex(visibilityBufferValue.InstanceID);
                 VividMaterialCoverageEvaluation coverage;
                 const uint coverageStatus = VividEvaluateCoverageProgram(
-                    instanceData.MaterialIndex,
+                    materialIndex,
                     input.uv0,
                     uv0Ddx,
                     uv0Ddy,
@@ -138,7 +148,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferPass"
                 if (coverageStatus == VIVID_MATERIAL_COVERAGE_LEGACY_FALLBACK)
                 {
                     const VividMaterialData materialData =
-                        PullMaterialData(instanceData.MaterialIndex);
+                        PullMaterialData(materialIndex);
                     const VividSurfaceBindingData surfaceBindingData =
                         PullSurfaceBindingData(materialData.SurfaceBindingIndex);
                     coverage = VividEvaluateBaseColorAlphaCoverage(

@@ -214,18 +214,20 @@ bool VSMHZBRectOccluded(float2 low, float2 high, float depth, uint level, bool p
 bool VSMHZBOccluded(VividMeshletRenderRequestPacked request, uint level, bool previous)
 {
     if (_VSMHZBEnabled == 0 || (previous && _VSMHZBHistoryValid == 0)) return false;
-    VividInstanceData instance = PullInstanceData(request.InstanceID_LOD);
+    float4x4 objectToWorldMatrix;
+    float wpoPadWS;
+    if (!TryPullInstanceBoundsTransform(request.InstanceID_LOD, objectToWorldMatrix, wpoPadWS))
+        return false;
     VividDecodedMeshlet meshlet = PullMeshletData(request.MeshletID);
     VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(request.MeshletID, meshlet.BoundingSphere);
     float4x4 projection = previous ? _VSMHZBPreviousProjections[level].worldToShadow
         : _VSMProjections[level].worldToShadow;
-    float4x4 transform = mul(projection, instance.ObjectToWorldMatrix);
+    float4x4 transform = mul(projection, objectToWorldMatrix);
     float4 center = mul(transform, float4(bounds.center, 1.0));
     float3 support = bounds.sphere ? bounds.radius * float3(length(transform[0].xyz),
         length(transform[1].xyz), length(transform[2].xyz)) : float3(
         dot(abs(transform[0].xyz), bounds.extent), dot(abs(transform[1].xyz), bounds.extent),
         dot(abs(transform[2].xyz), bounds.extent));
-    float wpoPadWS = VividGetInstanceWpoPaddingWS(instance);
     if (wpoPadWS > 0.0)
     {
         support += wpoPadWS * float3(

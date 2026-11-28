@@ -31,7 +31,8 @@ namespace VividRP.Runtime.PrimitiveScene
             VividGPUDrivenSceneData legacySceneData,
             bool staticDataChanged,
             bool materialDataChanged,
-            int frameIndex)
+            int frameIndex,
+            bool legacyInstanceDataRebuilt = true)
         {
             if (primitiveScene == null)
                 throw new ArgumentNullException(nameof(primitiveScene));
@@ -74,10 +75,13 @@ namespace VividRP.Runtime.PrimitiveScene
                         for (int index = 0; index < m_Changes.Count; index++)
                         {
                             VividMeshletRendererChange change = m_Changes[index];
-                            if ((change.Flags & (VividMeshletRendererChangeFlags.Added
+                            VividMeshletRendererChangeFlags bridgeTriggerFlags =
+                                VividMeshletRendererChangeFlags.Added
                                 | VividMeshletRendererChangeFlags.Removed
-                                | VividMeshletRendererChangeFlags.RenderState
-                                | VividMeshletRendererChangeFlags.Resources)) != 0)
+                                | VividMeshletRendererChangeFlags.Resources;
+                            if (legacyInstanceDataRebuilt)
+                                bridgeTriggerFlags |= VividMeshletRendererChangeFlags.RenderState;
+                            if ((change.Flags & bridgeTriggerFlags) != 0)
                             {
                                 rebuildLegacyBridge = true;
                             }

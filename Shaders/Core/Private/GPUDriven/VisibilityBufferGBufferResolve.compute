@@ -712,11 +712,11 @@ uint ClassifyVisibilityPixelMaterialBin(uint2 pixelCoord, out VividVisibilityBuf
     if (!hasVisibility)
         return VIVID_MATERIAL_BIN_EMPTY;
 
-    VividInstanceData instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
+    const uint materialIndex = PullInstanceMaterialIndex(visibilityBufferValue.InstanceID);
     VividMaterialRuntimeHeader runtimeHeader;
     VividMaterialProgramData programData;
     const uint programStatus = VividGetMaterialProgramStatus(
-        instanceData.MaterialIndex,
+        materialIndex,
         runtimeHeader,
         programData);
     if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN || runtimeHeader.ProgramID == VIVIDMATERIALPROGRAMID_INVALID)

@@ -3,6 +3,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl"
+#include "Packages/com.vivid.render-pipelines/Runtime/SubSystem/PrimitiveScene/VividPrimitiveSceneTypes.cs.hlsl"
 
 #define VIVID_MATERIAL_PROGRAM_LEGACY_FALLBACK 0u
 #define VIVID_MATERIAL_PROGRAM_KNOWN 1u
@@ -34,6 +35,17 @@ struct VividMeshletListBuildJob
 StructuredBuffer<VividInstanceData> _InstanceData;
 uint _InstanceDataCount;
 
+StructuredBuffer<VividPrimitiveData> _VividPrimitiveData;
+StructuredBuffer<VividPrimitiveTransformData> _VividPrimitiveTransformData;
+StructuredBuffer<VividPrimitiveDrawSectionData> _VividPrimitiveDrawSectionData;
+StructuredBuffer<VividPrimitiveGeometryData> _VividPrimitiveGeometryData;
+StructuredBuffer<VividPrimitiveMaterialData> _VividPrimitiveMaterialData;
+uint _VividPrimitiveCount;
+uint _VividPrimitiveDrawSectionCount;
+uint _VividPrimitiveGeometryCount;
+uint _VividPrimitiveMaterialCount;
+uint _VividPrimitiveSceneDirectEnabled;
+
 StructuredBuffer<VividMaterialData> _MaterialData;
 uint _MaterialDataCount;
 StructuredBuffer<VividDualSlabMaterialData> _DualSlabMaterialData;
@@ -59,9 +71,567 @@ StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
 uint _MeshletCount;
 
+uint ExtractPrimitiveInstanceFlags(const uint primitiveFlags)
+{
+    uint instanceFlags = 0u;
+    if ((primitiveFlags & VIVIDPRIMITIVEFLAGS_DISABLED) != 0u)
+        instanceFlags |= (uint) VIVIDINSTANCEFLAGS_DISABLED;
+    if ((primitiveFlags & VIVIDPRIMITIVEFLAGS_FLIP_WINDING_ORDER) != 0u)
+        instanceFlags |= (uint) VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER;
+    if ((primitiveFlags & VIVIDPRIMITIVEFLAGS_TWO_SIDED_SHADOWS) != 0u)
+        instanceFlags |= (uint) VIVIDINSTANCEFLAGS_TWO_SIDED_SHADOWS;
+    return instanceFlags;
+}
+
+VividInstanceData PullPrimitiveSceneInstanceData(const uint drawSectionIndex)
+{
+    VividInstanceData result = (VividInstanceData) 0;
+    result.Flags = VIVIDINSTANCEFLAGS_DISABLED;
+    if (drawSectionIndex >= _VividPrimitiveDrawSectionCount)
+        return result;
+
+    const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[drawSectionIndex];
+    if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+        || section.PrimitiveIndex >= _VividPrimitiveCount
+        || section.GeometryIndex >= _VividPrimitiveGeometryCount
+        || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+    {
+        return result;
+    }
+
+    const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+    const VividPrimitiveGeometryData geometry = _VividPrimitiveGeometryData[section.GeometryIndex];
+    const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+    if (primitive.Generation != section.PrimitiveGeneration
+        || geometry.Generation != section.GeometryGeneration
+        || material.Generation != section.MaterialGeneration
+        || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+        || material.LegacyMaterialIndex == 0xffffffffu
+        || geometry.LegacyTopMeshLODStartIndex == 0xffffffffu)
+    {
+        return result;
+    }
+
+    const VividPrimitiveTransformData transformData = _VividPrimitiveTransformData[primitive.TransformIndex];
+    result.ObjectToWorldMatrix = transformData.ObjectToWorldMatrix;
+    result.WorldToObjectMatrix = transformData.WorldToObjectMatrix;
+    result.AABBMin = float4(section.LocalBoundsMin.xyz, 0.0f);
+    result.AABBMax = section.LocalBoundsMax;
+    result.TopMeshLODStartIndex = geometry.LegacyTopMeshLODStartIndex;
+    result.TotalMeshLODCount = geometry.LegacyTotalMeshLODCount;
+    result.MaterialIndex = material.LegacyMaterialIndex;
+    result.MeshLODLevelCount = geometry.LegacyMeshLODLevelCount;
+    result.LODErrorScale = section.LocalBoundsMin.w;
+    result.PassMask = (int) primitive.PassMask;
+    result.Flags = (int) ExtractPrimitiveInstanceFlags(primitive.Flags);
+    result.ShaderUserValue = primitive.ShaderUserValue;
+    return result;
+}
+
 VividInstanceData PullInstanceData(const uint instanceIndex)
 {
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+        return PullPrimitiveSceneInstanceData(instanceIndex);
+
     return _InstanceData[instanceIndex];
+}
+
+// Phase 3 SoA hot-path pull helpers: read only the tables and fields required by each GPU stage
+// while preserving full fallback compatibility with legacy _InstanceData.
+
+uint PullInstanceMaterialIndex(const uint instanceIndex)
+{
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return 0xffffffffu;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return 0xffffffffu;
+        }
+
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+        return material.Generation == section.MaterialGeneration
+            ? material.LegacyMaterialIndex
+            : 0xffffffffu;
+    }
+
+    return _InstanceData[instanceIndex].MaterialIndex;
+}
+
+struct VividInstanceCullHeader
+{
+    float4x4 ObjectToWorldMatrix;
+    float3 AABBMinOS;
+    float LODErrorScale;
+    float3 AABBMaxOS;
+    float WpoPaddingWS;
+    uint GeometryIndex;
+    uint GeometryGeneration;
+    uint MaterialIndex;
+    uint MaterialGeneration;
+};
+
+struct VividInstanceLODTraversalData
+{
+    float4x4 ObjectToWorldMatrix;
+    float LODErrorScale;
+    float WpoPaddingWS;
+    uint TopMeshLODStartIndex;
+    uint TotalMeshLODCount;
+    uint MeshLODLevelCount;
+};
+
+bool TryPullInstanceCullHeader(
+    const uint instanceIndex,
+    const uint requiredPassMask,
+    out VividInstanceCullHeader header)
+{
+    header = (VividInstanceCullHeader) 0;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return false;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.GeometryIndex >= _VividPrimitiveGeometryCount
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return false;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_DISABLED) != 0u
+            || (primitive.PassMask & requiredPassMask) == 0u)
+        {
+            return false;
+        }
+
+        header.ObjectToWorldMatrix = _VividPrimitiveTransformData[primitive.TransformIndex].ObjectToWorldMatrix;
+        header.AABBMinOS = section.LocalBoundsMin.xyz;
+        header.LODErrorScale = section.LocalBoundsMin.w;
+        header.AABBMaxOS = section.LocalBoundsMax.xyz;
+        header.WpoPaddingWS = max(section.LocalBoundsMax.w, 0.0f);
+        header.GeometryIndex = section.GeometryIndex;
+        header.GeometryGeneration = section.GeometryGeneration;
+        header.MaterialIndex = section.MaterialIndex;
+        header.MaterialGeneration = section.MaterialGeneration;
+        return true;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    if ((instanceData.Flags & VIVIDINSTANCEFLAGS_DISABLED) != 0u
+        || ((uint) instanceData.PassMask & requiredPassMask) == 0u)
+    {
+        return false;
+    }
+
+    header.ObjectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    header.AABBMinOS = instanceData.AABBMin.xyz;
+    header.LODErrorScale = instanceData.LODErrorScale;
+    header.AABBMaxOS = instanceData.AABBMax.xyz;
+    header.WpoPaddingWS = max(instanceData.AABBMax.w, 0.0f);
+    header.GeometryIndex = instanceData.TopMeshLODStartIndex;
+    header.GeometryGeneration = instanceData.TotalMeshLODCount;
+    header.MaterialIndex = instanceData.MeshLODLevelCount;
+    header.MaterialGeneration = 0u;
+    return true;
+}
+
+bool TryPullInstanceLODTraversalFromCullHeader(
+    const VividInstanceCullHeader header,
+    out VividInstanceLODTraversalData lodData)
+{
+    lodData = (VividInstanceLODTraversalData) 0;
+    lodData.ObjectToWorldMatrix = header.ObjectToWorldMatrix;
+    lodData.LODErrorScale = header.LODErrorScale;
+    lodData.WpoPaddingWS = header.WpoPaddingWS;
+
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        const VividPrimitiveGeometryData geometry = _VividPrimitiveGeometryData[header.GeometryIndex];
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[header.MaterialIndex];
+        if (geometry.Generation != header.GeometryGeneration
+            || material.Generation != header.MaterialGeneration
+            || material.LegacyMaterialIndex == 0xffffffffu
+            || geometry.LegacyTopMeshLODStartIndex == 0xffffffffu
+            || geometry.LegacyTotalMeshLODCount == 0u)
+        {
+            return false;
+        }
+
+        lodData.TopMeshLODStartIndex = geometry.LegacyTopMeshLODStartIndex;
+        lodData.TotalMeshLODCount = geometry.LegacyTotalMeshLODCount;
+        lodData.MeshLODLevelCount = geometry.LegacyMeshLODLevelCount;
+        return true;
+    }
+
+    if (header.GeometryGeneration == 0u)
+        return false;
+
+    lodData.TopMeshLODStartIndex = header.GeometryIndex;
+    lodData.TotalMeshLODCount = header.GeometryGeneration;
+    lodData.MeshLODLevelCount = header.MaterialIndex;
+    return true;
+}
+
+bool TryPullInstanceLODTraversalData(
+    const uint instanceIndex,
+    out VividInstanceLODTraversalData lodData)
+{
+    lodData = (VividInstanceLODTraversalData) 0;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return false;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.GeometryIndex >= _VividPrimitiveGeometryCount)
+        {
+            return false;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        const VividPrimitiveGeometryData geometry = _VividPrimitiveGeometryData[section.GeometryIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || geometry.Generation != section.GeometryGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || geometry.LegacyTopMeshLODStartIndex == 0xffffffffu
+            || geometry.LegacyTotalMeshLODCount == 0u)
+        {
+            return false;
+        }
+
+        lodData.ObjectToWorldMatrix = _VividPrimitiveTransformData[primitive.TransformIndex].ObjectToWorldMatrix;
+        lodData.LODErrorScale = section.LocalBoundsMin.w;
+        lodData.WpoPaddingWS = max(section.LocalBoundsMax.w, 0.0f);
+        lodData.TopMeshLODStartIndex = geometry.LegacyTopMeshLODStartIndex;
+        lodData.TotalMeshLODCount = geometry.LegacyTotalMeshLODCount;
+        lodData.MeshLODLevelCount = geometry.LegacyMeshLODLevelCount;
+        return true;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    if (instanceData.TotalMeshLODCount == 0u)
+        return false;
+
+    lodData.ObjectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    lodData.LODErrorScale = instanceData.LODErrorScale;
+    lodData.WpoPaddingWS = max(instanceData.AABBMax.w, 0.0f);
+    lodData.TopMeshLODStartIndex = instanceData.TopMeshLODStartIndex;
+    lodData.TotalMeshLODCount = instanceData.TotalMeshLODCount;
+    lodData.MeshLODLevelCount = instanceData.MeshLODLevelCount;
+    return true;
+}
+
+struct VividInstanceLODBuildData
+{
+    float4x4 ObjectToWorldMatrix;
+    float LODErrorScale;
+    float WpoPaddingWS;
+    uint TopMeshLODStartIndex;
+    uint MeshLODLevelCount;
+    uint BaseRendererListID;
+    uint InstanceFlags;
+};
+
+VividInstanceLODBuildData PullInstanceLODBuildData(const uint instanceIndex)
+{
+    VividInstanceLODBuildData result = (VividInstanceLODBuildData) 0;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return result;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.GeometryIndex >= _VividPrimitiveGeometryCount
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return result;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        const VividPrimitiveGeometryData geometry = _VividPrimitiveGeometryData[section.GeometryIndex];
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || geometry.Generation != section.GeometryGeneration
+            || material.Generation != section.MaterialGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || material.LegacyMaterialIndex == 0xffffffffu
+            || geometry.LegacyTopMeshLODStartIndex == 0xffffffffu)
+        {
+            return result;
+        }
+
+        result.ObjectToWorldMatrix = _VividPrimitiveTransformData[primitive.TransformIndex].ObjectToWorldMatrix;
+        result.LODErrorScale = section.LocalBoundsMin.w;
+        result.WpoPaddingWS = max(section.LocalBoundsMax.w, 0.0f);
+        result.TopMeshLODStartIndex = geometry.LegacyTopMeshLODStartIndex;
+        result.MeshLODLevelCount = geometry.LegacyMeshLODLevelCount;
+        result.BaseRendererListID = (uint) material.RendererListID;
+        result.InstanceFlags = ExtractPrimitiveInstanceFlags(primitive.Flags);
+        return result;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    const VividMaterialData materialData = _MaterialData[instanceData.MaterialIndex];
+    result.ObjectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    result.LODErrorScale = instanceData.LODErrorScale;
+    result.WpoPaddingWS = max(instanceData.AABBMax.w, 0.0f);
+    result.TopMeshLODStartIndex = instanceData.TopMeshLODStartIndex;
+    result.MeshLODLevelCount = instanceData.MeshLODLevelCount;
+    result.BaseRendererListID = (uint) materialData.RendererListID;
+    result.InstanceFlags = (uint) instanceData.Flags;
+    return result;
+}
+
+struct VividInstanceMeshletCullData
+{
+    float4x4 ObjectToWorldMatrix;
+    float WpoPaddingWS;
+    uint BaseRendererListID;
+    uint InstanceFlags;
+    uint TransformIndex;
+};
+
+VividInstanceMeshletCullData PullInstanceMeshletCullData(const uint instanceIndex)
+{
+    VividInstanceMeshletCullData result = (VividInstanceMeshletCullData) 0;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return result;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return result;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || material.Generation != section.MaterialGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || material.LegacyMaterialIndex == 0xffffffffu)
+        {
+            return result;
+        }
+
+        result.ObjectToWorldMatrix = _VividPrimitiveTransformData[primitive.TransformIndex].ObjectToWorldMatrix;
+        result.WpoPaddingWS = max(section.LocalBoundsMax.w, 0.0f);
+        result.BaseRendererListID = (uint) material.RendererListID;
+        result.InstanceFlags = ExtractPrimitiveInstanceFlags(primitive.Flags);
+        result.TransformIndex = primitive.TransformIndex;
+        return result;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    const VividMaterialData materialData = _MaterialData[instanceData.MaterialIndex];
+    result.ObjectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    result.WpoPaddingWS = max(instanceData.AABBMax.w, 0.0f);
+    result.BaseRendererListID = (uint) materialData.RendererListID;
+    result.InstanceFlags = (uint) instanceData.Flags;
+    result.TransformIndex = instanceIndex;
+    return result;
+}
+
+float4x4 PullInstanceWorldToObjectMatrix(const uint instanceIndex, const uint transformIndex)
+{
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+        return _VividPrimitiveTransformData[transformIndex].WorldToObjectMatrix;
+
+    return _InstanceData[instanceIndex].WorldToObjectMatrix;
+}
+
+bool TryPullInstanceBoundsTransform(
+    const uint instanceIndex,
+    out float4x4 objectToWorldMatrix,
+    out float wpoPaddingWS)
+{
+    objectToWorldMatrix = (float4x4) 0;
+    wpoPaddingWS = 0.0f;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return false;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount)
+        {
+            return false;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u)
+        {
+            return false;
+        }
+
+        objectToWorldMatrix = _VividPrimitiveTransformData[primitive.TransformIndex].ObjectToWorldMatrix;
+        wpoPaddingWS = max(section.LocalBoundsMax.w, 0.0f);
+        return true;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    objectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    wpoPaddingWS = max(instanceData.AABBMax.w, 0.0f);
+    return true;
+}
+
+bool TryPullInstanceShadowRasterData(
+    const uint instanceIndex,
+    out float4x4 objectToWorldMatrix,
+    out uint materialIndex)
+{
+    objectToWorldMatrix = (float4x4) 0;
+    materialIndex = 0xffffffffu;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return false;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return false;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || material.Generation != section.MaterialGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || material.LegacyMaterialIndex == 0xffffffffu)
+        {
+            return false;
+        }
+
+        objectToWorldMatrix = _VividPrimitiveTransformData[primitive.TransformIndex].ObjectToWorldMatrix;
+        materialIndex = material.LegacyMaterialIndex;
+        return true;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    objectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    materialIndex = instanceData.MaterialIndex;
+    return true;
+}
+
+bool TryPullInstanceMainRasterData(
+    const uint instanceIndex,
+    out float4x4 objectToWorldMatrix,
+    out float4x4 worldToObjectMatrix,
+    out uint materialIndex)
+{
+    objectToWorldMatrix = (float4x4) 0;
+    worldToObjectMatrix = (float4x4) 0;
+    materialIndex = 0xffffffffu;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return false;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return false;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || material.Generation != section.MaterialGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || material.LegacyMaterialIndex == 0xffffffffu)
+        {
+            return false;
+        }
+
+        const VividPrimitiveTransformData transformData = _VividPrimitiveTransformData[primitive.TransformIndex];
+        objectToWorldMatrix = transformData.ObjectToWorldMatrix;
+        worldToObjectMatrix = transformData.WorldToObjectMatrix;
+        materialIndex = material.LegacyMaterialIndex;
+        return true;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    objectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    worldToObjectMatrix = instanceData.WorldToObjectMatrix;
+    materialIndex = instanceData.MaterialIndex;
+    return true;
+}
+
+struct VividInstanceResolveData
+{
+    float4x4 ObjectToWorldMatrix;
+    float4x4 WorldToObjectMatrix;
+    uint BaseRendererListID;
+    uint InstanceFlags;
+};
+
+bool TryPullInstanceResolveData(
+    const uint instanceIndex,
+    out VividInstanceResolveData data)
+{
+    data = (VividInstanceResolveData) 0;
+    if (_VividPrimitiveSceneDirectEnabled != 0u)
+    {
+        if (instanceIndex >= _VividPrimitiveDrawSectionCount)
+            return false;
+
+        const VividPrimitiveDrawSectionData section = _VividPrimitiveDrawSectionData[instanceIndex];
+        if ((section.Flags & VIVIDPRIMITIVEDRAWSECTIONFLAGS_VALID) == 0u
+            || section.PrimitiveIndex >= _VividPrimitiveCount
+            || section.MaterialIndex >= _VividPrimitiveMaterialCount)
+        {
+            return false;
+        }
+
+        const VividPrimitiveData primitive = _VividPrimitiveData[section.PrimitiveIndex];
+        const VividPrimitiveMaterialData material = _VividPrimitiveMaterialData[section.MaterialIndex];
+        if (primitive.Generation != section.PrimitiveGeneration
+            || material.Generation != section.MaterialGeneration
+            || (primitive.Flags & VIVIDPRIMITIVEFLAGS_VALID) == 0u
+            || material.LegacyMaterialIndex == 0xffffffffu)
+        {
+            return false;
+        }
+
+        const VividPrimitiveTransformData transformData = _VividPrimitiveTransformData[primitive.TransformIndex];
+        data.ObjectToWorldMatrix = transformData.ObjectToWorldMatrix;
+        data.WorldToObjectMatrix = transformData.WorldToObjectMatrix;
+        data.BaseRendererListID = (uint) material.RendererListID;
+        data.InstanceFlags = ExtractPrimitiveInstanceFlags(primitive.Flags);
+        return true;
+    }
+
+    const VividInstanceData instanceData = _InstanceData[instanceIndex];
+    const VividMaterialData materialData = _MaterialData[instanceData.MaterialIndex];
+    data.ObjectToWorldMatrix = instanceData.ObjectToWorldMatrix;
+    data.WorldToObjectMatrix = instanceData.WorldToObjectMatrix;
+    data.BaseRendererListID = (uint) materialData.RendererListID;
+    data.InstanceFlags = (uint) instanceData.Flags;
+    return true;
 }
 
 VividMaterialData PullMaterialData(const uint materialIndex)
@@ -363,20 +933,20 @@ bool LightSphereCulling(const VividGPUCullingContext cullingContext, const float
     return DoLightSphereCulling(cullingContext.CullingSphereLS, casterBoundingSphereWS, worldToLightSpaceRotation);
 }
 
-uint GetRendererListID(
-    const VividInstanceData instanceData,
-    const VividMaterialData materialData,
+uint ResolveRendererListID(
+    const uint baseRendererListID,
+    const uint instanceFlags,
     const uint passMask)
 {
-    uint rendererListID = materialData.RendererListID;
+    uint rendererListID = baseRendererListID;
 
     if ((passMask & VIVIDINSTANCEPASSMASK_SHADOWS) != 0u &&
-        (instanceData.Flags & VIVIDINSTANCEFLAGS_TWO_SIDED_SHADOWS) != 0u)
+        (instanceFlags & VIVIDINSTANCEFLAGS_TWO_SIDED_SHADOWS) != 0u)
     {
         rendererListID &= ~VIVIDRENDERERLISTID_CULL_FRONT;
         rendererListID |= VIVIDRENDERERLISTID_CULL_OFF;
     }
-    else if ((instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u &&
+    else if ((instanceFlags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u &&
         (rendererListID & VIVIDRENDERERLISTID_CULL_OFF) == 0u)
     {
         if ((rendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u)
@@ -390,6 +960,17 @@ uint GetRendererListID(
     }
 
     return rendererListID;
+}
+
+uint GetRendererListID(
+    const VividInstanceData instanceData,
+    const VividMaterialData materialData,
+    const uint passMask)
+{
+    return ResolveRendererListID(
+        (uint) materialData.RendererListID,
+        (uint) instanceData.Flags,
+        passMask);
 }
 
 uint GetRendererListID(const VividInstanceData instanceData, const VividMaterialData materialData)
@@ -409,7 +990,9 @@ float3 GetViewForwardDir(const float4x4 viewMatrix)
 bool ShouldSelectMeshLODNode(
     const VividGPULODSelectionContext lodSelectionContext,
     const VividDecodedMeshLODNode meshLODNode,
-    const VividInstanceData instanceData,
+    const float4x4 objectToWorldMatrix,
+    const uint meshLODLevelCount,
+    const float lodErrorScale,
     const uint forcedMeshLODNodeDepth,
     const float meshLODErrorThreshold,
     const bool streamingLeaf
@@ -417,21 +1000,41 @@ bool ShouldSelectMeshLODNode(
 {
     if (forcedMeshLODNodeDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
     {
-        const bool isLeaf = streamingLeaf || meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
+        const bool isLeaf = streamingLeaf || meshLODNode.LevelIndex == meshLODLevelCount - 1;
         return meshLODNode.LevelIndex == forcedMeshLODNodeDepth ||
                (meshLODNode.LevelIndex < forcedMeshLODNodeDepth && isLeaf);
     }
 
-    const float4x4 localToClip = mul(lodSelectionContext.ViewProjectionMatrix, instanceData.ObjectToWorldMatrix);
-    const float budget = meshLODErrorThreshold * instanceData.LODErrorScale;
+    const float4x4 localToClip = mul(lodSelectionContext.ViewProjectionMatrix, objectToWorldMatrix);
+    const float budget = meshLODErrorThreshold * lodErrorScale;
     // Parent and own tests use bit-identical shared group data and complementary
     // comparisons. Equality selects the coarse side of the cut exactly once.
     const bool parentRefines = meshLODNode.ParentError < 0.0f || VividLODProjectedError(
         meshLODNode.ParentBounds, meshLODNode.ParentError, localToClip, lodSelectionContext.ScreenSizePixels) > budget;
-    const bool isLeaf = streamingLeaf || meshLODNode.LevelIndex == instanceData.MeshLODLevelCount - 1;
+    const bool isLeaf = streamingLeaf || meshLODNode.LevelIndex == meshLODLevelCount - 1;
     const bool ownRefines = !isLeaf && VividLODProjectedError(
         meshLODNode.Bounds, meshLODNode.Error, localToClip, lodSelectionContext.ScreenSizePixels) > budget;
     return parentRefines && !ownRefines;
+}
+
+bool ShouldSelectMeshLODNode(
+    const VividGPULODSelectionContext lodSelectionContext,
+    const VividDecodedMeshLODNode meshLODNode,
+    const VividInstanceData instanceData,
+    const uint forcedMeshLODNodeDepth,
+    const float meshLODErrorThreshold,
+    const bool streamingLeaf
+)
+{
+    return ShouldSelectMeshLODNode(
+        lodSelectionContext,
+        meshLODNode,
+        instanceData.ObjectToWorldMatrix,
+        instanceData.MeshLODLevelCount,
+        instanceData.LODErrorScale,
+        forcedMeshLODNodeDepth,
+        meshLODErrorThreshold,
+        streamingLeaf);
 }
 
 bool ShouldSelectMeshLODNode(const VividGPULODSelectionContext context,
@@ -441,19 +1044,38 @@ bool ShouldSelectMeshLODNode(const VividGPULODSelectionContext context,
 }
 
 bool ShouldSelectShadowMeshLODNode(
-    const VividDecodedMeshLODNode node, const VividInstanceData instance,
-    float pixelsPerObjectUnit, uint forcedDepth, float pixelErrorBudget, bool streamingLeaf)
+    const VividDecodedMeshLODNode node,
+    const uint meshLODLevelCount,
+    const float lodErrorScale,
+    float pixelsPerObjectUnit,
+    uint forcedDepth,
+    float pixelErrorBudget,
+    bool streamingLeaf)
 {
     if (forcedDepth != VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH)
     {
-        bool leaf = streamingLeaf || node.LevelIndex == instance.MeshLODLevelCount - 1;
+        bool leaf = streamingLeaf || node.LevelIndex == meshLODLevelCount - 1;
         return node.LevelIndex == forcedDepth || (node.LevelIndex < forcedDepth && leaf);
     }
-    float budget = pixelErrorBudget * instance.LODErrorScale;
+    float budget = pixelErrorBudget * lodErrorScale;
     bool parentRefines = node.ParentError < 0.0f || node.ParentError * pixelsPerObjectUnit > budget;
-    bool ownRefines = !streamingLeaf && node.LevelIndex != instance.MeshLODLevelCount - 1
+    bool ownRefines = !streamingLeaf && node.LevelIndex != meshLODLevelCount - 1
         && node.Error * pixelsPerObjectUnit > budget;
     return parentRefines && !ownRefines;
+}
+
+bool ShouldSelectShadowMeshLODNode(
+    const VividDecodedMeshLODNode node, const VividInstanceData instance,
+    float pixelsPerObjectUnit, uint forcedDepth, float pixelErrorBudget, bool streamingLeaf)
+{
+    return ShouldSelectShadowMeshLODNode(
+        node,
+        instance.MeshLODLevelCount,
+        instance.LODErrorScale,
+        pixelsPerObjectUnit,
+        forcedDepth,
+        pixelErrorBudget,
+        streamingLeaf);
 }
 
 bool ShouldSelectShadowMeshLODNode(const VividDecodedMeshLODNode node, const VividInstanceData instance,

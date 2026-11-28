@@ -98,6 +98,7 @@ namespace VividRP.Runtime.PrimitiveScene
         internal NativeArray<int> BucketWriteCursors;
         internal NativeArray<VividPrimitiveDrawSetBuildResult> Result;
         internal VividInstancePassMask RequiredPassMask;
+        internal bool EmitDrawSectionIndices;
 
         public void Execute()
         {
@@ -201,7 +202,9 @@ namespace VividRP.Runtime.PrimitiveScene
                     DrawSectionIndex = source.AbsoluteDrawSectionIndex,
                     LegacyInstanceIndex = source.LegacyInstanceIndex,
                 };
-                LegacyInstanceIndices[destinationIndex] = source.LegacyInstanceIndex;
+                LegacyInstanceIndices[destinationIndex] = EmitDrawSectionIndices
+                    ? source.AbsoluteDrawSectionIndex
+                    : source.LegacyInstanceIndex;
             }
         }
 

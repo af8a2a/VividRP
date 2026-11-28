@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.PrimitiveScene;
 using VividRP.Runtime.VirtualShadowMap;
 
 namespace VividRP.Runtime.GPUDriven
@@ -27,6 +28,7 @@ namespace VividRP.Runtime.GPUDriven
         private int m_FixupVisibleMeshletIndirectDrawArgsKernel = -1;
         private readonly VividGPUCullingContext[] m_SingleCullingContext = new VividGPUCullingContext[1];
         private GraphicsBuffer m_DrawSetInstanceIndicesPlaceholder;
+        private VividPrimitiveSceneBufferSet m_PlaceholderPrimitiveBuffers;
         private bool m_IsDisposed;
 
         public VividGPUDrivenCullingDispatcher(bool supportsOcclusion = true)
@@ -50,7 +52,10 @@ namespace VividRP.Runtime.GPUDriven
             float meshLODErrorThreshold,
             VividGPUDrivenOcclusionCullingParameters occlusionParameters = default,
             GraphicsBuffer drawSetInstanceIndices = null,
-            int drawSetInstanceCount = -1
+            int drawSetInstanceCount = -1,
+            VividPrimitiveScene primitiveScene = null,
+            VividPrimitiveSceneBufferSet primitiveBuffers = null,
+            bool usePrimitiveSceneDirect = false
         )
         {
             if (camera == null)
@@ -85,7 +90,10 @@ namespace VividRP.Runtime.GPUDriven
                     meshLODErrorThreshold,
                     occlusionParameters,
                     drawSetInstanceIndices,
-                    drawSetInstanceCount
+                    drawSetInstanceCount,
+                    primitiveScene,
+                    primitiveBuffers,
+                    usePrimitiveSceneDirect
                 );
             }
         }
@@ -104,7 +112,10 @@ namespace VividRP.Runtime.GPUDriven
             float meshLODErrorThreshold,
             VividGPUDrivenOcclusionCullingParameters occlusionParameters = default,
             GraphicsBuffer drawSetInstanceIndices = null,
-            int drawSetInstanceCount = -1
+            int drawSetInstanceCount = -1,
+            VividPrimitiveScene primitiveScene = null,
+            VividPrimitiveSceneBufferSet primitiveBuffers = null,
+            bool usePrimitiveSceneDirect = false
         )
         {
             m_SingleCullingContext[0] = cullingContext;
@@ -123,7 +134,11 @@ namespace VividRP.Runtime.GPUDriven
                 meshLODErrorThreshold,
                 occlusionParameters,
                 drawSetInstanceIndices,
-                drawSetInstanceCount);
+                drawSetInstanceCount,
+                default,
+                primitiveScene,
+                primitiveBuffers,
+                usePrimitiveSceneDirect);
         }
 
         public void DispatchBatch(
@@ -142,7 +157,10 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenOcclusionCullingParameters occlusionParameters = default,
             GraphicsBuffer drawSetInstanceIndices = null,
             int drawSetInstanceCount = -1,
-            VirtualShadowMapCullingParameters vsmCulling = default
+            VirtualShadowMapCullingParameters vsmCulling = default,
+            VividPrimitiveScene primitiveScene = null,
+            VividPrimitiveSceneBufferSet primitiveBuffers = null,
+            bool usePrimitiveSceneDirect = false
         )
         {
             DispatchInternal(
@@ -161,7 +179,10 @@ namespace VividRP.Runtime.GPUDriven
                 occlusionParameters,
                 drawSetInstanceIndices,
                 drawSetInstanceCount,
-                vsmCulling);
+                vsmCulling,
+                primitiveScene,
+                primitiveBuffers,
+                usePrimitiveSceneDirect);
         }
 
         private void DispatchInternal(
@@ -180,7 +201,10 @@ namespace VividRP.Runtime.GPUDriven
             in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
             GraphicsBuffer drawSetInstanceIndices,
             int drawSetInstanceCount,
-            VirtualShadowMapCullingParameters vsmCulling = default)
+            VirtualShadowMapCullingParameters vsmCulling = default,
+            VividPrimitiveScene primitiveScene = null,
+            VividPrimitiveSceneBufferSet primitiveBuffers = null,
+            bool usePrimitiveSceneDirect = false)
         {
             ThrowIfDisposed();
 
@@ -209,16 +233,22 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentOutOfRangeException(nameof(cullingContextCount));
             }
 
+            bool directPrimitiveMode = usePrimitiveSceneDirect
+                && primitiveScene != null
+                && primitiveBuffers != null;
+            int effectiveInstanceCount = directPrimitiveMode
+                ? primitiveScene.DrawSectionTable.Count
+                : sceneData.InstanceCount;
             bool drawSetEnabled = ValidateDrawSetInput(drawSetInstanceIndices, drawSetInstanceCount);
             int instanceDispatchCount = drawSetEnabled
                 ? drawSetInstanceCount
-                : sceneData.InstanceCount;
+                : effectiveInstanceCount;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchEnsureCapacityMarker.Auto())
             {
                 BufferSet.EnsureCapacity(sceneData, cullingContextCount);
                 if (!vsmCulling.IsEnabled || vsmCulling.UsesCompactedViews)
-                    BufferSet.EnsureVSMTraversalCapacity(Mathf.Max(sceneData.InstanceCount, instanceDispatchCount), cullingContextCount);
+                    BufferSet.EnsureVSMTraversalCapacity(Mathf.Max(effectiveInstanceCount, instanceDispatchCount), cullingContextCount);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchResetBuffersMarker.Auto())
@@ -227,7 +257,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             if (instanceDispatchCount == 0 ||
-                sceneData.InstanceCount == 0 ||
+                effectiveInstanceCount == 0 ||
                 sceneBuffers.InstanceDataBuffer == null ||
                 sceneBuffers.MaterialDataBuffer == null ||
                 sceneBuffers.MeshLODNodesBuffer == null ||
@@ -261,22 +291,33 @@ namespace VividRP.Runtime.GPUDriven
             {
                 DispatchGPUInstanceCulling(
                     cmd,
-                    sceneData.InstanceCount,
+                    effectiveInstanceCount,
                     instanceDispatchCount,
                     cullingContextCount,
                     sceneBuffers,
                     drawSetEnabled,
-                    drawSetInstanceIndices, forcedMeshLODNodeDepth, meshLODErrorThreshold, in vsmCulling);
+                    drawSetInstanceIndices,
+                    forcedMeshLODNodeDepth,
+                    meshLODErrorThreshold,
+                    in vsmCulling,
+                    primitiveScene,
+                    primitiveBuffers,
+                    directPrimitiveMode);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletListBuildMarker.Auto())
             {
                 DispatchMeshletListBuild(
                     cmd,
+                    effectiveInstanceCount,
                     sceneBuffers,
                     cullingContextCount,
                     forcedMeshLODNodeDepth,
-                    meshLODErrorThreshold, in vsmCulling);
+                    meshLODErrorThreshold,
+                    in vsmCulling,
+                    primitiveScene,
+                    primitiveBuffers,
+                    directPrimitiveMode);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchFixupDrawArgsMarker.Auto())
@@ -286,7 +327,15 @@ namespace VividRP.Runtime.GPUDriven
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletCullingMarker.Auto())
             {
-                DispatchGPUMeshletCulling(cmd, sceneBuffers, cullingContextCount, occlusionParameters, in vsmCulling);
+                DispatchGPUMeshletCulling(
+                    cmd,
+                    sceneBuffers,
+                    cullingContextCount,
+                    occlusionParameters,
+                    in vsmCulling,
+                    primitiveScene,
+                    primitiveBuffers,
+                    directPrimitiveMode);
             }
         }
 
@@ -306,6 +355,8 @@ namespace VividRP.Runtime.GPUDriven
             BufferSet.Dispose();
             m_DrawSetInstanceIndicesPlaceholder?.Dispose();
             m_DrawSetInstanceIndicesPlaceholder = null;
+            m_PlaceholderPrimitiveBuffers?.Dispose();
+            m_PlaceholderPrimitiveBuffers = null;
             m_GPUInstanceCullingCompute = null;
             m_MeshletListBuildCompute = null;
             m_GPUMeshletCullingCompute = null;
@@ -332,8 +383,13 @@ namespace VividRP.Runtime.GPUDriven
             int cullingContextCount,
             VividGPUDrivenBufferSet sceneBuffers,
             bool drawSetEnabled,
-            GraphicsBuffer drawSetInstanceIndices, int forcedMeshLODNodeDepth, float meshLODErrorThreshold,
-            in VirtualShadowMapCullingParameters vsmCulling
+            GraphicsBuffer drawSetInstanceIndices,
+            int forcedMeshLODNodeDepth,
+            float meshLODErrorThreshold,
+            in VirtualShadowMapCullingParameters vsmCulling,
+            VividPrimitiveScene primitiveScene,
+            VividPrimitiveSceneBufferSet primitiveBuffers,
+            bool directPrimitiveMode
         )
         {
             int kernel = m_GPUInstanceCullingKernel;
@@ -382,6 +438,13 @@ namespace VividRP.Runtime.GPUDriven
                 VividGPUDrivenShaderIDs._InstanceDataCount,
                 instanceCount
             );
+            BindPrimitiveSceneToCompute(
+                cmd,
+                m_GPUInstanceCullingCompute,
+                kernel,
+                primitiveScene,
+                primitiveBuffers,
+                directPrimitiveMode);
             cmd.SetComputeBufferParam(
                 m_GPUInstanceCullingCompute,
                 kernel,
@@ -429,7 +492,7 @@ namespace VividRP.Runtime.GPUDriven
                     instanceDispatchCount, cullingContextCount, BufferSet.MeshletListBuildIndirectArgsBuffer);
                 cmd.DispatchCompute(m_GPUInstanceCullingCompute, kernel, vsmCulling.InstanceDispatchArgs,
                     vsmCulling.InstanceDispatchArgsByteOffset);
-                DispatchLODTraversal(cmd, sceneBuffers, forcedMeshLODNodeDepth, in vsmCulling);
+                DispatchLODTraversal(cmd, sceneBuffers, forcedMeshLODNodeDepth, in vsmCulling, primitiveScene, primitiveBuffers, directPrimitiveMode);
             }
             else
             {
@@ -440,7 +503,7 @@ namespace VividRP.Runtime.GPUDriven
                     cullingContextCount,
                     1);
                 if (!vsmCulling.IsEnabled)
-                    DispatchLODTraversal(cmd, sceneBuffers, forcedMeshLODNodeDepth, in vsmCulling);
+                    DispatchLODTraversal(cmd, sceneBuffers, forcedMeshLODNodeDepth, in vsmCulling, primitiveScene, primitiveBuffers, directPrimitiveMode);
             }
         }
 
@@ -452,8 +515,14 @@ namespace VividRP.Runtime.GPUDriven
                 VividGPUDrivenShaderIDs._VSMLodTraversalArgs, BufferSet.VSMLodTraversalArgs);
         }
 
-        private void DispatchLODTraversal(CommandBuffer cmd, VividGPUDrivenBufferSet sceneBuffers,
-            int forcedMeshLODNodeDepth, in VirtualShadowMapCullingParameters vsmCulling)
+        private void DispatchLODTraversal(
+            CommandBuffer cmd,
+            VividGPUDrivenBufferSet sceneBuffers,
+            int forcedMeshLODNodeDepth,
+            in VirtualShadowMapCullingParameters vsmCulling,
+            VividPrimitiveScene primitiveScene,
+            VividPrimitiveSceneBufferSet primitiveBuffers,
+            bool directPrimitiveMode)
         {
             int kernel;
             if (vsmCulling.IsEnabled)
@@ -480,6 +549,13 @@ namespace VividRP.Runtime.GPUDriven
                 VividGPUDrivenShaderIDs._CullingContexts, BufferSet.CullingContextBuffer);
             cmd.SetComputeBufferParam(m_GPUInstanceCullingCompute, kernel,
                 VividGPUDrivenShaderIDs._InstanceData, sceneBuffers.InstanceDataBuffer);
+            BindPrimitiveSceneToCompute(
+                cmd,
+                m_GPUInstanceCullingCompute,
+                kernel,
+                primitiveScene,
+                primitiveBuffers,
+                directPrimitiveMode);
             cmd.SetComputeBufferParam(m_GPUInstanceCullingCompute, kernel,
                 VividGPUDrivenShaderIDs._MeshletListBuildJobs, BufferSet.MeshletListBuildJobsBuffer);
             cmd.SetComputeBufferParam(m_GPUInstanceCullingCompute, kernel,
@@ -541,13 +617,40 @@ namespace VividRP.Runtime.GPUDriven
             return m_DrawSetInstanceIndicesPlaceholder;
         }
 
+        private void BindPrimitiveSceneToCompute(
+            CommandBuffer cmd,
+            ComputeShader compute,
+            int kernel,
+            VividPrimitiveScene primitiveScene,
+            VividPrimitiveSceneBufferSet primitiveBuffers,
+            bool directPrimitiveMode)
+        {
+            VividPrimitiveSceneBufferSet targetBuffers = primitiveBuffers ?? GetPlaceholderPrimitiveBuffers();
+            targetBuffers.BindToCompute(
+                cmd,
+                compute,
+                kernel,
+                primitiveScene,
+                directPrimitiveMode && primitiveBuffers != null && primitiveScene != null);
+        }
+
+        private VividPrimitiveSceneBufferSet GetPlaceholderPrimitiveBuffers()
+        {
+            m_PlaceholderPrimitiveBuffers ??= new VividPrimitiveSceneBufferSet();
+            return m_PlaceholderPrimitiveBuffers;
+        }
+
         private void DispatchMeshletListBuild(
             CommandBuffer cmd,
+            int instanceCount,
             VividGPUDrivenBufferSet sceneBuffers,
             int cullingContextCount,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold,
-            in VirtualShadowMapCullingParameters vsmCulling
+            in VirtualShadowMapCullingParameters vsmCulling,
+            VividPrimitiveScene primitiveScene,
+            VividPrimitiveSceneBufferSet primitiveBuffers,
+            bool directPrimitiveMode
         )
         {
             int kernel = m_MeshletListBuildKernel;
@@ -590,8 +693,15 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetComputeIntParam(
                 m_MeshletListBuildCompute,
                 VividGPUDrivenShaderIDs._InstanceDataCount,
-                sceneBuffers.InstanceCount
+                instanceCount
             );
+            BindPrimitiveSceneToCompute(
+                cmd,
+                m_MeshletListBuildCompute,
+                kernel,
+                primitiveScene,
+                primitiveBuffers,
+                directPrimitiveMode);
             cmd.SetComputeBufferParam(
                 m_MeshletListBuildCompute,
                 kernel,
@@ -729,7 +839,10 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenBufferSet sceneBuffers,
             int cullingContextCount,
             in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
-            in VirtualShadowMapCullingParameters vsmCulling)
+            in VirtualShadowMapCullingParameters vsmCulling,
+            VividPrimitiveScene primitiveScene,
+            VividPrimitiveSceneBufferSet primitiveBuffers,
+            bool directPrimitiveMode)
         {
             bool testOcclusion = !vsmCulling.IsEnabled && occlusionParameters.IsEnabled
                 && BufferSet.SupportsOcclusion
@@ -767,6 +880,13 @@ namespace VividRP.Runtime.GPUDriven
                 VividGPUDrivenShaderIDs._InstanceData,
                 sceneBuffers.InstanceDataBuffer
             );
+            BindPrimitiveSceneToCompute(
+                cmd,
+                m_GPUMeshletCullingCompute,
+                kernel,
+                primitiveScene,
+                primitiveBuffers,
+                directPrimitiveMode);
             cmd.SetComputeBufferParam(
                 m_GPUMeshletCullingCompute,
                 kernel,
@@ -881,7 +1001,10 @@ namespace VividRP.Runtime.GPUDriven
             int height,
             int textureWidth,
             int textureHeight,
-            int mipCount)
+            int mipCount,
+            VividPrimitiveScene primitiveScene = null,
+            VividPrimitiveSceneBufferSet primitiveBuffers = null,
+            bool usePrimitiveSceneDirect = false)
         {
             ThrowIfDisposed();
             if (cmd == null
@@ -934,6 +1057,13 @@ namespace VividRP.Runtime.GPUDriven
                 m_OcclusionRetestKernel,
                 VividGPUDrivenShaderIDs._InstanceData,
                 sceneBuffers.InstanceDataBuffer);
+            BindPrimitiveSceneToCompute(
+                cmd,
+                gpuMeshletCullingCompute,
+                m_OcclusionRetestKernel,
+                primitiveScene,
+                primitiveBuffers,
+                usePrimitiveSceneDirect);
             cmd.SetComputeBufferParam(
                 gpuMeshletCullingCompute,
                 m_OcclusionRetestKernel,

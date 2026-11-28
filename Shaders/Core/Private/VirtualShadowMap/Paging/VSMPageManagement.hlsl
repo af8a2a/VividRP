@@ -425,14 +425,20 @@ bool GetVSMPageRange(
         return false;
     }
 
-    const VividInstanceData instanceData = PullInstanceData(
-        sourceRequest.InstanceID_LOD);
+    float4x4 objectToWorldMatrix;
+    float wpoPadWS;
+    if (!TryPullInstanceBoundsTransform(
+            sourceRequest.InstanceID_LOD,
+            objectToWorldMatrix,
+            wpoPadWS))
+    {
+        return false;
+    }
     const VividDecodedMeshlet meshlet = PullMeshletData(
         sourceRequest.MeshletID);
-    const float wpoPadWS = VividGetInstanceWpoPaddingWS(instanceData);
     float4 sphereWS = TransformSphere(
         meshlet.BoundingSphere,
-        instanceData.ObjectToWorldMatrix);
+        objectToWorldMatrix);
     sphereWS.w += wpoPadWS;
     const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
     const uint pageSize = (uint)max(_VSMPrototypePageSize, 1);
@@ -440,7 +446,7 @@ bool GetVSMPageRange(
     VividVSMLocalBounds bounds = VividVSMLoadMeshletBounds(sourceRequest.MeshletID, meshlet.BoundingSphere);
     const float4x4 worldToShadow = _VSMProjections[cascadeIndex].worldToShadow;
     if (!VividVSMProjectLocalBoundsWpo(bounds.center, bounds.extent, bounds.radius, bounds.sphere,
-            mul(worldToShadow, instanceData.ObjectToWorldMatrix), worldToShadow, wpoPadWS,
+            mul(worldToShadow, objectToWorldMatrix), worldToShadow, wpoPadWS,
             (uint)max(_VSMPrototypeVirtualResolution, 1), minVirtualTexel, maxVirtualTexel)) return false;
 #else
     if (!VividVSMProjectCasterSphere(sphereWS, _VSMProjections[cascadeIndex].worldToShadow,

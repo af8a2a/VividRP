@@ -49,7 +49,7 @@ namespace VividRP.Editor.GPUDriven
     /// </list>
     /// Automatically reimports when linked <c>.vmatg</c> MaterialGraphs or base templates change.
     /// </summary>
-    [ScriptedImporter(10, Extension)]
+    [ScriptedImporter(12, Extension)]
     internal sealed class VividSlabShaderImporter : ScriptedImporter
     {
         internal const string Extension = "slab.shader";
@@ -57,8 +57,21 @@ namespace VividRP.Editor.GPUDriven
         internal const string ResolveComputeObjectId = "GPUDrivenResolveCompute";
         internal const string DescriptorObjectId = "SlabProgramDescriptor";
 
+        private static readonly string[] s_SharedResolveIncludeRelativePaths =
+        {
+            "Runtime/SubSystem/GPUDriven/VividGPUDrivenStructs.cs.hlsl",
+            "Runtime/SubSystem/PrimitiveScene/VividPrimitiveSceneTypes.cs.hlsl",
+            "Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl",
+            "Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl",
+            "Shaders/Core/Public/GPUDriven/VividMaterialSurface.hlsl",
+            "Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl",
+            "Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl",
+            "Shaders/Core/Public/VividSlabSurfaceContract.hlsl",
+        };
+
         public override void OnImportAsset(AssetImportContext ctx)
         {
+            RegisterSharedIncludeDependencies(ctx);
             string sourceText = File.ReadAllText(ctx.assetPath);
             VividSlabShaderAssemblyResult assembled = AssembleFromAssetPath(
                 ctx.assetPath,
@@ -262,6 +275,34 @@ namespace VividRP.Editor.GPUDriven
             }
 
             return normalized;
+        }
+
+        private static void RegisterSharedIncludeDependencies(AssetImportContext ctx)
+        {
+            if (ctx == null)
+                return;
+
+            for (int i = 0; i < s_SharedResolveIncludeRelativePaths.Length; i++)
+            {
+                string preferred = VividPackagePathUtility.GetPreferredAssetPath(
+                    s_SharedResolveIncludeRelativePaths[i]);
+                if (File.Exists(preferred))
+                {
+                    ctx.DependsOnSourceAsset(preferred);
+                    continue;
+                }
+
+                string[] candidates = VividPackagePathUtility.GetCandidateAssetPaths(
+                    s_SharedResolveIncludeRelativePaths[i]);
+                for (int c = 0; c < candidates.Length; c++)
+                {
+                    if (File.Exists(candidates[c]))
+                    {
+                        ctx.DependsOnSourceAsset(candidates[c]);
+                        break;
+                    }
+                }
+            }
         }
     }
 }

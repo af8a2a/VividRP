@@ -55,6 +55,9 @@ namespace VividRP.Runtime.PrimitiveScene
         private bool m_StaticShadowInvalidationRequiresFullRefresh = true;
         private uint m_DynamicShadowRevision;
         private bool m_DynamicShadowInvalidationRequiresFullRefresh = true;
+        private uint m_MainViewRendererBatchMask;
+        private uint m_ShadowRendererBatchMask;
+        private bool m_RendererBatchMasksDirty = true;
         private bool m_IsDisposed;
 
         internal VividPrimitiveScene()
@@ -129,6 +132,51 @@ namespace VividRP.Runtime.PrimitiveScene
         internal NativeArray<VividStaticShadowInvalidationBounds> PendingDynamicShadowInvalidationBounds
             => m_PendingDynamicShadowInvalidationBounds.AsArray();
         internal bool DynamicShadowInvalidationRequiresFullRefresh => m_DynamicShadowInvalidationRequiresFullRefresh;
+
+        internal bool IsMainViewRendererBatchActive(VividRendererListID batchKey)
+        {
+            ThrowIfDisposed();
+            RebuildRendererBatchMasksIfNeeded();
+            int index = (int) batchKey;
+            return (uint) index < (uint) VividRendererListID.Count
+                && (m_MainViewRendererBatchMask & (1u << index)) != 0u;
+        }
+
+        internal bool IsShadowRendererBatchActive(VividRendererListID batchKey)
+        {
+            ThrowIfDisposed();
+            RebuildRendererBatchMasksIfNeeded();
+            int index = (int) batchKey;
+            return (uint) index < (uint) VividRendererListID.Count
+                && (m_ShadowRendererBatchMask & (1u << index)) != 0u;
+        }
+
+        internal bool TryResolveLegacyMaterialIndexForDrawSection(
+            uint absoluteDrawSectionIndex,
+            out uint legacyMaterialIndex)
+        {
+            ThrowIfDisposed();
+            legacyMaterialIndex = InvalidIndex;
+            if (absoluteDrawSectionIndex >= (uint) DrawSectionTable.Count)
+                return false;
+
+            VividPrimitiveDrawSectionData section = DrawSectionTable[(int) absoluteDrawSectionIndex];
+            if ((section.Flags & VividPrimitiveDrawSectionFlags.Valid) == 0
+                || section.MaterialIndex >= (uint) MaterialTable.Count)
+            {
+                return false;
+            }
+
+            VividPrimitiveMaterialData material = MaterialTable[(int) section.MaterialIndex];
+            if (material.Generation != section.MaterialGeneration
+                || material.LegacyMaterialIndex == InvalidIndex)
+            {
+                return false;
+            }
+
+            legacyMaterialIndex = material.LegacyMaterialIndex;
+            return true;
+        }
 
         internal bool HasUnboundedDynamicShadowCasters(uint cameraCullingMask)
         {
@@ -227,6 +275,7 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 handle = Register(descriptor);
                 m_ChangedPrimitiveCount++;
+                m_RendererBatchMasksDirty = true;
                 IncrementSceneRevision();
                 if (IsStaticShadowCaster(PrimitiveTable[handle.Index].Flags, descriptor.PassMask))
                 {
@@ -320,6 +369,7 @@ namespace VividRP.Runtime.PrimitiveScene
             TransformTable.Set(handle.Index, default);
             PreviousTransformTable.Set(handle.Index, default);
             m_ChangedPrimitiveCount++;
+            m_RendererBatchMasksDirty = true;
             IncrementSceneRevision();
             if (removedStaticShadowCaster)
             {
@@ -493,6 +543,7 @@ namespace VividRP.Runtime.PrimitiveScene
         internal void RecordFullResync()
         {
             m_FullResyncCount++;
+            m_RendererBatchMasksDirty = true;
             PrimitiveTable.MarkAllDirty();
             TransformTable.MarkAllDirty();
             PreviousTransformTable.MarkAllDirty();
@@ -504,6 +555,7 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal void InvalidateLegacyResourcePayloads()
         {
+            m_RendererBatchMasksDirty = true;
             for (int index = 0; index < m_GeometryRecords.Count; index++)
             {
                 GeometryRecord record = m_GeometryRecords[index];
@@ -530,13 +582,16 @@ namespace VividRP.Runtime.PrimitiveScene
             if (!TryGetGeometryHandle(key, out VividPrimitiveGeometryHandle handle))
                 return false;
 
-            GeometryTable.SetIfChanged(handle.Index, new VividPrimitiveGeometryData
+            if (GeometryTable.SetIfChanged(handle.Index, new VividPrimitiveGeometryData
             {
                 Generation = handle.Generation,
                 LegacyTopMeshLODStartIndex = legacyInstanceData.TopMeshLODStartIndex,
                 LegacyTotalMeshLODCount = legacyInstanceData.TotalMeshLODCount,
                 LegacyMeshLODLevelCount = legacyInstanceData.MeshLODLevelCount,
-            });
+            }))
+            {
+                m_RendererBatchMasksDirty = true;
+            }
             return true;
         }
 
@@ -548,13 +603,16 @@ namespace VividRP.Runtime.PrimitiveScene
             if (!TryGetMaterialHandle(key, out VividPrimitiveMaterialHandle handle))
                 return false;
 
-            MaterialTable.SetIfChanged(handle.Index, new VividPrimitiveMaterialData
+            if (MaterialTable.SetIfChanged(handle.Index, new VividPrimitiveMaterialData
             {
                 Generation = handle.Generation,
                 LegacyMaterialIndex = legacyMaterialIndex,
                 RendererListID = legacyMaterialData.RendererListID,
                 MaterialFlags = legacyMaterialData.MaterialFlags,
-            });
+            }))
+            {
+                m_RendererBatchMasksDirty = true;
+            }
             return true;
         }
 
@@ -768,7 +826,13 @@ namespace VividRP.Runtime.PrimitiveScene
             }
 
             var nextData = CreatePrimitiveData(descriptor, handle, record.DrawSectionOffset, record.DrawSectionCount);
-            nextData.Flags |= PrimitiveTable[handle.Index].Flags & ShadowCacheStaticFlag;
+            VividPrimitiveData currentData = PrimitiveTable[handle.Index];
+            nextData.Flags |= currentData.Flags & ShadowCacheStaticFlag;
+            bool batchRelevantChanged = sectionsChanged
+                || currentData.PassMask != nextData.PassMask
+                || (currentData.Flags & ~ShadowCacheStaticFlag) != (nextData.Flags & ~ShadowCacheStaticFlag);
+            if (batchRelevantChanged)
+                m_RendererBatchMasksDirty = true;
             bool primitiveDataChanged = PrimitiveTable.SetIfChanged(handle.Index, nextData);
             bool cullRecordChanged = UpdateCullRecord(
                 handle,
@@ -1172,6 +1236,95 @@ namespace VividRP.Runtime.PrimitiveScene
                 RendererListID = VividRendererListID.Default,
                 MaterialFlags = VividMaterialFlags.None,
             };
+        }
+
+        private void RebuildRendererBatchMasksIfNeeded()
+        {
+            if (!m_RendererBatchMasksDirty)
+                return;
+
+            uint mainMask = 0u;
+            uint shadowMask = 0u;
+            int recordCount = m_ActiveCullRecords.Length;
+            int drawSectionCount = DrawSectionTable.Count;
+            int geometryCount = GeometryTable.Count;
+            int materialCount = MaterialTable.Count;
+
+            for (int recordIndex = 0; recordIndex < recordCount; recordIndex++)
+            {
+                VividPrimitiveCullRecord record = m_ActiveCullRecords[recordIndex];
+                if (!record.Handle.IsValid
+                    || (record.Flags & VividPrimitiveFlags.Valid) == 0
+                    || (record.Flags & VividPrimitiveFlags.Disabled) != 0
+                    || record.DrawSectionCount == 0u
+                    || record.DrawSectionOffset >= (uint) drawSectionCount)
+                {
+                    continue;
+                }
+
+                bool hasMain = (record.PassMask & VividInstancePassMask.Main) != 0;
+                bool hasShadows = (record.PassMask & VividInstancePassMask.Shadows) != 0;
+                if (!hasMain && !hasShadows)
+                    continue;
+
+                bool flipWinding = (record.Flags & VividPrimitiveFlags.FlipWindingOrder) != 0;
+                bool twoSidedShadows = (record.Flags & VividPrimitiveFlags.TwoSidedShadows) != 0;
+                int sectionStart = (int) record.DrawSectionOffset;
+                int sectionEnd = Mathf.Min(drawSectionCount, sectionStart + (int) record.DrawSectionCount);
+
+                for (int sectionIndex = sectionStart; sectionIndex < sectionEnd; sectionIndex++)
+                {
+                    VividPrimitiveDrawSectionData section = DrawSectionTable[sectionIndex];
+                    if ((section.Flags & VividPrimitiveDrawSectionFlags.Valid) == 0
+                        || section.GeometryIndex >= (uint) geometryCount
+                        || section.MaterialIndex >= (uint) materialCount)
+                    {
+                        continue;
+                    }
+
+                    VividPrimitiveGeometryData geometry = GeometryTable[(int) section.GeometryIndex];
+                    VividPrimitiveMaterialData material = MaterialTable[(int) section.MaterialIndex];
+                    if (geometry.Generation != section.GeometryGeneration
+                        || material.Generation != section.MaterialGeneration
+                        || geometry.LegacyTopMeshLODStartIndex == InvalidIndex
+                        || geometry.LegacyTotalMeshLODCount == 0u
+                        || material.LegacyMaterialIndex == InvalidIndex)
+                    {
+                        continue;
+                    }
+
+                    VividRendererListID baseListId = material.RendererListID;
+                    if (hasMain)
+                    {
+                        VividRendererListID mainListId = baseListId;
+                        if (flipWinding && (mainListId & VividRendererListID.CullOff) == 0)
+                            mainListId ^= VividRendererListID.CullFront;
+                        if ((uint) mainListId < (uint) VividRendererListID.Count)
+                            mainMask |= 1u << (int) mainListId;
+                    }
+
+                    if (hasShadows)
+                    {
+                        VividRendererListID shadowListId = baseListId;
+                        if (twoSidedShadows)
+                        {
+                            shadowListId = (shadowListId & ~VividRendererListID.CullFront)
+                                | VividRendererListID.CullOff;
+                        }
+                        else if (flipWinding && (shadowListId & VividRendererListID.CullOff) == 0)
+                        {
+                            shadowListId ^= VividRendererListID.CullFront;
+                        }
+
+                        if ((uint) shadowListId < (uint) VividRendererListID.Count)
+                            shadowMask |= 1u << (int) shadowListId;
+                    }
+                }
+            }
+
+            m_MainViewRendererBatchMask = mainMask;
+            m_ShadowRendererBatchMask = shadowMask;
+            m_RendererBatchMasksDirty = false;
         }
 
         private void IncrementSceneRevision()

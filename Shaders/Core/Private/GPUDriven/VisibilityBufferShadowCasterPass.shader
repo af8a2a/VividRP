@@ -212,6 +212,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
 #endif
                 const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+                VividMaterialRuntimeHeader runtimeHeader;
+                VividMaterialProgramData programData;
+                if (VividGetMaterialProgramStatus(instanceData.MaterialIndex, runtimeHeader, programData) == VIVID_MATERIAL_PROGRAM_KNOWN
+                    && (programData.CapabilityFlags & VIVIDMATERIALPROGRAMCAPABILITIES_PROGRAMMABLE_RASTER) != 0u)
+                {
+                    return output;
+                }
                 const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
 #if defined(VIVID_VSM_PAGE_CASTER)
                 // Large records fan out over all relevant pages. Recheck this

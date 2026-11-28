@@ -1,6 +1,7 @@
 // @vivid-base "Packages/com.vivid.render-pipelines/Shaders/Material/Templates/SubstrateOpaque.slab.template"
 // @vivid-wpo-padding _FurLength + _GravityStrength + _WindStrength + 0.02
 // @vivid-shell-layers 8
+// @vivid-shadow-shell-layers 2
 //
 // VividRP Shell-Based Fur Material (.slab.shader, Phase 1 Raster Vertical Slice).
 // Driven via DrawMeshInstanced / RenderMeshInstanced with per-instance _ShellHeight in [0, 1]:
@@ -48,6 +49,12 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurStrands)] _HybridMaxParallax("Hybrid Max Grazing Parallax", Range(1.0, 5.0)) = 3.0
         [Sub(FurStrands)] _GPUDrivenShellCount("GPUDriven Shell Count (1-8)", Range(1.0, 8.0)) = 8.0
         [Sub(FurStrands)] _ShellHeightPower("GPUDriven Shell Height Power", Range(0.5, 2.0)) = 1.0
+        [SubToggle(FurStrands, _)] _GPUDrivenDistanceLod("GPUDriven Distance Shell LOD", Float) = 1.0
+        [Sub(FurStrands)] _GPUDrivenLodNearDistance("GPUDriven LOD Near Distance", Float) = 4.0
+        [Sub(FurStrands)] _GPUDrivenLodFarDistance("GPUDriven LOD Far Distance", Float) = 25.0
+        [Sub(FurStrands)] _GPUDrivenMinLodShellCount("GPUDriven Min LOD Shells", Range(1.0, 8.0)) = 2.0
+        [Sub(FurStrands)] _GPUDrivenShadowShellCount("GPUDriven Shadow Shells (1-4)", Range(1.0, 4.0)) = 2.0
+        [Sub(FurStrands)] _GPUDrivenShadowMaxHeight("GPUDriven Shadow Max Height", Range(0.0, 1.0)) = 0.35
 
         [Main(FurShading, _, on, off)] _FurShading("Root-to-Tip & Substrate Shading", Float) = 1
         [Tex(FurShading)] _BaseMap("Base Albedo Map", 2D) = "white" {}
@@ -99,6 +106,12 @@ Shader "VividRP/Material/FurSlab"
     float _HybridMaxParallax;
     float _GPUDrivenShellCount;
     float _ShellHeightPower;
+    float _GPUDrivenDistanceLod;
+    float _GPUDrivenLodNearDistance;
+    float _GPUDrivenLodFarDistance;
+    float _GPUDrivenMinLodShellCount;
+    float _GPUDrivenShadowShellCount;
+    float _GPUDrivenShadowMaxHeight;
     float4 _BaseMap_ST;
     float4 _RootColor;
     float4 _TipColor;
@@ -143,18 +156,46 @@ Shader "VividRP/Material/FurSlab"
         out float shellHeight,
         out float shellStep)
     {
-        uint targetCount = clamp((uint)round(VIVID_SLAB_PARAM(ctx, _GPUDrivenShellCount)), 1u, max(ctx.shellCount, 1u));
-        if (ctx.shellIndex >= targetCount)
-        {
-            shellHeight = 0.0f;
-            shellStep = 1.0f;
-            return false;
-        }
-
         float heightPower = clamp(VIVID_SLAB_PARAM(ctx, _ShellHeightPower), 0.5f, 2.0f);
-        shellHeight = VividComputeSlabShellHeight(ctx.shellIndex, targetCount, heightPower);
-        shellStep = VividComputeSlabShellStep(targetCount);
-        return true;
+        #if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
+            uint targetCount = clamp(
+                (uint)round(VIVID_SLAB_PARAM(ctx, _GPUDrivenShadowShellCount)),
+                1u,
+                max(ctx.shellCount, 1u));
+            if (ctx.shellIndex >= targetCount)
+            {
+                shellHeight = 0.0f;
+                shellStep = 1.0f;
+                return false;
+            }
+            float maxShadowHeight = saturate(VIVID_SLAB_PARAM(ctx, _GPUDrivenShadowMaxHeight));
+            shellHeight = VividComputeSlabShellHeight(ctx.shellIndex, targetCount, heightPower) * maxShadowHeight;
+            shellStep = targetCount > 1u ? maxShadowHeight * rcp((float)(targetCount - 1u)) : maxShadowHeight;
+            return true;
+        #else
+            uint baseCount = clamp(
+                (uint)round(VIVID_SLAB_PARAM(ctx, _GPUDrivenShellCount)),
+                1u,
+                max(ctx.shellCount, 1u));
+            bool enableLod = VIVID_SLAB_PARAM(ctx, _GPUDrivenDistanceLod) > 0.5f;
+            float distToCamera = length(ctx.instancePositionWS - _WorldSpaceCameraPos);
+            uint targetCount = VividComputeSlabLodShellCount(
+                baseCount,
+                enableLod,
+                distToCamera,
+                VIVID_SLAB_PARAM(ctx, _GPUDrivenLodNearDistance),
+                VIVID_SLAB_PARAM(ctx, _GPUDrivenLodFarDistance),
+                (uint)round(VIVID_SLAB_PARAM(ctx, _GPUDrivenMinLodShellCount)));
+            if (ctx.shellIndex >= targetCount)
+            {
+                shellHeight = 0.0f;
+                shellStep = 1.0f;
+                return false;
+            }
+            shellHeight = VividComputeSlabShellHeight(ctx.shellIndex, targetCount, heightPower);
+            shellStep = VividComputeSlabShellStep(targetCount);
+            return true;
+        #endif
     }
 
     float3 VividSlabEvaluateVertexOffset(const VividSlabVertexContext ctx)
@@ -228,10 +269,16 @@ Shader "VividRP/Material/FurSlab"
         float4 baseMapST = VIVID_SLAB_PARAM(ctx, _BaseMap_ST);
         float2 baseUv = ctx.uv0 * baseMapST.xy + baseMapST.zw;
         float densityMask = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurMaskMap, baseUv).r;
+        #if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
+            // Keep VSM/CSM shadow pages camera-independent and temporally stable.
+            bool useTemporalDither = false;
+        #else
+            bool useTemporalDither = VIVID_SLAB_PARAM(ctx, _TemporalDither) > 0.5f;
+        #endif
         float ign = VividFurInterleavedGradientNoise(
             ctx.positionCS.xy,
             _JitterParams.xy,
-            VIVID_SLAB_PARAM(ctx, _TemporalDither) > 0.5f);
+            useTemporalDither);
 
         float2 strandTiling = VIVID_SLAB_PARAM(ctx, _StrandTiling).xy;
         float furDensity = VIVID_SLAB_PARAM(ctx, _FurDensity);
@@ -242,6 +289,7 @@ Shader "VividRP/Material/FurSlab"
         float alphaCutoff = VIVID_SLAB_PARAM(ctx, _AlphaCutoff);
         float ditherStrength = VIVID_SLAB_PARAM(ctx, _DitherStrength);
 
+        #if !defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
         if (VIVID_SLAB_PARAM(ctx, _HybridRaymarch) > 0.5f)
         {
             VividFurHybridHit hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
@@ -275,6 +323,7 @@ Shader "VividRP/Material/FurSlab"
             cutoff = 0.5f;
             return;
         }
+        #endif
 
         VividFurStrandSample strand = VividEvaluateFurProceduralStrands(
             ctx.uv0,

@@ -23,6 +23,8 @@ namespace VividRP.Editor.GPUDriven
         internal string[] WorldPositionOffsetPaddingProperties { get; set; } = Array.Empty<string>();
 
         internal int ShellLayerCount { get; set; } = 1;
+
+        internal int ShadowShellLayerCount { get; set; }
     }
 
     internal sealed class VividSlabShaderAssemblyResult
@@ -68,6 +70,8 @@ namespace VividRP.Editor.GPUDriven
         internal string[] WorldPositionOffsetPaddingProperties { get; set; } = Array.Empty<string>();
 
         internal int ShellLayerCount { get; set; } = 1;
+
+        internal int ShadowShellLayerCount { get; set; } = 1;
 
         internal uint SourceContentHash { get; set; }
 
@@ -170,6 +174,10 @@ namespace VividRP.Editor.GPUDriven
             @"^\s*//\s*@vivid-shell-layers\s+(\d+)\s*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
+        private static readonly Regex s_ShadowShellLayersDirectiveRegex = new(
+            @"^\s*//\s*@vivid-shadow-shell-layers\s+(\d+)\s*$",
+            RegexOptions.Multiline | RegexOptions.Compiled);
+
         private static readonly Regex s_ShaderNameRegex = new(
             @"Shader\s+""([^""]+)""",
             RegexOptions.Compiled);
@@ -245,6 +253,20 @@ namespace VividRP.Editor.GPUDriven
             {
                 directives.ShellLayerCount = Mathf.Clamp(
                     parsedShellLayers,
+                    1,
+                    VividSlabProgramDescriptor.MaxSupportedShellLayerCount);
+            }
+
+            Match shadowShellLayersMatch = s_ShadowShellLayersDirectiveRegex.Match(sourceText);
+            if (shadowShellLayersMatch.Success
+                && int.TryParse(
+                    shadowShellLayersMatch.Groups[1].Value,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int parsedShadowShellLayers))
+            {
+                directives.ShadowShellLayerCount = Mathf.Clamp(
+                    parsedShadowShellLayers,
                     1,
                     VividSlabProgramDescriptor.MaxSupportedShellLayerCount);
             }
@@ -479,6 +501,10 @@ namespace VividRP.Editor.GPUDriven
 
             // ShaderLab Properties block does not accept HLSL #line directives.
             rasterText = rasterText.Replace(GraphPropertiesToken, propertiesBlock);
+            if (normalizedSource.Contains(UseBaseSubShaderToken))
+            {
+                rasterText = EnsureHiddenSystemProperties(rasterText);
+            }
             rasterText = ReplaceTokenWithLineAnchor(rasterText, GraphCBufferToken, rasterCBufferBlock, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserCBufferToken, userCBuffer, normalizedSourcePath);
             rasterText = ReplaceTokenWithLineAnchor(rasterText, UserInstancingToken, userInstancing, normalizedSourcePath);
@@ -501,6 +527,9 @@ namespace VividRP.Editor.GPUDriven
                 directives.ShellLayerCount,
                 1,
                 VividSlabProgramDescriptor.MaxSupportedShellLayerCount);
+            int shadowShellLayerCount = directives.ShadowShellLayerCount > 0
+                ? Mathf.Clamp(directives.ShadowShellLayerCount, 1, shellLayerCount)
+                : shellLayerCount;
 
             bool hasErrors = HasErrorDiagnostics(diagnostics);
             string computeSource = BuildStandaloneGPUDrivenComputeSource(
@@ -573,6 +602,7 @@ namespace VividRP.Editor.GPUDriven
                 WorldPositionOffsetPadding = directives.WorldPositionOffsetPadding,
                 WorldPositionOffsetPaddingProperties = directives.WorldPositionOffsetPaddingProperties,
                 ShellLayerCount = shellLayerCount,
+                ShadowShellLayerCount = shadowShellLayerCount,
                 SourceContentHash = contentHash,
                 Diagnostics = diagnostics.ToArray(),
             };
@@ -1142,6 +1172,56 @@ namespace VividRP.Editor.GPUDriven
             return sb.ToString().TrimEnd();
         }
 
+        private static string EnsureHiddenSystemProperties(string shaderSource)
+        {
+            if (string.IsNullOrEmpty(shaderSource))
+                return shaderSource;
+
+            int propsKeyword = shaderSource.IndexOf("Properties", StringComparison.Ordinal);
+            if (propsKeyword < 0)
+                return shaderSource;
+
+            int openBrace = shaderSource.IndexOf('{', propsKeyword);
+            if (openBrace < 0)
+                return shaderSource;
+
+            int depth = 0;
+            int closeBrace = -1;
+            for (int i = openBrace; i < shaderSource.Length; i++)
+            {
+                char ch = shaderSource[i];
+                if (ch == '{') depth++;
+                else if (ch == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        closeBrace = i;
+                        break;
+                    }
+                }
+            }
+
+            if (closeBrace <= openBrace)
+                return shaderSource;
+
+            string body = shaderSource.Substring(openBrace + 1, closeBrace - openBrace - 1);
+            var inject = new StringBuilder(192);
+            if (body.IndexOf("_Cull", StringComparison.Ordinal) < 0)
+                inject.AppendLine("        [HideInInspector] _Cull(\"Cull\", Float) = 2");
+            if (body.IndexOf("_ZWrite", StringComparison.Ordinal) < 0)
+                inject.AppendLine("        [HideInInspector] _ZWrite(\"ZWrite\", Float) = 1");
+            if (body.IndexOf("_ZTest", StringComparison.Ordinal) < 0)
+                inject.AppendLine("        [HideInInspector] _ZTest(\"ZTest\", Float) = 4");
+            if (body.IndexOf("_VSMRasterWindowPages", StringComparison.Ordinal) < 0)
+                inject.AppendLine("        [HideInInspector] _VSMRasterWindowPages(\"Raster Window Pages\", Integer) = 1");
+
+            if (inject.Length == 0)
+                return shaderSource;
+
+            return shaderSource.Insert(closeBrace, "\n" + inject.ToString() + "    ");
+        }
+
         private static string ExtractSubShaderBlock(string templateText)
         {
             Match match = s_SubShaderBlockRegex.Match(templateText);
@@ -1271,6 +1351,7 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN || runtimeHeader.ProgramID != _TargetMaterialBin)");
             sb.AppendLine("        return;");
             sb.AppendLine();
+            sb.AppendLine("    float3 instancePosWS = float3(instanceData.ObjectToWorldMatrix[0][3], instanceData.ObjectToWorldMatrix[1][3], instanceData.ObjectToWorldMatrix[2][3]);");
             sb.AppendLine("    uint shellIndex = UnpackVisibilityBufferShellIndex(packedVis);");
             sb.AppendLine("    uint maxShellCount = VIVID_SLAB_MAX_SHELL_LAYERS;");
             sb.AppendLine("    float shellHeight = VividComputeSlabShellHeight(shellIndex, maxShellCount, 1.0f);");
@@ -1281,6 +1362,7 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("        shellCtx.parameterAddress = runtimeHeader.ParameterAddress;");
             sb.AppendLine("        shellCtx.resourceAddress = runtimeHeader.ResourceBindingAddress;");
             sb.AppendLine("        shellCtx.materialIndex = instanceData.MaterialIndex;");
+            sb.AppendLine("        shellCtx.instancePositionWS = instancePosWS;");
             sb.AppendLine("        shellCtx.shellHeight = shellHeight;");
             sb.AppendLine("        shellCtx.shellStep = shellStep;");
             sb.AppendLine("        shellCtx.shellIndex = shellIndex;");
@@ -1311,9 +1393,9 @@ namespace VividRP.Editor.GPUDriven
             sb.AppendLine("    float3 n2 = SafeNormalize(mul(nOS2, (float3x3)instanceData.WorldToObjectMatrix));");
             sb.AppendLine("    #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)");
             sb.AppendLine("    {");
-            sb.AppendLine("        VividSlabVertexContext vctx0 = { posOS0, posWS0, nOS0, n0, DecodeVividMeshletUV(v0), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex, shellHeight, shellStep, shellIndex, maxShellCount };");
-            sb.AppendLine("        VividSlabVertexContext vctx1 = { posOS1, posWS1, nOS1, n1, DecodeVividMeshletUV(v1), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex, shellHeight, shellStep, shellIndex, maxShellCount };");
-            sb.AppendLine("        VividSlabVertexContext vctx2 = { posOS2, posWS2, nOS2, n2, DecodeVividMeshletUV(v2), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex, shellHeight, shellStep, shellIndex, maxShellCount };");
+            sb.AppendLine("        VividSlabVertexContext vctx0 = { posOS0, posWS0, nOS0, n0, DecodeVividMeshletUV(v0), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex, instancePosWS, shellHeight, shellStep, shellIndex, maxShellCount };");
+            sb.AppendLine("        VividSlabVertexContext vctx1 = { posOS1, posWS1, nOS1, n1, DecodeVividMeshletUV(v1), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex, instancePosWS, shellHeight, shellStep, shellIndex, maxShellCount };");
+            sb.AppendLine("        VividSlabVertexContext vctx2 = { posOS2, posWS2, nOS2, n2, DecodeVividMeshletUV(v2), runtimeHeader.ParameterAddress, runtimeHeader.ResourceBindingAddress, instanceData.MaterialIndex, instancePosWS, shellHeight, shellStep, shellIndex, maxShellCount };");
             sb.AppendLine("        posWS0 += VividSlabEvaluateVertexOffset(vctx0);");
             sb.AppendLine("        posWS1 += VividSlabEvaluateVertexOffset(vctx1);");
             sb.AppendLine("        posWS2 += VividSlabEvaluateVertexOffset(vctx2);");

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
@@ -21,7 +22,27 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private protected static readonly int ShadowBiasId = Shader.PropertyToID("_ShadowBias");
 
+        private protected static readonly int s_TargetSlabProgramId = Shader.PropertyToID("_TargetSlabProgramID");
+
+        private protected static readonly int s_SlabShellParamsId = Shader.PropertyToID("_VividSlabShellParams");
+
         private protected const string AlphaTestKeywordName = "_ALPHATEST_ON";
+
+        private protected const string ProgrammableShadowCasterPassName = "VividVisibilityShadowCaster";
+
+        private protected sealed class ProgrammableSlabShadowMaterialCache
+        {
+            public readonly Material[] CullMaterials = new Material[3];
+            public int ShadowPassIndex = -1;
+            public bool PassLookupAttempted;
+            public bool StateConfigured;
+            public bool ConfiguredVsm;
+            public bool ConfiguredVsmPageCaster;
+            public int ConfiguredWindowPages;
+        }
+
+        private readonly Dictionary<VividSlabProgramDescriptor, ProgrammableSlabShadowMaterialCache>
+            m_ProgrammableSlabShadowMaterials = new();
 
         private protected readonly Material[] m_Materials = new Material[RendererListCount];
 
@@ -128,6 +149,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Materials[i]);
                 m_Materials[i] = null;
             }
+            DisposeProgrammableSlabShadowMaterials();
             m_IsActive = false;
             m_MeshletRenderingActive = false;
             m_ShadowData = null;
@@ -336,6 +358,102 @@ namespace VividRP.Runtime.RenderPass.Core
                 return CullMode.Off;
 
             return CullMode.Back;
+        }
+
+        private protected Material GetOrCreateProgrammableSlabShadowMaterial(
+            VividSlabProgramDescriptor descriptor,
+            Shader rasterShader,
+            CullMode cullMode,
+            bool enableVsmCaster,
+            bool enableVsmPageCaster,
+            int vsmRasterWindowPages,
+            float zWrite,
+            CompareFunction zTest,
+            int vsmRasterWindowPagesId,
+            int zWriteId,
+            int zTestId,
+            string vsmCasterKeyword,
+            string vsmPageCasterKeyword,
+            out int passIndex)
+        {
+            passIndex = -1;
+            if (descriptor == null || rasterShader == null)
+                return null;
+
+            if (!m_ProgrammableSlabShadowMaterials.TryGetValue(descriptor, out ProgrammableSlabShadowMaterialCache cache))
+            {
+                cache = new ProgrammableSlabShadowMaterialCache();
+                m_ProgrammableSlabShadowMaterials.Add(descriptor, cache);
+            }
+
+            int cullSlot = cullMode switch
+            {
+                CullMode.Off => 0,
+                CullMode.Front => 1,
+                _ => 2,
+            };
+
+            Material material = cache.CullMaterials[cullSlot];
+            bool recreated = false;
+            if (material == null || material.shader != rasterShader)
+            {
+                if (material != null)
+                    CoreUtils.Destroy(material);
+                material = CoreUtils.CreateEngineMaterial(rasterShader);
+                material.SetFloat(s_CullId, (float)cullMode);
+                cache.CullMaterials[cullSlot] = material;
+                cache.ShadowPassIndex = material.FindPass(ProgrammableShadowCasterPassName);
+                cache.PassLookupAttempted = true;
+                recreated = true;
+            }
+            else if (!cache.PassLookupAttempted)
+            {
+                cache.ShadowPassIndex = material.FindPass(ProgrammableShadowCasterPassName);
+                cache.PassLookupAttempted = true;
+            }
+
+            if (recreated
+                || !cache.StateConfigured
+                || cache.ConfiguredVsm != enableVsmCaster
+                || cache.ConfiguredVsmPageCaster != enableVsmPageCaster
+                || cache.ConfiguredWindowPages != vsmRasterWindowPages)
+            {
+                CoreUtils.SetKeyword(material, vsmCasterKeyword, enableVsmCaster);
+                CoreUtils.SetKeyword(material, vsmPageCasterKeyword, enableVsmPageCaster);
+                if (vsmRasterWindowPagesId != 0)
+                    material.SetInteger(vsmRasterWindowPagesId, vsmRasterWindowPages);
+                if (zWriteId != 0)
+                    material.SetFloat(zWriteId, zWrite);
+                if (zTestId != 0)
+                    material.SetFloat(zTestId, (float)zTest);
+                cache.StateConfigured = true;
+                cache.ConfiguredVsm = enableVsmCaster;
+                cache.ConfiguredVsmPageCaster = enableVsmPageCaster;
+                cache.ConfiguredWindowPages = vsmRasterWindowPages;
+            }
+
+            passIndex = cache.ShadowPassIndex;
+            return material;
+        }
+
+        private void DisposeProgrammableSlabShadowMaterials()
+        {
+            foreach (KeyValuePair<VividSlabProgramDescriptor, ProgrammableSlabShadowMaterialCache> kvp
+                     in m_ProgrammableSlabShadowMaterials)
+            {
+                ProgrammableSlabShadowMaterialCache cache = kvp.Value;
+                if (cache?.CullMaterials == null)
+                    continue;
+                for (int i = 0; i < cache.CullMaterials.Length; i++)
+                {
+                    if (cache.CullMaterials[i] != null)
+                    {
+                        CoreUtils.Destroy(cache.CullMaterials[i]);
+                        cache.CullMaterials[i] = null;
+                    }
+                }
+            }
+            m_ProgrammableSlabShadowMaterials.Clear();
         }
 
         private protected struct MeshletShadowRecordContext

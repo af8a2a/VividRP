@@ -44,7 +44,7 @@ namespace VividRP.Editor.GPUDriven
                             : "Single-Closure (Tier 1/2)");
                     EditorGUILayout.TextField(
                         "Features",
-                        $"GraphSurface={descriptor.HasLinkedGraphSurface}, PostHook={descriptor.HasCustomSurfaceHook}, CustomCoverage={descriptor.HasCustomCoverage}, WPO={descriptor.HasVertexOffset}, Shells={descriptor.ShellLayerCount}, ProgVisRaster={descriptor.RequiresProgrammableVisibilityRaster}");
+                        $"GraphSurface={descriptor.HasLinkedGraphSurface}, PostHook={descriptor.HasCustomSurfaceHook}, CustomCoverage={descriptor.HasCustomCoverage}, WPO={descriptor.HasVertexOffset}, Shells={descriptor.ShellLayerCount}/{descriptor.ShadowShellLayerCount}, ProgVisRaster={descriptor.RequiresProgrammableVisibilityRaster}");
                     EditorGUILayout.TextField("Content Hash", $"0x{descriptor.SourceContentHash:X8}");
                     if (!string.IsNullOrEmpty(descriptor.BaseTemplateAssetPath))
                         EditorGUILayout.TextField("Base Template", descriptor.BaseTemplateAssetPath);

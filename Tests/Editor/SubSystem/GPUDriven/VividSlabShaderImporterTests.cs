@@ -1277,6 +1277,84 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Assemble_ShadowShellLayersAndDistanceLod_WiresProgrammableVsmShadowCasterAndLodControls()
+        {
+            string templatePath = VividPackagePathUtility.GetPreferredAssetPath(BaseTemplateRelativePath);
+            string templateText = File.ReadAllText(templatePath);
+            string furPath = VividPackagePathUtility.GetPreferredAssetPath(FurSlabRelativePath);
+
+            VividSlabShaderAssemblyResult furResult = VividSlabShaderAssembler.Assemble(
+                furPath,
+                File.ReadAllText(furPath),
+                templatePath,
+                templateText,
+                resolvedLinkedGraphPath: string.Empty,
+                compiledGraphProgram: null);
+
+            Assert.That(furResult.Succeeded, Is.True);
+            Assert.That(furResult.ShellLayerCount, Is.EqualTo(8));
+            Assert.That(furResult.ShadowShellLayerCount, Is.EqualTo(2));
+
+            // Hidden VSM/CSM shadow raster properties must be injected automatically into Properties.
+            Assert.That(furResult.RasterShaderSource, Does.Contain("_ZWrite(\"ZWrite\", Float) = 1"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("_ZTest(\"ZTest\", Float) = 4"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("_VSMRasterWindowPages(\"Raster Window Pages\", Integer) = 1"));
+
+            // Programmable GPUDriven shadow caster pass supports both VSM page raster and CSM.
+            Assert.That(furResult.RasterShaderSource, Does.Contain("Name \"VividVisibilityShadowCaster\""));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("#pragma multi_compile_local _ VIVID_VSM_PAGE_CASTER"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("meshletSphereWS.w += max(instanceData.AABBMax.w, 0.0f);"));
+            Assert.That(furResult.RasterShaderSource, Does.Contain("VividInsertVSMDepth(physicalTexel, asuint(saturate(input.positionCS.z)));"));
+
+            // Distance Shell LOD & Sparse Shadow Shell parameters reflected into GPUDriven lanes.
+            Assert.That(FindParamSlot(furResult.ParameterSlots, "_GPUDrivenDistanceLod").DefaultValue.x, Is.EqualTo(1.0f).Within(1e-5f));
+            Assert.That(FindParamSlot(furResult.ParameterSlots, "_GPUDrivenLodNearDistance").DefaultValue.x, Is.EqualTo(4.0f).Within(1e-5f));
+            Assert.That(FindParamSlot(furResult.ParameterSlots, "_GPUDrivenLodFarDistance").DefaultValue.x, Is.EqualTo(25.0f).Within(1e-5f));
+            Assert.That(FindParamSlot(furResult.ParameterSlots, "_GPUDrivenMinLodShellCount").DefaultValue.x, Is.EqualTo(2.0f).Within(1e-5f));
+            Assert.That(FindParamSlot(furResult.ParameterSlots, "_GPUDrivenShadowShellCount").DefaultValue.x, Is.EqualTo(2.0f).Within(1e-5f));
+            Assert.That(FindParamSlot(furResult.ParameterSlots, "_GPUDrivenShadowMaxHeight").DefaultValue.x, Is.EqualTo(0.35f).Within(1e-5f));
+
+            // Compute Resolve passes per-instance world origin for exact agreement with VisibilityRaster Distance LOD.
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("shellCtx.instancePositionWS = instancePosWS;"));
+            Assert.That(furResult.ComputeResolveSource, Does.Contain("VividComputeSlabLodShellCount("));
+
+            // ShadowShellLayerCount clamps to ShellLayerCount.
+            var descriptor = ScriptableObject.CreateInstance<VividSlabProgramDescriptor>();
+            try
+            {
+                descriptor.Apply(
+                    rasterShader: null,
+                    resolveComputeShader: null,
+                    resolveKernelName: VividSlabProgramDescriptor.DefaultResolveKernelName,
+                    shaderName: furResult.ShaderName,
+                    baseTemplateAssetPath: templatePath,
+                    linkedGraphAssetPath: string.Empty,
+                    estimatedSubstrateBytesPerPixel: furResult.EstimatedSubstrateBytesPerPixel,
+                    parameterStrideInWords: furResult.ParameterStrideInWords,
+                    parameters: furResult.ParameterSlots,
+                    resources: furResult.ResourceSlots,
+                    hasLinkedGraphSurface: false,
+                    hasCustomSurfaceHook: true,
+                    sourceContentHash: furResult.SourceContentHash,
+                    hasImportErrors: false,
+                    diagnostics: Array.Empty<string>(),
+                    hasCustomCoverage: true,
+                    hasVertexOffset: true,
+                    worldPositionOffsetPadding: furResult.WorldPositionOffsetPadding,
+                    worldPositionOffsetPaddingProperties: furResult.WorldPositionOffsetPaddingProperties,
+                    shellLayerCount: 4,
+                    shadowShellLayerCount: 12);
+
+                Assert.That(descriptor.ShellLayerCount, Is.EqualTo(4));
+                Assert.That(descriptor.ShadowShellLayerCount, Is.EqualTo(4));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(descriptor);
+            }
+        }
+
         private static VividSlabParameterSlot FindParamSlot(VividSlabParameterSlot[] slots, string propName)
         {
             for (int i = 0; i < slots.Length; i++)

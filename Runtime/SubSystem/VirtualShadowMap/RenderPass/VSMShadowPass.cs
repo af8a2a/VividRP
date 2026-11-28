@@ -1150,6 +1150,132 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_DrawProperties);
                 }
             }
+
+            if (system?.SceneData?.HasProgrammableVisibilityRasterPrograms() == true)
+            {
+                submittedMask |= DrawProgrammableSlabVirtualShadowMapPages(
+                    nativeCmd,
+                    system,
+                    requestsBuffer,
+                    argsBuffer,
+                    virtualTextureReady,
+                    in virtualTextureBinding);
+            }
+
+            return submittedMask;
+        }
+
+        private uint DrawProgrammableSlabVirtualShadowMapPages(
+            CommandBuffer nativeCmd,
+            VividGPUDrivenSystem system,
+            GraphicsBuffer requestsBuffer,
+            GraphicsBuffer argsBuffer,
+            bool virtualTextureReady,
+            in VirtualTextureSpaceBinding virtualTextureBinding)
+        {
+            uint submittedMask = 0u;
+            bool windows = VirtualShadowMapPrototypeRuntime.PageWindowsEnabled;
+            int rasterWindowPages = VirtualShadowMapPrototypeRuntime.RasterWindowScale;
+            float zWrite = windows ? 0.0f : 1.0f;
+            CompareFunction zTest = windows ? CompareFunction.Always : CompareFunction.LessEqual;
+
+            var dynamicPrograms = system.SceneData.DynamicSlabPrograms;
+            for (int i = 0; i < dynamicPrograms.Count; i++)
+            {
+                VividDynamicSlabProgramBinding binding = dynamicPrograms[i];
+                if (!binding.RequiresProgrammableVisibilityRaster
+                    || binding.RasterShader == null
+                    || binding.Descriptor == null)
+                {
+                    continue;
+                }
+
+                if (!virtualTextureReady && binding.Descriptor.HasCustomCoverage)
+                    continue;
+
+                int shadowShellCount = Mathf.Clamp(
+                    binding.Descriptor.ShadowShellLayerCount,
+                    1,
+                    VividSlabProgramDescriptor.MaxSupportedShellLayerCount);
+                float uniformShellStep = shadowShellCount > 1
+                    ? 1.0f / (shadowShellCount - 1)
+                    : 1.0f;
+
+                for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
+                {
+                    VividRendererListID batchKey = (VividRendererListID)rendererListIndex;
+                    if (!system.IsShadowRendererBatchActive(batchKey))
+                        continue;
+
+                    Material material = GetOrCreateProgrammableSlabShadowMaterial(
+                        binding.Descriptor,
+                        binding.RasterShader,
+                        GetCullMode(batchKey),
+                        enableVsmCaster: true,
+                        enableVsmPageCaster: true,
+                        vsmRasterWindowPages: rasterWindowPages,
+                        zWrite: zWrite,
+                        zTest: zTest,
+                        vsmRasterWindowPagesId: RasterWindowPagesId,
+                        zWriteId: ZWriteId,
+                        zTestId: ZTestId,
+                        vsmCasterKeyword: VirtualShadowMapCasterKeywordName,
+                        vsmPageCasterKeyword: VirtualShadowMapPageCasterKeywordName,
+                        out int passIndex);
+                    if (material == null || passIndex < 0)
+                        continue;
+
+                    system.ConfigureTextureBackendKeyword(material);
+
+                    m_DrawProperties.Clear();
+                    m_DrawProperties.SetBuffer(VSMPrototypeMeshletPageRequestsId, requestsBuffer);
+                    m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, argsBuffer);
+                    m_DrawProperties.SetBuffer(
+                        VSMPrototypeMeshletRasterPagesId,
+                        VirtualShadowMapPrototypeRuntime.MeshletRasterPages);
+                    m_DrawProperties.SetInteger(s_TargetSlabProgramId, (int)(uint)binding.ProgramID);
+                    if (system.UsesVirtualTexture && virtualTextureReady)
+                    {
+                        GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(
+                            m_DrawProperties,
+                            virtualTextureBinding,
+                            m_VirtualTextureSpaceParams,
+                            m_VirtualTextureMipOffsets,
+                            m_VirtualTextureLayerFallbacks,
+                            m_FrameIndex,
+                            m_VirtualTextureFrameData.AdaptiveMipBias);
+                    }
+
+                    for (int shellIndex = shadowShellCount - 1; shellIndex >= 0; --shellIndex)
+                    {
+                        float uniformShellHeight = shadowShellCount > 1
+                            ? (float)shellIndex / (shadowShellCount - 1)
+                            : 0.0f;
+                        m_DrawProperties.SetVector(
+                            s_SlabShellParamsId,
+                            new Vector4(uniformShellHeight, uniformShellStep, shellIndex, shadowShellCount));
+
+                        for (int requestMode = 0; requestMode < 2; requestMode++)
+                        {
+                            m_DrawProperties.SetInteger(
+                                s_UnityBaseCommandIdId,
+                                requestMode * RendererListCount + rendererListIndex);
+                            submittedMask |= 1u << (requestMode * RendererListCount + rendererListIndex);
+                            nativeCmd.DrawProceduralIndirect(
+                                Matrix4x4.identity,
+                                material,
+                                passIndex,
+                                MeshTopology.Triangles,
+                                argsBuffer,
+                                VividGPUDrivenCullingBuffers.GetIndirectDrawArgsByteOffset(
+                                    requestMode,
+                                    rendererListIndex),
+                                m_DrawProperties);
+                        }
+                    }
+                }
+            }
+
             return submittedMask;
         }
 

@@ -15,6 +15,7 @@ struct VividSlabVertexContext
     uint parameterAddress;
     uint resourceAddress;
     uint materialIndex;
+    float3 instancePositionWS;
     float shellHeight;
     float shellStep;
     uint shellIndex;
@@ -59,6 +60,36 @@ float VividComputeSlabShellHeight(const uint shellIndex, const uint shellCount, 
 float VividComputeSlabShellStep(const uint shellCount)
 {
     return shellCount > 1u ? rcp((float)(shellCount - 1u)) : 1.0f;
+}
+
+// Camera-distance-scaled shell count matching VividFurShellRenderer.ComputeLodShellCount.
+// Evaluated from per-instance world origin so every vertex & pixel of an instance agrees.
+uint VividComputeSlabLodShellCount(
+    const uint baseShellCount,
+    const bool enableDistanceLod,
+    const float distanceToCamera,
+    const float nearDistance,
+    const float farDistance,
+    const uint minLodShellCount)
+{
+    const uint clampedBase = max(baseShellCount, 1u);
+    if (!enableDistanceLod)
+        return clampedBase;
+
+    const uint clampedMin = clamp(minLodShellCount, 1u, clampedBase);
+    if (clampedMin >= clampedBase)
+        return clampedBase;
+
+    const float nearDist = max(nearDistance, 0.0f);
+    const float farDist = max(nearDist + 0.001f, farDistance);
+    if (distanceToCamera <= nearDist)
+        return clampedBase;
+    if (distanceToCamera >= farDist)
+        return clampedMin;
+
+    const float t = saturate((distanceToCamera - nearDist) / (farDist - nearDist));
+    const uint lodCount = (uint)round(lerp((float)clampedBase, (float)clampedMin, t));
+    return clamp(lodCount, clampedMin, clampedBase);
 }
 
 // Multi-Closure evaluation result (Phase S2: up to 4 closures, 3 operators -> Substrate Tier 3).

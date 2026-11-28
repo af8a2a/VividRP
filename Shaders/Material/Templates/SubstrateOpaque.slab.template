@@ -91,6 +91,7 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.instancePositionWS = float3(UNITY_MATRIX_M[0][3], UNITY_MATRIX_M[1][3], UNITY_MATRIX_M[2][3]);
                 vctx.shellHeight = 0.0f;
                 vctx.shellStep = 1.0f;
                 vctx.shellIndex = 0u;
@@ -233,6 +234,7 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.instancePositionWS = float3(UNITY_MATRIX_M[0][3], UNITY_MATRIX_M[1][3], UNITY_MATRIX_M[2][3]);
                 vctx.shellHeight = 0.0f;
                 vctx.shellStep = 1.0f;
                 vctx.shellIndex = 0u;
@@ -365,6 +367,7 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.instancePositionWS = float3(UNITY_MATRIX_M[0][3], UNITY_MATRIX_M[1][3], UNITY_MATRIX_M[2][3]);
                 vctx.shellHeight = 0.0f;
                 vctx.shellStep = 1.0f;
                 vctx.shellIndex = 0u;
@@ -571,6 +574,7 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.instancePositionWS = float3(UNITY_MATRIX_M[0][3], UNITY_MATRIX_M[1][3], UNITY_MATRIX_M[2][3]);
                 vctx.shellHeight = 0.0f;
                 vctx.shellStep = 1.0f;
                 vctx.shellIndex = 0u;
@@ -807,6 +811,7 @@ SubShader
                 vctx.parameterAddress = 0u;
                 vctx.resourceAddress = 0u;
                 vctx.materialIndex = 0u;
+                vctx.instancePositionWS = float3(UNITY_MATRIX_M[0][3], UNITY_MATRIX_M[1][3], UNITY_MATRIX_M[2][3]);
                 vctx.shellHeight = 0.0f;
                 vctx.shellStep = 1.0f;
                 vctx.shellIndex = 0u;
@@ -822,6 +827,7 @@ SubShader
                 prevVctx.parameterAddress = 0u;
                 prevVctx.resourceAddress = 0u;
                 prevVctx.materialIndex = 0u;
+                prevVctx.instancePositionWS = float3(UNITY_PREV_MATRIX_M[0][3], UNITY_PREV_MATRIX_M[1][3], UNITY_PREV_MATRIX_M[2][3]);
                 prevVctx.shellHeight = 0.0f;
                 prevVctx.shellStep = 1.0f;
                 prevVctx.shellIndex = 0u;
@@ -1014,6 +1020,10 @@ SubShader
             vctx.parameterAddress = runtimeHeader.ParameterAddress;
             vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
             vctx.materialIndex = instanceData.MaterialIndex;
+            vctx.instancePositionWS = float3(
+                instanceData.ObjectToWorldMatrix[0][3],
+                instanceData.ObjectToWorldMatrix[1][3],
+                instanceData.ObjectToWorldMatrix[2][3]);
             vctx.shellHeight = shellHeight;
             vctx.shellStep = shellStep;
             vctx.shellIndex = shellIndex;
@@ -1103,6 +1113,397 @@ SubShader
                 uv0Ddy,
                 input.geometricNormalWS,
                 barycentrics);
+        }
+        ENDHLSL
+    }
+
+    Pass
+    {
+        Name "VividVisibilityShadowCaster"
+        Tags { "LightMode" = "VividVisibilityShadowCaster" }
+
+        ZWrite [_ZWrite]
+        ZTest [_ZTest]
+        Cull [_Cull]
+        ColorMask 0
+
+        HLSLPROGRAM
+        #pragma target 5.0
+        #pragma require randomwrite
+        #pragma require wavebasic : VIVID_VSM_PAGE_CASTER
+        #pragma use_dxc
+        #pragma vertex VertSlabVisShadow
+        #pragma fragment FragSlabVisShadow
+        #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
+        #pragma multi_compile_local_fragment _ VIVID_VSM_CASTER
+        #pragma multi_compile_local _ VIVID_VSM_PAGE_CASTER
+
+        #define VIVID_SLAB_TARGET_VISIBILITY_RASTER 1
+        #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #define VIVIDRP_STANDARD_LIT_TO_OPENPBR_SUBSTRATE_ONLY 1
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividStandardLitToOpenPBR.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+        #if !defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+        #endif
+        #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSlabSurfaceContract.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapCaster.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Shadow/VirtualShadowMap/VividVirtualShadowMapProjection.hlsl"
+
+        #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
+        #include "UnityIndirect.cginc"
+
+        uint _TargetSlabProgramID;
+        float4 _VividSlabShellParams;
+        float4 _ShadowBias;
+        StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
+        #if defined(VIVID_VSM_PAGE_CASTER)
+            int _VSMRasterWindowPages;
+            StructuredBuffer<uint4> _VSMPrototypeMeshletPageRequests;
+            StructuredBuffer<uint> _VSMPrototypeMeshletRasterPages;
+        #endif
+        StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
+        ByteAddressBuffer _SharedIndexBuffer;
+
+        VIVID_SLAB_VISIBILITY_REFLECTED_ACCESSORS
+        VIVID_SLAB_USER_VERTEX_HOOK
+        VIVID_SLAB_USER_COVERAGE_HOOK
+
+        struct Attributes
+        {
+            uint vertexID : SV_VertexID;
+            uint instanceID : SV_InstanceID;
+        };
+
+        struct Varyings
+        {
+            float4 positionCS : SV_POSITION;
+            float2 uv0 : TEXCOORD0;
+            float3 positionWS : TEXCOORD1;
+            float3 geometricNormalWS : TEXCOORD2;
+            float4 geometricTangentWS : TEXCOORD3;
+            nointerpolation uint3 materialIds : TEXCOORD4;
+            nointerpolation float4 shellParams : TEXCOORD5;
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                float4 pageClipDistances : SV_ClipDistance0;
+                nointerpolation uint virtualPageIndex : TEXCOORD6;
+                nointerpolation uint2 windowExtent : TEXCOORD7;
+                uint renderTargetArrayIndex : SV_RenderTargetArrayIndex;
+            #endif
+        };
+
+        uint VividSlabVisShadowPullIndex(const VividDecodedMeshlet meshlet, const uint indexID)
+        {
+            const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
+            const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
+            const uint shiftAmount = (absoluteIndexID % 4u) * 8u;
+            return (packedIndices >> shiftAmount) & 0xFFu;
+        }
+
+        float4 ApplySlabVisShadowClamping(float4 positionCS)
+        {
+            #if UNITY_REVERSED_Z
+                float clampedZ = min(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
+            #else
+                float clampedZ = max(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
+            #endif
+            positionCS.z = lerp(positionCS.z, clampedZ, round(_ShadowBias.z) == 1.0 ? 1.0 : 0.0);
+            return positionCS;
+        }
+
+        #if defined(VIVID_VSM_PAGE_CASTER)
+        float4 GetSlabVSMPageClipDistances(
+            float4 positionCS,
+            uint virtualPageIndex,
+            uint cascadeIndex,
+            uint2 windowExtent)
+        {
+            const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+            const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
+            const uint cascadePageIndex = virtualPageIndex - cascadeIndex * pagesPerCascade;
+            const uint2 pageCoord = uint2(
+                cascadePageIndex % pagesPerAxis,
+                cascadePageIndex / pagesPerAxis);
+            const float2 pageMinUV = (float2)pageCoord / (float)pagesPerAxis;
+            const float2 pageMaxUV = (float2)(pageCoord + windowExtent) / (float)pagesPerAxis;
+            const float minNdcX = pageMinUV.x * 2.0 - 1.0;
+            const float maxNdcX = pageMaxUV.x * 2.0 - 1.0;
+            #if UNITY_UV_STARTS_AT_TOP
+                const float minNdcY = 1.0 - pageMaxUV.y * 2.0;
+                const float maxNdcY = 1.0 - pageMinUV.y * 2.0;
+            #else
+                const float minNdcY = pageMinUV.y * 2.0 - 1.0;
+                const float maxNdcY = pageMaxUV.y * 2.0 - 1.0;
+            #endif
+            return float4(
+                positionCS.x - minNdcX * positionCS.w,
+                maxNdcX * positionCS.w - positionCS.x,
+                positionCS.y - minNdcY * positionCS.w,
+                maxNdcY * positionCS.w - positionCS.y);
+        }
+        #endif
+
+        Varyings VertSlabVisShadow(Attributes input)
+        {
+            InitIndirectDrawArgs(0);
+
+            Varyings output;
+            output.positionCS = float4(-2.0f, -2.0f, 0.0f, 1.0f);
+            output.uv0 = 0.0f;
+            output.positionWS = 0.0f;
+            output.geometricNormalWS = float3(0.0f, 0.0f, 1.0f);
+            output.geometricTangentWS = float4(1.0f, 0.0f, 0.0f, 1.0f);
+            output.materialIds = 0u;
+            output.shellParams = float4(0.0f, 1.0f, 0.0f, 1.0f);
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                output.pageClipDistances = -1.0f;
+                output.virtualPageIndex = 0u;
+                output.windowExtent = 1u;
+                output.renderTargetArrayIndex = 0u;
+            #endif
+
+            const uint instanceID = GetIndirectInstanceID_Base(input.instanceID);
+            const uint vertexID = GetIndirectVertexID_Base(input.vertexID);
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                uint4 pageRequest;
+                uint virtualPageIndex;
+                uint cascadeIndex;
+                uint2 windowExtent = 1u;
+                if (GetCommandID(0) >= VIVIDRENDERERLISTID_COUNT)
+                {
+                    const uint pageCount = _VSMPrototypeMeshletRasterPages[0];
+                    if (pageCount == 0u)
+                        return output;
+                    const uint localInstance = GetIndirectInstanceID(input.instanceID);
+                    const uint requestEnd = instanceID - localInstance;
+                    pageRequest = _VSMPrototypeMeshletPageRequests[
+                        requestEnd - 1u - localInstance / pageCount];
+                    const uint pagesPerAxis = (uint)max(_VSMPrototypePagesPerAxis, 1);
+                    const uint pagesPerCascade = pagesPerAxis * pagesPerAxis;
+                    cascadeIndex = pageRequest.w / pagesPerCascade;
+                    uint pageOrdinal = localInstance % pageCount;
+                    if (pageOrdinal >= _VSMPrototypeMeshletRasterPages[1u + cascadeIndex])
+                        return output;
+                    uint pageOffset = _VSMPrototypeMeshletRasterPages[1u + VIVID_VSM_RASTER_MAX_LEVELS + cascadeIndex];
+                    virtualPageIndex = _VSMPrototypeMeshletRasterPages[pageOffset + pageOrdinal];
+                    uint2 windowMin = uint2(virtualPageIndex % pagesPerAxis,
+                        (virtualPageIndex / pagesPerAxis) % pagesPerAxis);
+                    uint2 boundsMin = uint2(pageRequest.z % pagesPerAxis,
+                        (pageRequest.z / pagesPerAxis) % pagesPerAxis);
+                    uint2 boundsMax = uint2(pageRequest.w % pagesPerAxis,
+                        (pageRequest.w / pagesPerAxis) % pagesPerAxis);
+                    uint2 low = max(windowMin, boundsMin);
+                    uint2 high = min(windowMin + (uint)max(_VSMRasterWindowPages, 1) - 1u, boundsMax);
+                    if (any(low > high)) return output;
+                    virtualPageIndex = cascadeIndex * pagesPerCascade + low.y * pagesPerAxis + low.x;
+                    windowExtent = high - low + 1u;
+                }
+                else
+                {
+                    pageRequest = _VSMPrototypeMeshletPageRequests[instanceID];
+                    virtualPageIndex = pageRequest.z;
+                    cascadeIndex = pageRequest.w & 0xffu;
+                    windowExtent = VividVSMDecodePageWindow(pageRequest.w);
+                }
+                VividMeshletRenderRequestPacked renderRequest;
+                renderRequest.InstanceID_LOD = pageRequest.x;
+                renderRequest.MeshletID = pageRequest.y;
+            #else
+                const VividMeshletRenderRequestPacked renderRequest = _VisibleMeshletRenderRequests[instanceID];
+            #endif
+
+            const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+            VividMaterialRuntimeHeader runtimeHeader;
+            VividMaterialProgramData programData;
+            const uint programStatus = VividGetMaterialProgramStatus(
+                instanceData.MaterialIndex,
+                runtimeHeader,
+                programData);
+            if (programStatus != VIVID_MATERIAL_PROGRAM_KNOWN
+                || runtimeHeader.ProgramID != _TargetSlabProgramID)
+            {
+                return output;
+            }
+
+            const VividDecodedMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+            #if defined(VIVID_VSM_PAGE_CASTER)
+            {
+                float4 meshletSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+                meshletSphereWS.w += max(instanceData.AABBMax.w, 0.0f);
+                if (all(windowExtent == 1u) && !VividVSMCasterReceiverSphere(virtualPageIndex,
+                        meshletSphereWS,
+                        _VSMProjections[cascadeIndex].worldToShadow))
+                {
+                    return output;
+                }
+            }
+            #endif
+
+            const uint indexCount = meshlet.TriangleCount * 3u;
+            if (vertexID >= indexCount)
+                return output;
+
+            const uint vertexIndex = VividSlabVisShadowPullIndex(meshlet, vertexID);
+            const VividDecodedMeshletVertex vertex = DecodeVividMeshletVertex(
+                _SharedVertexBuffer[meshlet.VertexOffset + vertexIndex]);
+
+            float3 positionWS = TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz);
+            float3 normalWS = SafeNormalize(mul(vertex.Normal.xyz, (float3x3)instanceData.WorldToObjectMatrix));
+
+            const uint shellIndex = (uint)round(max(_VividSlabShellParams.z, 0.0f));
+            const uint maxShellCount = max((uint)round(_VividSlabShellParams.w), 1u);
+            float shellHeight = _VividSlabShellParams.x;
+            float shellStep = _VividSlabShellParams.y > 0.0f
+                ? _VividSlabShellParams.y
+                : VividComputeSlabShellStep(maxShellCount);
+
+            VividSlabVertexContext vctx;
+            vctx.positionOS = vertex.Position.xyz;
+            vctx.positionWS = positionWS;
+            vctx.normalOS = vertex.Normal.xyz;
+            vctx.normalWS = normalWS;
+            vctx.uv0 = vertex.UV.xy;
+            vctx.parameterAddress = runtimeHeader.ParameterAddress;
+            vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
+            vctx.materialIndex = instanceData.MaterialIndex;
+            vctx.instancePositionWS = float3(
+                instanceData.ObjectToWorldMatrix[0][3],
+                instanceData.ObjectToWorldMatrix[1][3],
+                instanceData.ObjectToWorldMatrix[2][3]);
+            vctx.shellHeight = shellHeight;
+            vctx.shellStep = shellStep;
+            vctx.shellIndex = shellIndex;
+            vctx.shellCount = maxShellCount;
+
+            #if defined(VIVID_SLAB_HAS_SHELL_PARAMS_HOOK)
+            {
+                if (!VividSlabResolveShellLayer(vctx, shellHeight, shellStep))
+                    return output;
+                vctx.shellHeight = shellHeight;
+                vctx.shellStep = shellStep;
+            }
+            #endif
+
+            #if defined(VIVID_SLAB_HAS_VERTEX_OFFSET)
+            {
+                positionWS += VividSlabEvaluateVertexOffset(vctx);
+            }
+            #endif
+
+            float3 tangentWS = mul((float3x3)instanceData.ObjectToWorldMatrix, vertex.Tangent.xyz);
+            float tangentSign = (instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u
+                ? -vertex.Tangent.w
+                : vertex.Tangent.w;
+
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                output.positionCS = mul(_VSMProjections[cascadeIndex].worldToClip, float4(positionWS, 1.0f));
+            #else
+                output.positionCS = TransformWorldToHClip(positionWS);
+            #endif
+            output.positionCS = ApplySlabVisShadowClamping(output.positionCS);
+            output.uv0 = vertex.UV.xy;
+            output.positionWS = positionWS;
+            output.geometricNormalWS = normalWS;
+            output.geometricTangentWS = dot(tangentWS, tangentWS) > 1e-8f
+                ? float4(normalize(tangentWS), tangentSign)
+                : float4(1.0f, 0.0f, 0.0f, 1.0f);
+            output.materialIds = uint3(
+                runtimeHeader.ParameterAddress,
+                runtimeHeader.ResourceBindingAddress,
+                instanceData.MaterialIndex);
+            output.shellParams = float4(shellHeight, shellStep, (float)shellIndex, (float)maxShellCount);
+
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                output.pageClipDistances = _VSMRasterWindowPages > 1 ? 1.0f
+                    : GetSlabVSMPageClipDistances(output.positionCS, virtualPageIndex, cascadeIndex, windowExtent);
+                const uint pagesPerAxis = (uint)_VSMPrototypePagesPerAxis;
+                const uint pageInProjection = virtualPageIndex % (pagesPerAxis * pagesPerAxis);
+                const uint2 origin = uint2(pageInProjection % pagesPerAxis,
+                    pageInProjection / pagesPerAxis) * (uint)_VSMPrototypePageSize;
+                output.positionCS = VividVSMToRasterClip(output.positionCS, origin,
+                    (uint)_VSMPrototypeVirtualResolution,
+                    (uint)_VSMPrototypePageSize * (uint)max(_VSMRasterWindowPages, 1));
+                output.virtualPageIndex = virtualPageIndex;
+                output.windowExtent = windowExtent;
+                output.renderTargetArrayIndex = _VSMRasterWindowPages > 1
+                    ? 0u : VividVSMPageTableSlot(_VSMPrototypePageTable[virtualPageIndex],
+                        (uint)_VSMPrototypePhysicalPagesPerRow);
+            #endif
+
+            return output;
+        }
+
+        void FragSlabVisShadow(Varyings input)
+        {
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+                const float2 uv0Ddx = ddx(input.uv0);
+                const float2 uv0Ddy = ddy(input.uv0);
+                const float3 posWSDdx = ddx(input.positionWS);
+                const float3 posWSDdy = ddy(input.positionWS);
+            #endif
+
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                uint2 physicalTexel;
+                bool validTexel;
+                if (_VSMRasterWindowPages > 1)
+                    validTexel = VividTryResolveVSMWindowPhysicalTexel(input.positionCS,
+                        input.virtualPageIndex, input.windowExtent, physicalTexel);
+                else
+                    validTexel = VividTryResolveVSMPagePhysicalTexel(input.positionCS,
+                        input.virtualPageIndex, physicalTexel);
+                if (!validTexel)
+                    return;
+
+                #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+                [branch] if (_VSMRasterWindowPages > 1)
+                {
+                    uint slice = _VSMPrototypeCasterLayer == 0
+                        ? VIVID_VSM_STATIC_DEPTH_SLICE : VIVID_VSM_FINAL_DEPTH_SLICE;
+                    uint depthPassed = (uint)(_VSMPrototypePhysicalPage[uint3(physicalTexel, slice)]
+                        < asuint(saturate(input.positionCS.z)));
+                    uint quadPassed = depthPassed | QuadReadAcrossX(depthPassed)
+                        | QuadReadAcrossY(depthPassed) | QuadReadAcrossDiagonal(depthPassed);
+                    [branch] if (quadPassed == 0u) return;
+                }
+                #endif
+            #endif
+
+            #if defined(VIVID_SLAB_HAS_CUSTOM_COVERAGE)
+            {
+                VividSlabEvalContext ctx;
+                ctx.uv0 = input.uv0;
+                ctx.uv0Ddx = uv0Ddx;
+                ctx.uv0Ddy = uv0Ddy;
+                ctx.geometryNormalWS = SafeNormalize(input.geometricNormalWS);
+                ctx.geometryTangentWS = float4(
+                    SafeNormalize(input.geometricTangentWS.xyz),
+                    input.geometricTangentWS.w);
+                ctx.positionWS = input.positionWS;
+                ctx.positionWSDdx = posWSDdx;
+                ctx.positionWSDdy = posWSDdy;
+                ctx.positionCS = input.positionCS;
+                ctx.parameterAddress = input.materialIds.x;
+                ctx.resourceAddress = input.materialIds.y;
+                ctx.materialIndex = input.materialIds.z;
+                ctx.shellHeight = input.shellParams.x;
+                ctx.shellStep = input.shellParams.y;
+                ctx.shellIndex = (uint)round(max(input.shellParams.z, 0.0f));
+                ctx.shellCount = max((uint)round(input.shellParams.w), 1u);
+
+                float alpha = 1.0f;
+                float cutoff = 0.5f;
+                VividSlabEvaluateCoverage(ctx, alpha, cutoff);
+                clip(alpha - cutoff);
+            }
+            #endif
+
+            #if defined(VIVID_VSM_PAGE_CASTER)
+                VividInsertVSMDepth(physicalTexel, asuint(saturate(input.positionCS.z)));
+            #else
+                VividWriteVSMDepth(input.positionCS);
+            #endif
         }
         ENDHLSL
     }

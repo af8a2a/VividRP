@@ -172,6 +172,9 @@ namespace VividRP.Runtime.GPUDriven
         private int m_ShellLayerCount = 1;
 
         [SerializeField]
+        private int m_ShadowShellLayerCount = 1;
+
+        [SerializeField]
         private uint m_SourceContentHash;
 
         [SerializeField]
@@ -239,6 +242,11 @@ namespace VividRP.Runtime.GPUDriven
 
         public int ShellLayerCount => Mathf.Clamp(m_ShellLayerCount, 1, MaxSupportedShellLayerCount);
 
+        public int ShadowShellLayerCount => Mathf.Clamp(
+            m_ShadowShellLayerCount > 0 ? m_ShadowShellLayerCount : m_ShellLayerCount,
+            1,
+            ShellLayerCount);
+
         public bool RequiresProgrammableVisibilityRaster =>
             m_HasCustomCoverage || m_HasVertexOffset || m_ShellLayerCount > 1;
 
@@ -279,7 +287,8 @@ namespace VividRP.Runtime.GPUDriven
             bool hasVertexOffset = false,
             float worldPositionOffsetPadding = 0.0f,
             string[] worldPositionOffsetPaddingProperties = null,
-            int shellLayerCount = 1)
+            int shellLayerCount = 1,
+            int shadowShellLayerCount = 0)
         {
             m_RasterShader = rasterShader;
             m_ResolveComputeShader = resolveComputeShader;
@@ -306,6 +315,9 @@ namespace VividRP.Runtime.GPUDriven
                 : 0.0f;
             m_WorldPositionOffsetPaddingProperties = worldPositionOffsetPaddingProperties ?? Array.Empty<string>();
             m_ShellLayerCount = Mathf.Clamp(shellLayerCount, 1, MaxSupportedShellLayerCount);
+            m_ShadowShellLayerCount = shadowShellLayerCount > 0
+                ? Mathf.Clamp(shadowShellLayerCount, 1, m_ShellLayerCount)
+                : m_ShellLayerCount;
             m_WpoPaddingPropertyIds = null;
             m_SourceContentHash = sourceContentHash;
             m_HasImportErrors = hasImportErrors;

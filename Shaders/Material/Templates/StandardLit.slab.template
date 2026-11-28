@@ -437,6 +437,10 @@ SubShader
                     vctx.parameterAddress = runtimeHeader.ParameterAddress;
                     vctx.resourceAddress = runtimeHeader.ResourceBindingAddress;
                     vctx.materialIndex = instanceData.MaterialIndex;
+                    vctx.instancePositionWS = float3(
+                        instanceData.ObjectToWorldMatrix[0][3],
+                        instanceData.ObjectToWorldMatrix[1][3],
+                        instanceData.ObjectToWorldMatrix[2][3]);
                     vctx.shellHeight = 0.0f;
                     vctx.shellStep = 1.0f;
                     vctx.shellIndex = 0u;

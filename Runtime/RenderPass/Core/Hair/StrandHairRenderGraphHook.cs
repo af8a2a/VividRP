@@ -31,6 +31,10 @@ namespace VividRP.Runtime.RenderPass.Core
             public BufferHandle DirectionalLights;
             public BufferHandle PunctualLights;
             public BufferHandle AreaLights;
+            public BufferHandle ReflectionProbes;
+            public BufferHandle LayeredLightList;
+            public BufferHandle LayeredOffset;
+            public BufferHandle LogBaseBuffer;
             public TextureHandle CsmShadowAtlas;
             public TextureHandle SkyIblCubemap;
         }
@@ -46,6 +50,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly BaseRenderFunc<ShadePassData, ComputeGraphContext> s_ExecuteShade = ExecuteShade;
         private static readonly BaseRenderFunc<CompPassData, ComputeGraphContext> s_ExecuteComp = ExecuteComp;
 
+        private static readonly List<BufferHandle> s_SlotClipHandles = new List<BufferHandle>(16);
         private static readonly List<BufferHandle> s_SlotMaskHandles = new List<BufferHandle>(16);
         private static readonly List<BufferHandle> s_SlotVertListHandles = new List<BufferHandle>(16);
         private static readonly List<BufferHandle> s_SlotShadeArgsHandles = new List<BufferHandle>(16);
@@ -71,6 +76,7 @@ namespace VividRP.Runtime.RenderPass.Core
             s_HasPendingComposition = false;
             s_PendingColorHandle = default;
             s_PendingVisAtlasHandle = default;
+            s_SlotClipHandles.Clear();
             s_SlotMaskHandles.Clear();
             s_SlotVertListHandles.Clear();
             s_SlotShadeArgsHandles.Clear();
@@ -190,6 +196,10 @@ namespace VividRP.Runtime.RenderPass.Core
             BufferHandle dirLightsHandle = ResolveBufferHandle(deferredLightingPass.DirectionalLightBuffer);
             BufferHandle puncLightsHandle = ResolveBufferHandle(deferredLightingPass.PunctualLightBuffer);
             BufferHandle areaLightsHandle = ResolveBufferHandle(deferredLightingPass.AreaLightBuffer);
+            BufferHandle reflProbesHandle = ResolveBufferHandle(deferredLightingPass.ReflectionProbeBuffer);
+            BufferHandle layeredLightListHandle = ResolveBufferHandle(deferredLightingPass.LayeredLightListBuffer);
+            BufferHandle layeredOffsetHandle = ResolveBufferHandle(deferredLightingPass.LayeredOffsetBuffer);
+            BufferHandle logBaseHandle = ResolveBufferHandle(deferredLightingPass.LogBaseBuffer);
             TextureHandle csmHandle = csmShadowAtlasTexture != null && csmShadowAtlasTexture.innerHandle.IsValid()
                 ? csmShadowAtlasTexture.innerHandle
                 : renderGraph.defaultResources.blackTextureArrayXR;
@@ -210,6 +220,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 shadeData.DirectionalLights = dirLightsHandle;
                 shadeData.PunctualLights = puncLightsHandle;
                 shadeData.AreaLights = areaLightsHandle;
+                shadeData.ReflectionProbes = reflProbesHandle;
+                shadeData.LayeredLightList = layeredLightListHandle;
+                shadeData.LayeredOffset = layeredOffsetHandle;
+                shadeData.LogBaseBuffer = logBaseHandle;
                 shadeData.CsmShadowAtlas = csmHandle;
                 shadeData.SkyIblCubemap = skyHandle;
 
@@ -219,10 +233,20 @@ namespace VividRP.Runtime.RenderPass.Core
                     shadeBuilder.UseBuffer(puncLightsHandle, AccessFlags.Read);
                 if (areaLightsHandle.IsValid())
                     shadeBuilder.UseBuffer(areaLightsHandle, AccessFlags.Read);
+                if (reflProbesHandle.IsValid())
+                    shadeBuilder.UseBuffer(reflProbesHandle, AccessFlags.Read);
+                if (layeredLightListHandle.IsValid())
+                    shadeBuilder.UseBuffer(layeredLightListHandle, AccessFlags.Read);
+                if (layeredOffsetHandle.IsValid())
+                    shadeBuilder.UseBuffer(layeredOffsetHandle, AccessFlags.Read);
+                if (logBaseHandle.IsValid())
+                    shadeBuilder.UseBuffer(logBaseHandle, AccessFlags.Read);
                 if (csmHandle.IsValid())
                     shadeBuilder.UseTexture(csmHandle, AccessFlags.Read);
                 if (skyHandle.IsValid())
                     shadeBuilder.UseTexture(skyHandle, AccessFlags.Read);
+                for (int i = 0; i < s_SlotClipHandles.Count; i++)
+                    shadeBuilder.UseBuffer(s_SlotClipHandles[i], AccessFlags.Read);
                 for (int i = 0; i < s_SlotMaskHandles.Count; i++)
                     shadeBuilder.UseBuffer(s_SlotMaskHandles[i], AccessFlags.Read);
                 for (int i = 0; i < s_SlotVertListHandles.Count; i++)
@@ -279,6 +303,7 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTexture hzbTexture,
             bool enableAsyncCompute)
         {
+            s_SlotClipHandles.Clear();
             s_SlotMaskHandles.Clear();
             s_SlotVertListHandles.Clear();
             s_SlotShadeArgsHandles.Clear();
@@ -304,6 +329,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     slotIdx,
                     gpuRes.VertexCount,
                     gpuRes.SegmentCount);
+                if (slot.PostTransformClipBuffer != null && slot.PostTransformClipBuffer.IsValid())
+                    s_SlotClipHandles.Add(renderGraph.ImportBuffer(slot.PostTransformClipBuffer));
                 if (slot.VisibleVertexMaskBuffer != null && slot.VisibleVertexMaskBuffer.IsValid())
                     s_SlotMaskHandles.Add(renderGraph.ImportBuffer(slot.VisibleVertexMaskBuffer));
                 if (slot.VisibleVertexListBuffer != null && slot.VisibleVertexListBuffer.IsValid())
@@ -333,6 +360,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (hzbHandle.IsValid())
                     visBuilder.UseTexture(hzbHandle, AccessFlags.Read);
                 visBuilder.UseBuffer(visAtlasHandle, AccessFlags.Write);
+                for (int i = 0; i < s_SlotClipHandles.Count; i++)
+                    visBuilder.UseBuffer(s_SlotClipHandles[i], AccessFlags.Write);
                 for (int i = 0; i < s_SlotMaskHandles.Count; i++)
                     visBuilder.UseBuffer(s_SlotMaskHandles[i], AccessFlags.Write);
                 for (int i = 0; i < s_SlotVertListHandles.Count; i++)
@@ -390,6 +419,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 data.DirectionalLights,
                 data.PunctualLights,
                 data.AreaLights,
+                data.ReflectionProbes,
+                data.LayeredLightList,
+                data.LayeredOffset,
+                data.LogBaseBuffer,
                 data.CsmShadowAtlas,
                 data.SkyIblCubemap);
         }

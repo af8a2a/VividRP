@@ -119,16 +119,38 @@ namespace VividRP.Editor.Tests
             Assert.That(slot.VisibleVertexMaskBuffer, Is.Not.Null);
             Assert.That(slot.VisibleVertexMaskBuffer.IsValid(), Is.True);
             Assert.That(slot.VisibleVertexMaskBuffer.count, Is.EqualTo(4)); // ceil(100 / 32)
+            Assert.That(slot.PostTransformClipBuffer, Is.Not.Null);
+            Assert.That(slot.PostTransformClipBuffer.IsValid(), Is.True);
+            Assert.That(slot.PostTransformClipBuffer.count, Is.EqualTo(100));
             Assert.That(slot.VertexShadingBuffer, Is.Not.Null);
             Assert.That(slot.VertexShadingBuffer.IsValid(), Is.True);
             Assert.That(slot.VertexShadingBuffer.count, Is.EqualTo(100));
 
             var maskRef = slot.VisibleVertexMaskBuffer;
+            var clipRef = slot.PostTransformClipBuffer;
             var shadeRef = slot.VertexShadingBuffer;
             slot.EnsureCapacity(vertexCount: 90, segmentCount: 70);
 
             Assert.That(slot.VisibleVertexMaskBuffer, Is.SameAs(maskRef));
+            Assert.That(slot.PostTransformClipBuffer, Is.SameAs(clipRef));
             Assert.That(slot.VertexShadingBuffer, Is.SameAs(shadeRef));
+        }
+
+        [Test]
+        public void StrandHairShadingPass_ClusteredLightGrid_EnabledByDefaultAndLifecycleClean()
+        {
+            Assert.That(VividRP.Runtime.RenderPass.Core.StrandHairShadingPass.EnableClusteredLightGrid, Is.True);
+            Assert.That(VividLightData.ReflectionProbeData.Stride, Is.GreaterThan(0));
+
+            var pass = new VividRP.Runtime.RenderPass.Core.StrandHairShadingPass();
+            try
+            {
+                pass.Create();
+            }
+            finally
+            {
+                pass.Dispose();
+            }
         }
     }
 }

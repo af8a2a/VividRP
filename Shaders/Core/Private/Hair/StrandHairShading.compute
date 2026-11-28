@@ -8,12 +8,24 @@
 
 #if !defined(VIVID_STANDALONE_DXC)
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PunctualLightCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividAreaLightCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
 #else
-// Standalone DXC ABI mirror matching Lighting.hlsl / PunctualLightCommon.hlsl
+// Standalone DXC ABI mirror matching Lighting.hlsl / PunctualLightCommon.hlsl /
+// VividAreaLightCommon.hlsl / ClusteredLighting.hlsl / LightingLoop.hlsl
 #define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_PROJECTOR_BOX 2u
+#define VIVID_AREA_LIGHT_TYPE_TUBE      0u
+#define VIVID_AREA_LIGHT_TYPE_RECTANGLE 1u
 #define PUNCTUAL_LIGHT_THRESHOLD 0.01f
+#define LIGHTCATEGORY_PUNCTUAL 0u
+#define LIGHTCATEGORY_AREA     1u
+#define LIGHTCATEGORY_ENV      2u
+#define LIGHT_CLUSTER_PACKING_COUNT_BITS 6u
+#define LIGHT_CLUSTER_PACKING_COUNT_MASK 63u
+#define LIGHT_CLUSTER_PACKING_OFFSET_BITS 26u
+#define LIGHT_CLUSTER_PACKING_OFFSET_MASK 67108863u
 
 struct DirectionalLightData
 {
@@ -76,11 +88,195 @@ struct AreaLightData
     uint affectVolumetric;
 };
 
+struct ReflectionProbeData
+{
+    float3 positionWS;
+    float blendDistance;
+    float3 extents;
+    uint isBoxProjection;
+    float3 rightWS;
+    float importance;
+    float3 upWS;
+    float weight;
+    float3 forwardWS;
+    float padding0;
+    float3 capturePositionWS;
+    float padding1;
+    float4 hdrData;
+    float4 atlasScaleOffset;
+    float4 atlasIndexAndSlice;
+    float3 blendDistancePositive;
+    float multiplier;
+    float3 blendDistanceNegative;
+    uint isProjectionInfinite;
+    float3 boxSideFadePositive;
+    float rangeCompressionFactor;
+    float3 boxSideFadeNegative;
+    float padding2;
+    float3 proxyPositionWS;
+    float padding3;
+    float3 proxyExtents;
+    float padding4;
+};
+
 StructuredBuffer<DirectionalLightData> _DirectionalLights;
 StructuredBuffer<PunctualLightData> _PunctualLights;
 StructuredBuffer<AreaLightData> _AreaLights;
+StructuredBuffer<ReflectionProbeData> _ReflectionProbes;
+StructuredBuffer<uint> g_vLayeredLightList;
+StructuredBuffer<uint> g_LayeredOffset;
+StructuredBuffer<float> g_logBaseBuffer;
 uint _DirectionalLightCount;
+uint _ReflectionProbeCount;
 int _MainDirectionalLightIndex;
+uint _ClusteredPunctualLightGridEnabled;
+uint _ClusteredAreaLightGridEnabled;
+uint _ClusteredReflectionProbeGridEnabled;
+int _ClusterTileSize;
+int _ClusterSliceCount;
+int _ClusterTileCountX;
+int _ClusterTileCountY;
+float _ClusterNearClip;
+float _ClusterFarClip;
+int _ClusterIsOrthographic;
+float g_fClustScale;
+float g_fClustBase;
+float g_fNearPlane;
+float g_fFarPlane;
+int g_iLog2NumClusters;
+uint g_isLogBaseBufferEnabled;
+uint _NumTileClusteredX;
+uint _NumTileClusteredY;
+
+struct VividClusteredLightCell
+{
+    uint offset;
+    uint count;
+};
+
+struct VividLightingLoopContext
+{
+    VividClusteredLightCell punctualLightCell;
+    VividClusteredLightCell areaLightCell;
+    VividClusteredLightCell reflectionProbeCell;
+    VividClusteredLightCell decalCell;
+};
+
+struct VividClusteredLighting
+{
+    static uint GetTileCountX() { return max(_NumTileClusteredX, max((uint)_ClusterTileCountX, 1u)); }
+    static uint GetTileCountY() { return max(_NumTileClusteredY, max((uint)_ClusterTileCountY, 1u)); }
+    static uint GetSliceCount() { return g_iLog2NumClusters > 0 ? (1u << g_iLog2NumClusters) : max((uint)_ClusterSliceCount, 1u); }
+
+    static uint2 GetTileCoord(uint2 pixelCoord)
+    {
+        uint tileSize = max((uint)_ClusterTileSize, 1u);
+        return uint2(
+            min(pixelCoord.x / tileSize, GetTileCountX() - 1u),
+            min(pixelCoord.y / tileSize, GetTileCountY() - 1u));
+    }
+
+    static float GetLogBase(uint2 tileCoord)
+    {
+        float logBase = max(g_fClustBase, 1.0001f);
+        if (g_isLogBaseBufferEnabled != 0u)
+            logBase = max(g_logBaseBuffer[tileCoord.y * GetTileCountX() + tileCoord.x], logBase);
+        return logBase;
+    }
+
+    static uint GetSliceIndex(uint2 pixelCoord, float viewDepth)
+    {
+        uint sliceCount = GetSliceCount();
+        if (sliceCount <= 1u)
+            return 0u;
+        float nearPlane = max(g_fNearPlane, 0.0001f);
+        float farPlane = max(g_fFarPlane, nearPlane + 0.0001f);
+        float depth = clamp(viewDepth, nearPlane, farPlane);
+        float logBase = GetLogBase(GetTileCoord(pixelCoord));
+        float rangeFitted = saturate((depth - nearPlane) / (farPlane - nearPlane));
+        float slice = log2(lerp(1.0f, pow(logBase, (float)sliceCount), rangeFitted)) / log2(logBase);
+        return min((uint)max((int)slice, 0), sliceCount - 1u);
+    }
+
+    static uint GetLayeredOffsetBufferIndex(uint lightCategory, uint2 tileCoord, uint sliceIndex)
+    {
+        uint numTilesX = GetTileCountX();
+        uint numTilesY = GetTileCountY();
+        uint numClusters = GetSliceCount();
+        return ((lightCategory * numClusters + sliceIndex) * numTilesY + tileCoord.y) * numTilesX + tileCoord.x;
+    }
+
+    static VividClusteredLightCell UnpackLightCell(uint packedOffset)
+    {
+        VividClusteredLightCell cell = (VividClusteredLightCell)0;
+        cell.offset = packedOffset & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+        cell.count = (packedOffset >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK;
+        return cell;
+    }
+
+    static uint FlattenClusterIndex(uint2 tileCoord, uint sliceIndex)
+    {
+        uint tileCountX = GetTileCountX();
+        uint tileCountY = GetTileCountY();
+        return tileCoord.x + tileCoord.y * tileCountX + sliceIndex * tileCountX * tileCountY;
+    }
+
+    static VividClusteredLightCell LoadPunctualLightCell(uint2 tileCoord, uint sliceIndex)
+    {
+        if (_ClusteredPunctualLightGridEnabled == 0u)
+            return (VividClusteredLightCell)0;
+        return UnpackLightCell(g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_PUNCTUAL, tileCoord, sliceIndex)]);
+    }
+
+    static VividClusteredLightCell LoadAreaLightCell(uint2 tileCoord, uint sliceIndex)
+    {
+        if (_ClusteredAreaLightGridEnabled == 0u)
+            return (VividClusteredLightCell)0;
+        return UnpackLightCell(g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_AREA, tileCoord, sliceIndex)]);
+    }
+
+    static VividClusteredLightCell LoadReflectionProbeCell(uint2 tileCoord, uint sliceIndex)
+    {
+        if (_ClusteredReflectionProbeGridEnabled == 0u)
+            return (VividClusteredLightCell)0;
+        return UnpackLightCell(g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_ENV, tileCoord, sliceIndex)]);
+    }
+
+    static uint LoadLightIndex(VividClusteredLightCell lightCell, uint localIndex)
+    {
+        return g_vLayeredLightList[lightCell.offset + localIndex];
+    }
+};
+
+struct VividLightingLoop
+{
+    static bool TryEvaluateReflectionProbes(
+        VividLightingLoopContext context,
+        float3 positionWS,
+        float3 normalWS,
+        float3 reflectionDirectionWS,
+        float perceptualRoughness,
+        out float3 radiance,
+        out float weight)
+    {
+        radiance = 0.0f.xxx;
+        weight = 0.0f;
+        return false;
+    }
+};
+
+void ApplyRectangularAreaLightBarnDoor(inout AreaLightData areaLight, float3 positionWS) {}
+
+float EvaluateAreaLightIntensity(AreaLightData areaLight, float3 positionWS)
+{
+    float3 unL = areaLight.positionWS - positionWS;
+    if (areaLight.lightType == VIVID_AREA_LIGHT_TYPE_RECTANGLE && dot(unL, areaLight.forwardWS) >= 0.0f)
+        return 0.0f;
+    float distSq = dot(unL, unL);
+    if (areaLight.range > 0.0f && distSq > areaLight.range * areaLight.range)
+        return 0.0f;
+    return 1.0f;
+}
 
 void GetVividPunctualLightVectors(
     float3 positionWS,
@@ -118,6 +314,7 @@ float VividPunctualLightAttenuationWithDistanceModification(
 StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
 StructuredBuffer<HairGroomVisibilitySH> _HairVisibilitySH;
 StructuredBuffer<float4> _HairWorldPosRadius;
+StructuredBuffer<float4> _HairPostTransformClip;
 StructuredBuffer<uint> _HairVisibleVertexMask;
 StructuredBuffer<uint> _HairVisibleVertexList;
 StructuredBuffer<uint> _HairIndirectShadeArgs;
@@ -135,6 +332,8 @@ SamplerState sampler_LinearClamp;
 uint _HairPunctualLightCount;
 uint _HairAreaLightCount;
 float3 _HairCameraPosWS;
+float2 _HairScreenSize;
+float4x4 _HairViewMatrix;
 
 float4x4 _CSMViewProjMatrices[4];
 float4 _CSMCascadeSpheres[4];
@@ -276,13 +475,194 @@ float3 AccumulateHairLight(
     return max(unshadowedRadiance, 0.0f.xxx) * (singleScatter + dualScatter + volumeScatter);
 }
 
+void EvaluateHairPunctualLight(
+    PunctualLightData pl,
+    VividHairFurBSDFInputs bsdfIn,
+    float3 posWS,
+    float3 viewDirWS,
+    float4 shCoeffsOS,
+    float selfShadowExtinction,
+    float dualScatterGain,
+    inout float3 totalRadiance,
+    inout float strongestLightLum,
+    inout float primarySelfShadow)
+{
+    float3 lightDirWS;
+    float4 distances;
+    GetVividPunctualLightVectors(posWS, pl, lightDirWS, distances);
+    if (distances.y <= 1e-6f)
+        return;
+
+    float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+        pl, posWS - pl.positionWS, distances);
+    if (attenuation <= 1e-5f)
+        return;
+
+    float lightSelfShadow;
+    float3 lightRadiance = max(pl.color, 0.0f.xxx) * attenuation;
+    totalRadiance += AccumulateHairLight(
+        bsdfIn, viewDirWS, lightDirWS, lightRadiance, 1.0f,
+        shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
+
+    float lum = dot(lightRadiance, float3(0.2126f, 0.7152f, 0.0722f));
+    if (lum > strongestLightLum)
+    {
+        strongestLightLum = lum;
+        primarySelfShadow = lightSelfShadow;
+    }
+}
+
+void EvaluateHairAreaLight(
+    AreaLightData al,
+    VividHairFurBSDFInputs bsdfIn,
+    float3 posWS,
+    float3 viewDirWS,
+    float3 reflDirWS,
+    float4 shCoeffsOS,
+    float selfShadowExtinction,
+    float dualScatterGain,
+    inout float3 totalRadiance,
+    inout float strongestLightLum,
+    inout float primarySelfShadow)
+{
+    ApplyRectangularAreaLightBarnDoor(al, posWS);
+    float windowAtten = EvaluateAreaLightIntensity(al, posWS);
+    if (windowAtten <= 1e-5f)
+        return;
+
+    float3 repPosWS = al.positionWS;
+    float area;
+    float frontFacing = 1.0f;
+    float effectiveRadius;
+
+    if (al.lightType == VIVID_AREA_LIGHT_TYPE_TUBE)
+    {
+        float halfLen = max(al.width * 0.5f, 1e-4f);
+        float tubeRadius = max(al.height * 0.5f, 1e-3f);
+        float3 l0 = (al.positionWS - al.rightWS * halfLen) - posWS;
+        float3 l1 = (al.positionWS + al.rightWS * halfLen) - posWS;
+        float3 ld = l1 - l0;
+        float rDotL0 = dot(reflDirWS, l0);
+        float rDotLd = dot(reflDirWS, ld);
+        float l0DotLd = dot(l0, ld);
+        float ldSq = max(dot(ld, ld), 1e-6f);
+        float t = saturate((rDotL0 * rDotLd - l0DotLd) / max(ldSq - rDotLd * rDotLd, 1e-5f));
+        repPosWS = posWS + l0 + ld * t;
+        area = max(al.width * (2.0f * tubeRadius) * 3.14159265f, 1e-4f);
+        effectiveRadius = tubeRadius;
+    }
+    else
+    {
+        float halfW = max(al.width * 0.5f, 1e-4f);
+        float halfH = max(al.height * 0.5f, 1e-4f);
+        float3 toPos = posWS - al.positionWS;
+
+        // Closest point on rectangle to shading point (stable grazing & backlit TT direction)
+        float2 closestLocal = clamp(
+            float2(dot(toPos, al.rightWS), dot(toPos, al.upWS)),
+            float2(-halfW, -halfH),
+            float2(halfW, halfH));
+        float3 closestPosWS = al.positionWS + al.rightWS * closestLocal.x + al.upWS * closestLocal.y;
+
+        // Representative point where cylinder reflection ray intersects rectangle plane (Karis 2013)
+        float rDotN = dot(reflDirWS, al.forwardWS);
+        float rayBlend = saturate(-rDotN * 4.0f);
+        float3 rayPosWS = closestPosWS;
+        if (rDotN < -1e-4f)
+        {
+            float tPlane = dot(al.positionWS - posWS, al.forwardWS) / rDotN;
+            if (tPlane > 0.0f)
+            {
+                float3 hitOffset = (posWS + reflDirWS * tPlane) - al.positionWS;
+                float2 hitLocal = clamp(
+                    float2(dot(hitOffset, al.rightWS), dot(hitOffset, al.upWS)),
+                    float2(-halfW, -halfH),
+                    float2(halfW, halfH));
+                rayPosWS = al.positionWS + al.rightWS * hitLocal.x + al.upWS * hitLocal.y;
+            }
+        }
+
+        repPosWS = lerp(closestPosWS, rayPosWS, rayBlend);
+        area = max(al.width * al.height, 1e-4f);
+        effectiveRadius = sqrt(area * VIVID_HAIR_INV_PI);
+    }
+
+    float3 toRep = repPosWS - posWS;
+    float distSq = max(dot(toRep, toRep), 1e-4f);
+    float invDist = rsqrt(distSq);
+    float3 lightDirWS = toRep * invDist;
+
+    if (al.lightType != VIVID_AREA_LIGHT_TYPE_TUBE)
+    {
+        frontFacing = saturate(dot(al.forwardWS, -lightDirWS));
+        if (frontFacing <= 1e-5f)
+            return;
+    }
+
+    float solidAngle = saturate(area * frontFacing / (distSq + area * VIVID_HAIR_INV_PI)) * windowAtten;
+    if (solidAngle <= 1e-5f)
+        return;
+
+    VividHairFurBSDFInputs areaBsdfIn = bsdfIn;
+    float sinAlpha = saturate(effectiveRadius * invDist);
+    areaBsdfIn.roughness = sqrt(saturate(bsdfIn.roughness * bsdfIn.roughness + 0.35f * sinAlpha * sinAlpha));
+
+    float lightSelfShadow;
+    float3 lightRadiance = max(al.color, 0.0f.xxx) * solidAngle;
+    totalRadiance += AccumulateHairLight(
+        areaBsdfIn, viewDirWS, lightDirWS, lightRadiance, 1.0f,
+        shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
+
+    float lum = dot(lightRadiance, float3(0.2126f, 0.7152f, 0.0722f));
+    if (lum > strongestLightLum)
+    {
+        strongestLightLum = lum;
+        primarySelfShadow = lightSelfShadow;
+    }
+}
+
 void ShadeHairVertex(uint vIdx)
 {
     HairGroomRestVertex rv = _HairRestVertices[vIdx];
     float3 posWS = _HairWorldPosRadius[vIdx].xyz;
+    float4 clipPos = _HairPostTransformClip[vIdx];
     float3 tangentWS = VividHairSafeNormalize(mul((float3x3)_HairLocalToWorld, rv.tangentOS), float3(0.0f, 1.0f, 0.0f));
     float3 viewDirWS = VividHairSafeNormalize(_HairCameraPosWS - posWS, float3(0.0f, 0.0f, 1.0f));
     float3 geomNormalWS = VividHairSafeNormalize(posWS - _HairBoundsCenterWS, float3(0.0f, 1.0f, 0.0f));
+    float3 cylNormalWS = VividComputeHairCylinderNormal(tangentWS, viewDirWS, geomNormalWS);
+    float3 reflDirWS = reflect(-viewDirWS, cylNormalWS);
+
+    // Resolve Clustered LightGrid cell (32x32 screen tile + adaptive log-Z slice) from pre-transformed clip coords.
+    // Vertices behind the camera near plane (rare partial near-clip endpoints) fall back safely to full-list loops.
+    float nearPlane = max(g_fNearPlane, 1e-4f);
+    float3 posVS = mul(_HairViewMatrix, float4(posWS, 1.0f)).xyz;
+    float viewDepth = max(-posVS.z, nearPlane);
+    bool hasValidClusterSample = (_ClusterIsOrthographic != 0)
+        ? (abs(clipPos.w) > 1e-5f)
+        : (clipPos.w > nearPlane && -posVS.z > nearPlane * 0.5f);
+
+    uint2 clusterTileCoord = uint2(0u, 0u);
+    uint clusterSliceIndex = 0u;
+    uint clusterKey = 0u;
+    VividLightingLoopContext lightLoop = (VividLightingLoopContext)0;
+
+    if (hasValidClusterSample)
+    {
+        float2 screenMaxF = max(_HairScreenSize - 1.0f, 0.0f.xx);
+        float2 pixelPosF = clamp(VividHairClipToScreenPixel(clipPos, _HairScreenSize), 0.0f.xx, screenMaxF);
+        uint2 pixelCoord = (uint2)pixelPosF;
+        clusterTileCoord = VividClusteredLighting::GetTileCoord(pixelCoord);
+        clusterSliceIndex = VividClusteredLighting::GetSliceIndex(pixelCoord, viewDepth);
+        clusterKey = VividClusteredLighting::FlattenClusterIndex(clusterTileCoord, clusterSliceIndex);
+
+        lightLoop.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(clusterTileCoord, clusterSliceIndex);
+        lightLoop.areaLightCell = VividClusteredLighting::LoadAreaLightCell(clusterTileCoord, clusterSliceIndex);
+        lightLoop.reflectionProbeCell = VividClusteredLighting::LoadReflectionProbeCell(clusterTileCoord, clusterSliceIndex);
+    }
+
+    // Phase S3 natural-order compacted vertices give strong spatial coherence across Wave32 lanes;
+    // when the entire wave maps to the same cluster, scalarize cell offsets/counts/indices to avoid divergence.
+    bool waveUniformCluster = WaveActiveAllTrue(hasValidClusterSample) && WaveActiveAllEqual(clusterKey);
 
     float strandU = VividHairUnpackStrandU(rv.packedAttrs);
     float strandSeed = VividHairUnpackStrandRandom(rv.packedAttrs);
@@ -331,13 +711,11 @@ void ShadeHairVertex(uint vIdx)
     float primarySelfShadow = shAmbientVis;
     float strongestLightLum = -1.0f;
 
-    // 1. Indirect Sky IBL / Studio Ambient (cylinder virtual normal V_perp)
+    // 1. Indirect Sky IBL + Clustered Reflection Probes (LIGHTCATEGORY_ENV)
     float3 diffuseIrradiance = _HairFallbackAmbientColor;
     float3 specularRadiance = _HairFallbackAmbientColor * 0.65f;
     if (_SkyTextureParams.w > 0.5f)
     {
-        float3 cylNormalWS = VividComputeHairCylinderNormal(tangentWS, viewDirWS, geomNormalWS);
-        float3 reflDirWS = reflect(-viewDirWS, cylNormalWS);
         float maxMip = _SkyTextureParams.x;
         float skyScale = _SkyTextureParams.y;
         float skyRot = _SkyTextureParams.z;
@@ -347,6 +725,39 @@ void ShadeHairVertex(uint vIdx)
         float3 skySpec = _SkyTexture.SampleLevel(sampler_LinearClamp, RotateAroundY(reflDirWS, skyRot), specMip).rgb;
         diffuseIrradiance = max(skyDiff * _SkyTextureTint.rgb * skyScale, 0.0f.xxx);
         specularRadiance = max(skySpec * _SkyTextureTint.rgb * skyScale, 0.0f.xxx);
+    }
+
+    if (hasValidClusterSample && _ClusteredReflectionProbeGridEnabled != 0u && lightLoop.reflectionProbeCell.count > 0u)
+    {
+        float3 probeSpecRadiance;
+        float probeSpecWeight;
+        if (VividLightingLoop::TryEvaluateReflectionProbes(
+                lightLoop,
+                posWS,
+                cylNormalWS,
+                reflDirWS,
+                saturate(_HairRoughnessParams.x),
+                probeSpecRadiance,
+                probeSpecWeight))
+        {
+            float w = saturate(probeSpecWeight);
+            specularRadiance = specularRadiance * (1.0f - w) + max(probeSpecRadiance, 0.0f.xxx);
+        }
+
+        float3 probeDiffRadiance;
+        float probeDiffWeight;
+        if (VividLightingLoop::TryEvaluateReflectionProbes(
+                lightLoop,
+                posWS,
+                cylNormalWS,
+                cylNormalWS,
+                1.0f,
+                probeDiffRadiance,
+                probeDiffWeight))
+        {
+            float w = saturate(probeDiffWeight);
+            diffuseIrradiance = diffuseIrradiance * (1.0f - w) + max(probeDiffRadiance, 0.0f.xxx);
+        }
     }
     totalRadiance += VividEvaluateHairFurIndirect(bsdfIn, viewDirWS, diffuseIrradiance, specularRadiance);
 
@@ -377,59 +788,106 @@ void ShadeHairVertex(uint vIdx)
         }
     }
 
-    // 3. Punctual Lights (Point / Spot / Projector from VividClusteredLightingData)
-    [loop]
-    for (uint pi = 0u; pi < _HairPunctualLightCount; pi++)
+    // 3. Punctual Lights (Clustered LightGrid with Wave32 scalarization, graceful full-list fallback)
+    if (hasValidClusterSample && _ClusteredPunctualLightGridEnabled != 0u)
     {
-        PunctualLightData pl = _PunctualLights[pi];
-        float3 lightDirWS;
-        float4 distances;
-        GetVividPunctualLightVectors(posWS, pl, lightDirWS, distances);
-        if (distances.y <= 1e-6f)
-            continue;
-
-        float attenuation = VividPunctualLightAttenuationWithDistanceModification(
-            pl, posWS - pl.positionWS, distances);
-        if (attenuation <= 1e-5f)
-            continue;
-
-        float lightSelfShadow;
-        float3 lightRadiance = max(pl.color, 0.0f.xxx) * attenuation;
-        totalRadiance += AccumulateHairLight(
-            bsdfIn, viewDirWS, lightDirWS, lightRadiance, 1.0f,
-            shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
-
-        float lum = dot(lightRadiance, float3(0.2126f, 0.7152f, 0.0722f));
-        if (lum > strongestLightLum)
+        if (waveUniformCluster)
         {
-            strongestLightLum = lum;
-            primarySelfShadow = lightSelfShadow;
+            VividClusteredLightCell uniformCell;
+            uniformCell.offset = WaveReadLaneFirst(lightLoop.punctualLightCell.offset);
+            uniformCell.count = WaveReadLaneFirst(lightLoop.punctualLightCell.count);
+
+            [loop]
+            for (uint localIdx = 0u; localIdx < uniformCell.count; localIdx++)
+            {
+                uint lightIndex = WaveReadLaneFirst(VividClusteredLighting::LoadLightIndex(uniformCell, localIdx));
+                if (lightIndex < _HairPunctualLightCount)
+                {
+                    EvaluateHairPunctualLight(
+                        _PunctualLights[lightIndex],
+                        bsdfIn, posWS, viewDirWS, shCoeffsOS, selfShadowExtinction, dualScatterGain,
+                        totalRadiance, strongestLightLum, primarySelfShadow);
+                }
+            }
+        }
+        else
+        {
+            uint punctualCount = lightLoop.punctualLightCell.count;
+            [loop]
+            for (uint localIdx = 0u; localIdx < punctualCount; localIdx++)
+            {
+                uint lightIndex = VividClusteredLighting::LoadLightIndex(lightLoop.punctualLightCell, localIdx);
+                if (lightIndex < _HairPunctualLightCount)
+                {
+                    EvaluateHairPunctualLight(
+                        _PunctualLights[lightIndex],
+                        bsdfIn, posWS, viewDirWS, shCoeffsOS, selfShadowExtinction, dualScatterGain,
+                        totalRadiance, strongestLightLum, primarySelfShadow);
+                }
+            }
+        }
+    }
+    else
+    {
+        [loop]
+        for (uint pi = 0u; pi < _HairPunctualLightCount; pi++)
+        {
+            EvaluateHairPunctualLight(
+                _PunctualLights[pi],
+                bsdfIn, posWS, viewDirWS, shCoeffsOS, selfShadowExtinction, dualScatterGain,
+                totalRadiance, strongestLightLum, primarySelfShadow);
         }
     }
 
-    // 4. Area Lights (representative solid-angle direction from VividClusteredLightingData)
-    [loop]
-    for (uint ai = 0u; ai < _HairAreaLightCount; ai++)
+    // 4. Area Lights (Clustered LightGrid + Representative-Point Rectangle/Tube evaluation)
+    if (hasValidClusterSample && _ClusteredAreaLightGridEnabled != 0u)
     {
-        AreaLightData al = _AreaLights[ai];
-        float3 toLight = al.positionWS - posWS;
-        float distSq = max(dot(toLight, toLight), 1e-4f);
-        if (al.range > 0.0f && distSq > al.range * al.range)
-            continue;
+        if (waveUniformCluster)
+        {
+            VividClusteredLightCell uniformCell;
+            uniformCell.offset = WaveReadLaneFirst(lightLoop.areaLightCell.offset);
+            uniformCell.count = WaveReadLaneFirst(lightLoop.areaLightCell.count);
 
-        float invDist = rsqrt(distSq);
-        float3 lightDirWS = toLight * invDist;
-        float area = max(al.width * al.height, 1e-4f);
-        float frontFacing = saturate(dot(al.forwardWS, -lightDirWS));
-        float solidAngle = saturate(area * frontFacing / (distSq + area * VIVID_HAIR_INV_PI));
-        if (solidAngle <= 1e-5f)
-            continue;
-
-        float lightSelfShadow;
-        float3 lightRadiance = max(al.color, 0.0f.xxx) * solidAngle;
-        totalRadiance += AccumulateHairLight(
-            bsdfIn, viewDirWS, lightDirWS, lightRadiance, 1.0f,
-            shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
+            [loop]
+            for (uint localIdx = 0u; localIdx < uniformCell.count; localIdx++)
+            {
+                uint lightIndex = WaveReadLaneFirst(VividClusteredLighting::LoadLightIndex(uniformCell, localIdx));
+                if (lightIndex < _HairAreaLightCount)
+                {
+                    EvaluateHairAreaLight(
+                        _AreaLights[lightIndex],
+                        bsdfIn, posWS, viewDirWS, reflDirWS, shCoeffsOS, selfShadowExtinction, dualScatterGain,
+                        totalRadiance, strongestLightLum, primarySelfShadow);
+                }
+            }
+        }
+        else
+        {
+            uint areaCount = lightLoop.areaLightCell.count;
+            [loop]
+            for (uint localIdx = 0u; localIdx < areaCount; localIdx++)
+            {
+                uint lightIndex = VividClusteredLighting::LoadLightIndex(lightLoop.areaLightCell, localIdx);
+                if (lightIndex < _HairAreaLightCount)
+                {
+                    EvaluateHairAreaLight(
+                        _AreaLights[lightIndex],
+                        bsdfIn, posWS, viewDirWS, reflDirWS, shCoeffsOS, selfShadowExtinction, dualScatterGain,
+                        totalRadiance, strongestLightLum, primarySelfShadow);
+                }
+            }
+        }
+    }
+    else
+    {
+        [loop]
+        for (uint ai = 0u; ai < _HairAreaLightCount; ai++)
+        {
+            EvaluateHairAreaLight(
+                _AreaLights[ai],
+                bsdfIn, posWS, viewDirWS, reflDirWS, shCoeffsOS, selfShadowExtinction, dualScatterGain,
+                totalRadiance, strongestLightLum, primarySelfShadow);
+        }
     }
 
     float preExposure = VividGetPreExposure();

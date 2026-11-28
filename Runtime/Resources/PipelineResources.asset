@@ -167,6 +167,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 8b18b2e4cd399994a9494e46d958cc83, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/SdfShortRangeAO.compute
     ResourceObject: {fileID: 7200000, guid: 6dc6c044c8bd5fb4e976c3653d161eda, type: 3}
+  - ResourceName: Shaders/Core/Private/Hair/StrandHairComposition.compute
+    ResourceObject: {fileID: 7200000, guid: ef2c13893797f374cbac0ec5a6d70cba, type: 3}
+  - ResourceName: Shaders/Core/Private/Hair/StrandHairVisibility.compute
+    ResourceObject: {fileID: 7200000, guid: 3198b0b04fb65334591f7cedd05e19d8, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ReGIRGridBuild.compute

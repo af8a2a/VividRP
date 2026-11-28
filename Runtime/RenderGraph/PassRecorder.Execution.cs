@@ -99,6 +99,8 @@ namespace VividRP.Runtime
                     s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
                 if (s_FrameData.Contains<VividSubstrateMaterialFrameData>())
                     s_FrameData.Get<VividSubstrateMaterialFrameData>().Reset();
+                if (s_FrameData.Contains<StrandHairFrameData>())
+                    s_FrameData.Get<StrandHairFrameData>().Reset();
             }
 
             VividRenderingData renderingData;
@@ -1485,6 +1487,31 @@ namespace VividRP.Runtime
                             bufferCache,
                             renderListCache,
                             accelerationStructureCache);
+
+                        if (computePass is RenderPass.Core.HZBGeneratePass hzbPass)
+                        {
+                            s_LastRecordedHzbTexture = hzbPass.HzbTexture;
+                        }
+                        else if (computePass is RenderPass.Core.DeferredLightingPass deferredLightingPass)
+                        {
+                            bool hasActiveSkyInjection = false;
+                            for (int nextIdx = passIndex + 1; nextIdx < s_RenderPasses.Count; nextIdx++)
+                            {
+                                if (s_RenderPasses[nextIdx] is RenderPass.Core.SkyInjectionPass
+                                    && (nextIdx >= passActiveStates.Length || passActiveStates[nextIdx]))
+                                {
+                                    hasActiveSkyInjection = true;
+                                    break;
+                                }
+                            }
+
+                            RenderPass.Core.StrandHairRenderGraphHook.TryRecordAfterDeferredLighting(
+                                renderGraph,
+                                s_FrameData,
+                                deferredLightingPass,
+                                s_LastRecordedHzbTexture,
+                                deferCompositionUntilAfterSky: hasActiveSkyInjection);
+                        }
                     }
                     else if (pass is RasterPass rasterPass)
                     {
@@ -1509,6 +1536,13 @@ namespace VividRP.Runtime
                             bufferCache,
                             renderListCache,
                             accelerationStructureCache);
+
+                        if (unsafePass is RenderPass.Core.SkyInjectionPass)
+                        {
+                            RenderPass.Core.StrandHairRenderGraphHook.TryRecordDeferredComposition(
+                                renderGraph,
+                                s_FrameData);
+                        }
                     }
                 }
             }
@@ -1519,8 +1553,12 @@ namespace VividRP.Runtime
             }
         }
 
+        private static RenderGraphTexture s_LastRecordedHzbTexture;
+
         private static void ClearRecordGraphResourceCaches()
         {
+            s_LastRecordedHzbTexture = null;
+            RenderPass.Core.StrandHairRenderGraphHook.ClearPerFrameState();
             s_TextureImportCache.Clear();
             s_BufferImportCache.Clear();
             s_RecordGraphTextureCache.Clear();

@@ -142,6 +142,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTexture;
 
+        internal RenderGraphTexture DepthTexture => m_DepthTexture;
+        internal RenderGraphTexture ColorTexture => m_ColorTexture;
+
         [RenderGraphResource(
             Name = "DeferredLightingDebug",
             Access = AccessFlags.Write,

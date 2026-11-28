@@ -25,6 +25,12 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Material/Hair/HairDotsVertexUpdate.compute")]
         public ComputeShader HairDotsVertexUpdateCompute;
 
+        [VividResourcePath("Shaders/Core/Private/Hair/StrandHairVisibility.compute")]
+        public ComputeShader StrandHairVisibilityCompute;
+
+        [VividResourcePath("Shaders/Core/Private/Hair/StrandHairComposition.compute")]
+        public ComputeShader StrandHairCompositionCompute;
+
         [VividResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 

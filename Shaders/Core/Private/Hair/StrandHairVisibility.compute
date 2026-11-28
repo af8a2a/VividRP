@@ -1,0 +1,355 @@
+#pragma kernel KClearAtlasTiles
+#pragma kernel KTransformVertices
+#pragma kernel KClearCullArgs
+#pragma kernel KCullSegments
+#pragma kernel KRasterizeSegments
+#pragma use_dxc
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Hair/VividStrandHairCommon.hlsl"
+
+// Groom source buffers (owned by HairGroomGpuResource)
+StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
+StructuredBuffer<HairGroomSegmentIndex> _HairSegmentIndices;
+
+// Post-transform caches (reused across Culling, Raster, S2 Shading, Composition, S4 Motion)
+RWStructuredBuffer<float4> _HairPostTransformClip;
+RWStructuredBuffer<float4> _HairWorldPosRadius;
+
+// Culling & indirect dispatch buffers
+RWStructuredBuffer<uint> _HairVisibleSegmentList;
+RWStructuredBuffer<uint> _HairIndirectRasterArgs; // [0]=groupX, [1]=1, [2]=1, [3]=visibleCount
+
+// 32-bit Tiled 3-Layer Visibility Atlas + 1 Additive Coverage Layer
+// Layout per 64x64 tile: 4 slices * 4096 uints = 16384 uints/tile
+RWStructuredBuffer<uint> _HairVisAtlas;
+
+// Scene depth & optional HZB for conservative occlusion culling
+Texture2D<float> _HairSceneDepth;
+Texture2D<float> _HairHZBTexture;
+
+// Per-dispatch uniforms
+float4x4 _HairLocalToWorld;
+float4x4 _HairViewMatrix;
+float4x4 _HairViewProjMatrix;
+
+uint _HairVertexCount;
+uint _HairSegmentCount;
+uint _HairAllocatedTileCount;
+uint _HairFirstAtlasTile;
+
+float4 _HairAtlasTileRect;   // xy = tileOrigin, zw = tileGridSize
+uint _HairDownscaleFactor;
+uint _HairEnableHZB;
+
+float2 _HairScreenSize;      // Full-res camera pixel size
+float2 _HairAtlasScreenSize; // Full-res / _HairDownscaleFactor
+float4 _HairHZBSize;         // xy = mip0 size, z = maxMip, w = unused
+
+float _HairRadiusScale;
+float _HairProjScaleY;       // abs(proj[1][1]) * 0.5 * atlasHeight
+float _HairDepthRangeNear;   // View-space linear Z near of model OBB
+float _HairDepthRangeInvSpan; // 1.0 / max(far - near, 1e-4)
+float _HairNearClipPlane;
+
+[numthreads(64, 1, 1)]
+void KClearAtlasTiles(uint3 tid : SV_DispatchThreadID)
+{
+    uint totalPixels = _HairAllocatedTileCount * VIVID_HAIR_ATLAS_TILE_PIXELS;
+    uint idx = tid.x;
+    if (idx >= totalPixels)
+        return;
+
+    uint tileIdx = idx / VIVID_HAIR_ATLAS_TILE_PIXELS;
+    uint localPx = idx & (VIVID_HAIR_ATLAS_TILE_PIXELS - 1u);
+    uint baseOffset = tileIdx * VIVID_HAIR_ATLAS_TILE_STRIDE + localPx;
+
+    _HairVisAtlas[baseOffset + 0u * VIVID_HAIR_ATLAS_TILE_PIXELS] = VIVID_HAIR_VIS_EMPTY;
+    _HairVisAtlas[baseOffset + 1u * VIVID_HAIR_ATLAS_TILE_PIXELS] = VIVID_HAIR_VIS_EMPTY;
+    _HairVisAtlas[baseOffset + 2u * VIVID_HAIR_ATLAS_TILE_PIXELS] = VIVID_HAIR_VIS_EMPTY;
+    _HairVisAtlas[baseOffset + 3u * VIVID_HAIR_ATLAS_TILE_PIXELS] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void KTransformVertices(uint3 tid : SV_DispatchThreadID)
+{
+    uint vIdx = tid.x;
+    if (vIdx >= _HairVertexCount)
+        return;
+
+    HairGroomRestVertex v = _HairRestVertices[vIdx];
+    float3 posWS = mul(_HairLocalToWorld, float4(v.positionOS, 1.0f)).xyz;
+    float4 clipPos = mul(_HairViewProjMatrix, float4(posWS, 1.0f));
+
+    // Uniform scale approximation for world-space radius
+    float3 col0 = _HairLocalToWorld._m00_m10_m20;
+    float worldScale = max(length(col0), 1e-5f);
+    float radiusWS = max(v.radius * _HairRadiusScale * worldScale, 1e-6f);
+
+    _HairPostTransformClip[vIdx] = clipPos;
+    _HairWorldPosRadius[vIdx] = float4(posWS, radiusWS);
+}
+
+[numthreads(1, 1, 1)]
+void KClearCullArgs(uint3 tid : SV_DispatchThreadID)
+{
+    _HairIndirectRasterArgs[0] = 0u;
+    _HairIndirectRasterArgs[1] = 1u;
+    _HairIndirectRasterArgs[2] = 1u;
+    _HairIndirectRasterArgs[3] = 0u;
+}
+
+bool TestSegmentHZB(float2 minPx, float2 maxPx, float nearestDeviceZ)
+{
+    if (_HairEnableHZB == 0u || _HairHZBSize.x < 1.0f || _HairHZBSize.y < 1.0f)
+        return true;
+
+    float2 uvMin = saturate(minPx / _HairAtlasScreenSize);
+    float2 uvMax = saturate(maxPx / _HairAtlasScreenSize);
+    float2 hzbMin = uvMin * _HairHZBSize.xy;
+    float2 hzbMax = uvMax * _HairHZBSize.xy;
+    float2 extent = max(hzbMax - hzbMin, 1.0f);
+    float maxExtent = max(extent.x, extent.y);
+    uint mip = (uint)clamp(ceil(log2(maxExtent)), 0.0f, _HairHZBSize.z);
+
+    uint2 mipSize = max(uint2(1u, 1u), uint2(_HairHZBSize.xy) >> mip);
+    int2 c0 = clamp(int2(floor(hzbMin / exp2((float)mip))), int2(0, 0), int2(mipSize) - 1);
+    int2 c1 = clamp(int2(floor(hzbMax / exp2((float)mip))), int2(0, 0), int2(mipSize) - 1);
+
+    float d00 = _HairHZBTexture.Load(int3(c0.x, c0.y, mip));
+    float d10 = _HairHZBTexture.Load(int3(c1.x, c0.y, mip));
+    float d01 = _HairHZBTexture.Load(int3(c0.x, c1.y, mip));
+    float d11 = _HairHZBTexture.Load(int3(c1.x, c1.y, mip));
+
+#if UNITY_REVERSED_Z
+    // Reversed-Z: smaller value = farther away. Conservative occluder depth = min of 4 texels.
+    float farOccluderZ = min(min(d00, d10), min(d01, d11));
+    return nearestDeviceZ >= farOccluderZ - 1e-5f;
+#else
+    float farOccluderZ = max(max(d00, d10), max(d01, d11));
+    return nearestDeviceZ <= farOccluderZ + 1e-5f;
+#endif
+}
+
+[numthreads(64, 1, 1)]
+void KCullSegments(uint3 tid : SV_DispatchThreadID)
+{
+    uint segId = tid.x;
+    bool visible = false;
+
+    if (segId < _HairSegmentCount)
+    {
+        HairGroomSegmentIndex seg = _HairSegmentIndices[segId];
+        uint v0 = seg.vertexIndex0;
+        uint v1 = v0 + 1u;
+
+        float4 clip0 = _HairPostTransformClip[v0];
+        float4 clip1 = _HairPostTransformClip[v1];
+
+        // Reject segments completely behind the near plane
+        if (clip0.w > _HairNearClipPlane && clip1.w > _HairNearClipPlane)
+        {
+            float2 p0 = VividHairClipToScreenPixel(clip0, _HairAtlasScreenSize);
+            float2 p1 = VividHairClipToScreenPixel(clip1, _HairAtlasScreenSize);
+            float r0Px = _HairWorldPosRadius[v0].w * _HairProjScaleY * rcp(clip0.w);
+            float r1Px = _HairWorldPosRadius[v1].w * _HairProjScaleY * rcp(clip1.w);
+            float pad = max(r0Px, r1Px) + 1.0f;
+
+            float2 minPx = min(p0, p1) - pad;
+            float2 maxPx = max(p0, p1) + pad;
+
+            uint2 tileOrigin = uint2(_HairAtlasTileRect.xy);
+            uint2 tileGridSize = uint2(_HairAtlasTileRect.zw);
+            float2 atlasMin = float2(tileOrigin * VIVID_HAIR_ATLAS_TILE_SIZE);
+            float2 atlasMax = float2((tileOrigin + tileGridSize) * VIVID_HAIR_ATLAS_TILE_SIZE);
+
+            if (maxPx.x >= atlasMin.x && minPx.x < atlasMax.x
+                && maxPx.y >= atlasMin.y && minPx.y < atlasMax.y)
+            {
+                float z0 = VividHairClipToDeviceZ(clip0);
+                float z1 = VividHairClipToDeviceZ(clip1);
+#if UNITY_REVERSED_Z
+                float nearestZ = max(z0, z1);
+#else
+                float nearestZ = min(z0, z1);
+#endif
+                visible = TestSegmentHZB(minPx, maxPx, nearestZ);
+            }
+        }
+    }
+
+    // Wave-aggregated atomic append (1 global atomic per wave)
+    uint activeCount = WaveActiveCountBits(visible);
+    if (activeCount > 0u)
+    {
+        uint baseOffset = 0u;
+        if (WaveIsFirstLane())
+        {
+            InterlockedAdd(_HairIndirectRasterArgs[3], activeCount, baseOffset);
+            uint newTotal = baseOffset + activeCount;
+            uint newGroups = (newTotal + 63u) >> 6u;
+            InterlockedMax(_HairIndirectRasterArgs[0], newGroups);
+        }
+        baseOffset = WaveReadLaneFirst(baseOffset);
+        if (visible)
+        {
+            uint localRank = WavePrefixCountBits(visible);
+            _HairVisibleSegmentList[baseOffset + localRank] = segId;
+        }
+    }
+}
+
+void WritePixelToVisAtlas(uint pixelBase, uint pixelPayload, float coverage)
+{
+    // IJGC Slide 33: non-atomic cached early cull against Layer 2 before issuing atomic chain.
+    uint lastLayer = _HairVisAtlas[pixelBase + 2u * VIVID_HAIR_ATLAS_TILE_PIXELS];
+    if (lastLayer > pixelPayload)
+    {
+        uint prev0 = VIVID_HAIR_VIS_EMPTY;
+        InterlockedMin(_HairVisAtlas[pixelBase + 0u * VIVID_HAIR_ATLAS_TILE_PIXELS], pixelPayload, prev0);
+        if (prev0 != VIVID_HAIR_VIS_EMPTY)
+        {
+            uint payload1 = (prev0 > pixelPayload) ? prev0 : pixelPayload;
+            uint prev1 = VIVID_HAIR_VIS_EMPTY;
+            InterlockedMin(_HairVisAtlas[pixelBase + 1u * VIVID_HAIR_ATLAS_TILE_PIXELS], payload1, prev1);
+            if (prev1 != VIVID_HAIR_VIS_EMPTY)
+            {
+                uint payload2 = (prev1 > payload1) ? prev1 : payload1;
+                InterlockedMin(_HairVisAtlas[pixelBase + 2u * VIVID_HAIR_ATLAS_TILE_PIXELS], payload2);
+            }
+        }
+    }
+
+    // Always accumulate additive coverage (fixed-point 10-bit, IJGC Slide 31).
+    uint covFixed = (uint)max(1, (int)round(coverage * 1024.0f));
+    InterlockedAdd(_HairVisAtlas[pixelBase + 3u * VIVID_HAIR_ATLAS_TILE_PIXELS], covFixed);
+}
+
+[numthreads(64, 1, 1)]
+void KRasterizeSegments(uint3 tid : SV_DispatchThreadID)
+{
+    uint visibleCount = _HairIndirectRasterArgs[3];
+    if (tid.x >= visibleCount)
+        return;
+
+    uint segId = _HairVisibleSegmentList[tid.x];
+    HairGroomSegmentIndex seg = _HairSegmentIndices[segId];
+    uint v0 = seg.vertexIndex0;
+    uint v1 = v0 + 1u;
+
+    float4 clip0 = _HairPostTransformClip[v0];
+    float4 clip1 = _HairPostTransformClip[v1];
+    if (clip0.w <= _HairNearClipPlane || clip1.w <= _HairNearClipPlane)
+        return;
+
+    float2 p0 = VividHairClipToScreenPixel(clip0, _HairAtlasScreenSize);
+    float2 p1 = VividHairClipToScreenPixel(clip1, _HairAtlasScreenSize);
+    float z0 = VividHairClipToDeviceZ(clip0);
+    float z1 = VividHairClipToDeviceZ(clip1);
+
+    float4 wr0 = _HairWorldPosRadius[v0];
+    float4 wr1 = _HairWorldPosRadius[v1];
+    float r0Px = wr0.w * _HairProjScaleY * rcp(clip0.w);
+    float r1Px = wr1.w * _HairProjScaleY * rcp(clip1.w);
+
+    // Positive view-space distance along camera forward for 12-bit normalized depth
+    float viewZ0 = abs(mul(_HairViewMatrix, float4(wr0.xyz, 1.0f)).z);
+    float viewZ1 = abs(mul(_HairViewMatrix, float4(wr1.xyz, 1.0f)).z);
+
+    float2 segVec = p1 - p0;
+    float segLenSq = dot(segVec, segVec);
+    float invSegLenSq = segLenSq > 1e-6f ? rcp(segLenSq) : 0.0f;
+
+    float maxR = max(r0Px, r1Px);
+    float pad = maxR + 0.6f;
+
+    uint2 tileOrigin = uint2(_HairAtlasTileRect.xy);
+    uint2 tileGridSize = uint2(_HairAtlasTileRect.zw);
+    int2 atlasMinPx = int2(tileOrigin * VIVID_HAIR_ATLAS_TILE_SIZE);
+    int2 atlasMaxPx = int2((tileOrigin + tileGridSize) * VIVID_HAIR_ATLAS_TILE_SIZE) - 1;
+    atlasMaxPx = min(atlasMaxPx, int2(_HairAtlasScreenSize) - 1);
+
+    // Clamp overly large single-segment screen footprints as a safety guard
+    int2 minPx = max(int2(floor(min(p0, p1) - pad)), atlasMinPx);
+    int2 maxPx = min(int2(ceil(max(p0, p1) + pad)), atlasMaxPx);
+    if (minPx.x > maxPx.x || minPx.y > maxPx.y)
+        return;
+
+    // Conservative trapezoid/slice traversal flattened into a single loop (IJGC Slide 35)
+    bool steep = abs(segVec.y) > abs(segVec.x);
+    float2 a = steep ? p0.yx : p0.xy;
+    float2 b = steep ? p1.yx : p1.xy;
+    if (a.x > b.x)
+    {
+        float2 tmp = a;
+        a = b;
+        b = tmp;
+    }
+
+    int majorMin = steep ? minPx.y : minPx.x;
+    int majorMax = steep ? maxPx.y : maxPx.x;
+    int minorClampMin = steep ? minPx.x : minPx.y;
+    int minorClampMax = steep ? maxPx.x : maxPx.y;
+
+    float dx = max(b.x - a.x, 1e-5f);
+    float slope = (b.y - a.y) / dx;
+    float minorHalfBand = pad * sqrt(1.0f + slope * slope) + 0.5f;
+
+    int major = majorMin;
+    float centerMinor = a.y + slope * clamp((float)major + 0.5f - a.x, 0.0f, dx);
+    int minorMin = max((int)floor(centerMinor - minorHalfBand), minorClampMin);
+    int minorMax = min((int)ceil(centerMinor + minorHalfBand), minorClampMax);
+    int minor = minorMin;
+
+    // Cap per-segment iteration count to guard against extreme near-clip slivers
+    const uint kMaxSteps = 512u;
+    uint steps = 0u;
+    int2 fullDepthMax = int2(_HairScreenSize) - 1;
+
+    while (steps < kMaxSteps)
+    {
+        if (minor > minorMax)
+        {
+            major++;
+            if (major > majorMax)
+                break;
+            centerMinor = a.y + slope * clamp((float)major + 0.5f - a.x, 0.0f, dx);
+            minorMin = max((int)floor(centerMinor - minorHalfBand), minorClampMin);
+            minorMax = min((int)ceil(centerMinor + minorHalfBand), minorClampMax);
+            minor = minorMin;
+            if (minor > minorMax)
+                continue;
+        }
+
+        int2 px = steep ? int2(minor, major) : int2(major, minor);
+        float2 pxCenter = float2(px) + 0.5f;
+
+        float t = saturate(dot(pxCenter - p0, segVec) * invSegLenSq);
+        float2 closest = p0 + segVec * t;
+        float distPx = length(pxCenter - closest);
+        float rPx = lerp(r0Px, r1Px, t);
+        float coverage = VividHairComputeAnalyticCoverage(rPx, distPx);
+
+        if (coverage > 1e-3f)
+        {
+            float hairDeviceZ = lerp(z0, z1, t);
+            int2 depthCoord = min(px * (int)_HairDownscaleFactor + (int)(_HairDownscaleFactor >> 1u), fullDepthMax);
+            float sceneDeviceZ = _HairSceneDepth.Load(int3(depthCoord, 0));
+
+            if (VividHairDepthPassesOpaque(hairDeviceZ, sceneDeviceZ))
+            {
+                float viewZ = lerp(viewZ0, viewZ1, t);
+                float normDepth = saturate((viewZ - _HairDepthRangeNear) * _HairDepthRangeInvSpan);
+                uint payload = VividHairPackVisPayload(normDepth, segId);
+                uint pixelBase = VividHairComputeAtlasPixelBase(
+                    uint2(px),
+                    tileOrigin,
+                    tileGridSize,
+                    _HairFirstAtlasTile);
+                WritePixelToVisAtlas(pixelBase, payload, coverage);
+            }
+        }
+
+        minor++;
+        steps++;
+    }
+}

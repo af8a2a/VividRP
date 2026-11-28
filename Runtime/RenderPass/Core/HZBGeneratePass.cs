@@ -56,6 +56,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "HZB", Access = AccessFlags.Write)]
         private RenderGraphTexture m_HzbTexture;
 
+        internal RenderGraphTexture HzbTexture => m_HzbTexture;
+
         [RenderGraphResource(
             Name = "HZBGlobalAtomic",
             Access = AccessFlags.ReadWrite)]

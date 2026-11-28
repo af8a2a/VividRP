@@ -13,8 +13,29 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
     public sealed class VirtualShadowMapLocalShadowPhase3Tests
     {
         private const string ResolveShaderPath = "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CSMShadowResolve.compute";
-        private const int ClusterPackingOffsetBits = 24;
+        private const int ClusterPackingOffsetBits = 26;
         private const uint PageTableValidBit = 0x80000000u;
+
+        private static uint4[] ReadbackMaskTexture(RenderTexture maskRt, int width, int height)
+        {
+            var helperShader = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.vivid.render-pipelines/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute");
+            if (helperShader == null)
+                helperShader = AssetDatabase.LoadAssetAtPath<ComputeShader>("Packages/VividRP/Tests/Editor/RenderPass/Shadows/VirtualShadowMapSamplingTests.compute");
+            Assert.That(helperShader, Is.Not.Null);
+            int rbKernel = helperShader.FindKernel("ReadbackUInt4Texture");
+            using var rbBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, width * height, sizeof(uint) * 4);
+            var rbCmd = new CommandBuffer();
+            rbCmd.SetComputeTextureParam(helperShader, rbKernel, "_TestReadbackUInt4Tex", maskRt);
+            rbCmd.SetComputeBufferParam(helperShader, rbKernel, "_TestReadbackUInt4Out", rbBuf);
+            rbCmd.SetComputeIntParams(helperShader, "_TestReadbackUInt4Size", width, height);
+            rbCmd.DispatchCompute(helperShader, rbKernel, CoreUtils.DivRoundUp(width, 8), CoreUtils.DivRoundUp(height, 8), 1);
+            Graphics.ExecuteCommandBuffer(rbCmd);
+            rbCmd.Dispose();
+            var result = new uint4[width * height];
+            rbBuf.GetData(result);
+            return result;
+        }
 
         private static ComputeShader LoadResolveShader()
         {
@@ -222,6 +243,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
             var prunedIndicesBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, sizeof(uint));
             var vsmInfoBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, sizeof(int) * 2);
             var punctualBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, VividLightData.PunctualLightData.Stride);
+            var areaVsmInfoBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(int) * 4);
+            var areaBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VividLightData.AreaLightData.Stride);
             var logBaseBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(float));
 
             try
@@ -234,6 +257,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 prunedOffsetsBuf.SetData(new uint[] { 2u << ClusterPackingOffsetBits });
                 prunedIndicesBuf.SetData(new uint[] { 0u, 1u });
                 vsmInfoBuf.SetData(new int2[] { new int2(0, 0), new int2(1, 0) });
+                areaVsmInfoBuf.SetData(new[] { new int4(-1, 0, 0, 0) });
+                areaBuf.SetData(new[] { default(VividLightData.AreaLightData) });
 
                 float cosOuter = Mathf.Cos(45f * Mathf.Deg2Rad);
                 float cosInner = Mathf.Cos(35f * Mathf.Deg2Rad);
@@ -275,6 +300,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.PrunedLightIndicesId, prunedIndicesBuf);
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.PunctualLightVSMInfoId, vsmInfoBuf);
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.PunctualLightsId, punctualBuf);
+                cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.AreaLightVSMInfoId, areaVsmInfoBuf);
+                cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.AreaLightsId, areaBuf);
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.LogBaseBufferId, logBaseBuf);
 
                 cmd.SetComputeIntParam(shader, VirtualShadowMapProjectionSet.CountId, registry.ProjectionCount);
@@ -282,6 +309,7 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 cmd.SetComputeIntParam(shader, "_VSMPrototypePageSize", pageSize);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.ClusterCountId, 1);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.PunctualLightCountId, 2);
+                cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.AreaLightCountId, 0);
                 cmd.SetComputeIntParam(shader, "_CSMOutputWidth", width);
                 cmd.SetComputeIntParam(shader, "_CSMOutputHeight", height);
                 cmd.SetComputeIntParam(shader, "_CSMFrameIndex", 1);
@@ -298,10 +326,7 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 Graphics.ExecuteCommandBuffer(cmd);
                 cmd.Dispose();
 
-                var readback = AsyncGPUReadback.Request(maskRt);
-                readback.WaitForCompletion();
-                Assert.That(readback.hasError, Is.False);
-                var data = readback.GetData<uint4>();
+                var data = ReadbackMaskTexture(maskRt, width, height);
 
                 // Sky pixel (0,0) must remain 0xFFFFFFFFu across all 4 words.
                 Assert.That(data[0], Is.EqualTo(new uint4(0xFFFFFFFFu)));
@@ -325,6 +350,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 prunedIndicesBuf.Dispose();
                 vsmInfoBuf.Dispose();
                 punctualBuf.Dispose();
+                areaVsmInfoBuf.Dispose();
+                areaBuf.Dispose();
                 logBaseBuf.Dispose();
             }
         }
@@ -424,6 +451,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
             var prunedIndicesBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
             var vsmInfoBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(int) * 2);
             var punctualBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VividLightData.PunctualLightData.Stride);
+            var areaVsmInfoBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(int) * 4);
+            var areaBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VividLightData.AreaLightData.Stride);
             var logBaseBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(float));
 
             try
@@ -435,6 +464,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 prunedOffsetsBuf.SetData(new uint[] { 1u << ClusterPackingOffsetBits });
                 prunedIndicesBuf.SetData(new uint[] { 0u });
                 vsmInfoBuf.SetData(new int2[] { new int2(0, 0) });
+                areaVsmInfoBuf.SetData(new[] { new int4(-1, 0, 0, 0) });
+                areaBuf.SetData(new[] { default(VividLightData.AreaLightData) });
                 punctualBuf.SetData(new[]
                 {
                     new VividLightData.PunctualLightData
@@ -460,6 +491,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.PrunedLightIndicesId, prunedIndicesBuf);
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.PunctualLightVSMInfoId, vsmInfoBuf);
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.PunctualLightsId, punctualBuf);
+                cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.AreaLightVSMInfoId, areaVsmInfoBuf);
+                cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.AreaLightsId, areaBuf);
                 cmd.SetComputeBufferParam(shader, kernel, VirtualShadowMapLocalLightGrid.LogBaseBufferId, logBaseBuf);
 
                 cmd.SetComputeIntParam(shader, VirtualShadowMapProjectionSet.CountId, registry.ProjectionCount);
@@ -467,6 +500,7 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 cmd.SetComputeIntParam(shader, "_VSMPrototypePageSize", pageSize);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.ClusterCountId, 1);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.PunctualLightCountId, 1);
+                cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.AreaLightCountId, 0);
                 cmd.SetComputeIntParam(shader, "_CSMOutputWidth", width);
                 cmd.SetComputeIntParam(shader, "_CSMOutputHeight", height);
                 cmd.SetComputeIntParam(shader, "_CSMFrameIndex", 2);
@@ -484,10 +518,7 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 Graphics.ExecuteCommandBuffer(cmd);
                 cmd.Dispose();
 
-                var readback = AsyncGPUReadback.Request(maskRt);
-                readback.WaitForCompletion();
-                Assert.That(readback.hasError, Is.False);
-                var data = readback.GetData<uint4>();
+                var data = ReadbackMaskTexture(maskRt, width, height);
                 for (int i = 0; i < data.Length; i++)
                 {
                     float visibility = Unpack4Bit(data[i], 0);
@@ -507,6 +538,8 @@ namespace VividRP.Tests.Editor.RenderPass.Shadows
                 prunedIndicesBuf.Dispose();
                 vsmInfoBuf.Dispose();
                 punctualBuf.Dispose();
+                areaVsmInfoBuf.Dispose();
+                areaBuf.Dispose();
                 logBaseBuf.Dispose();
             }
         }

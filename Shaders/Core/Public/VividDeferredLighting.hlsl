@@ -243,6 +243,8 @@ struct VividDeferredLocalShadowContext
     uint4 maskBits;
     uint prunedOffset;
     uint prunedCount;
+    uint areaPrunedOffset;
+    uint areaPrunedCount;
 };
 
 VividDeferredLocalShadowContext CreateDeferredLocalShadowContext(
@@ -250,25 +252,50 @@ VividDeferredLocalShadowContext CreateDeferredLocalShadowContext(
     float3 positionWS)
 {
     VividDeferredLocalShadowContext ctx = (VividDeferredLocalShadowContext)0;
-    if (_VSMLocalShadowMaskEnabled == 0u || _ClusteredPunctualLightGridEnabled == 0u)
+    if (_VSMLocalShadowMaskEnabled == 0u
+        || (_ClusteredPunctualLightGridEnabled == 0u && _ClusteredAreaLightGridEnabled == 0u))
         return ctx;
 
     uint2 tileCoord = VividClusteredLighting::GetTileCoord(pixelCoord);
     float viewDepth = VividClusteredLighting::GetViewDepthWS(positionWS);
     uint sliceIndex = VividClusteredLighting::GetSliceIndex(pixelCoord, viewDepth);
-    uint clusterIndex = VividClusteredLighting::GetLayeredOffsetBufferIndex(
-        LIGHTCATEGORY_PUNCTUAL, tileCoord, sliceIndex);
-    uint packed = _VSMPrunedLightOffsetCount[clusterIndex];
-    uint count = min(
-        (packed >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK,
-        VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS);
-    if (count == 0u)
+
+    uint punctualCount = 0u;
+    uint punctualOffset = 0u;
+    if (_ClusteredPunctualLightGridEnabled != 0u)
+    {
+        uint clusterIndex = VividClusteredLighting::GetLayeredOffsetBufferIndex(
+            LIGHTCATEGORY_PUNCTUAL, tileCoord, sliceIndex);
+        uint packed = _VSMPrunedLightOffsetCount[clusterIndex];
+        punctualOffset = packed & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+        punctualCount = min(
+            (packed >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK,
+            VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS);
+    }
+
+    uint areaCount = 0u;
+    uint areaOffset = 0u;
+    if (_ClusteredAreaLightGridEnabled != 0u && _AreaLightCount > 0u
+        && punctualCount < VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS)
+    {
+        uint areaClusterIndex = VividClusteredLighting::GetLayeredOffsetBufferIndex(
+            LIGHTCATEGORY_AREA, tileCoord, sliceIndex);
+        uint areaPacked = _VSMPrunedLightOffsetCount[areaClusterIndex];
+        areaOffset = areaPacked & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+        areaCount = min(
+            (areaPacked >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK,
+            VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS - punctualCount);
+    }
+
+    if (punctualCount == 0u && areaCount == 0u)
         return ctx;
 
     ctx.active = true;
     ctx.maskBits = _VSMLocalShadowMaskBits.Load(int3(pixelCoord, 0));
-    ctx.prunedOffset = packed & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
-    ctx.prunedCount = count;
+    ctx.prunedOffset = punctualOffset;
+    ctx.prunedCount = punctualCount;
+    ctx.areaPrunedOffset = areaOffset;
+    ctx.areaPrunedCount = areaCount;
     return ctx;
 }
 
@@ -277,7 +304,7 @@ float EvaluateDeferredLocalShadowAttenuation(
     uint punctualLightIndex,
     PunctualLightData light)
 {
-    if (!ctx.active || light.shadowStrength <= 0.0)
+    if (!ctx.active || ctx.prunedCount == 0u || light.shadowStrength <= 0.0)
         return 1.0;
 
     [loop]
@@ -287,6 +314,26 @@ float EvaluateDeferredLocalShadowAttenuation(
         {
             float shadow = VividVSMUnpackShadowMask4Bit(ctx.maskBits, slot);
             return lerp(1.0, shadow, saturate(light.shadowStrength));
+        }
+    }
+
+    return 1.0;
+}
+
+float EvaluateDeferredAreaShadowAttenuation(
+    VividDeferredLocalShadowContext ctx,
+    uint areaLightIndex)
+{
+    if (!ctx.active || ctx.areaPrunedCount == 0u)
+        return 1.0;
+
+    [loop]
+    for (uint a = 0u; a < ctx.areaPrunedCount; ++a)
+    {
+        if (_VSMPrunedLightIndices[ctx.areaPrunedOffset + a] == areaLightIndex)
+        {
+            // AreaLight shadowStrength is pre-applied during VSMResolveLocalShadows packing.
+            return VividVSMUnpackShadowMask4Bit(ctx.maskBits, ctx.prunedCount + a);
         }
     }
 
@@ -359,8 +406,9 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
             inputs.normalWS, SafeNormalize(light.directionWS), max(light.color, 0.0) * shadow), result);
     }
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
-    if (punctualCount > 0u)
+    if (punctualCount > 0u || areaCount > 0u)
         localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
@@ -383,14 +431,21 @@ bool TryEvaluateDeferredOpenPBROpaqueLighting(VividSurfaceSummaryData summary,
                 inputs.normalWS, direction, max(light.color, 0.0) * attenuation), result);
         }
     }
-    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint i = 0u; i < areaCount; ++i)
     {
-        float3 areaBounce;
-        VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBROpaqueAreaLight(inputs,
-            albedo, positionWS, viewDirectionWS, VividLightingLoop::LoadAreaLight(lightLoop, i), areaBounce), result);
-        diffuseBounce += areaBounce;
+        uint areaLightIndex = VividLightingLoop::GetAreaLightIndex(lightLoop, i);
+        float areaShadow = EvaluateDeferredAreaShadowAttenuation(localShadowCtx, areaLightIndex);
+        if (areaShadow > 0.0)
+        {
+            float3 areaBounce;
+            OpenPBR_DiffuseSpecular contrib = VividEvaluateOpenPBROpaqueAreaLight(inputs,
+                albedo, positionWS, viewDirectionWS, GetAreaLight(areaLightIndex), areaBounce);
+            contrib.diffuse *= areaShadow;
+            contrib.specular *= areaShadow;
+            VividAccumulateOpenPBROpaqueLight(contrib, result);
+            diffuseBounce += areaBounce * areaShadow;
+        }
     }
     return true;
 }
@@ -490,8 +545,9 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
         }
     }
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
-    if (punctualCount > 0u)
+    if (punctualCount > 0u || areaCount > 0u)
         localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
@@ -522,15 +578,22 @@ bool TryEvaluateDeferredOpenPBRV2Lighting(VividSurfaceSummaryData summary,
             }
         }
     }
-    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint i = 0u; i < areaCount; ++i)
     {
-        float3 areaBounce;
-        VividAccumulateOpenPBROpaqueLight(VividEvaluateOpenPBRV2AreaLight(
-            v2Inputs, resolved, comp, positionWS, viewDirectionWS,
-            VividLightingLoop::LoadAreaLight(lightLoop, i), areaBounce), result);
-        diffuseBounce += areaBounce;
+        uint areaLightIndex = VividLightingLoop::GetAreaLightIndex(lightLoop, i);
+        float areaShadow = EvaluateDeferredAreaShadowAttenuation(localShadowCtx, areaLightIndex);
+        if (areaShadow > 0.0f)
+        {
+            float3 areaBounce;
+            OpenPBR_DiffuseSpecular contrib = VividEvaluateOpenPBRV2AreaLight(
+                v2Inputs, resolved, comp, positionWS, viewDirectionWS,
+                GetAreaLight(areaLightIndex), areaBounce);
+            contrib.diffuse *= areaShadow;
+            contrib.specular *= areaShadow;
+            VividAccumulateOpenPBROpaqueLight(contrib, result);
+            diffuseBounce += areaBounce * areaShadow;
+        }
     }
     return true;
 }
@@ -659,8 +722,9 @@ bool TryEvaluateDeferredSubstrateMultiClosureLighting(VividSurfaceSummaryData su
 
     // 3. Direct punctual lights
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
-    if (punctualCount > 0u)
+    if (punctualCount > 0u || areaCount > 0u)
         localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
@@ -701,11 +765,14 @@ bool TryEvaluateDeferredSubstrateMultiClosureLighting(VividSurfaceSummaryData su
     }
 
     // 4. Area lights (LTC weighted by indirect diffuse/specular transmission weights)
-    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint i = 0u; i < areaCount; ++i)
     {
-        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, i);
+        uint areaLightIndex = VividLightingLoop::GetAreaLightIndex(lightLoop, i);
+        float areaShadow = EvaluateDeferredAreaShadowAttenuation(localShadowCtx, areaLightIndex);
+        if (areaShadow <= 0.0f)
+            continue;
+        AreaLightData areaLight = GetAreaLight(areaLightIndex);
         [unroll]
         for (uint c = 0u; c < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++c)
         {
@@ -715,10 +782,10 @@ bool TryEvaluateDeferredSubstrateMultiClosureLighting(VividSurfaceSummaryData su
                 OpenPBR_DiffuseSpecular contrib = VividEvaluateOpenPBRV2AreaLight(
                     closures[c], resolvedList[c], compList[c], positionWS, viewDirectionWS,
                     areaLight, areaBounce);
-                contrib.diffuse *= indirectDiffWeights[c];
-                contrib.specular *= indirectSpecWeights[c];
+                contrib.diffuse *= indirectDiffWeights[c] * areaShadow;
+                contrib.specular *= indirectSpecWeights[c] * areaShadow;
                 VividAccumulateOpenPBROpaqueLight(contrib, result);
-                diffuseBounce += areaBounce * indirectDiffWeights[c];
+                diffuseBounce += areaBounce * (indirectDiffWeights[c] * areaShadow);
             }
         }
     }
@@ -752,8 +819,9 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
     }
 
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
-    if (punctualCount > 0u)
+    if (punctualCount > 0u || areaCount > 0u)
         localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint lightIndex = 0; lightIndex < punctualCount; ++lightIndex)
@@ -770,13 +838,18 @@ VividSimpleSlabDeferredLighting EvaluateDeferredFastSlabLighting(
             directLighting);
     }
 
-    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint lightIndex = 0; lightIndex < areaCount; ++lightIndex)
     {
-        AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, lightIndex);
+        uint areaLightIndex = VividLightingLoop::GetAreaLightIndex(lightLoop, lightIndex);
+        float areaShadow = EvaluateDeferredAreaShadowAttenuation(localShadowCtx, areaLightIndex);
+        if (areaShadow <= 0.0f)
+            continue;
+        AreaLightData light = GetAreaLight(areaLightIndex);
         VividAccumulateSimpleSlabDirectLighting(
-            VividEvaluateSimpleSlabAreaLight(slab, preLight, positionWS, light),
+            VividScaleSimpleSlabDirectLighting(
+                VividEvaluateSimpleSlabAreaLight(slab, preLight, positionWS, light),
+                areaShadow.xxx),
             directLighting);
     }
 
@@ -959,8 +1032,9 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
     }
 
     uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
-    if (punctualLightCount > 0u)
+    if (punctualLightCount > 0u || areaLightCount > 0u)
         localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
@@ -1009,20 +1083,23 @@ VividSimpleSlabDeferredLighting EvaluateDeferredDualSlabLighting(
             topSimpleDirectLighting);
     }
 
-    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint lightIndex = 0; lightIndex < areaLightCount; ++lightIndex)
     {
-        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, lightIndex);
+        uint areaLightIndex = VividLightingLoop::GetAreaLightIndex(lightLoop, lightIndex);
+        float areaShadow = EvaluateDeferredAreaShadowAttenuation(localShadowCtx, areaLightIndex);
+        if (areaShadow <= 0.0f)
+            continue;
+        AreaLightData areaLight = GetAreaLight(areaLightIndex);
         VividAccumulateSimpleSlabDirectLighting(
             VividScaleSimpleSlabDirectLighting(
                 VividEvaluateSimpleSlabAreaLight(baseSimpleSlab, basePreLightData, positionWS, areaLight),
-                baseEnvironmentWeight),
+                baseEnvironmentWeight * areaShadow),
             baseSimpleDirectLighting);
         VividAccumulateSimpleSlabDirectLighting(
             VividScaleSimpleSlabDirectLighting(
                 VividEvaluateSimpleSlabAreaLight(topSimpleSlab, topPreLightData, positionWS, areaLight),
-                topWeight),
+                topWeight * areaShadow),
             topSimpleDirectLighting);
     }
 
@@ -1168,8 +1245,9 @@ bool TryEvaluateDeferredHairLighting(
 
     // 3. Direct Punctual Lights
     uint punctualCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     VividDeferredLocalShadowContext localShadowCtx = (VividDeferredLocalShadowContext)0;
-    if (punctualCount > 0u)
+    if (punctualCount > 0u || areaCount > 0u)
         localShadowCtx = CreateDeferredLocalShadowContext(pixelCoord, positionWS);
     [loop]
     for (uint i = 0u; i < punctualCount; ++i)
@@ -1206,11 +1284,14 @@ bool TryEvaluateDeferredHairLighting(
     }
 
     // 4. Direct Area Lights (representative direction + projected solid-angle energy)
-    uint areaCount = VividLightingLoop::GetAreaLightCount(lightLoop);
     [loop]
     for (uint i = 0u; i < areaCount; ++i)
     {
-        AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, i);
+        uint areaLightIndex = VividLightingLoop::GetAreaLightIndex(lightLoop, i);
+        float areaShadow = EvaluateDeferredAreaShadowAttenuation(localShadowCtx, areaLightIndex);
+        if (areaShadow <= 0.0f)
+            continue;
+        AreaLightData light = GetAreaLight(areaLightIndex);
         ApplyRectangularAreaLightBarnDoor(light, positionWS);
         float intensity = EvaluateAreaLightIntensity(light, positionWS);
         if (intensity <= 0.0f)
@@ -1230,7 +1311,7 @@ bool TryEvaluateDeferredHairLighting(
             float backlitVis = smoothstep(-0.65f, 0.25f, NdotL) * lerp(0.15f, 1.0f, bsdfIn.shellDepth);
             float dualVis = lerp(0.25f, 1.0f, skinWrap);
 
-            float3 radiance = max(light.color, 0.0f.xxx) * (intensity * solidAngle);
+            float3 radiance = max(light.color, 0.0f.xxx) * (intensity * solidAngle * areaShadow);
             VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirectionWS, lightDir, 1.0f);
             float3 directSpec = radiance * (resp.lobeR + resp.lobeTRT) * reflectionVis;
             float3 directDiff = radiance * (resp.lobeTT * backlitVis + resp.lobeMedulla * reflectionVis + resp.lobeDualScatter * dualVis);

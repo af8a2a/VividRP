@@ -86,6 +86,12 @@ bool VividVSMInstanceIntersectsLocalLight(VividVSMProjection proj, float4 sphere
         if (cosAlpha < cosHalf * cosBeta - sinHalf * sinBeta)
             return false;
     }
+    else if (proj.meta.x == VIVID_VSM_LIGHT_TYPE_RECT)
+    {
+        // Rectangle AreaLight only illuminates the front hemisphere (forwardWS).
+        if (dot(toCenter, proj.lightDirectionAndSpot.xyz) + sphereWS.w < 0.0)
+            return false;
+    }
     return true;
 }
 #endif

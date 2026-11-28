@@ -32,11 +32,39 @@ struct VSMPunctualLightData
 #define VIVID_VSM_PUNCTUAL_TYPE_POINT 0u
 #define VIVID_VSM_PUNCTUAL_TYPE_SPOT 1u
 
+// Matches Lighting.hlsl::AreaLightData (112 bytes) without pulling full lighting includes.
+struct VSMAreaLightData
+{
+    float3 positionWS;
+    float rangeAttenuationScale;
+    float3 color;
+    uint lightType;
+    float3 forwardWS;
+    float rangeAttenuationBias;
+    float3 rightWS;
+    float width;
+    float3 upWS;
+    float height;
+    uint renderingLayerMask;
+    float range;
+    float cosBarnDoorAngle;
+    float barnDoorLength;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
+};
+
+#define VIVID_VSM_AREA_TYPE_TUBE 0u
+#define VIVID_VSM_AREA_TYPE_RECTANGLE 1u
+
 StructuredBuffer<uint> _VSMLayeredOffset;
 StructuredBuffer<uint> _VSMLayeredLightList;
 StructuredBuffer<float> _VSMLogBaseBuffer;
 StructuredBuffer<VSMPunctualLightData> _VSMPunctualLights;
 StructuredBuffer<int2> _VSMPunctualLightVSMInfo; // x = baseVsmId (-1 if none), y = projection flags
+StructuredBuffer<VSMAreaLightData> _VSMAreaLights;
+StructuredBuffer<int4> _VSMAreaLightVSMInfo; // x = baseVsmId (-1 if none), y = projFlags, z = asint(shadowStrength), w = reserved
 
 RWStructuredBuffer<uint> _VSMPrunedLightOffsetCountRW;
 RWStructuredBuffer<uint> _VSMPrunedLightIndicesRW;
@@ -45,6 +73,8 @@ StructuredBuffer<uint> _VSMPrunedLightIndices;
 
 int _VSMClusterCount;
 int _VSMPunctualLightCount;
+int _VSMAreaLightCount;
+int _VSMPruneAreaCategoryEnabled;
 int _VSMMarkCoarsePagesLocal;
 // x = radiusScreen = min(1 / (W * P00), 1 / (H * P11)), y = isPerspective (1/0),
 // z = orthoRadiusWorld, w = globalLocalLodBias
@@ -108,6 +138,53 @@ void VSMPruneLightGridCS(uint3 id : SV_DispatchThreadID)
     _VSMPrunedLightOffsetCountRW[clusterIndex] =
         (startOffset & LIGHT_CLUSTER_PACKING_OFFSET_MASK)
         | ((retained & LIGHT_CLUSTER_PACKING_COUNT_MASK) << LIGHT_CLUSTER_PACKING_OFFSET_BITS);
+
+    // Optional Category 1 (LIGHTCATEGORY_AREA) pruning at [_VSMClusterCount + clusterIndex].
+    if (_VSMPruneAreaCategoryEnabled != 0)
+    {
+        uint areaCellIdx = (uint)_VSMClusterCount + clusterIndex;
+        uint areaPacked = _VSMLayeredOffset[areaCellIdx];
+        uint areaStartOffset = areaPacked & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+        uint areaLightCount = (areaPacked >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK;
+
+        uint areaRetained = 0u;
+        if (_VSMAreaLightCount > 0 && areaLightCount > 0u)
+        {
+            uint firstArea = areaLightCount;
+            uint lastArea = 0u;
+            [loop]
+            for (uint i = 0u; i < areaLightCount; i++)
+            {
+                uint lightIdx = _VSMLayeredLightList[areaStartOffset + i];
+                if (lightIdx >= (uint)_VSMAreaLightCount)
+                    continue;
+                int4 info = _VSMAreaLightVSMInfo[lightIdx];
+                if (info.x >= 0)
+                {
+                    firstArea = min(firstArea, i);
+                    lastArea = max(lastArea, i);
+                    if (((uint)info.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) == 0u)
+                        _VSMPrunedLightIndicesRW[areaStartOffset + areaRetained++] = lightIdx;
+                }
+            }
+            if (firstArea < areaLightCount)
+            {
+                [loop]
+                for (uint i = firstArea; i <= lastArea; i++)
+                {
+                    uint lightIdx = _VSMLayeredLightList[areaStartOffset + i];
+                    if (lightIdx >= (uint)_VSMAreaLightCount)
+                        continue;
+                    int4 info = _VSMAreaLightVSMInfo[lightIdx];
+                    if (info.x >= 0 && ((uint)info.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) != 0u)
+                        _VSMPrunedLightIndicesRW[areaStartOffset + areaRetained++] = lightIdx;
+                }
+            }
+        }
+        _VSMPrunedLightOffsetCountRW[areaCellIdx] =
+            (areaStartOffset & LIGHT_CLUSTER_PACKING_OFFSET_MASK)
+            | ((areaRetained & LIGHT_CLUSTER_PACKING_COUNT_MASK) << LIGHT_CLUSTER_PACKING_OFFSET_BITS);
+    }
 }
 
 // Clears local/unified page request flags and receiver masks without touching directional page pressure.
@@ -203,6 +280,64 @@ bool VividVSMIsBackfaceToLocalLight(float3 toLight, float distSq, float invDist,
 {
     float sinAlpha = sqrt(saturate(sourceRadiusSq / (distSq + 1e-4)));
     return dot(normalWS, toLight * invDist) < -sinAlpha;
+}
+
+// Verbatim mirror of VividAreaLightCommon.hlsl::ApplyRectangularAreaLightBarnDoor.
+void VSMApplyRectangularAreaLightBarnDoor(inout VSMAreaLightData areaLight, float3 positionWS)
+{
+    if (areaLight.lightType != VIVID_VSM_AREA_TYPE_RECTANGLE)
+        return;
+    if (areaLight.cosBarnDoorAngle <= 0.017 || areaLight.barnDoorLength <= 0.05)
+        return;
+
+    float halfWidth = areaLight.width * 0.5;
+    float halfHeight = areaLight.height * 0.5;
+    float3 pointToLight = positionWS - areaLight.positionWS;
+    float3 pointLS = float3(
+        dot(pointToLight, areaLight.rightWS),
+        dot(pointToLight, areaLight.upWS),
+        dot(pointToLight, areaLight.forwardWS));
+
+    float maxDepth = areaLight.cosBarnDoorAngle * areaLight.barnDoorLength;
+    float pointDepth = min(pointLS.z, maxDepth);
+    float pointDepthRatio = pointDepth / max(maxDepth, 1e-5);
+    float sinTheta = sqrt(saturate(1.0 - areaLight.cosBarnDoorAngle * areaLight.cosBarnDoorAngle));
+    float barnDoorProjection = sinTheta * areaLight.barnDoorLength * pointDepthRatio;
+    float2 pointSign = sign(pointLS.xy);
+    pointLS.xy = pointSign * max(abs(pointLS.xy), float2(halfWidth, halfHeight) + barnDoorProjection.xx);
+
+    float3 closestLightCorner = float3(
+        pointSign.x * (halfWidth + barnDoorProjection),
+        pointSign.y * (halfHeight + barnDoorProjection),
+        pointDepth);
+    float3 pointProjection = pointLS - closestLightCorner;
+    float cosPhi = max(0.0, pointProjection.z);
+    float2 tanPhi = cosPhi > 0.001
+        ? abs(pointProjection.xy) / cosPhi
+        : float2(99999.0, 99999.0);
+    float2 projectionDistance = pointDepth * tanPhi;
+
+    float2 topRight = float2(-halfWidth, halfWidth);
+    float2 bottomLeft = float2(-halfHeight, halfHeight);
+    topRight += (projectionDistance.x - barnDoorProjection) * float2(max(0.0, -pointSign.x), -max(0.0, pointSign.x));
+    bottomLeft += (projectionDistance.y - barnDoorProjection) * float2(max(0.0, -pointSign.y), -max(0.0, pointSign.y));
+    topRight = clamp(topRight, -halfWidth, halfWidth);
+    bottomLeft = clamp(bottomLeft, -halfHeight, halfHeight);
+
+    float2 lightCenterOffset = 0.5 * float2(topRight.x + topRight.y, bottomLeft.x + bottomLeft.y);
+    areaLight.width = topRight.y - topRight.x;
+    areaLight.height = bottomLeft.y - bottomLeft.x;
+    areaLight.positionWS += areaLight.rightWS * lightCenterOffset.x + areaLight.upWS * lightCenterOffset.y;
+}
+
+// Exact analytical conservative backface test over all 4 rectangle corners (or 2 tube endpoints).
+bool VividVSMIsBackfaceToAreaLight(VSMAreaLightData light, float3 positionWS, float3 normalWS)
+{
+    float centerDot = dot(normalWS, light.positionWS - positionWS);
+    float halfW = 0.5 * max(light.width, 0.0);
+    float halfH = light.lightType == VIVID_VSM_AREA_TYPE_TUBE ? 0.0 : 0.5 * max(light.height, 0.0);
+    float maxCornerDot = centerDot + halfW * abs(dot(normalWS, light.rightWS)) + halfH * abs(dot(normalWS, light.upWS));
+    return maxCornerDot <= 0.0;
 }
 
 // UE VirtualShadowMapCalcPixelFootprintLocal + GetMipLevelLocal.
@@ -343,6 +478,70 @@ void VSMMarkLocalReceiverPages(uint3 id : SV_DispatchThreadID, uint groupIndex :
         float4 shadowUVz;
         uint mipLevel = VividVSMSelectLocalMipLevel(proj, positionWS, viewDepth, shadowUVz);
         VividVSMMarkLocalPage(proj, mipLevel, shadowUVz, groupIndex);
+    }
+
+    // Mark Full-VSM LTC AreaLights (Rectangle / Tube, 6-face cubemap) from pruned Category 1 list.
+    if (_VSMAreaLightCount > 0)
+    {
+        uint areaPacked = _VSMPrunedLightOffsetCount[(uint)_VSMClusterCount + clusterIndex];
+        uint areaStartOffset = areaPacked & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+        uint areaLightCount = (areaPacked >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK;
+
+        [loop]
+        for (uint j = 0u; j < areaLightCount; j++)
+        {
+            uint areaIdx = _VSMPrunedLightIndices[areaStartOffset + j];
+            if (areaIdx >= (uint)_VSMAreaLightCount)
+                continue;
+
+            int4 vsmInfo = _VSMAreaLightVSMInfo[areaIdx];
+            if (vsmInfo.x < 0)
+                continue;
+
+            // PruneLightGridCS sorted Single-Page AreaLights to the tail; stop immediately on first hit.
+            if (((uint)vsmInfo.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) != 0u)
+                break;
+
+            VSMAreaLightData area = _VSMAreaLights[areaIdx];
+            float3 origCenterWS = area.positionWS;
+            float3 fromCenter = positionWS - origCenterWS;
+            bool isRect = area.lightType == VIVID_VSM_AREA_TYPE_RECTANGLE;
+            if (!isRect && area.lightType != VIVID_VSM_AREA_TYPE_TUBE)
+                continue;
+
+            // Rectangle only illuminates its front hemisphere (+forwardWS).
+            if (isRect && dot(fromCenter, area.forwardWS) <= 0.0)
+                continue;
+
+            // Check effective outer range before BarnDoor clip.
+            float halfExtent = isRect
+                ? 0.5 * sqrt(area.width * area.width + area.height * area.height)
+                : 0.5 * area.width;
+            float effRange = area.range + halfExtent;
+            if (dot(fromCenter, fromCenter) > effRange * effRange)
+                continue;
+
+            VSMAreaLightData clippedArea = area;
+            if (isRect)
+            {
+                VSMApplyRectangularAreaLightBarnDoor(clippedArea, positionWS);
+                if (clippedArea.width <= 1e-4 || clippedArea.height <= 1e-4)
+                    continue;
+            }
+
+            if (_VSMCullBackfacingPixels != 0u
+                && VividVSMIsBackfaceToAreaLight(clippedArea, positionWS, normalWS))
+                continue;
+
+            uint vsmId = (uint)vsmInfo.x + VividVSMGetCubeFace(fromCenter);
+            if (vsmId >= (uint)_VSMProjectionCount)
+                continue;
+
+            VividVSMProjection proj = _VSMProjections[vsmId];
+            float4 shadowUVz;
+            uint mipLevel = VividVSMSelectLocalMipLevel(proj, positionWS, viewDepth, shadowUVz);
+            VividVSMMarkLocalPage(proj, mipLevel, shadowUVz, groupIndex);
+        }
     }
 }
 #endif

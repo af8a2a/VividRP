@@ -757,3 +757,16 @@ void InspectVSMClusterWindowFeedback(uint3 id : SV_DispatchThreadID)
     _SamplingResults[0] = float2(small ? 1.0 : 0.0, clusters);
 }
 #endif
+
+#pragma kernel ReadbackUInt4Texture
+Texture2D<uint4> _TestReadbackUInt4Tex;
+RWStructuredBuffer<uint4> _TestReadbackUInt4Out;
+uint2 _TestReadbackUInt4Size;
+
+[numthreads(8, 8, 1)]
+void ReadbackUInt4Texture(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _TestReadbackUInt4Size.x || id.y >= _TestReadbackUInt4Size.y)
+        return;
+    _TestReadbackUInt4Out[id.y * _TestReadbackUInt4Size.x + id.x] = _TestReadbackUInt4Tex.Load(int3(id.xy, 0));
+}

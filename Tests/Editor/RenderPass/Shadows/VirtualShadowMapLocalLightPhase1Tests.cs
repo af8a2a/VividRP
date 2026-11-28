@@ -182,6 +182,7 @@ namespace VividRP.Editor.Tests
             using var layeredOffset = new GraphicsBuffer(GraphicsBuffer.Target.Structured, offsets.Length, sizeof(uint));
             using var layeredList = new GraphicsBuffer(GraphicsBuffer.Target.Structured, indices.Length, sizeof(uint));
             using var vsmInfo = new GraphicsBuffer(GraphicsBuffer.Target.Structured, infoData.Length, sizeof(int) * 2);
+            using var areaVsmInfo = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(int) * 4);
             using var prunedOffset = new GraphicsBuffer(GraphicsBuffer.Target.Structured, offsets.Length, sizeof(uint));
             using var prunedList = new GraphicsBuffer(GraphicsBuffer.Target.Structured, indices.Length, sizeof(uint));
             try
@@ -189,14 +190,18 @@ namespace VividRP.Editor.Tests
                 layeredOffset.SetData(offsets);
                 layeredList.SetData(indices);
                 vsmInfo.SetData(infoData);
+                areaVsmInfo.SetData(new[] { new int4(-1, 0, 0, 0) });
                 prunedList.SetData(new uint[indices.Length]);
 
                 int kernel = shader.FindKernel("VSMPruneLightGridCS");
                 shader.SetInt("_VSMClusterCount", offsets.Length);
                 shader.SetInt("_VSMPunctualLightCount", infoData.Length);
+                shader.SetInt("_VSMAreaLightCount", 0);
+                shader.SetInt("_VSMPruneAreaCategoryEnabled", 0);
                 shader.SetBuffer(kernel, "_VSMLayeredOffset", layeredOffset);
                 shader.SetBuffer(kernel, "_VSMLayeredLightList", layeredList);
                 shader.SetBuffer(kernel, "_VSMPunctualLightVSMInfo", vsmInfo);
+                shader.SetBuffer(kernel, "_VSMAreaLightVSMInfo", areaVsmInfo);
                 shader.SetBuffer(kernel, "_VSMPrunedLightOffsetCountRW", prunedOffset);
                 shader.SetBuffer(kernel, "_VSMPrunedLightIndicesRW", prunedList);
                 shader.Dispatch(kernel, 1, 1, 1);
@@ -406,6 +411,8 @@ namespace VividRP.Editor.Tests
             using var reqMasks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, totalEntries, sizeof(uint) * 2);
             using var punctualBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, punctuals.Length, 128);
             using var infoBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, vsmInfos.Length, sizeof(int) * 2);
+            using var areaBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, VividLightData.AreaLightData.Stride);
+            using var areaInfoBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(int) * 4);
             using var prunedOffset = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
             using var prunedList = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2, sizeof(uint));
             using var logBaseBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(float));
@@ -416,6 +423,8 @@ namespace VividRP.Editor.Tests
                 reqMasks.SetData(new uint2[totalEntries]);
                 punctualBuf.SetData(punctuals);
                 infoBuf.SetData(vsmInfos);
+                areaBuf.SetData(new[] { default(VividLightData.AreaLightData) });
+                areaInfoBuf.SetData(new[] { new int4(-1, 0, 0, 0) });
                 prunedOffset.SetData(clusterOffsets);
                 prunedList.SetData(clusterIndices);
                 logBaseBuf.SetData(logBases);
@@ -429,6 +438,7 @@ namespace VividRP.Editor.Tests
                 shader.SetInt("_VSMProjectionCount", registry.ProjectionCount);
                 shader.SetInt("_VSMClusterCount", 1);
                 shader.SetInt("_VSMPunctualLightCount", punctuals.Length);
+                shader.SetInt("_VSMAreaLightCount", 0);
                 shader.SetInt("_CSMOutputWidth", width);
                 shader.SetInt("_CSMOutputHeight", height);
                 shader.SetInt("_VSMCullBackfacingPixels", 0);
@@ -442,6 +452,8 @@ namespace VividRP.Editor.Tests
                 shader.SetBuffer(kernel, "_VSMPageReceiverMasks", reqMasks);
                 shader.SetBuffer(kernel, "_VSMPunctualLights", punctualBuf);
                 shader.SetBuffer(kernel, "_VSMPunctualLightVSMInfo", infoBuf);
+                shader.SetBuffer(kernel, "_VSMAreaLights", areaBuf);
+                shader.SetBuffer(kernel, "_VSMAreaLightVSMInfo", areaInfoBuf);
                 shader.SetBuffer(kernel, "_VSMPrunedLightOffsetCount", prunedOffset);
                 shader.SetBuffer(kernel, "_VSMPrunedLightIndices", prunedList);
                 shader.SetBuffer(kernel, "_VSMLogBaseBuffer", logBaseBuf);

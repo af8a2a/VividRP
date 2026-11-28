@@ -108,7 +108,9 @@ namespace VividRP.Runtime.VirtualShadowMap
                 || localGrid.PrunedLightOffsetCount == null || !localGrid.PrunedLightOffsetCount.IsValid()
                 || localGrid.PrunedLightIndices == null || !localGrid.PrunedLightIndices.IsValid()
                 || localGrid.PunctualLightVSMInfo == null || !localGrid.PunctualLightVSMInfo.IsValid()
+                || localGrid.AreaLightVSMInfo == null || !localGrid.AreaLightVSMInfo.IsValid()
                 || localGrid.SourcePunctualLights == null || !localGrid.SourcePunctualLights.IsValid()
+                || localGrid.SourceAreaLights == null || !localGrid.SourceAreaLights.IsValid()
                 || localGrid.SourceLogBaseBuffer == null || !localGrid.SourceLogBaseBuffer.IsValid()
                 || !IsMaskFormatSupported())
             {
@@ -128,7 +130,9 @@ namespace VividRP.Runtime.VirtualShadowMap
                 PassRecorder.ImportBufferForPass(pass, localGrid.PrunedLightOffsetCount, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(pass, localGrid.PrunedLightIndices, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(pass, localGrid.PunctualLightVSMInfo, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(pass, localGrid.AreaLightVSMInfo, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(pass, localGrid.SourcePunctualLights, AccessFlags.Read);
+                PassRecorder.ImportBufferForPass(pass, localGrid.SourceAreaLights, AccessFlags.Read);
                 PassRecorder.ImportBufferForPass(pass, localGrid.SourceLogBaseBuffer, AccessFlags.Read);
             }
 
@@ -176,6 +180,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 cmd.SetComputeBufferParam(shader, resolveLocalKernel, VirtualShadowMapLocalLightGrid.PrunedLightIndicesId, localGrid.PrunedLightIndices);
                 cmd.SetComputeBufferParam(shader, resolveLocalKernel, VirtualShadowMapLocalLightGrid.PunctualLightVSMInfoId, localGrid.PunctualLightVSMInfo);
                 cmd.SetComputeBufferParam(shader, resolveLocalKernel, VirtualShadowMapLocalLightGrid.PunctualLightsId, localGrid.SourcePunctualLights);
+                cmd.SetComputeBufferParam(shader, resolveLocalKernel, VirtualShadowMapLocalLightGrid.AreaLightVSMInfoId, localGrid.AreaLightVSMInfo);
+                cmd.SetComputeBufferParam(shader, resolveLocalKernel, VirtualShadowMapLocalLightGrid.AreaLightsId, localGrid.SourceAreaLights);
                 cmd.SetComputeBufferParam(shader, resolveLocalKernel, VirtualShadowMapLocalLightGrid.LogBaseBufferId, localGrid.SourceLogBaseBuffer);
 
                 cmd.SetComputeIntParam(shader, VirtualShadowMapProjectionSet.CountId, localGrid.UnifiedProjectionCount);
@@ -183,6 +189,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                 cmd.SetComputeIntParam(shader, PageSizeId, VirtualShadowMapPrototypeRuntime.PageSize);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.ClusterCountId, localGrid.ClusterCount);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.PunctualLightCountId, localGrid.PunctualLightCount);
+                cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.AreaLightCountId, localGrid.AreaLightCount);
                 cmd.SetComputeIntParam(shader, VirtualShadowMapLocalLightGrid.LocalPagePressureEnabledId, 0);
                 cmd.SetComputeIntParam(shader, OutputWidthId, m_Width);
                 cmd.SetComputeIntParam(shader, OutputHeightId, m_Height);

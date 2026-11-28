@@ -11,6 +11,8 @@ namespace VividRP.Runtime.VirtualShadowMap
         Directional = 0u,
         Point = 1u,
         Spot = 2u,
+        Rect = 3u,
+        Tube = 4u,
     }
 
     [Flags]

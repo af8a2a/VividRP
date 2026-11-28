@@ -497,7 +497,9 @@ Shader "Hidden/VividRP/VSMDebug"
                     color = float3(0.025, 0.025, 0.025);
                     uint tagGlyph = focusSingleVSM ? 0x5bfdu // M
                         : (isSingle ? 0x3b6bu // D (Distant single-page)
-                        : (proj.meta.x == VIVID_VSM_LIGHT_TYPE_POINT ? 0x12ebu : 0x79cfu)); // P or S
+                        : (proj.meta.x == VIVID_VSM_LIGHT_TYPE_POINT ? 0x12ebu
+                        : (proj.meta.x == VIVID_VSM_LIGHT_TYPE_RECT ? 0x5aebu
+                        : (proj.meta.x == VIVID_VSM_LIGHT_TYPE_TUBE ? 0x2497u : 0x79cfu)))); // P / R / T / S
                     uint tagNumber = focusSingleVSM ? mipLevel : tileIdx;
                     if (LocalGlyph(labelPixel - int2(2, 2), tagGlyph)
                         || LocalNumber(labelPixel - int2(8, 2), tagNumber))

@@ -593,6 +593,151 @@ float TraceLocalLightVSM(
 }
 
 // ============================================================================
+// LTC AreaLight (Rectangle / Tube) Anisotropic SMRT over 6-Face Cubemap VSM
+// Ray endpoints sample the BarnDoor-clipped rectangle (or tube segment) while
+// tracing seamlessly across cubemap faces via VSMShadowRayCastPointLight.
+// ============================================================================
+float TraceAreaLightVSM(
+    uint baseVsmId,
+    bool isSinglePage,
+    float3 origCenterWS,
+    VSMAreaLightData clippedArea,
+    uint2 pixelPos,
+    float viewDepth,
+    float3 positionWS,
+    float rayStartOffset,
+    float noise,
+    float3 worldNormal)
+{
+    const float3 toCenter = origCenterWS - positionWS;
+    const float distSq = max(dot(toCenter, toCenter), 1e-8);
+    const float distToCenter = sqrt(distSq);
+    const float3 coneAxis = toCenter / distToCenter;
+
+    uint offsetVsmId = baseVsmId + VividVSMGetCubeFace(-toCenter);
+    if (offsetVsmId >= (uint)_VSMProjectionCount)
+        return 1.0;
+
+    VividVSMProjection proj = _VSMProjections[offsetVsmId];
+    float4 receiverShadowUVz;
+    uint mipLevel = isSinglePage ? 0u : VividVSMSelectLocalMipLevel(proj, positionWS, viewDepth, receiverShadowUVz);
+
+    const uint maxRayCount = (uint)clamp((int)_VSMLocalSMRTParameters.x, 1, 16);
+    uint samplesPerRay = (uint)clamp((int)_VSMLocalSMRTParameters.y, 0, 16);
+    bool isRect = clippedArea.lightType == VIVID_VSM_AREA_TYPE_RECTANGLE;
+    float maxExtent = isRect ? max(clippedArea.width, clippedArea.height) : clippedArea.width;
+    if (maxExtent <= 1e-5)
+        samplesPerRay = 0u;
+
+    if (isSinglePage || (maxRayCount <= 1u && samplesPerRay == 0u))
+    {
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+        g_VSMLocalDebugRays += 1u;
+        g_VSMLocalDebugSamples += 1u;
+#endif
+        return SampleLocalLightHardVSM(offsetVsmId, positionWS, worldNormal, viewDepth, mipLevel);
+    }
+
+    const float2 depthSlopeUV = ComputeDepthSlopeLocalUV(offsetVsmId, positionWS, worldNormal);
+    const float shadowResolutionScale = ComputeShadowResolutionScaleLocal(proj, viewDepth);
+    const float shadowDepthFunctionScale = abs(proj.projectionScales.w / distSq);
+
+    const float projDitherScale = asfloat(proj.extended.x);
+    const float ditherScale = (_VSMLocalSMRTSettings.y * projDitherScale) * shadowResolutionScale;
+    const float maxDitherSlope = _VSMLocalSMRTParameters.z * ditherScale;
+    const float maxDepthBias = _VSMLocalSMRTParameters.z * shadowResolutionScale * shadowDepthFunctionScale;
+
+    const float3x3 coneTangentToWorldMatrix = VSMLocalGetTangentBasis(coneAxis);
+    const float3 normalPlaneTangent = mul(coneTangentToWorldMatrix, worldNormal);
+    const float denomZ = abs(normalPlaneTangent.z) > 1e-6 ? normalPlaneTangent.z : (normalPlaneTangent.z < 0.0 ? -1e-6 : 1e-6);
+    const float2 depthSlopeTangent = -normalPlaneTangent.xy / denomZ;
+
+    const uint adaptiveRayCount = (uint)max((int)_VSMLocalSMRTSettings.z, 0);
+    uint i = 0u;
+    uint rayMissCount = 0u;
+    float stepOffset = noise;
+
+    [loop]
+    for (; i < maxRayCount; i++)
+    {
+        float4 randSample = VSMLocalGetRandomSample(pixelPos, (uint)_CSMFrameIndex, i, maxRayCount);
+
+        float3 rayStartWithDither = positionWS;
+        if (ditherScale > 0.0)
+        {
+            float2 randomOffset = (randSample.zw - 0.5) * ditherScale;
+            float offsetZ = min(maxDitherSlope, 2.0 * max(0.0, dot(depthSlopeTangent, randomOffset)));
+            float3 offset = mul(float3(randomOffset, offsetZ), coneTangentToWorldMatrix);
+            rayStartWithDither += offset;
+        }
+
+        // Anisotropic sample point on the BarnDoor-clipped rectangle (or tube line segment).
+        float3 samplePointWS = clippedArea.positionWS
+            + (randSample.x - 0.5) * clippedArea.width * clippedArea.rightWS;
+        if (isRect)
+            samplePointWS += (randSample.y - 0.5) * clippedArea.height * clippedArea.upWS;
+
+        float3 rayVec = samplePointWS - rayStartWithDither;
+        float rayLenSq = max(dot(rayVec, rayVec), 1e-8);
+        float rayLen = sqrt(rayLenSq);
+        float3 dir = rayVec / rayLen;
+        float cosTheta = saturate(dot(dir, coneAxis));
+
+        // Clamp ray end to stay strictly inside the emitter plane and avoid cubemap-pole distortion.
+        float clampedEnd = rayLen * VirtualShadowMapGetClampedRayDistanceScaleLocal(cosTheta);
+        float start = min(rayStartOffset, max(clampedEnd - 1e-6, 0.0));
+
+        float3 rayStart = rayStartWithDither + dir * start;
+        float3 rayEnd = rayStartWithDither + dir * clampedEnd;
+
+        float depthBias = 0.0;
+        if (maxDepthBias > 0.0)
+            depthBias = min(maxDepthBias, ComputeOptimalSlopeBiasLocal(offsetVsmId, rayStart, depthSlopeUV, mipLevel));
+
+        VSMLocalSMRTSingleRayState rayState;
+        VSMSMRTResult smrtResult = VSMShadowRayCastPointLight(
+            baseVsmId,
+            origCenterWS,
+            rayStart,
+            rayEnd,
+            depthBias,
+            mipLevel,
+            (int)samplesPerRay,
+            stepOffset,
+            _VSMLocalSMRTSettings.x,
+            rayState);
+
+        if (!smrtResult.bValidHit)
+            ++rayMissCount;
+
+#if defined(PLATFORM_SUPPORTS_WAVE_INTRINSICS)
+        if (maxRayCount > 1u && adaptiveRayCount > 0u)
+        {
+            if (i == 0u)
+            {
+                if (WaveActiveAllTrue(!smrtResult.bValidHit))
+                    break;
+            }
+            else if (i >= adaptiveRayCount)
+            {
+                if (WaveActiveAllTrue(rayMissCount == 0u))
+                    break;
+            }
+        }
+#endif
+
+        uint seed = asuint(stepOffset);
+        stepOffset = (float)(VSMLocalEvolveSobolSeed(seed) >> 8) * 5.96046447754e-08;
+    }
+
+    uint rayCount = min(i + 1u, maxRayCount);
+#if defined(VIVID_VSM_LOCAL_RECEIVER_DEBUG)
+    g_VSMLocalDebugRays += rayCount;
+#endif
+    return (float)rayMissCount / (float)rayCount;
+}
+
+// ============================================================================
 // Phase 3 Kernel: One-Pass Local Light Shadow Projection
 // Packs up to 32 local lights/pixel (4-bit + blue-noise dither) into uint4.
 // ============================================================================
@@ -699,6 +844,83 @@ void VSMResolveLocalShadows(uint3 id : SV_DispatchThreadID)
             normalWS);
 
         VividVSMPackShadowMask4Bit(maskBits, shadowFactor, slot, lightNoise);
+    }
+
+    // Pack LTC AreaLights (Rectangle / Tube) immediately after Punctual slots in the shared uint4 mask.
+    if (_VSMAreaLightCount > 0 && lightCount < VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS)
+    {
+        uint areaPacked = _VSMPrunedLightOffsetCount[(uint)_VSMClusterCount + clusterIndex];
+        uint areaStartOffset = areaPacked & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+        uint areaCount = min(
+            (areaPacked >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK,
+            VIVID_VSM_MAX_PACKED_LOCAL_LIGHTS - lightCount);
+
+        [loop]
+        for (uint a = 0u; a < areaCount; a++)
+        {
+            uint areaIdx = _VSMPrunedLightIndices[areaStartOffset + a];
+            if (areaIdx >= (uint)_VSMAreaLightCount)
+                continue;
+
+            int4 vsmInfo = _VSMAreaLightVSMInfo[areaIdx];
+            if (vsmInfo.x < 0)
+                continue;
+
+            float shadowStrength = saturate(asfloat(vsmInfo.z));
+            if (shadowStrength <= 0.0)
+                continue;
+
+            VSMAreaLightData area = _VSMAreaLights[areaIdx];
+            bool isRect = area.lightType == VIVID_VSM_AREA_TYPE_RECTANGLE;
+            if (!isRect && area.lightType != VIVID_VSM_AREA_TYPE_TUBE)
+                continue;
+
+            float3 origCenterWS = area.positionWS;
+            float3 fromCenter = biasedPosWS - origCenterWS;
+            if (isRect && dot(fromCenter, area.forwardWS) <= 0.0)
+                continue;
+
+            float halfExtent = isRect
+                ? 0.5 * sqrt(area.width * area.width + area.height * area.height)
+                : 0.5 * area.width;
+            float effRange = area.range + halfExtent;
+            float distSq = dot(fromCenter, fromCenter);
+            if (distSq > effRange * effRange || distSq <= 1e-8)
+                continue;
+
+            VSMAreaLightData clippedArea = area;
+            if (isRect)
+            {
+                VSMApplyRectangularAreaLightBarnDoor(clippedArea, biasedPosWS);
+                if (clippedArea.width <= 1e-4 || clippedArea.height <= 1e-4)
+                    continue;
+            }
+
+            uint maskSlot = lightCount + a;
+            float lightNoise = frac(ditherNoise + (float)maskSlot * 0.61803398875);
+
+            if (VividVSMIsBackfaceToAreaLight(clippedArea, biasedPosWS, normalWS))
+            {
+                VividVSMPackShadowMask4Bit(maskBits, lerp(1.0, 0.0, shadowStrength), maskSlot, lightNoise);
+                continue;
+            }
+
+            bool isSinglePage = ((uint)vsmInfo.y & VIVID_VSM_PROJ_FLAG_SINGLE_PAGE) != 0u;
+            float shadowFactor = TraceAreaLightVSM(
+                (uint)vsmInfo.x,
+                isSinglePage,
+                origCenterWS,
+                clippedArea,
+                pixelPos,
+                viewDepth,
+                biasedPosWS,
+                0.0,
+                lightNoise,
+                normalWS);
+
+            float atten = lerp(1.0, shadowFactor, shadowStrength);
+            VividVSMPackShadowMask4Bit(maskBits, atten, maskSlot, lightNoise);
+        }
     }
 
     _VSMLocalShadowMaskBitsRW[pixelPos] = maskBits;

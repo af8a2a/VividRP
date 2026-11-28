@@ -253,9 +253,18 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        public struct AreaLightShadowMeta
+        {
+            public EntityId lightEntityId;
+            public float shadowStrength;
+            public VividLightRenderDataFlags flags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct AreaLightCandidate
         {
             public AreaLightData lightData;
+            public AreaLightShadowMeta shadowMeta;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -352,6 +361,7 @@ namespace VividRP.Runtime
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
         public PunctualLightShadowMeta[] punctualLightShadowMeta = Array.Empty<PunctualLightShadowMeta>();
         public AreaLightData[] areaLights = Array.Empty<AreaLightData>();
+        public AreaLightShadowMeta[] areaLightShadowMeta = Array.Empty<AreaLightShadowMeta>();
         public ReflectionProbeData[] reflectionProbes = Array.Empty<ReflectionProbeData>();
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public SFiniteLightBound[] punctualLightBounds = Array.Empty<SFiniteLightBound>();
@@ -761,6 +771,7 @@ namespace VividRP.Runtime
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
             areaLights = Array.Empty<AreaLightData>();
+            areaLightShadowMeta = Array.Empty<AreaLightShadowMeta>();
             reflectionProbes = Array.Empty<ReflectionProbeData>();
             reGIRLights = Array.Empty<VividReGIRLightData>();
             punctualLightBounds = Array.Empty<SFiniteLightBound>();
@@ -815,6 +826,9 @@ namespace VividRP.Runtime
         {
             if (requiredCapacity > areaLights.Length)
                 areaLights = new AreaLightData[requiredCapacity];
+
+            if (requiredCapacity > areaLightShadowMeta.Length)
+                areaLightShadowMeta = new AreaLightShadowMeta[requiredCapacity];
 
             if (requiredCapacity > areaLightBounds.Length)
                 areaLightBounds = new SFiniteLightBound[requiredCapacity];
@@ -1143,7 +1157,10 @@ namespace VividRP.Runtime
             areaLightCount = areaCandidates.Length;
 
             for (var areaIndex = 0; areaIndex < areaLightCount; areaIndex++)
+            {
                 areaLights[areaIndex] = areaCandidates[areaIndex].lightData;
+                areaLightShadowMeta[areaIndex] = areaCandidates[areaIndex].shadowMeta;
+            }
         }
 
         private void ApplyReGIRLightCandidates(NativeList<VividReGIRLightData> reGIRLightCandidates)
@@ -1292,6 +1309,12 @@ namespace VividRP.Runtime
             return new AreaLightCandidate
             {
                 lightData = CreateAreaLightData(trackedLightData),
+                shadowMeta = new AreaLightShadowMeta
+                {
+                    lightEntityId = trackedLightData.lightEntityId,
+                    shadowStrength = trackedLightData.shadowStrength,
+                    flags = trackedLightData.flags,
+                },
             };
         }
 

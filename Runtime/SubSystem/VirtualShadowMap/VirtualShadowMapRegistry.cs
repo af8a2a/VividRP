@@ -21,6 +21,7 @@ namespace VividRP.Runtime.VirtualShadowMap
         internal bool IsSinglePage;
         internal bool UseReceiverMask;
         internal bool ForceUncached;
+        internal bool IsAreaLight;
         internal uint PunctualLightIndex;
     }
 
@@ -140,6 +141,29 @@ namespace VividRP.Runtime.VirtualShadowMap
             view = Matrix4x4.Scale(new Vector3(1.0f, 1.0f, -1.0f))
                 * Matrix4x4.TRS(lightPosWS, lightRotation, Vector3.one).inverse;
             projection = Matrix4x4.Perspective(clampedFov, 1.0f, nearPlane, farPlane);
+        }
+
+        internal static bool UsesCubeFaces(VividVSMLightType lightType)
+        {
+            return lightType == VividVSMLightType.Point
+                || lightType == VividVSMLightType.Rect
+                || lightType == VividVSMLightType.Tube;
+        }
+
+        internal static bool IsLocalLightType(VividVSMLightType lightType)
+        {
+            return lightType == VividVSMLightType.Point
+                || lightType == VividVSMLightType.Spot
+                || lightType == VividVSMLightType.Rect
+                || lightType == VividVSMLightType.Tube;
+        }
+
+        internal static float CalculateAreaEffectiveRange(float range, float width, float height, bool isTube)
+        {
+            float w = Mathf.Max(width, 0.0f);
+            float h = isTube ? 0.0f : Mathf.Max(height, 0.0f);
+            float halfExtent = isTube ? 0.5f * w : 0.5f * Mathf.Sqrt(w * w + h * h);
+            return Mathf.Max(range, 0.001f) + halfExtent;
         }
 
         internal static float CalculateLocalNearPlane(float range)
@@ -322,8 +346,8 @@ namespace VividRP.Runtime.VirtualShadowMap
                 for (int i = 0; i < localLightCount; i++)
                 {
                     ref readonly VividVSMLocalLightDescriptor d = ref localLights[i];
-                    if (d.IsSinglePage && (d.LightType == VividVSMLightType.Point || d.LightType == VividVSMLightType.Spot))
-                        totalSinglePageFaces += d.LightType == VividVSMLightType.Point ? PointFaceCount : 1;
+                    if (d.IsSinglePage && IsLocalLightType(d.LightType))
+                        totalSinglePageFaces += UsesCubeFaces(d.LightType) ? PointFaceCount : 1;
                 }
             }
             int distantRefreshBudget = maxDistantPagesPerFrame > 0 && totalSinglePageFaces > 0
@@ -342,10 +366,11 @@ namespace VividRP.Runtime.VirtualShadowMap
                         ref readonly VividVSMLocalLightDescriptor desc = ref localLights[i];
                         if (desc.IsSinglePage != singlePagePass)
                             continue;
-                        if (desc.LightType != VividVSMLightType.Point && desc.LightType != VividVSMLightType.Spot)
+                        if (!IsLocalLightType(desc.LightType))
                             continue;
 
-                        int faceCount = desc.LightType == VividVSMLightType.Point ? PointFaceCount : 1;
+                        bool usesCubeFaces = UsesCubeFaces(desc.LightType);
+                        int faceCount = usesCubeFaces ? PointFaceCount : 1;
                         int resolution = desc.IsSinglePage
                             ? VirtualShadowMapPrototypeRuntime.PageSize
                             : VirtualShadowMapProjectionSet.ResolveResolution(
@@ -373,7 +398,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                             && m_PreviousRecords[prevIdx].IsSinglePage == desc.IsSinglePage
                             && m_PreviousRecords[prevIdx].Position == desc.PositionWS
                             && Mathf.Approximately(m_PreviousRecords[prevIdx].Range, desc.Range)
-                            && (desc.LightType == VividVSMLightType.Point
+                            && (usesCubeFaces
                                 || (m_PreviousRecords[prevIdx].Rotation.Equals(desc.Rotation)
                                     && Mathf.Approximately(m_PreviousRecords[prevIdx].SpotAngle, desc.SpotAngle)));
 
@@ -429,7 +454,7 @@ namespace VividRP.Runtime.VirtualShadowMap
 
                             Matrix4x4 view, proj;
                             float nearPlane;
-                            if (desc.LightType == VividVSMLightType.Point)
+                            if (usesCubeFaces)
                                 BuildPointFaceMatrices(desc.PositionWS, desc.Range, face, out view, out proj, out nearPlane);
                             else
                                 BuildSpotMatrices(desc.PositionWS, desc.Rotation, desc.Range, desc.SpotAngle, out view, out proj, out nearPlane);
@@ -450,7 +475,7 @@ namespace VividRP.Runtime.VirtualShadowMap
                                     faceCacheReusable && prevVsmId >= 0 ? (uint)prevVsmId : VirtualShadowMapAddressing.InvalidVSMId,
                                     0u,
                                     0u),
-                                Extended = new uint4(ditherBits, boundRectCursor, desc.PunctualLightIndex, 0u),
+                                Extended = new uint4(ditherBits, boundRectCursor, desc.PunctualLightIndex, desc.IsAreaLight ? 1u : 0u),
                             };
 
                             pageCursor += entriesPerFace;

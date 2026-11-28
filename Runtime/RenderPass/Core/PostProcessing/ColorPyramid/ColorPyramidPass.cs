@@ -7,6 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [CameraHistoryAccess("ColorPyramid", AccessFlags.ReadWrite)]
     public sealed class ColorPyramidPass : ComputePass, IStablePassResourceLayout, IRenderGraphSideEffectPass
     {
         private const int ThreadGroupSize = 8;
@@ -149,6 +150,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var previousColorPyramidHandle = m_ColorPyramidHistory.GetPrevious();
             var previousColorPyramidTexture = CameraHistoryRenderGraphBridge.Import(m_ColorPyramidHistory, 1);
             CameraHistoryRenderGraphBridge.Bind(m_CurrentColorPyramid, m_ColorPyramidHistory, 0);
+            PassRecorder.RegisterHistoryWriteForPass(this, m_ColorPyramidHistory);
 
             var previousViewportSize = ResolvePreviousColorPyramidViewportSize(
                 previousColorPyramidHandle,
@@ -177,7 +179,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (!CanExecute())
                     return;
 
-                m_ColorPyramidHistory?.MarkWritten();
                 cmd.SetComputeVectorParam(
                     m_ComputeShader,
                     OutputSizeId,

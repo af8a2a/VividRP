@@ -142,6 +142,24 @@ namespace VividRP.Runtime
             return IsDeclaredTransientResourceField(field)
                 && IsSupportedTransientResourceFieldType(field.FieldType);
         }
+
+        internal static IEnumerable<FrameResourceSlotAttribute> EnumerateFrameResourceSlotAccesses(this Type type)
+        {
+            var metadata = PassTypeMetadataCache.GetOrCreate(type);
+            return metadata != null ? metadata.SlotAccesses : Array.Empty<FrameResourceSlotAttribute>();
+        }
+
+        internal static IEnumerable<CameraHistoryAccessAttribute> EnumerateCameraHistoryAccesses(this Type type)
+        {
+            var metadata = PassTypeMetadataCache.GetOrCreate(type);
+            return metadata != null ? metadata.HistoryAccesses : Array.Empty<CameraHistoryAccessAttribute>();
+        }
+
+        internal static bool HasCameraHistoryWriteAccess(this Type type)
+        {
+            var metadata = PassTypeMetadataCache.GetOrCreate(type);
+            return metadata != null && metadata.HasCameraHistoryWrite;
+        }
     }
 
     internal static class PassResourceCollector
@@ -149,6 +167,8 @@ namespace VividRP.Runtime
         public static PassResource Collect(this object pass)
         {
             var type = pass.GetType();
+            var metadata = PassTypeMetadataCache.GetOrCreate(type);
+            var resourceFields = metadata.ResourceFields;
 
             var textures = new List<PassResourceEntry>();
             var buffers = new List<PassResourceEntry>();
@@ -156,12 +176,14 @@ namespace VividRP.Runtime
             var accelerationStructures = new List<PassResourceEntry>();
             var bypassRules = new List<PassBypassRule>();
 
-            foreach (var field in type.EnumerateRenderGraphResourceFields())
+            for (var i = 0; i < resourceFields.Length; i++)
             {
-                var attr = field.GetCustomAttribute<RenderGraphResource>();
-                var isTransient = field.IsTransientResourceField();
+                var fieldMeta = resourceFields[i];
+                var field = fieldMeta.Field;
+                var attr = fieldMeta.ResourceAttribute;
+                var isTransient = fieldMeta.IsTransient;
 
-                var value = field.GetValue(pass);
+                var value = fieldMeta.Getter(pass);
                 if (value == null)
                     continue;
 
@@ -170,7 +192,8 @@ namespace VividRP.Runtime
                     case RenderGraphTexture texture:
                         textures.Add(CreateEntry(
                             field,
-                            field.GetRenderGraphResourceName(attr),
+                            fieldMeta.Getter,
+                            fieldMeta.DisplayName,
                             attr.Access,
                             PassResourceType.Texture,
                             texture,
@@ -185,7 +208,8 @@ namespace VividRP.Runtime
                     case RenderGraphBuffer buffer:
                         buffers.Add(CreateEntry(
                             field,
-                            field.GetRenderGraphResourceName(attr),
+                            fieldMeta.Getter,
+                            fieldMeta.DisplayName,
                             attr.Access,
                             PassResourceType.Buffer,
                             buffer,
@@ -197,7 +221,8 @@ namespace VividRP.Runtime
                     case RenderGraphRenderList renderList:
                         renderLists.Add(CreateEntry(
                             field,
-                            field.GetRenderGraphResourceName(attr),
+                            fieldMeta.Getter,
+                            fieldMeta.DisplayName,
                             attr.Access,
                             PassResourceType.RenderList,
                             renderList,
@@ -209,7 +234,8 @@ namespace VividRP.Runtime
                     case RenderGraphAccelerationStructure accelerationStructure:
                         accelerationStructures.Add(CreateEntry(
                             field,
-                            field.GetRenderGraphResourceName(attr),
+                            fieldMeta.Getter,
+                            fieldMeta.DisplayName,
                             attr.Access,
                             PassResourceType.AccelerationStructure,
                             accelerationStructure,
@@ -220,7 +246,8 @@ namespace VividRP.Runtime
                         break;
                 }
 
-                TryAddBypassRule(type, field, attr, isTransient, bypassRules);
+                if (fieldMeta.BypassAttribute != null)
+                    TryAddBypassRule(type, field, attr, isTransient, fieldMeta.BypassAttribute, bypassRules);
             }
 
             var textureEntries = textures.ToArray();
@@ -280,9 +307,9 @@ namespace VividRP.Runtime
             FieldInfo outputField,
             RenderGraphResource outputAttr,
             bool outputIsTransient,
+            PassBypassAttribute bypassAttr,
             List<PassBypassRule> bypassRules)
         {
-            var bypassAttr = outputField.GetCustomAttribute<PassBypassAttribute>();
             if (bypassAttr == null)
                 return;
 
@@ -356,21 +383,35 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            sourceField = passType.GetInstanceField(sourceFieldName);
-            if (sourceField == null)
+            var metadata = PassTypeMetadataCache.GetOrCreate(passType);
+            RenderGraphResource sourceAttr;
+            bool sourceIsDeclaredTransient;
+            if (metadata.TryGetResourceField(sourceFieldName, out var sourceFieldMeta))
             {
-                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceFieldName}' was not found.";
-                return false;
+                sourceField = sourceFieldMeta.Field;
+                sourceAttr = sourceFieldMeta.ResourceAttribute;
+                sourceIsDeclaredTransient = sourceFieldMeta.IsDeclaredTransient;
+            }
+            else
+            {
+                sourceField = passType.GetInstanceField(sourceFieldName);
+                if (sourceField == null)
+                {
+                    error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceFieldName}' was not found.";
+                    return false;
+                }
+
+                sourceAttr = sourceField.GetCustomAttribute<RenderGraphResource>();
+                sourceIsDeclaredTransient = sourceField.IsDeclaredTransientResourceField();
             }
 
-            var sourceAttr = sourceField.GetCustomAttribute<RenderGraphResource>();
             if (sourceAttr == null)
             {
                 error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' must be marked with {nameof(RenderGraphResource)}.";
                 return false;
             }
 
-            if (sourceField.IsDeclaredTransientResourceField())
+            if (sourceIsDeclaredTransient)
             {
                 error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' cannot be transient.";
                 return false;
@@ -411,6 +452,7 @@ namespace VividRP.Runtime
 
         private static PassResourceEntry CreateEntry(
             FieldInfo field,
+            Func<object, object> getter,
             string name,
             AccessFlags access,
             PassResourceType resourceType,
@@ -423,6 +465,7 @@ namespace VividRP.Runtime
             return new PassResourceEntry
             {
                 Field = field,
+                Getter = getter,
                 Name = name,
                 Access = access,
                 ResourceType = resourceType,
@@ -455,6 +498,7 @@ namespace VividRP.Runtime
                 if (texture != null)
                 {
                     textures.Add(CreateEntry(
+                        null,
                         null,
                         RenderGraphPassReflectionUtility.GetRenderGraphResourceCollectionName(baseName, entryAttachmentIndex, collectionIndex),
                         attr.Access,
@@ -510,7 +554,9 @@ namespace VividRP.Runtime
                 if (field == null)
                     continue;
 
-                var descriptor = field.GetValue(pass);
+                var descriptor = entry.Getter != null
+                    ? entry.Getter(pass)
+                    : field.GetValue(pass);
                 if (descriptor == null || !MatchesResourceType(descriptor, entry.ResourceType))
                     return false;
 
@@ -560,16 +606,26 @@ namespace VividRP.Runtime
     {
     }
 
-    internal interface IPostProcessSourceOverridePass : IDynamicPassResourceLayout
+    internal interface ISceneColorBoundaryPass
+    {
+        RenderGraphTexture GetSceneColorInput();
+    }
+
+    internal interface IPostProcessSourceOverridePass : IDynamicPassResourceLayout, ISceneColorBoundaryPass
     {
         RenderGraphTexture GetSourceTexture();
+
+        RenderGraphTexture ISceneColorBoundaryPass.GetSceneColorInput() => GetSourceTexture();
 
         void SetSourceTexture(RenderGraphTexture sourceTexture);
 
         void RestoreSourceTexture();
     }
 
-    //only used for  Antialiasing
+    /// <summary>
+    /// Allows a logical RenderGraph pass node to record one or more fine-grained CoreRP RenderGraph sub-passes,
+    /// enabling per-sub-pass transient resource lifetimes, physical memory aliasing, and finer barrier scheduling.
+    /// </summary>
     public interface IRenderGraphRecordingPass
     {
         void RecordGraph(RenderGraphRecordingContext context);
@@ -595,6 +651,31 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
+            : this(
+                renderGraph,
+                frameData,
+                passDefinition,
+                enableAsyncCompute,
+                textureCache,
+                bufferCache,
+                renderListCache,
+                accelerationStructureCache,
+                passResources: null,
+                passName: passDefinition?.PassName)
+        {
+        }
+
+        internal RenderGraphRecordingContext(
+            RenderGraph renderGraph,
+            ContextContainer frameData,
+            RenderGraphPassDefinition passDefinition,
+            bool enableAsyncCompute,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
+            PassResource passResources,
+            string passName)
         {
             RenderGraph = renderGraph;
             FrameData = frameData;
@@ -604,6 +685,8 @@ namespace VividRP.Runtime
             BufferCache = bufferCache;
             RenderListCache = renderListCache;
             AccelerationStructureCache = accelerationStructureCache;
+            PassResources = passResources;
+            PassName = passName;
         }
 
         public RenderGraph RenderGraph { get; }
@@ -621,6 +704,10 @@ namespace VividRP.Runtime
         internal Dictionary<RenderGraphRenderList, RendererListHandle> RenderListCache { get; }
 
         internal Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> AccelerationStructureCache { get; }
+
+        internal PassResource PassResources { get; }
+
+        internal string PassName { get; }
 
         internal TextureHandle GetOrCreateTextureHandle(RenderGraphTexture texture)
         {
@@ -666,6 +753,22 @@ namespace VividRP.Runtime
                 passName);
         }
 
+        internal void RecordRasterPass(
+            RasterPass pass,
+            PassResource resource,
+            string passName = null)
+        {
+            PassRecorder.RecordRasterPass(
+                RenderGraph,
+                pass,
+                resource,
+                TextureCache,
+                BufferCache,
+                RenderListCache,
+                AccelerationStructureCache,
+                passName);
+        }
+
         internal void RecordUnsafePass(
             UnsafePass pass,
             PassResource resource,
@@ -683,6 +786,30 @@ namespace VividRP.Runtime
                 RenderListCache,
                 AccelerationStructureCache,
                 passName);
+        }
+
+        internal void RecordDefaultComputePass(ComputePass pass, string passName = null)
+        {
+            if (pass == null || PassResources == null)
+                return;
+
+            RecordComputePass(pass, PassResources, PassDefinition, passName ?? PassName);
+        }
+
+        internal void RecordDefaultRasterPass(RasterPass pass, string passName = null)
+        {
+            if (pass == null || PassResources == null)
+                return;
+
+            RecordRasterPass(pass, PassResources, passName ?? PassName);
+        }
+
+        internal void RecordDefaultUnsafePass(UnsafePass pass, string passName = null)
+        {
+            if (pass == null || PassResources == null)
+                return;
+
+            RecordUnsafePass(pass, PassResources, PassDefinition, passName ?? PassName);
         }
     }
 

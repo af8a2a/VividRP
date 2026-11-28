@@ -6,7 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class AntialiasingPass : UnsafePass, IRenderGraphRecordingPass, IStablePassResourceLayout
+    public sealed class AntialiasingPass : UnsafePass, IRenderGraphRecordingPass, IStablePassResourceLayout, ISceneColorBoundaryPass
     {
         private static readonly int InputColorId = Shader.PropertyToID("_InputColor");
         private static readonly int MotionVectorsId = Shader.PropertyToID("_MotionVectors");
@@ -28,6 +28,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture Color;
 
         internal RenderGraphTexture SceneColorInput => Color;
+
+        RenderGraphTexture ISceneColorBoundaryPass.GetSceneColorInput() => Color;
 
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Read)]
         private RenderGraphTexture MotionVectors;

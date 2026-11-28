@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class StopNaNPass : RasterPass
+    public sealed class StopNaNPass : RasterPass, ISceneColorBoundaryPass
     {
         internal const string StopNaNShaderName = "Hidden/VividRP/StopNaN";
 
@@ -13,6 +13,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_Source = new();
 
         internal RenderGraphTexture SceneColorInput => m_Source;
+
+        RenderGraphTexture ISceneColorBoundaryPass.GetSceneColorInput() => m_Source;
 
         [RenderGraphResource(
             Name = "StopNaNOutput",

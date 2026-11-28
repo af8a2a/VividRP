@@ -6,15 +6,13 @@ using VividRP.Runtime.GPUDriven;
 namespace VividRP.Runtime
 {
     /// <summary>
-    /// Per-frame RenderGraph context carrying the Substrate Closure Buffer
-    /// (RWTexture2DArray&lt;uint&gt;) between VisibilityBuffer Resolve and downstream
-    /// Classification, Deferred Lighting, and Lumen passes without modifying .vrdg ports.
+    /// Per-frame RenderGraph metadata for the Substrate Closure Buffer
+    /// (RWTexture2DArray&lt;uint&gt;) backed by a CoreRP RenderGraph frame texture
+    /// published in <see cref="FrameResourceTable"/> under
+    /// <see cref="FrameResourceSlots.SubstrateClosureBuffer"/>.
     /// </summary>
     internal sealed class VividSubstrateMaterialFrameData : ContextItem
     {
-        internal static readonly CameraHistoryId ClosureBufferHistoryId =
-            CameraHistoryId.Create("VividSubstrateClosureBuffer");
-
         private static readonly int OutSubstrateClosureBufferId = Shader.PropertyToID("_OutSubstrateClosureBuffer");
         private static readonly int ClassificationWidthId = Shader.PropertyToID("_ClassificationWidth");
         private static readonly int ClassificationHeightId = Shader.PropertyToID("_ClassificationHeight");
@@ -23,7 +21,6 @@ namespace VividRP.Runtime
         private static RenderTexture s_DummyClosureBuffer;
         private static RTHandle s_DummyClosureBufferRTHandle;
 
-        internal CameraHistoryTexture ClosureBufferHistory;
         internal TextureHandle ClosureBufferHandle;
         internal int Width;
         internal int Height;
@@ -31,11 +28,10 @@ namespace VividRP.Runtime
         internal bool HasSubstrateContent;
         internal bool HeadersClearedThisFrame;
         internal int WriterCount;
-        internal bool IsValid => ClosureBufferHistory != null && Width > 0 && Height > 0 && SliceCount > 0;
+        internal bool IsValid => ClosureBufferHandle.IsValid() && Width > 0 && Height > 0 && SliceCount > 0;
 
         public override void Reset()
         {
-            ClosureBufferHistory = null;
             ClosureBufferHandle = default;
             Width = 0;
             Height = 0;
@@ -45,30 +41,32 @@ namespace VividRP.Runtime
             WriterCount = 0;
         }
 
-        internal static CameraHistoryTextureDescriptor CreateClosureBufferDescriptor(
+        internal static TextureDesc CreateClosureBufferTextureDesc(
             int width,
             int height,
             int sliceCount = VividSubstrateContract.DefaultSliceCount)
         {
-            return new CameraHistoryTextureDescriptor(
-                Mathf.Max(1, width),
-                Mathf.Max(1, height),
-                VividSubstrateContract.ClosureBufferFormat,
-                VividSubstrateContract.ClampSliceCount(sliceCount),
-                VividSubstrateContract.ClosureBufferDimension,
-                DepthBits.None,
-                MSAASamples.None,
-                FilterMode.Point,
-                TextureWrapMode.Clamp,
-                anisoLevel: 1,
-                mipMapBias: 0f,
-                enableRandomWrite: true,
-                useMipMap: false,
-                autoGenerateMips: false,
-                isShadowMap: false,
-                bindTextureMS: false,
-                useDynamicScale: false,
-                useDynamicScaleExplicit: false);
+            return new TextureDesc(Mathf.Max(1, width), Mathf.Max(1, height))
+            {
+                dimension = VividSubstrateContract.ClosureBufferDimension,
+                slices = VividSubstrateContract.ClampSliceCount(sliceCount),
+                colorFormat = VividSubstrateContract.ClosureBufferFormat,
+                depthBufferBits = DepthBits.None,
+                msaaSamples = MSAASamples.None,
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                anisoLevel = 1,
+                mipMapBias = 0f,
+                enableRandomWrite = true,
+                useMipMap = false,
+                autoGenerateMips = false,
+                clearBuffer = false,
+                isShadowMap = false,
+                bindTextureMS = false,
+                useDynamicScale = false,
+                useDynamicScaleExplicit = false,
+                name = "VividSubstrateClosureBuffer",
+            };
         }
 
         internal static RenderTexture GetOrCreateDummyClosureBuffer()
@@ -138,6 +136,10 @@ namespace VividRP.Runtime
             if (pass == null || substrateData == null || cameraData?.camera == null || !PassRecorder.HasActiveRenderGraph)
                 return false;
 
+            var frameResources = FrameResourceTable.GetOrCreate(frameData);
+            if (frameResources == null)
+                return false;
+
             int clampedSlices = VividSubstrateContract.ClampSliceCount(requestedSliceCount);
             if (substrateData.HasSubstrateContent
                 && substrateData.IsValid
@@ -145,13 +147,14 @@ namespace VividRP.Runtime
                 && substrateData.Height == height
                 && substrateData.SliceCount >= clampedSlices)
             {
-                handle = CameraHistoryRenderGraphBridge.ImportForPass(
-                    pass,
-                    substrateData.ClosureBufferHistory,
-                    0,
-                    AccessFlags.ReadWrite);
-                if (!handle.IsValid())
+                if (!frameResources.UseTextureSlotForPass(
+                        pass,
+                        FrameResourceSlots.SubstrateClosureBuffer,
+                        AccessFlags.ReadWrite,
+                        out handle))
+                {
                     return false;
+                }
 
                 substrateData.ClosureBufferHandle = handle;
                 substrateData.WriterCount++;
@@ -159,27 +162,18 @@ namespace VividRP.Runtime
                 return true;
             }
 
-            var cameraHistory = cameraData.camera.GetVividCameraHistory();
-            if (!cameraHistory.IsFrameActive)
-                return false;
-
             int effectiveSlices = substrateData.IsValid
                 ? Mathf.Max(substrateData.SliceCount, clampedSlices)
                 : clampedSlices;
-            var descriptor = CreateClosureBufferDescriptor(width, height, effectiveSlices);
-            CameraHistoryTexture history = cameraHistory.GetOrCreateTexture(
-                ClosureBufferHistoryId,
-                1,
-                descriptor);
-            handle = CameraHistoryRenderGraphBridge.ImportForPass(
+            var descriptor = CreateClosureBufferTextureDesc(width, height, effectiveSlices);
+            handle = frameResources.CreateAndPublishTextureForPass(
                 pass,
-                history,
-                0,
+                FrameResourceSlots.SubstrateClosureBuffer,
+                in descriptor,
                 AccessFlags.Write);
             if (!handle.IsValid())
                 return false;
 
-            substrateData.ClosureBufferHistory = history;
             substrateData.ClosureBufferHandle = handle;
             substrateData.Width = width;
             substrateData.Height = height;
@@ -247,15 +241,15 @@ namespace VividRP.Runtime
                 if (substrate.HasSubstrateContent
                     && substrate.IsValid
                     && substrate.Width == expectedWidth
-                    && substrate.Height == expectedHeight)
-                {
-                    handle = CameraHistoryRenderGraphBridge.ImportForPass(
+                    && substrate.Height == expectedHeight
+                    && FrameResourceTable.TryGet(frameData, out var frameResources)
+                    && frameResources.UseTextureSlotForPass(
                         pass,
-                        substrate.ClosureBufferHistory,
-                        0,
-                        AccessFlags.Read);
-                    if (handle.IsValid())
-                        return true;
+                        FrameResourceSlots.SubstrateClosureBuffer,
+                        AccessFlags.Read,
+                        out handle))
+                {
+                    return true;
                 }
             }
 

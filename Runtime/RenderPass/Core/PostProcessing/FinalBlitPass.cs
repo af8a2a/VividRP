@@ -5,7 +5,8 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class FinalBlitPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout, IRenderGraphPreparePass
+    [FrameResourceSlot(FrameResourceSlots.LumenDebugOutputName, AccessFlags.Read, Optional = true)]
+    public class FinalBlitPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout, IRenderGraphPreparePass, IRenderGraphSideEffectPass
     {
         private static readonly int HDROutputParamsId = Shader.PropertyToID("_HDROutputParams");
 
@@ -102,6 +103,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public void PrepareRenderGraph(ContextContainer frameData)
         {
+            if (FrameResourceTable.TryGet(frameData, out var frameResources)
+                && frameResources.UseTextureSlotForPass(this, FrameResourceSlots.LumenDebugOutput, AccessFlags.Read, out _))
+            {
+                return;
+            }
+
             if (frameData.Contains<VividLumenDebugFrameData>())
                 PassRecorder.RegisterImportedTextureForPass(this, frameData.Get<VividLumenDebugFrameData>().Output);
         }

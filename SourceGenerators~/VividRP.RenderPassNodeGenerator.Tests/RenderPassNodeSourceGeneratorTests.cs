@@ -257,6 +257,183 @@ namespace VividRP.Runtime
             }
         }
 
+        private const string RuntimeContractScaffolding = @"
+using System;
+
+namespace VividRP.Runtime
+{
+    [Flags]
+    public enum AccessFlags
+    {
+        None = 0,
+        Read = 1,
+        Write = 2,
+        ReadWrite = 3
+    }
+
+    public interface IRenderPass { }
+    public sealed class RenderGraphTexture { }
+    public sealed class RenderGraphBuffer { }
+    public sealed class RenderGraphRenderList { }
+
+    [AttributeUsage(AttributeTargets.Field)]
+    public class RenderGraphResource : Attribute
+    {
+        public AccessFlags Access;
+    }
+
+    [AttributeUsage(AttributeTargets.Field)]
+    public sealed class TransientResourceAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Field)]
+    public sealed class PassBypassAttribute : Attribute
+    {
+        public PassBypassAttribute(string sourceFieldName) { SourceFieldName = sourceFieldName; }
+        public string SourceFieldName { get; }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = true)]
+    public sealed class FrameResourceSlotAttribute : Attribute
+    {
+        public FrameResourceSlotAttribute(string slotName, AccessFlags access) { SlotName = slotName; Access = access; }
+        public string SlotName { get; }
+        public AccessFlags Access { get; }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = true)]
+    public sealed class CameraHistoryAccessAttribute : Attribute
+    {
+        public CameraHistoryAccessAttribute(string historyName, AccessFlags access) { HistoryName = historyName; Access = access; }
+        public string HistoryName { get; }
+        public AccessFlags Access { get; }
+    }
+}
+";
+
+        [TestMethod]
+        public void ValidTransientBypassSlotAndHistoryDeclarationsProduceNoDiagnostics()
+        {
+            var runtimeSource = RuntimeContractScaffolding + @"
+namespace VividRP.Runtime
+{
+    [FrameResourceSlot(""SceneColor"", AccessFlags.Read)]
+    [CameraHistoryAccess(""ColorHistory"", AccessFlags.Write)]
+    public sealed class ValidContractPass : IRenderPass
+    {
+        [RenderGraphResource(Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Input;
+
+        [RenderGraphResource(Access = AccessFlags.Write)]
+        [PassBypass(nameof(m_Input))]
+        private RenderGraphTexture m_Output;
+
+        [RenderGraphResource(Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphBuffer m_Scratch;
+    }
+}
+";
+
+            var run = RunGenerator(runtimeSource);
+
+            AssertNoErrors(run.OutputCompilation);
+            Assert.AreEqual(0, run.GeneratorDiagnostics.Length);
+        }
+
+        [TestMethod]
+        public void ReportsVRPG004ForInvalidTransientResourceDeclarations()
+        {
+            var runtimeSource = RuntimeContractScaffolding + @"
+namespace VividRP.Runtime
+{
+    public sealed class BadTransientPass : IRenderPass
+    {
+        [TransientResource]
+        private RenderGraphTexture m_MissingResourceAttr;
+
+        [RenderGraphResource(Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphRenderList m_UnsupportedType;
+    }
+}
+";
+
+            var run = RunGenerator(runtimeSource);
+
+            var diagnostics = run.GeneratorDiagnostics.Where(d => d.Id == "VRPG004").ToArray();
+            Assert.AreEqual(2, diagnostics.Length);
+            Assert.IsTrue(diagnostics.All(d => d.Severity == DiagnosticSeverity.Error));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("m_MissingResourceAttr")));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("m_UnsupportedType")));
+        }
+
+        [TestMethod]
+        public void ReportsVRPG005ForInvalidPassBypassDeclarations()
+        {
+            var runtimeSource = RuntimeContractScaffolding + @"
+namespace VividRP.Runtime
+{
+    public sealed class BadBypassPass : IRenderPass
+    {
+        [RenderGraphResource(Access = AccessFlags.Write)]
+        private RenderGraphTexture m_WriteOnlySource;
+
+        [RenderGraphResource(Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_BufferSource;
+
+        [RenderGraphResource(Access = AccessFlags.Write)]
+        [PassBypass(""m_MissingField"")]
+        private RenderGraphTexture m_MissingSourceOutput;
+
+        [RenderGraphResource(Access = AccessFlags.Write)]
+        [PassBypass(nameof(m_WriteOnlySource))]
+        private RenderGraphTexture m_NonReadableSourceOutput;
+
+        [RenderGraphResource(Access = AccessFlags.Write)]
+        [PassBypass(nameof(m_BufferSource))]
+        private RenderGraphTexture m_MismatchedTypeOutput;
+
+        [RenderGraphResource(Access = AccessFlags.Read)]
+        [PassBypass(nameof(m_BufferSource))]
+        private RenderGraphBuffer m_ReadOnlyOutput;
+    }
+}
+";
+
+            var run = RunGenerator(runtimeSource);
+
+            var diagnostics = run.GeneratorDiagnostics.Where(d => d.Id == "VRPG005").ToArray();
+            Assert.AreEqual(4, diagnostics.Length);
+            Assert.IsTrue(diagnostics.All(d => d.Severity == DiagnosticSeverity.Error));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("m_MissingSourceOutput")));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("m_NonReadableSourceOutput")));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("m_MismatchedTypeOutput")));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("m_ReadOnlyOutput")));
+        }
+
+        [TestMethod]
+        public void ReportsVRPG006ForEmptySlotAndHistoryNames()
+        {
+            var runtimeSource = RuntimeContractScaffolding + @"
+namespace VividRP.Runtime
+{
+    [FrameResourceSlot(""   "", AccessFlags.Read)]
+    [CameraHistoryAccess("""", AccessFlags.Write)]
+    public sealed class EmptyNamePass : IRenderPass
+    {
+    }
+}
+";
+
+            var run = RunGenerator(runtimeSource);
+
+            var diagnostics = run.GeneratorDiagnostics.Where(d => d.Id == "VRPG006").ToArray();
+            Assert.AreEqual(2, diagnostics.Length);
+            Assert.IsTrue(diagnostics.All(d => d.Severity == DiagnosticSeverity.Error));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("FrameResourceSlot")));
+            Assert.IsTrue(diagnostics.Any(d => d.GetMessage().Contains("CameraHistoryAccess")));
+        }
+
         private static GeneratorRun RunGenerator(
             string runtimeSource,
             string editorAssemblyName = "VividRP.Editor")

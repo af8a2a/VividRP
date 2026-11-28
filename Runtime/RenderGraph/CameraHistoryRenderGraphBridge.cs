@@ -54,12 +54,16 @@ namespace VividRP.Runtime
             IRenderPass pass,
             CameraHistoryTexture history,
             int frameAge,
-            AccessFlags access)
+            AccessFlags access,
+            bool autoMarkWritten = false)
         {
             if (history == null)
                 return default;
 
-            return PassRecorder.ImportTextureForPass(pass, history.GetFrame(frameAge), access);
+            var handle = PassRecorder.ImportTextureForPass(pass, history.GetFrame(frameAge), access);
+            if (autoMarkWritten && frameAge == 0 && (access & AccessFlags.Write) != 0 && handle.IsValid())
+                PassRecorder.RegisterHistoryWriteForPass(pass, history);
+            return handle;
         }
 
         internal static TextureHandle Bind(
@@ -80,12 +84,13 @@ namespace VividRP.Runtime
             RenderGraphTexture texture,
             CameraHistoryTexture history,
             int frameAge,
-            AccessFlags access)
+            AccessFlags access,
+            bool autoMarkWritten = false)
         {
             if (texture == null || history == null)
                 return default;
 
-            var handle = ImportForPass(pass, history, frameAge, access);
+            var handle = ImportForPass(pass, history, frameAge, access, autoMarkWritten);
             PassRecorder.BindImportedTexture(texture, handle);
             return handle;
         }
@@ -98,7 +103,8 @@ namespace VividRP.Runtime
             RenderGraphTexture current,
             RenderGraphTextureDesc descriptor,
             out CameraHistoryTexture history,
-            AccessFlags currentAccess = AccessFlags.ReadWrite)
+            AccessFlags currentAccess = AccessFlags.ReadWrite,
+            bool autoMarkWritten = false)
         {
             history = null;
             if (pass == null || camera == null || previous == null || current == null || descriptor == null)
@@ -113,7 +119,7 @@ namespace VividRP.Runtime
                 2,
                 CreateDescriptor(descriptor));
             BindForPass(pass, previous, history, 1, AccessFlags.Read);
-            BindForPass(pass, current, history, 0, currentAccess);
+            BindForPass(pass, current, history, 0, currentAccess, autoMarkWritten);
             return history.IsValid();
         }
 
@@ -129,12 +135,16 @@ namespace VividRP.Runtime
             IRenderPass pass,
             CameraHistoryBuffer history,
             int frameAge,
-            AccessFlags access)
+            AccessFlags access,
+            bool autoMarkWritten = false)
         {
             if (history == null)
                 return default;
 
-            return PassRecorder.ImportBufferForPass(pass, history.GetFrame(frameAge), access);
+            var handle = PassRecorder.ImportBufferForPass(pass, history.GetFrame(frameAge), access);
+            if (autoMarkWritten && frameAge == 0 && (access & AccessFlags.Write) != 0 && handle.IsValid())
+                PassRecorder.RegisterHistoryWriteForPass(pass, history);
+            return handle;
         }
 
         internal static BufferHandle Bind(
@@ -155,12 +165,13 @@ namespace VividRP.Runtime
             RenderGraphBuffer buffer,
             CameraHistoryBuffer history,
             int frameAge,
-            AccessFlags access)
+            AccessFlags access,
+            bool autoMarkWritten = false)
         {
             if (buffer == null || history == null)
                 return default;
 
-            var handle = ImportForPass(pass, history, frameAge, access);
+            var handle = ImportForPass(pass, history, frameAge, access, autoMarkWritten);
             PassRecorder.BindImportedBuffer(buffer, handle);
             return handle;
         }
@@ -173,7 +184,8 @@ namespace VividRP.Runtime
             RenderGraphBuffer current,
             RenderGraphBufferDesc descriptor,
             out CameraHistoryBuffer history,
-            AccessFlags currentAccess = AccessFlags.ReadWrite)
+            AccessFlags currentAccess = AccessFlags.ReadWrite,
+            bool autoMarkWritten = false)
         {
             history = null;
             if (pass == null || camera == null || previous == null || current == null || descriptor == null)
@@ -188,7 +200,7 @@ namespace VividRP.Runtime
                 2,
                 CreateDescriptor(descriptor));
             BindForPass(pass, previous, history, 1, AccessFlags.Read);
-            BindForPass(pass, current, history, 0, currentAccess);
+            BindForPass(pass, current, history, 0, currentAccess, autoMarkWritten);
             return history.IsValid();
         }
     }

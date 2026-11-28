@@ -14,16 +14,18 @@ namespace VividRP.Runtime
 
             var passTypes = new Type[passDefinitions.Count];
             var fieldAccessMaps = new Dictionary<string, AccessFlags>[passDefinitions.Count];
+            var slotAccessMaps = new Dictionary<string, AccessFlags>[passDefinitions.Count];
             for (var i = 0; i < passDefinitions.Count; i++)
             {
                 passTypes[i] = ResolveType(passDefinitions[i]?.PassType);
                 fieldAccessMaps[i] = BuildFieldAccessMap(passTypes[i]);
+                slotAccessMaps[i] = BuildSlotAccessMap(passTypes[i]);
             }
 
             var dependencies = new List<HashSet<int>>(passDefinitions.Count);
             for (var i = 0; i < passDefinitions.Count; i++)
             {
-                dependencies.Add(CollectDependencies(i, passDefinitions, passTypes, fieldAccessMaps));
+                dependencies.Add(CollectDependencies(i, passDefinitions, passTypes, fieldAccessMaps, slotAccessMaps));
             }
 
             var live = new bool[passDefinitions.Count];
@@ -71,6 +73,9 @@ namespace VividRP.Runtime
             if (typeof(IRenderGraphSideEffectPass).IsAssignableFrom(passType))
                 return true;
 
+            if (passType.HasCameraHistoryWriteAccess())
+                return true;
+
             var hasWritableResource = false;
             var hasTransientWritableResource = false;
             foreach (var field in passType.EnumerateRenderGraphResourceFields())
@@ -98,70 +103,125 @@ namespace VividRP.Runtime
             int passIndex,
             IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
             IReadOnlyList<Type> passTypes,
-            IReadOnlyList<Dictionary<string, AccessFlags>> fieldAccessMaps)
+            IReadOnlyList<Dictionary<string, AccessFlags>> fieldAccessMaps,
+            IReadOnlyList<Dictionary<string, AccessFlags>> slotAccessMaps)
         {
             var result = new HashSet<int>();
             var passDefinition = passDefinitions[passIndex];
-            if (passDefinition?.ResourceBindings == null)
-                return result;
-
-            foreach (var binding in passDefinition.ResourceBindings)
+            if (passDefinition?.ResourceBindings != null)
             {
-                if (binding == null)
-                    continue;
-
-                if (binding.SourceKind == RenderGraphPassBindingSourceKind.PassField)
+                foreach (var binding in passDefinition.ResourceBindings)
                 {
-                    var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passTypes.Count
-                        ? passTypes[binding.SourcePassIndex]
-                        : null;
-                    var sourceField = sourcePassType.GetInstanceField(binding.SourceFieldName);
-                    if (sourceField.IsDeclaredTransientResourceField())
+                    if (binding == null)
                         continue;
 
-                    if (binding.SourcePassIndex >= 0
-                        && binding.SourcePassIndex < passDefinitions.Count
-                        && binding.SourcePassIndex != passIndex)
+                    if (binding.SourceKind == RenderGraphPassBindingSourceKind.PassField)
                     {
-                        result.Add(binding.SourcePassIndex);
+                        var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passTypes.Count
+                            ? passTypes[binding.SourcePassIndex]
+                            : null;
+                        var sourceField = sourcePassType.GetInstanceField(binding.SourceFieldName);
+                        if (sourceField.IsDeclaredTransientResourceField())
+                            continue;
+
+                        if (binding.SourcePassIndex >= 0
+                            && binding.SourcePassIndex < passDefinitions.Count
+                            && binding.SourcePassIndex != passIndex)
+                        {
+                            result.Add(binding.SourcePassIndex);
+                        }
+
+                        continue;
                     }
 
-                    continue;
+                    if (!TryGetFieldAccess(fieldAccessMaps[passIndex], binding.FieldName, out var access))
+                        continue;
+
+                    if (!RenderGraphPassBindingUtility.ConsumesExistingState(binding, access))
+                        continue;
+
+                    for (var otherPassIndex = 0; otherPassIndex < passDefinitions.Count; otherPassIndex++)
+                    {
+                        if (otherPassIndex == passIndex)
+                            continue;
+
+                        var otherPassDefinition = passDefinitions[otherPassIndex];
+                        if (otherPassDefinition?.ResourceBindings == null)
+                            continue;
+
+                        foreach (var otherBinding in otherPassDefinition.ResourceBindings)
+                        {
+                            if (otherBinding == null || otherBinding.SourceKind != RenderGraphPassBindingSourceKind.Resource)
+                                continue;
+
+                            if (otherBinding.ResourceKind != binding.ResourceKind
+                                || otherBinding.ResourceIndex != binding.ResourceIndex)
+                            {
+                                continue;
+                            }
+
+                            if (!TryGetFieldAccess(fieldAccessMaps[otherPassIndex], otherBinding.FieldName, out var otherAccess))
+                                continue;
+
+                            if (CanWrite(otherAccess))
+                                result.Add(otherPassIndex);
+                        }
+                    }
                 }
+            }
 
-                if (!TryGetFieldAccess(fieldAccessMaps[passIndex], binding.FieldName, out var access))
+            CollectSlotDependencies(passIndex, slotAccessMaps, result);
+            return result;
+        }
+
+        private static void CollectSlotDependencies(
+            int passIndex,
+            IReadOnlyList<Dictionary<string, AccessFlags>> slotAccessMaps,
+            HashSet<int> dependencies)
+        {
+            var slotMap = slotAccessMaps[passIndex];
+            if (slotMap == null || slotMap.Count == 0)
+                return;
+
+            foreach (var entry in slotMap)
+            {
+                var access = entry.Value;
+                if ((access & AccessFlags.Read) == 0)
                     continue;
 
-                if (!RenderGraphPassBindingUtility.ConsumesExistingState(binding, access))
-                    continue;
-
-                for (var otherPassIndex = 0; otherPassIndex < passDefinitions.Count; otherPassIndex++)
+                var currentWrites = CanWrite(access);
+                for (var otherPassIndex = 0; otherPassIndex < slotAccessMaps.Count; otherPassIndex++)
                 {
                     if (otherPassIndex == passIndex)
                         continue;
 
-                    var otherPassDefinition = passDefinitions[otherPassIndex];
-                    if (otherPassDefinition?.ResourceBindings == null)
+                    var otherSlotMap = slotAccessMaps[otherPassIndex];
+                    if (otherSlotMap == null || !otherSlotMap.TryGetValue(entry.Key, out var otherAccess))
                         continue;
 
-                    foreach (var otherBinding in otherPassDefinition.ResourceBindings)
-                    {
-                        if (otherBinding == null || otherBinding.SourceKind != RenderGraphPassBindingSourceKind.Resource)
-                            continue;
+                    if (!CanWrite(otherAccess))
+                        continue;
 
-                        if (otherBinding.ResourceKind != binding.ResourceKind
-                            || otherBinding.ResourceIndex != binding.ResourceIndex)
-                        {
-                            continue;
-                        }
-
-                        if (!TryGetFieldAccess(fieldAccessMaps[otherPassIndex], otherBinding.FieldName, out var otherAccess))
-                            continue;
-
-                        if (CanWrite(otherAccess))
-                            result.Add(otherPassIndex);
-                    }
+                    if (!currentWrites || (otherAccess & AccessFlags.Read) == 0)
+                        dependencies.Add(otherPassIndex);
                 }
+            }
+        }
+
+        private static Dictionary<string, AccessFlags> BuildSlotAccessMap(Type passType)
+        {
+            var result = new Dictionary<string, AccessFlags>(StringComparer.Ordinal);
+            if (passType == null)
+                return result;
+
+            foreach (var slotAttr in passType.EnumerateFrameResourceSlotAccesses())
+            {
+                if (string.IsNullOrWhiteSpace(slotAttr.SlotName))
+                    continue;
+
+                result[slotAttr.SlotName] = result.TryGetValue(slotAttr.SlotName, out var existing)
+                    ? existing | slotAttr.Access
+                    : slotAttr.Access;
             }
 
             return result;

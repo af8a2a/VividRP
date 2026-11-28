@@ -35,32 +35,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler SpatialSampler = new("Lumen Reflections Spatial Denoise");
         private static readonly ProfilingSampler DebugSampler = new("Lumen Reflections Debug View");
 
-        // CameraHistory IDs (zero-allocation per-camera persistent/scratch management)
-        private static readonly CameraHistoryId TileBitmaskId = CameraHistoryId.Create("LumenReflectionTileBitmask");
-        private static readonly CameraHistoryId DownsampledDepthId = CameraHistoryId.Create("LumenReflectionDownsampledDepth");
-        private static readonly CameraHistoryId RayBufferId = CameraHistoryId.Create("LumenReflectionRayBuffer");
-        private static readonly CameraHistoryId TraceRadianceId = CameraHistoryId.Create("LumenReflectionTraceRadiance");
-        private static readonly CameraHistoryId TraceHitId = CameraHistoryId.Create("LumenReflectionTraceHit");
-        private static readonly CameraHistoryId ResolvedSpecularId = CameraHistoryId.Create("LumenReflectionResolvedSpecular");
-        private static readonly CameraHistoryId ResolvedSpecularDepthId = CameraHistoryId.Create("LumenReflectionResolvedDepth");
+        // CameraHistory IDs (cross-frame temporal rings only)
         private static readonly CameraHistoryId SpecularAndSecondMomentHistoryId = CameraHistoryId.Create("LumenReflectionSpecularHistory");
         private static readonly CameraHistoryId NumFramesAccumulatedHistoryId = CameraHistoryId.Create("LumenReflectionFramesHistory");
         private static readonly CameraHistoryId SceneDepthHistoryId = CameraHistoryId.Create("LumenReflectionSceneDepthHistory");
         private static readonly CameraHistoryId PreExposureHistoryId = CameraHistoryId.Create("LumenReflectionPreExposureHistory");
-        private static readonly CameraHistoryId SpecularOutputId = CameraHistoryId.Create("LumenReflectionSpecularOutput");
-
-        private static readonly CameraHistoryId ClearTileDataId = CameraHistoryId.Create("LumenReflectionClearTileData");
-        private static readonly CameraHistoryId ResolveTileDataId = CameraHistoryId.Create("LumenReflectionResolveTileData");
-        private static readonly CameraHistoryId ClearUnusedTracingTileDataId = CameraHistoryId.Create("LumenReflectionClearUnusedTracingTileData");
-        private static readonly CameraHistoryId TracingTileDataId = CameraHistoryId.Create("LumenReflectionTracingTileData");
-        private static readonly CameraHistoryId ClearTileArgsId = CameraHistoryId.Create("LumenReflectionClearTileArgs");
-        private static readonly CameraHistoryId ResolveTileArgsId = CameraHistoryId.Create("LumenReflectionResolveTileArgs");
-        private static readonly CameraHistoryId ClearUnusedTracingTileArgsId = CameraHistoryId.Create("LumenReflectionClearUnusedTracingTileArgs");
-        private static readonly CameraHistoryId TracingTileArgsId = CameraHistoryId.Create("LumenReflectionTracingTileArgs");
-        private static readonly CameraHistoryId CompactedAllocatorId = CameraHistoryId.Create("LumenReflectionCompactedAllocator");
-        private static readonly CameraHistoryId CompactedDataId = CameraHistoryId.Create("LumenReflectionCompactedData");
-        private static readonly CameraHistoryId CompactionArgsId = CameraHistoryId.Create("LumenReflectionCompactionArgs");
-        private static readonly CameraHistoryId CompactTracingArgsId = CameraHistoryId.Create("LumenReflectionCompactTracingArgs");
 
         // Shader property IDs
         private static readonly int MaxRoughnessToTraceId = Shader.PropertyToID("_LumenReflectionMaxRoughnessToTrace");
@@ -297,14 +276,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private CameraHistoryTexture m_NumFramesHistoryRing;
         private CameraHistoryTexture m_SceneDepthHistoryRing;
         private CameraHistoryBuffer m_PreExposureHistoryRing;
-        private CameraHistoryTexture m_SpecularOutputHistory;
 
         private TextureHandle m_BlueNoiseVec2;
         private readonly int[] m_ScratchInt2 = new int[2];
 
         internal bool Prepared => m_Prepared;
         internal bool WantsScreenTraces => m_Prepared && m_UseScreenTraces;
-        internal CameraHistoryTexture OutputHistory => m_SpecularOutputHistory;
         internal TextureHandle OutputHandle => m_SpecularOutput;
 
         internal Vector4 CombineParameters => BuildCombineParameters(
@@ -440,7 +417,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_NumFramesHistoryRing = null;
             m_SceneDepthHistoryRing = null;
             m_PreExposureHistoryRing = null;
-            m_SpecularOutputHistory = null;
             m_SpecularOutput = default;
             m_BlueNoiseVec2 = default;
         }
@@ -467,7 +443,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var history = camera.GetVividCameraHistory();
-            if (!history.IsFrameActive)
+            if (!history.IsFrameActive || !PassRecorder.HasActiveRenderGraph)
                 return;
 
             m_Width = width;
@@ -520,40 +496,34 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SceneDepthHistoryDesc.Resize(width, height);
             m_SpecularOutputDesc.Resize(width, height);
 
-            // Single-frame scratch textures
-            m_TileBitmask = ImportScratchTexture(owner, history, TileBitmaskId, m_TileBitmaskDesc);
-            m_DownsampledDepth = ImportScratchTexture(owner, history, DownsampledDepthId, m_DownsampledDepthDesc);
-            m_RayBuffer = ImportScratchTexture(owner, history, RayBufferId, m_RayBufferDesc);
-            m_TraceRadiance = ImportScratchTexture(owner, history, TraceRadianceId, m_TraceRadianceDesc);
-            m_TraceHit = ImportScratchTexture(owner, history, TraceHitId, m_TraceHitDesc);
-            m_ResolvedSpecular = ImportScratchTexture(owner, history, ResolvedSpecularId, m_ResolvedSpecularDesc);
-            m_ResolvedSpecularDepth = ImportScratchTexture(owner, history, ResolvedSpecularDepthId, m_ResolvedSpecularDepthDesc);
+            // Same-frame output texture published to FrameResourceTable for DeferredLightingPass.
+            // Owned by the Reflection sub-pass rather than the Diffuse pass so its lifetime starts at Reflections.
+            TextureDesc specularOutputDesc = m_SpecularOutputDesc.desc;
+            m_SpecularOutput = PassRecorder.CreateTextureHandle(in specularOutputDesc);
+            FrameResourceTable.GetOrCreate(frameData).PublishTexture(
+                FrameResourceSlots.LumenSpecularReflection,
+                m_SpecularOutput);
 
-            // Persistent output texture handed to DeferredLightingPass
-            m_SpecularOutputHistory = history.GetOrCreateTexture(SpecularOutputId, 1,
-                CameraHistoryRenderGraphBridge.CreateDescriptor(m_SpecularOutputDesc.desc));
-            m_SpecularOutput = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_SpecularOutputHistory, 0, AccessFlags.ReadWrite);
-
-            // Double-buffered temporal history textures & pre-exposure buffer
+            // Double-buffered temporal history textures & pre-exposure buffer (declared on Reflection sub-pass builder).
             m_SpecularHistoryRing = history.GetOrCreateTexture(SpecularAndSecondMomentHistoryId, 2,
                 CameraHistoryRenderGraphBridge.CreateDescriptor(m_SpecularHistoryDesc.desc));
-            m_PreviousSpecularHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_SpecularHistoryRing, 1, AccessFlags.Read);
-            m_CurrentSpecularHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_SpecularHistoryRing, 0, AccessFlags.ReadWrite);
+            m_PreviousSpecularHistory = CameraHistoryRenderGraphBridge.Import(m_SpecularHistoryRing, 1);
+            m_CurrentSpecularHistory = CameraHistoryRenderGraphBridge.Import(m_SpecularHistoryRing, 0);
 
             m_NumFramesHistoryRing = history.GetOrCreateTexture(NumFramesAccumulatedHistoryId, 2,
                 CameraHistoryRenderGraphBridge.CreateDescriptor(m_NumFramesHistoryDesc.desc));
-            m_PreviousNumFramesHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_NumFramesHistoryRing, 1, AccessFlags.Read);
-            m_CurrentNumFramesHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_NumFramesHistoryRing, 0, AccessFlags.ReadWrite);
+            m_PreviousNumFramesHistory = CameraHistoryRenderGraphBridge.Import(m_NumFramesHistoryRing, 1);
+            m_CurrentNumFramesHistory = CameraHistoryRenderGraphBridge.Import(m_NumFramesHistoryRing, 0);
 
             m_SceneDepthHistoryRing = history.GetOrCreateTexture(SceneDepthHistoryId, 2,
                 CameraHistoryRenderGraphBridge.CreateDescriptor(m_SceneDepthHistoryDesc.desc));
-            m_PreviousSceneDepthHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_SceneDepthHistoryRing, 1, AccessFlags.Read);
-            m_CurrentSceneDepthHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_SceneDepthHistoryRing, 0, AccessFlags.ReadWrite);
+            m_PreviousSceneDepthHistory = CameraHistoryRenderGraphBridge.Import(m_SceneDepthHistoryRing, 1);
+            m_CurrentSceneDepthHistory = CameraHistoryRenderGraphBridge.Import(m_SceneDepthHistoryRing, 0);
 
             var preExposureDesc = new CameraHistoryBufferDescriptor(1, sizeof(float), GraphicsBuffer.Target.Structured);
             m_PreExposureHistoryRing = history.GetOrCreateBuffer(PreExposureHistoryId, 2, preExposureDesc);
-            m_PreviousPreExposureHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_PreExposureHistoryRing, 1, AccessFlags.Read);
-            m_CurrentPreExposureHistory = CameraHistoryRenderGraphBridge.ImportForPass(owner, m_PreExposureHistoryRing, 0, AccessFlags.ReadWrite);
+            m_PreviousPreExposureHistory = CameraHistoryRenderGraphBridge.Import(m_PreExposureHistoryRing, 1);
+            m_CurrentPreExposureHistory = CameraHistoryRenderGraphBridge.Import(m_PreExposureHistoryRing, 0);
 
             m_HistoryValid = m_UseTemporalFilter && !resetHistory
                 && m_SpecularHistoryRing.IsValid()
@@ -561,39 +531,81 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_SceneDepthHistoryRing.IsValid()
                 && m_PreExposureHistoryRing.IsValid();
 
-            // Tile lists & compaction scratch buffers
+            if (BlueNoise.Instance != null && BlueNoise.Instance.VectorAtlas.IsValid())
+                m_BlueNoiseVec2 = BlueNoise.Instance.VectorAtlas;
+
+            if (!m_SpecularOutput.IsValid())
+                return;
+
+            m_Prepared = true;
+        }
+
+        /// <summary>
+        /// Declares Reflection sub-pass resources on its own CoreRP ComputePass builder.
+        /// All 7 scratch textures and 12 scratch buffers are created as true sub-pass transients
+        /// so CoreRP aliases them against the preceding Diffuse sub-pass's released transients.
+        /// </summary>
+        internal void SetupSubPassResources(IComputeRenderGraphBuilder builder)
+        {
+            if (builder == null || !m_Prepared)
+                return;
+
+            m_TileBitmask = CreateSubPassTransientTexture(builder, m_TileBitmaskDesc);
+            m_DownsampledDepth = CreateSubPassTransientTexture(builder, m_DownsampledDepthDesc);
+            m_RayBuffer = CreateSubPassTransientTexture(builder, m_RayBufferDesc);
+            m_TraceRadiance = CreateSubPassTransientTexture(builder, m_TraceRadianceDesc);
+            m_TraceHit = CreateSubPassTransientTexture(builder, m_TraceHitDesc);
+            m_ResolvedSpecular = CreateSubPassTransientTexture(builder, m_ResolvedSpecularDesc);
+            m_ResolvedSpecularDepth = CreateSubPassTransientTexture(builder, m_ResolvedSpecularDepthDesc);
+
             int resolveTileCount = Mathf.Max(1, m_ResolveTileWidth * m_ResolveTileHeight);
             int tracingTileCount = Mathf.Max(1, m_TracingTileWidth * m_TracingTileHeight);
             int tracingTexelCount = Mathf.Max(1, m_TracingWidth * m_TracingHeight);
             const GraphicsBuffer.Target indirectStructured = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
 
-            m_ClearTileData = ImportScratchBuffer(owner, history, ClearTileDataId, resolveTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            m_ResolveTileData = ImportScratchBuffer(owner, history, ResolveTileDataId, resolveTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            m_ClearUnusedTracingTileData = ImportScratchBuffer(owner, history, ClearUnusedTracingTileDataId, tracingTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            m_TracingTileData = ImportScratchBuffer(owner, history, TracingTileDataId, tracingTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+            m_ClearTileData = CreateSubPassTransientBuffer(builder, "LumenReflectionClearTileData", resolveTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+            m_ResolveTileData = CreateSubPassTransientBuffer(builder, "LumenReflectionResolveTileData", resolveTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+            m_ClearUnusedTracingTileData = CreateSubPassTransientBuffer(builder, "LumenReflectionClearUnusedTracingTileData", tracingTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+            m_TracingTileData = CreateSubPassTransientBuffer(builder, "LumenReflectionTracingTileData", tracingTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
 
-            m_ClearTileArgs = ImportScratchBuffer(owner, history, ClearTileArgsId, 3, sizeof(uint), indirectStructured);
-            m_ResolveTileArgs = ImportScratchBuffer(owner, history, ResolveTileArgsId, 3, sizeof(uint), indirectStructured);
-            m_ClearUnusedTracingTileArgs = ImportScratchBuffer(owner, history, ClearUnusedTracingTileArgsId, 3, sizeof(uint), indirectStructured);
-            m_TracingTileArgs = ImportScratchBuffer(owner, history, TracingTileArgsId, 3, sizeof(uint), indirectStructured);
+            m_ClearTileArgs = CreateSubPassTransientBuffer(builder, "LumenReflectionClearTileArgs", 3, sizeof(uint), indirectStructured);
+            m_ResolveTileArgs = CreateSubPassTransientBuffer(builder, "LumenReflectionResolveTileArgs", 3, sizeof(uint), indirectStructured);
+            m_ClearUnusedTracingTileArgs = CreateSubPassTransientBuffer(builder, "LumenReflectionClearUnusedTracingTileArgs", 3, sizeof(uint), indirectStructured);
+            m_TracingTileArgs = CreateSubPassTransientBuffer(builder, "LumenReflectionTracingTileArgs", 3, sizeof(uint), indirectStructured);
 
-            m_CompactedAllocator = ImportScratchBuffer(owner, history, CompactedAllocatorId, 1, sizeof(uint), GraphicsBuffer.Target.Structured);
-            m_CompactedData = ImportScratchBuffer(owner, history, CompactedDataId, tracingTexelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            m_CompactionArgs = ImportScratchBuffer(owner, history, CompactionArgsId, 3, sizeof(uint), indirectStructured);
-            m_CompactTracingArgs = ImportScratchBuffer(owner, history, CompactTracingArgsId, 3, sizeof(uint), indirectStructured);
+            m_CompactedAllocator = CreateSubPassTransientBuffer(builder, "LumenReflectionCompactedAllocator", 1, sizeof(uint), GraphicsBuffer.Target.Structured);
+            m_CompactedData = CreateSubPassTransientBuffer(builder, "LumenReflectionCompactedData", tracingTexelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+            m_CompactionArgs = CreateSubPassTransientBuffer(builder, "LumenReflectionCompactionArgs", 3, sizeof(uint), indirectStructured);
+            m_CompactTracingArgs = CreateSubPassTransientBuffer(builder, "LumenReflectionCompactTracingArgs", 3, sizeof(uint), indirectStructured);
 
-            if (BlueNoise.Instance != null && BlueNoise.Instance.VectorAtlas.IsValid())
-            {
-                m_BlueNoiseVec2 = BlueNoise.Instance.VectorAtlas;
-                PassRecorder.RegisterImportedTextureForPass(owner, m_BlueNoiseVec2);
-            }
+            if (m_SpecularOutput.IsValid())
+                builder.UseTexture(m_SpecularOutput, AccessFlags.ReadWrite);
+            if (m_PreviousSpecularHistory.IsValid())
+                builder.UseTexture(m_PreviousSpecularHistory, AccessFlags.Read);
+            if (m_CurrentSpecularHistory.IsValid())
+                builder.UseTexture(m_CurrentSpecularHistory, AccessFlags.ReadWrite);
+            if (m_PreviousNumFramesHistory.IsValid())
+                builder.UseTexture(m_PreviousNumFramesHistory, AccessFlags.Read);
+            if (m_CurrentNumFramesHistory.IsValid())
+                builder.UseTexture(m_CurrentNumFramesHistory, AccessFlags.ReadWrite);
+            if (m_PreviousSceneDepthHistory.IsValid())
+                builder.UseTexture(m_PreviousSceneDepthHistory, AccessFlags.Read);
+            if (m_CurrentSceneDepthHistory.IsValid())
+                builder.UseTexture(m_CurrentSceneDepthHistory, AccessFlags.ReadWrite);
+            if (m_PreviousPreExposureHistory.IsValid())
+                builder.UseBuffer(m_PreviousPreExposureHistory, AccessFlags.Read);
+            if (m_CurrentPreExposureHistory.IsValid())
+                builder.UseBuffer(m_CurrentPreExposureHistory, AccessFlags.ReadWrite);
+            if (m_BlueNoiseVec2.IsValid())
+                builder.UseTexture(m_BlueNoiseVec2, AccessFlags.Read);
+        }
 
-            if (!m_SpecularOutput.IsValid() || !m_TileBitmask.IsValid() || !m_ResolveTileArgs.IsValid())
-                return;
-
-            m_Prepared = true;
-            var diffuse = frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>();
-            diffuse.SpecularReflectionHistory = m_SpecularOutputHistory;
+        internal void MarkHistoriesWritten()
+        {
+            m_SpecularHistoryRing?.MarkWritten();
+            m_NumFramesHistoryRing?.MarkWritten();
+            m_SceneDepthHistoryRing?.MarkWritten();
+            m_PreExposureHistoryRing?.MarkWritten();
         }
 
         internal void Record(
@@ -914,13 +926,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_DenoiserCompute, spatialKernel, RWSpecularIndirectAccumulatedId, m_SpecularOutput);
                 cmd.DispatchCompute(m_DenoiserCompute, spatialKernel, m_ResolveTileArgs, 0);
             }
-
-            // Commit history rings
-            m_SpecularHistoryRing.MarkWritten();
-            m_NumFramesHistoryRing.MarkWritten();
-            m_SceneDepthHistoryRing.MarkWritten();
-            m_PreExposureHistoryRing.MarkWritten();
-            m_SpecularOutputHistory.MarkWritten();
         }
 
         internal bool RecordDebugView(
@@ -1053,26 +1058,26 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParams(shader, propertyId, m_ScratchInt2);
         }
 
-        private static TextureHandle ImportScratchTexture(
-            IRenderPass owner,
-            CameraHistory history,
-            CameraHistoryId id,
+        private static TextureHandle CreateSubPassTransientTexture(
+            IComputeRenderGraphBuilder builder,
             RenderGraphTexture desc)
         {
-            var tex = history.GetOrCreateTexture(id, 1, CameraHistoryRenderGraphBridge.CreateDescriptor(desc.desc));
-            return CameraHistoryRenderGraphBridge.ImportForPass(owner, tex, 0, AccessFlags.ReadWrite);
+            TextureDesc textureDesc = desc.desc;
+            return builder.CreateTransientTexture(in textureDesc);
         }
 
-        private static BufferHandle ImportScratchBuffer(
-            IRenderPass owner,
-            CameraHistory history,
-            CameraHistoryId id,
+        private static BufferHandle CreateSubPassTransientBuffer(
+            IComputeRenderGraphBuilder builder,
+            string name,
             int count,
             int stride,
             GraphicsBuffer.Target target)
         {
-            var buf = history.GetOrCreateBuffer(id, 1, new CameraHistoryBufferDescriptor(count, stride, target));
-            return CameraHistoryRenderGraphBridge.ImportForPass(owner, buf, 0, AccessFlags.ReadWrite);
+            var bufferDesc = new BufferDesc(count, stride, target)
+            {
+                name = name,
+            };
+            return builder.CreateTransientBuffer(in bufferDesc);
         }
 
         private static int FindKernel(ComputeShader shader, string name)

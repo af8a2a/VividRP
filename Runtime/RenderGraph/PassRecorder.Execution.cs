@@ -14,12 +14,21 @@ namespace VividRP.Runtime
 {
     public static partial class PassRecorder
     {
-        private static readonly List<IRenderPass> s_RenderPasses = new();
+        private static readonly CompiledRenderGraphSession s_EmptySession = new();
+        private static readonly Dictionary<RenderGraphData, CompiledRenderGraphSession> s_CompiledSessions = new();
+        private static readonly List<RenderGraphData> s_DeadSessionKeys = new();
+        private static readonly List<CompiledRenderGraphSession> s_DisposeSessionScratch = new();
+        private static readonly Action<IRenderPass> s_DisposePassAction = DisposeRenderPassForSession;
+        private static readonly Action<IRenderPass> s_CleanupPassFrameStateAction = CleanupPassFrameState;
+        private static CompiledRenderGraphSession s_FallbackSession;
+        private static CompiledRenderGraphSession s_ActiveSession = s_EmptySession;
+
+        private static List<IRenderPass> s_RenderPasses = s_EmptySession.RenderPasses;
         private static readonly ContextContainer s_FrameData = new();
-        private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
-        private static readonly Dictionary<IRenderPass, int> s_PassIndices = new();
-        private static readonly Dictionary<IRenderPass, Vector2Int> s_PassRenderSizes = new();
-        private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
+        private static Dictionary<IRenderPass, PassResource> s_PassResources = s_EmptySession.PassResources;
+        private static Dictionary<IRenderPass, int> s_PassIndices = s_EmptySession.PassIndices;
+        private static Dictionary<IRenderPass, Vector2Int> s_PassRenderSizes = s_EmptySession.PassRenderSizes;
+        private static Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = s_EmptySession.PassResourceAccessOverrides;
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
         private static readonly Dictionary<IRenderPass, List<ImportedPassHandle>> s_PassImportedHandles = new();
         private static readonly HashSet<RenderGraphTexture> s_FrameImportedTextures = new();
@@ -30,17 +39,21 @@ namespace VividRP.Runtime
         private static readonly Dictionary<RenderGraphBuffer, BufferHandle> s_RecordGraphBufferCache = new(16);
         private static readonly Dictionary<RenderGraphRenderList, RendererListHandle> s_RecordGraphRenderListCache = new(16);
         private static readonly Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> s_RecordGraphAccelerationStructureCache = new(8);
-        private static bool[] s_PassActiveStates = Array.Empty<bool>();
+        private static bool[] s_PassActiveStates = s_EmptySession.PassActiveStates;
         private static RenderGraph s_CurrentRenderGraph;
         private static int s_InactiveBypassVersion;
 
         private static RenderGraphData s_CurrentGraphAsset;
-        private static List<RenderGraphPassDefinition> s_RuntimePassDefinitions = new();
+        private static List<RenderGraphPassDefinition> s_RuntimePassDefinitions = s_EmptySession.RuntimePassDefinitions;
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static bool s_HasCascadedShadowCasterPass;
         private static int s_EditModeFrameIndex;
+
+        internal static int CompiledSessionCount => s_CompiledSessions.Count + (s_FallbackSession != null ? 1 : 0);
+
+        internal static CompiledRenderGraphSession ActiveSession => s_ActiveSession;
 
         internal static bool UsesExperimentalMeshShaderRasterization
         {
@@ -97,6 +110,8 @@ namespace VividRP.Runtime
                     s_FrameData.Get<VividLumenIndirectDiffuseFrameData>().Reset();
                 if (s_FrameData.Contains<VividGlobalSdfFrameData>())
                     s_FrameData.Get<VividGlobalSdfFrameData>().Reset();
+                if (s_FrameData.Contains<FrameResourceTable>())
+                    s_FrameData.Get<FrameResourceTable>().Reset();
                 if (s_FrameData.Contains<VividSubstrateMaterialFrameData>())
                     s_FrameData.Get<VividSubstrateMaterialFrameData>().Reset();
                 if (s_FrameData.Contains<StrandHairFrameData>())
@@ -380,30 +395,113 @@ namespace VividRP.Runtime
             }
         }
 
-        public static void Dispose()
+        private static void DisposeRenderPassForSession(IRenderPass pass)
         {
-            foreach (var pass in s_RenderPasses)
+            DisposeRenderPass(pass);
+        }
+
+        private static void CleanupPassFrameState(IRenderPass pass)
+        {
+            if (pass == null)
+                return;
+
+            s_PassImportedHandles.Remove(pass);
+            RemovePassWrittenHistories(pass);
+        }
+
+        private static void ActivateSession(CompiledRenderGraphSession session)
+        {
+            session ??= s_EmptySession;
+            s_ActiveSession = session;
+            s_RenderPasses = session.RenderPasses;
+            s_RuntimePassDefinitions = session.RuntimePassDefinitions;
+            s_PassResources = session.PassResources;
+            s_PassIndices = session.PassIndices;
+            s_PassRenderSizes = session.PassRenderSizes;
+            s_PassResourceAccessOverrides = session.PassResourceAccessOverrides;
+            s_PassActiveStates = session.PassActiveStates;
+            s_CurrentGraphAsset = session.GraphAsset;
+            s_CurrentImportVersion = session.ImportVersion;
+            s_IsCompiled = session.IsCompiled;
+            s_HasCascadedShadowCasterPass = session.HasCascadedShadowCasterPass;
+        }
+
+        private static void DisposeSession(CompiledRenderGraphSession session)
+        {
+            if (session == null)
+                return;
+
+            var previousSession = s_ActiveSession;
+            ActivateSession(session);
+            session.Dispose(s_DisposePassAction, s_CleanupPassFrameStateAction);
+            if (ReferenceEquals(previousSession, session))
+                ActivateSession(s_EmptySession);
+            else
+                ActivateSession(previousSession);
+        }
+
+        private static void PruneDeadSessions()
+        {
+            if (s_CompiledSessions.Count == 0)
+                return;
+
+            s_DeadSessionKeys.Clear();
+            foreach (var kvp in s_CompiledSessions)
             {
-                try
+                if (kvp.Key == null)
+                    s_DeadSessionKeys.Add(kvp.Key);
+            }
+
+            for (var i = 0; i < s_DeadSessionKeys.Count; i++)
+            {
+                var key = s_DeadSessionKeys[i];
+                if (s_CompiledSessions.TryGetValue(key, out var deadSession))
                 {
-                    DisposeRenderPass(pass);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogException(e);
+                    s_CompiledSessions.Remove(key);
+                    DisposeSession(deadSession);
                 }
             }
 
-            DisposeAccelerationStructures();
-            s_RenderPasses.Clear();
-            s_PassResources.Clear();
-            s_PassIndices.Clear();
-            s_PassRenderSizes.Clear();
-            s_PassResourceAccessOverrides.Clear();
-            s_PassActiveStates = Array.Empty<bool>();
+            s_DeadSessionKeys.Clear();
+        }
+
+        public static void Dispose()
+        {
+            s_DisposeSessionScratch.Clear();
+            foreach (var session in s_CompiledSessions.Values)
+            {
+                if (session != null)
+                    s_DisposeSessionScratch.Add(session);
+            }
+            s_CompiledSessions.Clear();
+
+            if (s_FallbackSession != null)
+            {
+                s_DisposeSessionScratch.Add(s_FallbackSession);
+                s_FallbackSession = null;
+            }
+
+            if (s_ActiveSession != null
+                && !ReferenceEquals(s_ActiveSession, s_EmptySession)
+                && !s_DisposeSessionScratch.Contains(s_ActiveSession))
+            {
+                s_DisposeSessionScratch.Add(s_ActiveSession);
+            }
+
+            for (var i = 0; i < s_DisposeSessionScratch.Count; i++)
+                DisposeSession(s_DisposeSessionScratch[i]);
+            s_DisposeSessionScratch.Clear();
+
+            if (s_EmptySession.RenderPasses.Count > 0 || s_EmptySession.PassResources.Count > 0)
+                DisposeSession(s_EmptySession);
+            else
+                s_EmptySession.ClearState();
+
+            ActivateSession(s_EmptySession);
             ClearFrameImportedHandles();
             ClearImportedTextures();
             s_PassImportedHandles.Clear();
+            DisposePassWrittenHistories();
             ClearRecordGraphResourceCaches();
             VividAntialiasingRuntimeUtility.Clear();
             if (s_FrameData.Contains<VividLightData>())
@@ -411,11 +509,6 @@ namespace VividRP.Runtime
             FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_EditModeFrameIndex = 0;
-            s_CurrentGraphAsset = null;
-            s_RuntimePassDefinitions.Clear();
-            s_CurrentImportVersion = 0;
-            s_IsCompiled = false;
-            s_HasCascadedShadowCasterPass = false;
             RenderPassProfilingUtility.Clear();
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -449,12 +542,66 @@ namespace VividRP.Runtime
         internal static void AbortFrame()
         {
             VirtualTextureSystem.AbortPageTableUpdates();
+            if (s_FrameData.Contains<FrameResourceTable>())
+                s_FrameData.Get<FrameResourceTable>().Reset();
             ClearImportedTextures();
             ClearFrameImportedHandles();
             s_RenderedPreImageEffectGizmosInGraph = false;
         }
 
         internal static bool HasActiveRenderGraph => s_CurrentRenderGraph != null;
+
+        /// <summary>
+        /// Creates a CoreRP RenderGraph-managed frame texture and registers its access for a specific pass during Prepare().
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static TextureHandle CreateTextureForPass(
+            IRenderPass pass,
+            in TextureDesc desc,
+            AccessFlags access = AccessFlags.ReadWrite)
+        {
+            var handle = CreateTextureHandle(in desc);
+            RegisterImportedTextureForPass(pass, handle, access);
+            return handle;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static TextureHandle CreateTextureHandle(in TextureDesc desc)
+        {
+            if (s_CurrentRenderGraph == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot create texture: RenderGraph is not active. Call CreateTexture*() only during Prepare().");
+                return default;
+            }
+
+            return s_CurrentRenderGraph.CreateTexture(desc);
+        }
+
+        /// <summary>
+        /// Creates a CoreRP RenderGraph-managed frame buffer and registers its access for a specific pass during Prepare().
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static BufferHandle CreateBufferForPass(
+            IRenderPass pass,
+            in BufferDesc desc,
+            AccessFlags access = AccessFlags.ReadWrite)
+        {
+            var handle = CreateBufferHandle(in desc);
+            RegisterImportedBufferForPass(pass, handle, access);
+            return handle;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static BufferHandle CreateBufferHandle(in BufferDesc desc)
+        {
+            if (s_CurrentRenderGraph == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot create buffer: RenderGraph is not active. Call CreateBuffer*() only during Prepare().");
+                return default;
+            }
+
+            return s_CurrentRenderGraph.CreateBuffer(desc);
+        }
 
         /// <summary>
         /// Imports an external RTHandle for a specific pass during Prepare().
@@ -579,8 +726,18 @@ namespace VividRP.Runtime
                 s_PassImportedHandles[pass] = handles;
             }
 
-            if (!handles.Contains(importedHandle))
-                handles.Add(importedHandle);
+            for (var i = 0; i < handles.Count; i++)
+            {
+                if (handles[i].HasSameHandle(importedHandle))
+                {
+                    var mergedAccess = handles[i].Access | importedHandle.Access;
+                    if (mergedAccess != handles[i].Access)
+                        handles[i] = handles[i].WithAccess(mergedAccess);
+                    return;
+                }
+            }
+
+            handles.Add(importedHandle);
         }
 
         /// <summary>
@@ -614,6 +771,8 @@ namespace VividRP.Runtime
             VirtualTextureSystem.CommitPageTableUpdates();
             if (s_FrameData.Contains<VividGlobalSdfFrameData>())
                 s_FrameData.Get<VividGlobalSdfFrameData>().Commit();
+            if (s_FrameData.Contains<FrameResourceTable>())
+                s_FrameData.Get<FrameResourceTable>().Reset();
             using (RenderPassProfilingUtility.CommitFrameClearImportedHandlesMarker.Auto())
             {
                 ClearFrameImportedHandles();
@@ -637,6 +796,8 @@ namespace VividRP.Runtime
         internal static void RegisterCascadedShadowCasterPass()
         {
             s_HasCascadedShadowCasterPass = true;
+            if (s_ActiveSession != null)
+                s_ActiveSession.HasCascadedShadowCasterPass = true;
         }
 
         internal static bool HasRenderGizmoPrePostProcessBoundary(IReadOnlyList<IRenderPass> renderPasses)
@@ -710,6 +871,7 @@ namespace VividRP.Runtime
             s_ImportedRTHandles.Clear();
             foreach (var handles in s_PassImportedHandles.Values)
                 handles?.Clear();
+            ClearPassWrittenHistories();
             s_TextureImportCache.Clear();
             s_BufferImportCache.Clear();
             s_CurrentRenderGraph = null;
@@ -730,12 +892,28 @@ namespace VividRP.Runtime
             s_FrameImportedBuffers.Clear();
         }
 
-        private static void EnsureCompiled(RenderGraphData graphAsset)
+        internal static void EnsureCompiled(RenderGraphData graphAsset)
         {
             if (s_IsCompiled && s_CurrentGraphAsset == graphAsset)
             {
                 if (graphAsset == null || graphAsset.ImportVersion == s_CurrentImportVersion)
                     return;
+            }
+
+            if (graphAsset == null)
+            {
+                if (s_FallbackSession != null && s_FallbackSession.Matches(null))
+                {
+                    ActivateSession(s_FallbackSession);
+                    return;
+                }
+            }
+            else if (s_CompiledSessions.TryGetValue(graphAsset, out var cachedSession)
+                     && cachedSession != null
+                     && cachedSession.Matches(graphAsset))
+            {
+                ActivateSession(cachedSession);
+                return;
             }
 
             Compile(graphAsset);
@@ -744,19 +922,41 @@ namespace VividRP.Runtime
         private static void Compile(RenderGraphData graphAsset)
         {
             using var compileScope = RenderPassProfilingUtility.CompileMarker.Auto();
-            Dispose();
+            PruneDeadSessions();
+
+            if (graphAsset == null)
+            {
+                if (s_FallbackSession != null)
+                {
+                    var oldFallback = s_FallbackSession;
+                    s_FallbackSession = null;
+                    DisposeSession(oldFallback);
+                }
+            }
+            else if (s_CompiledSessions.TryGetValue(graphAsset, out var existingSession))
+            {
+                s_CompiledSessions.Remove(graphAsset);
+                DisposeSession(existingSession);
+            }
+
+            var session = new CompiledRenderGraphSession
+            {
+                GraphAsset = graphAsset,
+                ImportVersion = graphAsset != null ? graphAsset.ImportVersion : 0,
+                IsCompiled = false,
+            };
+            ActivateSession(session);
 
             if (graphAsset == null)
             {
                 // Fallback graph (keeps the pipeline running without an authored asset).
                 var fallbackPass = new FullScreenPass();
-                s_PassIndices[fallbackPass] = 0;
-                s_RenderPasses.Add(fallbackPass);
-                s_RuntimePassDefinitions.Add(null);
+                session.PassIndices[fallbackPass] = 0;
+                session.RenderPasses.Add(fallbackPass);
+                session.RuntimePassDefinitions.Add(null);
             }
             else
             {
-                
                 var passDefinitions = graphAsset.Passes ?? new List<RenderGraphPassDefinition>();
                 var textures = CreateRuntimeTextures(graphAsset);
                 var buffers = CreateRuntimeBuffers(graphAsset);
@@ -815,11 +1015,11 @@ namespace VividRP.Runtime
                     indexedPassTypes[passIndex] = passType;
                     var accessOverrides = BuildResourceAccessOverrides(passType, passDef);
                     if (accessOverrides != null && accessOverrides.Count > 0)
-                        s_PassResourceAccessOverrides[pass] = accessOverrides;
+                        session.PassResourceAccessOverrides[pass] = accessOverrides;
 
-                    s_PassIndices[pass] = s_RenderPasses.Count;
-                    s_RenderPasses.Add(pass);
-                    s_RuntimePassDefinitions.Add(passDef);
+                    session.PassIndices[pass] = session.RenderPasses.Count;
+                    session.RenderPasses.Add(pass);
+                    session.RuntimePassDefinitions.Add(passDef);
                 }
 
                 for (var passIndex = 0; passIndex < passDefinitions.Count; passIndex++)
@@ -839,23 +1039,31 @@ namespace VividRP.Runtime
                 }
             }
 
-            foreach (var pass in s_RenderPasses)
+            foreach (var pass in session.RenderPasses)
             {
                 CreateRenderPass(pass);
                 GetCurrentPassResources(pass);
             }
 
-            GetPassActiveStatesBuffer(s_RenderPasses.Count);
+            session.EnsurePassActiveStatesCapacity(session.RenderPasses.Count);
+            session.IsCompiled = true;
 
-            s_CurrentGraphAsset = graphAsset;
-            s_CurrentImportVersion = graphAsset != null ? graphAsset.ImportVersion : 0;
-            s_IsCompiled = true;
+            if (graphAsset == null)
+                s_FallbackSession = session;
+            else
+                s_CompiledSessions[graphAsset] = session;
+
+            ActivateSession(session);
         }
 
         internal static bool[] GetPassActiveStatesBuffer(int passCount)
         {
             if (s_PassActiveStates.Length < passCount)
-                s_PassActiveStates = new bool[passCount];
+            {
+                s_PassActiveStates = s_ActiveSession != null
+                    ? s_ActiveSession.EnsurePassActiveStatesCapacity(passCount)
+                    : new bool[passCount];
+            }
 
             return s_PassActiveStates;
         }
@@ -946,6 +1154,62 @@ namespace VividRP.Runtime
 
             return null;
         }
+        private static bool TryResolvePassField(
+            PassTypeMetadata metadata,
+            Type passType,
+            string fieldName,
+            out FieldInfo field,
+            out PassResourceFieldMetadata fieldMeta)
+        {
+            if (metadata != null && metadata.TryGetResourceField(fieldName, out fieldMeta))
+            {
+                field = fieldMeta.Field;
+                return field != null;
+            }
+
+            fieldMeta = null;
+            field = passType != null ? passType.GetInstanceField(fieldName) : null;
+            return field != null;
+        }
+
+        private static bool IsFieldDeclaredTransient(FieldInfo field, PassResourceFieldMetadata fieldMeta)
+        {
+            return fieldMeta != null
+                ? fieldMeta.IsDeclaredTransient
+                : field.IsDeclaredTransientResourceField();
+        }
+
+        private static object GetPassFieldValue(object pass, FieldInfo field, PassResourceFieldMetadata fieldMeta)
+        {
+            if (fieldMeta?.Getter != null)
+                return fieldMeta.Getter(pass);
+
+            return field?.GetValue(pass);
+        }
+
+        private static void SetPassFieldValue(object pass, FieldInfo field, PassResourceFieldMetadata fieldMeta, object value)
+        {
+            if (fieldMeta?.Setter != null)
+            {
+                fieldMeta.Setter(pass, value);
+                return;
+            }
+
+            field?.SetValue(pass, value);
+        }
+
+        private static object GetBypassFieldValue(IRenderPass pass, FieldInfo field)
+        {
+            if (pass == null || field == null)
+                return null;
+
+            var metadata = PassTypeMetadataCache.GetOrCreate(pass.GetType());
+            if (metadata != null && metadata.TryGetResourceField(field.Name, out var fieldMeta) && fieldMeta.Getter != null)
+                return fieldMeta.Getter(pass);
+
+            return field.GetValue(pass);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ApplyResourceBindings(
             IRenderPass pass,
@@ -959,16 +1223,16 @@ namespace VividRP.Runtime
             if (passDef.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
                 return;
 
+            var metadata = PassTypeMetadataCache.GetOrCreate(passType);
             foreach (var binding in passDef.ResourceBindings)
             {
                 if (binding == null || string.IsNullOrEmpty(binding.FieldName))
                     continue;
 
-                var field = passType.GetInstanceField(binding.FieldName);
-                if (field == null)
+                if (!TryResolvePassField(metadata, passType, binding.FieldName, out var field, out var fieldMeta))
                     continue;
 
-                if (field.IsDeclaredTransientResourceField())
+                if (IsFieldDeclaredTransient(field, fieldMeta))
                 {
                     LogSkippedTransientResourceBinding(passType, binding.FieldName);
                     continue;
@@ -985,28 +1249,28 @@ namespace VividRP.Runtime
 
                         if (binding.ResourceIndex >= 0 && binding.ResourceIndex < textures.Length)
                         {
-                            field.SetValue(pass, textures[binding.ResourceIndex]);
+                            SetPassFieldValue(pass, field, fieldMeta, textures[binding.ResourceIndex]);
                         }
                         break;
                     case RenderGraphResourceKind.Buffer:
                         if (binding.ResourceIndex >= 0 && binding.ResourceIndex < buffers.Length &&
                             field.FieldType == typeof(RenderGraphBuffer))
                         {
-                            field.SetValue(pass, buffers[binding.ResourceIndex]);
+                            SetPassFieldValue(pass, field, fieldMeta, buffers[binding.ResourceIndex]);
                         }
                         break;
                     case RenderGraphResourceKind.RenderList:
                         if (binding.ResourceIndex >= 0 && binding.ResourceIndex < renderLists.Length &&
                             field.FieldType == typeof(RenderGraphRenderList))
                         {
-                            field.SetValue(pass, renderLists[binding.ResourceIndex]);
+                            SetPassFieldValue(pass, field, fieldMeta, renderLists[binding.ResourceIndex]);
                         }
                         break;
                     case RenderGraphResourceKind.AccelerationStructure:
                         if (binding.ResourceIndex >= 0 && binding.ResourceIndex < accelerationStructures.Length &&
                             field.FieldType == typeof(RenderGraphAccelerationStructure))
                         {
-                            field.SetValue(pass, accelerationStructures[binding.ResourceIndex]);
+                            SetPassFieldValue(pass, field, fieldMeta, accelerationStructures[binding.ResourceIndex]);
                         }
                         break;
                 }
@@ -1025,16 +1289,16 @@ namespace VividRP.Runtime
             if (passDef?.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
                 return;
 
+            var metadata = PassTypeMetadataCache.GetOrCreate(passType);
             foreach (var binding in passDef.ResourceBindings)
             {
                 if (binding == null || binding.SourceKind != RenderGraphPassBindingSourceKind.PassField || string.IsNullOrEmpty(binding.FieldName))
                     continue;
 
-                var field = passType.GetInstanceField(binding.FieldName);
-                if (field == null)
+                if (!TryResolvePassField(metadata, passType, binding.FieldName, out var field, out var fieldMeta))
                     continue;
 
-                if (field.IsDeclaredTransientResourceField())
+                if (IsFieldDeclaredTransient(field, fieldMeta))
                 {
                     LogSkippedTransientResourceBinding(passType, binding.FieldName);
                     continue;
@@ -1043,8 +1307,9 @@ namespace VividRP.Runtime
                 var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < indexedPassTypes.Count
                     ? indexedPassTypes[binding.SourcePassIndex]
                     : null;
-                var sourceField = sourcePassType.GetInstanceField(binding.SourceFieldName);
-                if (sourceField.IsDeclaredTransientResourceField())
+                var sourceMetadata = PassTypeMetadataCache.GetOrCreate(sourcePassType);
+                if (TryResolvePassField(sourceMetadata, sourcePassType, binding.SourceFieldName, out var sourceField, out var sourceFieldMeta)
+                    && IsFieldDeclaredTransient(sourceField, sourceFieldMeta))
                 {
                     LogSkippedTransientResourceBinding(sourcePassType, binding.SourceFieldName);
                     continue;
@@ -1060,7 +1325,7 @@ namespace VividRP.Runtime
 
                 if (sharedResource != null && field.FieldType.IsInstanceOfType(sharedResource))
                 {
-                    field.SetValue(pass, sharedResource);
+                    SetPassFieldValue(pass, field, fieldMeta, sharedResource);
                 }
             }
         }
@@ -1071,6 +1336,7 @@ namespace VividRP.Runtime
                 return null;
 
             Dictionary<string, AccessFlags> accessOverrides = null;
+            var metadata = PassTypeMetadataCache.GetOrCreate(passType);
 
             foreach (var binding in passDef.ResourceBindings)
             {
@@ -1080,12 +1346,12 @@ namespace VividRP.Runtime
                     continue;
                 }
 
-                var field = passType.GetInstanceField(binding.FieldName);
-                var attr = field?.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
+                if (!metadata.TryGetResourceField(binding.FieldName, out var fieldMeta))
                     continue;
 
-                if (field.IsDeclaredTransientResourceField())
+                var field = fieldMeta.Field;
+                var attr = fieldMeta.ResourceAttribute;
+                if (attr == null || fieldMeta.IsDeclaredTransient)
                     continue;
 
                 var effectiveAccess = ShouldPreserveWriteOnlyColorAttachmentAccess(passType, binding, attr)
@@ -1138,14 +1404,14 @@ namespace VividRP.Runtime
             if (sourcePass == null || sourcePassType == null)
                 return null;
 
-            var sourceField = sourcePassType.GetInstanceField(fieldName);
-            if (sourceField == null)
+            var sourceMetadata = PassTypeMetadataCache.GetOrCreate(sourcePassType);
+            if (!TryResolvePassField(sourceMetadata, sourcePassType, fieldName, out var sourceField, out var sourceFieldMeta))
                 return null;
 
-            if (sourceField.IsDeclaredTransientResourceField())
+            if (IsFieldDeclaredTransient(sourceField, sourceFieldMeta))
                 return null;
 
-            var sourceValue = sourceField.GetValue(sourcePass);
+            var sourceValue = GetPassFieldValue(sourcePass, sourceField, sourceFieldMeta);
             var sourcePassDef = passDefinitions[passIndex];
             var sourceBinding = sourcePassDef?.ResourceBindings?.Find(binding => binding != null && binding.FieldName == fieldName);
             if (sourceBinding?.SourceKind == RenderGraphPassBindingSourceKind.PassField)
@@ -1159,7 +1425,7 @@ namespace VividRP.Runtime
                     visited);
                 if (resolvedValue != null && sourceField.FieldType.IsInstanceOfType(resolvedValue))
                 {
-                    sourceField.SetValue(sourcePass, resolvedValue);
+                    SetPassFieldValue(sourcePass, sourceField, sourceFieldMeta, resolvedValue);
                     sourceValue = resolvedValue;
                 }
             }
@@ -1374,9 +1640,9 @@ namespace VividRP.Runtime
             var renderListCache = s_RecordGraphRenderListCache;
             var accelerationStructureCache = s_RecordGraphAccelerationStructureCache;
             var recordedPreImageEffectGizmos = false;
-            var screenHistory = s_FrameData.Contains<VividSdfScreenTraceData>() ? s_FrameData.Get<VividSdfScreenTraceData>() : null;
-            bool captureSceneColor = screenHistory != null && screenHistory.currentColor.IsValid()
-                && screenHistory.currentDepthExposure.IsValid() && screenHistory.preExposure.IsValid();
+            var frameResources = s_FrameData.Contains<FrameResourceTable>()
+                ? s_FrameData.Get<FrameResourceTable>()
+                : null;
 
             using (RenderPassProfilingUtility.RecordRenderGraphRecordPassesMarker.Auto())
             {
@@ -1389,22 +1655,22 @@ namespace VividRP.Runtime
                         PrepareRenderGraphPass(pass);
                     }
 
-                    if (captureSceneColor)
+                    if (frameResources != null
+                        && frameResources.HasPendingTextureExtractors
+                        && pass is ISceneColorBoundaryPass sceneColorBoundaryPass)
                     {
-                        var source = pass switch
+                        var source = sceneColorBoundaryPass.GetSceneColorInput();
+                        if (source != null
+                            && textureCache.TryGetValue(source, out var color)
+                            && color.IsValid())
                         {
-                            StopNaNPass stopNaN => stopNaN.SceneColorInput,
-                            AntialiasingPass aa => aa.SceneColorInput,
-                            IPostProcessSourceOverridePass post => post.GetSourceTexture(),
-                            _ => null
-                        };
-                        if (source != null && source.desc.Width == screenHistory.depth.desc.Width
-                            && source.desc.Height == screenHistory.depth.desc.Height
-                            && textureCache.TryGetValue(source, out var color) && color.IsValid())
-                        {
-                            var depth = GetOrCreateTextureHandle(renderGraph, screenHistory.depth, textureCache);
-                            screenHistory.RecordSceneColor(renderGraph, color, depth);
-                            captureSceneColor = false;
+                            var extractionContext = new FrameResourceExtractionContext(renderGraph, textureCache);
+                            frameResources.TryRunTextureExtractors(
+                                FrameResourceSlots.SceneColorPrePostProcess,
+                                renderGraph,
+                                source,
+                                color,
+                                in extractionContext);
                         }
                     }
 
@@ -1472,7 +1738,9 @@ namespace VividRP.Runtime
                                 textureCache,
                                 bufferCache,
                                 renderListCache,
-                                accelerationStructureCache));
+                                accelerationStructureCache,
+                                resources,
+                                passDefinition?.PassName));
                         }
                     }
                     else if (pass is ComputePass computePass)
@@ -1572,8 +1840,8 @@ namespace VividRP.Runtime
 
         private static void CopyBypassTextureDescriptor(IRenderPass pass, PassBypassRule rule)
         {
-            var sourceTexture = rule.SourceEntry?.Texture ?? rule.SourceField?.GetValue(pass) as RenderGraphTexture;
-            var outputTexture = rule.OutputEntry?.Texture ?? rule.OutputField?.GetValue(pass) as RenderGraphTexture;
+            var sourceTexture = rule.SourceEntry?.Texture ?? GetBypassFieldValue(pass, rule.SourceField) as RenderGraphTexture;
+            var outputTexture = rule.OutputEntry?.Texture ?? GetBypassFieldValue(pass, rule.OutputField) as RenderGraphTexture;
             var sourceDescriptor = sourceTexture?.desc;
             if (sourceDescriptor == null || outputTexture == null)
                 return;
@@ -1584,8 +1852,8 @@ namespace VividRP.Runtime
 
         private static void CopyBypassBufferDescriptor(IRenderPass pass, PassBypassRule rule)
         {
-            var sourceBuffer = rule.SourceEntry?.Buffer ?? rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
-            var outputBuffer = rule.OutputEntry?.Buffer ?? rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
+            var sourceBuffer = rule.SourceEntry?.Buffer ?? GetBypassFieldValue(pass, rule.SourceField) as RenderGraphBuffer;
+            var outputBuffer = rule.OutputEntry?.Buffer ?? GetBypassFieldValue(pass, rule.OutputField) as RenderGraphBuffer;
             var sourceDescriptor = sourceBuffer?.desc;
             if (sourceDescriptor == null || outputBuffer == null)
                 return;
@@ -1653,8 +1921,8 @@ namespace VividRP.Runtime
             {
                 case PassResourceType.Texture:
                 {
-                    var sourceTexture = rule.SourceEntry?.Texture ?? rule.SourceField?.GetValue(pass) as RenderGraphTexture;
-                    var outputTexture = rule.OutputEntry?.Texture ?? rule.OutputField?.GetValue(pass) as RenderGraphTexture;
+                    var sourceTexture = rule.SourceEntry?.Texture ?? GetBypassFieldValue(pass, rule.SourceField) as RenderGraphTexture;
+                    var outputTexture = rule.OutputEntry?.Texture ?? GetBypassFieldValue(pass, rule.OutputField) as RenderGraphTexture;
                     if (sourceTexture == null || outputTexture == null)
                         return false;
 
@@ -1669,8 +1937,8 @@ namespace VividRP.Runtime
                 }
                 case PassResourceType.Buffer:
                 {
-                    var sourceBuffer = rule.SourceEntry?.Buffer ?? rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
-                    var outputBuffer = rule.OutputEntry?.Buffer ?? rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
+                    var sourceBuffer = rule.SourceEntry?.Buffer ?? GetBypassFieldValue(pass, rule.SourceField) as RenderGraphBuffer;
+                    var outputBuffer = rule.OutputEntry?.Buffer ?? GetBypassFieldValue(pass, rule.OutputField) as RenderGraphBuffer;
                     if (sourceBuffer == null || outputBuffer == null)
                         return false;
 
@@ -1876,24 +2144,5 @@ namespace VividRP.Runtime
             }
         }
 
-        private static void DisposeAccelerationStructures()
-        {
-            if (s_PassResources.Count == 0)
-                return;
-
-            var disposedAccelerationStructures = new HashSet<RenderGraphAccelerationStructure>();
-            foreach (var resources in s_PassResources.Values)
-            {
-                if (resources?.AccelerationStructures == null)
-                    continue;
-
-                foreach (var entry in resources.AccelerationStructures)
-                {
-                    var accelerationStructure = entry?.AccelerationStructure;
-                    if (accelerationStructure != null && disposedAccelerationStructures.Add(accelerationStructure))
-                        accelerationStructure.Dispose();
-                }
-            }
-        }
     }
 }

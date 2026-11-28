@@ -24,6 +24,11 @@ namespace VividRP.Runtime
         public FieldInfo Field;
 
         /// <summary>
+        /// Compiled getter delegate for <see cref="Field"/> to refresh descriptor references without reflection.
+        /// </summary>
+        internal Func<object, object> Getter;
+
+        /// <summary>
         /// Display name for this resource. Falls back to field name if not specified.
         /// </summary>
         public string Name;

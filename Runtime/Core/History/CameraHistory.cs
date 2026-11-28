@@ -328,6 +328,7 @@ namespace VividRP.Runtime
         private readonly BufferedRTHandleSystem m_Storage = new();
         private int m_ValidHistoryCount;
         private long m_LastCommittedSequence = -1;
+        private long m_LastTouchedSequence;
         private bool m_PendingWrite;
         private bool m_Disposed;
 
@@ -343,6 +344,7 @@ namespace VividRP.Runtime
             m_FrameCount = Mathf.Max(1, frameCount);
             m_Descriptor = descriptor;
             m_Allocator = allocator;
+            m_LastTouchedSequence = owner.CurrentSequence;
             var resolvedAllocator = allocator ?? AllocateDefault;
             var allocationDescriptor = descriptor;
             m_Storage.AllocBuffer(
@@ -371,12 +373,23 @@ namespace VividRP.Runtime
             return GetFrame(1);
         }
 
+        internal long LastTouchedSequence => m_LastTouchedSequence;
+
+        internal void Touch(long sequence)
+        {
+            if (sequence > m_LastTouchedSequence)
+                m_LastTouchedSequence = sequence;
+        }
+
         public RTHandle GetFrame(int frameAge)
         {
             if (m_Disposed)
                 throw new ObjectDisposedException(nameof(CameraHistoryTexture));
             if (frameAge < 0 || frameAge >= m_FrameCount)
                 throw new ArgumentOutOfRangeException(nameof(frameAge));
+
+            if (m_Owner.IsFrameActive)
+                Touch(m_Owner.CurrentSequence);
 
             return m_Storage.GetFrameRT(BufferId, frameAge);
         }
@@ -404,6 +417,7 @@ namespace VividRP.Runtime
             if (!m_Owner.IsFrameActive)
                 throw new InvalidOperationException("Camera history writes must occur inside an active camera frame.");
 
+            Touch(m_Owner.CurrentSequence);
             m_PendingWrite = true;
         }
 
@@ -491,13 +505,31 @@ namespace VividRP.Runtime
     /// </summary>
     public sealed class CameraHistory : CameraRelativeState
     {
+        public const int DefaultMaxIdleFrames = 8;
+
         private readonly Dictionary<CameraHistoryId, CameraHistoryTexture> m_Textures = new();
         private readonly Dictionary<CameraHistoryId, CameraHistoryBuffer> m_Buffers = new();
+        private readonly List<CameraHistoryId> m_ExpiredIds = new();
         private Camera m_Camera;
         private int m_ReferenceWidth = 1;
         private int m_ReferenceHeight = 1;
+        private int m_MaxIdleFrames = DefaultMaxIdleFrames;
         private long m_CurrentSequence;
         private bool m_IsFrameActive;
+
+        /// <summary>
+        /// Number of committed frames a history resource may remain untouched before it is
+        /// automatically disposed and removed. Non-positive values disable idle eviction.
+        /// </summary>
+        public int MaxIdleFrames
+        {
+            get => m_MaxIdleFrames;
+            set => m_MaxIdleFrames = value;
+        }
+
+        public int TextureCount => m_Textures.Count;
+
+        public int BufferCount => m_Buffers.Count;
 
         internal long CurrentSequence => m_CurrentSequence;
 
@@ -549,7 +581,10 @@ namespace VividRP.Runtime
             if (m_Textures.TryGetValue(id, out var texture))
             {
                 if (texture.Matches(frameCount, descriptor, allocator))
+                {
+                    texture.Touch(m_CurrentSequence);
                     return texture;
+                }
 
                 texture.Dispose();
                 m_Textures.Remove(id);
@@ -582,7 +617,10 @@ namespace VividRP.Runtime
             if (m_Buffers.TryGetValue(id, out var buffer))
             {
                 if (buffer.Matches(frameCount, normalizedDescriptor, allocator))
+                {
+                    buffer.Touch(m_CurrentSequence);
                     return buffer;
+                }
 
                 buffer.Dispose();
                 m_Buffers.Remove(id);
@@ -608,7 +646,58 @@ namespace VividRP.Runtime
             foreach (var buffer in m_Buffers.Values)
                 buffer.CommitFrame(m_CurrentSequence);
 
+            EvictIdleResources();
             m_IsFrameActive = false;
+        }
+
+        private void EvictIdleResources()
+        {
+            if (m_MaxIdleFrames <= 0)
+                return;
+
+            if (m_Textures.Count > 0)
+            {
+                m_ExpiredIds.Clear();
+                foreach (var entry in m_Textures)
+                {
+                    if (m_CurrentSequence - entry.Value.LastTouchedSequence >= m_MaxIdleFrames)
+                        m_ExpiredIds.Add(entry.Key);
+                }
+
+                for (var i = 0; i < m_ExpiredIds.Count; i++)
+                {
+                    var id = m_ExpiredIds[i];
+                    if (m_Textures.TryGetValue(id, out var expired))
+                    {
+                        expired.Dispose();
+                        m_Textures.Remove(id);
+                    }
+                }
+
+                m_ExpiredIds.Clear();
+            }
+
+            if (m_Buffers.Count > 0)
+            {
+                m_ExpiredIds.Clear();
+                foreach (var entry in m_Buffers)
+                {
+                    if (m_CurrentSequence - entry.Value.LastTouchedSequence >= m_MaxIdleFrames)
+                        m_ExpiredIds.Add(entry.Key);
+                }
+
+                for (var i = 0; i < m_ExpiredIds.Count; i++)
+                {
+                    var id = m_ExpiredIds[i];
+                    if (m_Buffers.TryGetValue(id, out var expired))
+                    {
+                        expired.Dispose();
+                        m_Buffers.Remove(id);
+                    }
+                }
+
+                m_ExpiredIds.Clear();
+            }
         }
 
         public void AbortFrame()
@@ -633,6 +722,7 @@ namespace VividRP.Runtime
 
             m_Textures.Clear();
             m_Buffers.Clear();
+            m_ExpiredIds.Clear();
             m_Camera = null;
             m_IsFrameActive = false;
         }

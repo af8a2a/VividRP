@@ -79,6 +79,7 @@ namespace VividRP.Runtime
         private int m_CurrentIndex;
         private int m_ValidHistoryCount;
         private long m_LastCommittedSequence = -1;
+        private long m_LastTouchedSequence;
         private bool m_PendingWrite;
         private bool m_Disposed;
 
@@ -94,6 +95,7 @@ namespace VividRP.Runtime
             m_FrameCount = Mathf.Max(1, frameCount);
             m_Descriptor = descriptor;
             m_Allocator = allocator;
+            m_LastTouchedSequence = owner.CurrentSequence;
             m_Buffers = new GraphicsBuffer[m_FrameCount];
 
             var resolvedAllocator = allocator ?? AllocateDefault;
@@ -137,12 +139,23 @@ namespace VividRP.Runtime
             return GetFrame(1);
         }
 
+        internal long LastTouchedSequence => m_LastTouchedSequence;
+
+        internal void Touch(long sequence)
+        {
+            if (sequence > m_LastTouchedSequence)
+                m_LastTouchedSequence = sequence;
+        }
+
         public GraphicsBuffer GetFrame(int frameAge)
         {
             if (m_Disposed)
                 throw new ObjectDisposedException(nameof(CameraHistoryBuffer));
             if (frameAge < 0 || frameAge >= m_FrameCount)
                 throw new ArgumentOutOfRangeException(nameof(frameAge));
+
+            if (m_Owner.IsFrameActive)
+                Touch(m_Owner.CurrentSequence);
 
             var frameIndex = m_CurrentIndex - frameAge;
             if (frameIndex < 0)
@@ -174,6 +187,7 @@ namespace VividRP.Runtime
             if (!m_Owner.IsFrameActive)
                 throw new InvalidOperationException("Camera history writes must occur inside an active camera frame.");
 
+            Touch(m_Owner.CurrentSequence);
             m_PendingWrite = true;
         }
 

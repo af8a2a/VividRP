@@ -93,7 +93,77 @@ namespace VividRP.Editor.RenderGraph
 
             ValidateSubgraphNodes(graph, reporter, summarizeChildSubgraphs, ref summary);
 
+            if (summarizeChildSubgraphs && !RenderGraphSubSystemCompilationUtility.IsSubSystemGraph(graph))
+                ValidateFrameResourceSlots(graph, reporter, ref summary);
+
             return summary;
+        }
+
+        private static void ValidateFrameResourceSlots(
+            RenderGraphEditorGraph graph,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
+        {
+            var flattened = RenderGraphSubSystemCompilationUtility.Flatten(graph);
+            if (flattened.PassNodes.Count == 0)
+                return;
+
+            var writtenSlots = new HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var passNode in flattened.PassNodes)
+            {
+                var passType = passNode.GetPassType();
+                if (passType == null)
+                    continue;
+
+                foreach (var slotAttr in passType.EnumerateFrameResourceSlotAccesses())
+                {
+                    if (!string.IsNullOrWhiteSpace(slotAttr.SlotName)
+                        && (slotAttr.Access & UnityEngine.Rendering.RenderGraphModule.AccessFlags.Write) != 0)
+                    {
+                        writtenSlots.Add(slotAttr.SlotName);
+                    }
+                }
+            }
+
+            foreach (var passNode in flattened.PassNodes)
+            {
+                var passType = passNode.GetPassType();
+                if (passType == null)
+                    continue;
+
+                foreach (var slotAttr in passType.EnumerateFrameResourceSlotAccesses())
+                {
+                    if (string.IsNullOrWhiteSpace(slotAttr.SlotName))
+                    {
+                        reporter.LogError(
+                            $"Pass '{passType.Name}' declares a {nameof(FrameResourceSlotAttribute)} with an empty slot name.",
+                            passNode);
+                        summary.ErrorCount++;
+                        continue;
+                    }
+
+                    var isRead = (slotAttr.Access & UnityEngine.Rendering.RenderGraphModule.AccessFlags.Read) != 0;
+                    var isWrite = (slotAttr.Access & UnityEngine.Rendering.RenderGraphModule.AccessFlags.Write) != 0;
+                    if (isRead && !isWrite && !slotAttr.Optional && !writtenSlots.Contains(slotAttr.SlotName))
+                    {
+                        reporter.LogError(
+                            $"Pass '{passType.Name}' requires FrameResourceSlot '{slotAttr.SlotName}', but no pass in the graph writes it.",
+                            passNode);
+                        summary.ErrorCount++;
+                    }
+                }
+
+                foreach (var historyAttr in passType.EnumerateCameraHistoryAccesses())
+                {
+                    if (string.IsNullOrWhiteSpace(historyAttr.HistoryName))
+                    {
+                        reporter.LogError(
+                            $"Pass '{passType.Name}' declares a {nameof(CameraHistoryAccessAttribute)} with an empty history name.",
+                            passNode);
+                        summary.ErrorCount++;
+                    }
+                }
+            }
         }
 
         private static void ValidateTransientResourceFields(

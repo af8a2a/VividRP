@@ -5,6 +5,10 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [FrameResourceSlot(FrameResourceSlots.SubstrateClosureBufferName, AccessFlags.Read, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenBentNormalName, AccessFlags.Read, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenRoughSpecularName, AccessFlags.Read, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenSpecularReflectionName, AccessFlags.Read, Optional = true)]
     public class DeferredLightingPass : ComputePass, IStablePassResourceLayout
     {
         private const int ClearThreadGroupSizeX = 8;
@@ -397,16 +401,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
-            var sdfDiffuse = frameData.Contains<VividLumenIndirectDiffuseFrameData>() ? frameData.Get<VividLumenIndirectDiffuseFrameData>() : null;
-            m_BentNormal = sdfDiffuse != null
-                ? CameraHistoryRenderGraphBridge.ImportForPass(this, sdfDiffuse.BentNormalHistory, 0, AccessFlags.Read)
-                : default;
-            m_RoughSpecular = sdfDiffuse != null
-                ? CameraHistoryRenderGraphBridge.ImportForPass(this, sdfDiffuse.RoughSpecularHistory, 0, AccessFlags.Read)
-                : default;
-            m_LumenReflections = sdfDiffuse != null
-                ? CameraHistoryRenderGraphBridge.ImportForPass(this, sdfDiffuse.SpecularReflectionHistory, 0, AccessFlags.Read)
-                : default;
+            if (FrameResourceTable.TryGet(frameData, out var frameResources))
+            {
+                frameResources.UseTextureSlotForPass(this, FrameResourceSlots.LumenBentNormal, AccessFlags.Read, out m_BentNormal);
+                frameResources.UseTextureSlotForPass(this, FrameResourceSlots.LumenRoughSpecular, AccessFlags.Read, out m_RoughSpecular);
+                frameResources.UseTextureSlotForPass(this, FrameResourceSlots.LumenSpecularReflection, AccessFlags.Read, out m_LumenReflections);
+            }
+            else
+            {
+                m_BentNormal = default;
+                m_RoughSpecular = default;
+                m_LumenReflections = default;
+            }
             m_SdfScreenSource = m_ClearSdfScreenSourceKernel >= 0 && frameData.Contains<VividSdfScreenTraceData>()
                 ? frameData.Get<VividSdfScreenTraceData>() : null;
             m_SdfScreenSourceRadiance = CameraHistoryRenderGraphBridge.ImportForPass(this,

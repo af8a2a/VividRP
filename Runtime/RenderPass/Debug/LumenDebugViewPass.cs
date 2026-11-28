@@ -78,7 +78,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FeedbackBufferId = Shader.PropertyToID("_SdfSurfaceCacheLastUsed");
         private static readonly int FeedbackFrameId = Shader.PropertyToID("_SdfSurfaceCacheFeedbackFrame");
 
-        private static readonly CameraHistoryId OutputHistoryId = CameraHistoryId.Create("LumenDebugView");
         private static readonly CameraHistoryId CardFramesHistoryId = CameraHistoryId.Create("LumenDebugCardFrames");
         private static readonly CameraHistoryId FeedbackHistoryId = CameraHistoryId.Create("LumenSurfaceCacheLastUsed");
         private readonly RenderGraphTexture m_OutputDesc = CreateTarget("Lumen Debug View", GraphicsFormat.R8G8B8A8_UNorm);
@@ -93,6 +92,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal TextureHandle CardFrames { get; private set; }
         internal bool ClearCardFrames { get; private set; }
         internal bool HasSurfaceCacheFeedback => m_Feedback.IsValid();
+        internal BufferHandle FeedbackBuffer => m_Feedback;
         internal LumenDebugViewMode Mode { get; private set; }
 
         internal static bool IsOverview(LumenDebugViewMode mode) =>
@@ -135,20 +135,19 @@ namespace VividRP.Runtime.RenderPass.Core
             Mode = LumenDebugViewMode.None;
             CardFrames = default;
             m_CardFramesHistory = null;
-            if (mode == LumenDebugViewMode.None)
-                return;
-
-            var history = camera.GetVividCameraHistory();
-            if (!history.IsFrameActive)
+            if (mode == LumenDebugViewMode.None || !PassRecorder.HasActiveRenderGraph)
                 return;
 
             bool overview = IsOverview(mode);
             int divisor = IsSurfaceView(mode) || mode == LumenDebugViewMode.GlobalSdf ? 2 : 1;
             int outputWidth = overview ? CoreUtils.DivRoundUp(width, 3) * 3 : CoreUtils.DivRoundUp(width, divisor);
             m_OutputDesc.Resize(outputWidth, CoreUtils.DivRoundUp(height, overview ? 3 : divisor));
-            var output = history.GetOrCreateTexture(OutputHistoryId, 1,
-                CameraHistoryRenderGraphBridge.CreateDescriptor(m_OutputDesc.desc));
-            var handle = CameraHistoryRenderGraphBridge.ImportForPass(owner, output, 0, AccessFlags.Write);
+            TextureDesc outputTextureDesc = m_OutputDesc.desc;
+            var handle = FrameResourceTable.GetOrCreate(frameData).CreateAndPublishTextureForPass(
+                owner,
+                FrameResourceSlots.LumenDebugOutput,
+                in outputTextureDesc,
+                AccessFlags.Write);
             if (!handle.IsValid())
                 return;
 
@@ -158,6 +157,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (cards <= 0 || mode is not (LumenDebugViewMode.DirectLightingUpdates or LumenDebugViewMode.IndirectLightingUpdates)
                 || !SystemInfo.IsFormatSupported(GraphicsFormat.R32G32_SFloat, GraphicsFormatUsage.LoadStore | GraphicsFormatUsage.Sample))
+                return;
+
+            var history = camera.GetVividCameraHistory();
+            if (!history.IsFrameActive)
                 return;
 
             m_CardFramesDesc.Resize(64, CoreUtils.DivRoundUp(cards, 64));

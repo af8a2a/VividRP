@@ -21,13 +21,10 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal RenderGraphTexture DeclaredOutput;
         internal RenderGraphTexture Output;
-        internal CameraHistoryTexture BentNormalHistory;
         internal TextureHandle BentNormalOutput;
         internal bool CompositeBentNormal;
-        internal CameraHistoryTexture RoughSpecularHistory;
         internal TextureHandle RoughSpecularOutput;
         internal bool RoughSpecularPreExposed;
-        internal CameraHistoryTexture SpecularReflectionHistory;
         internal TextureHandle SpecularReflectionOutput;
         internal Vector4 SpecularReflectionCombineParams;
         internal float SpecularReflectionSmoothBias;
@@ -39,13 +36,10 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             DeclaredOutput = null;
             Output = null;
-            BentNormalHistory = null;
             BentNormalOutput = default;
             CompositeBentNormal = false;
-            RoughSpecularHistory = null;
             RoughSpecularOutput = default;
             RoughSpecularPreExposed = false;
-            SpecularReflectionHistory = null;
             SpecularReflectionOutput = default;
             SpecularReflectionCombineParams = Vector4.zero;
             SpecularReflectionSmoothBias = 0f;
@@ -55,7 +49,12 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
-    public sealed class LumenIndirectDiffusePass : ComputePass, IRenderGraphPreparePass
+    [FrameResourceSlot(FrameResourceSlots.SubstrateClosureBufferName, AccessFlags.Read, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenBentNormalName, AccessFlags.Write, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenRoughSpecularName, AccessFlags.Write, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenSpecularReflectionName, AccessFlags.Write, Optional = true)]
+    [FrameResourceSlot(FrameResourceSlots.LumenDebugOutputName, AccessFlags.Write, Optional = true)]
+    public sealed class LumenIndirectDiffusePass : ComputePass, IRenderGraphPreparePass, IRenderGraphRecordingPass
     {
 #if UNITY_EDITOR
         internal static System.Action<ComputePassContext, Texture, Texture, Texture> EditorTraceCapture;
@@ -310,8 +309,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler MeshCardGridSampler = new("Lumen Mesh SDF CardGrid Build");
         // Must match MeshSdfCardGridSize and MeshSdfCardGridCapacity in MeshSdfTrace.hlsl.
         private const int MeshCardGridX = 16, MeshCardGridY = 12, MeshCardGridZ = 32, MeshCardGridStride = 97;
-        [RenderGraphResource(Name = "Mesh SDF CardGrid", Access = AccessFlags.ReadWrite)]
-        [TransientResource]
         private readonly RenderGraphBuffer m_MeshCardGrid = RenderGraphBuffer.CreateStructured("Mesh SDF CardGrid", sizeof(uint));
         private static readonly ProfilingSampler CompactScreenSampler = new("Lumen Screen Probe Compact Traces");
         private static readonly ProfilingSampler CompactMeshSampler = new("Lumen Screen Probe Trace Mesh SDF");
@@ -588,12 +585,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Global SDF Near", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ClipmapNear;
 
-        [RenderGraphResource(Name = "Global SDF Fallback", Access = AccessFlags.Read)]
-        [TransientResource]
         private readonly RenderGraphTexture m_GlobalFallback = CreateGlobalFallback();
 
-        [RenderGraphResource(Name = "Surface Cache Array Fallback", Access = AccessFlags.Read)]
-        [TransientResource]
         private readonly RenderGraphTexture m_SurfaceCacheArrayFallback = CreateSurfaceCacheArrayFallback();
 
         [RenderGraphResource(Name = "RealtimeDiffuseGI", Access = AccessFlags.ReadWrite)]
@@ -1019,9 +1012,22 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector2 m_ScreenJitterUv, m_ScreenJitterDelta;
         private Vector4 m_LightPositionRange, m_LightColorShadow;
         private int m_TraceKernel = -1, m_CachedTraceKernel = -1, m_ResolveKernel = -1;
-        [RenderGraphResource(Name = "Screen Probe Closest HZB", Access = AccessFlags.ReadWrite)]
-        [TransientResource]
         private readonly RenderGraphTexture m_ClosestHzb = CreateScratch("Screen Probe Closest HZB", GraphicsFormat.R16_SFloat);
+
+        private sealed class ReflectionSubPassData
+        {
+            public LumenIndirectDiffusePass Owner;
+            public ContextContainer FrameData;
+        }
+
+        private static readonly BaseRenderFunc<ReflectionSubPassData, ComputeGraphContext> s_ReflectionSubPassRenderFunc =
+            ExecuteReflectionSubPass;
+
+        private bool m_ReflectionDiffuseExecuted;
+        private int m_ReflectionFrame;
+        private bool m_ReflectionUseScreenRays;
+        private bool m_ReflectionHasMeshSdfScene;
+        private bool m_ReflectionUseGlobalClipmap;
         private int m_ClosestHzbKernel = -1, m_LumenTraceKernel = -1, m_LumenReceiverKernel = -1, m_SceneColorKernel = -1;
         private Vector4 m_ClosestHzbSize;
         private float m_DepthThicknessScale;
@@ -1375,6 +1381,22 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RawRoughSpecular.Resize(1, 1);
             m_LumenReflections.ResetFrame();
             m_MeshCardGridRecorded = false;
+            m_MeshCardGrid.desc.Count = 1;
+            m_MeshCardGrid.innerHandle = default;
+            m_ClosestHzb.innerHandle = default;
+            m_ReflectionDiffuseExecuted = false;
+            if (PassRecorder.HasActiveRenderGraph)
+            {
+                TextureDesc globalFallbackDesc = m_GlobalFallback.desc;
+                m_GlobalFallback.innerHandle = PassRecorder.CreateTextureForPass(this, in globalFallbackDesc, AccessFlags.Read);
+                TextureDesc surfaceCacheFallbackDesc = m_SurfaceCacheArrayFallback.desc;
+                m_SurfaceCacheArrayFallback.innerHandle = PassRecorder.CreateTextureForPass(this, in surfaceCacheFallbackDesc, AccessFlags.Read);
+            }
+            else
+            {
+                m_GlobalFallback.innerHandle = default;
+                m_SurfaceCacheArrayFallback.innerHandle = default;
+            }
             m_BentNormalHistory = null;
             m_BentNormalHistoryValid = false;
             m_BentSamples.Resize(1, 1);
@@ -1574,6 +1596,11 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             else
                 m_ClosestHzb.Resize(1, 1);
+            if (PassRecorder.HasActiveRenderGraph)
+            {
+                TextureDesc closestHzbDesc = m_ClosestHzb.desc;
+                m_ClosestHzb.innerHandle = PassRecorder.CreateTextureForPass(this, in closestHzbDesc, AccessFlags.ReadWrite);
+            }
             if (m_FullSphere && m_AdaptiveProbes)
                 m_AtlasHeight = m_ProbeHeight + (m_ProbeHeight + 1) / 2;
             if (m_FullSphere && BlueNoise.Instance != null)
@@ -1841,6 +1868,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_CompactTracePrepared)
                     SizeCompactTraceBuffers(m_ProbeWidth * m_AtlasHeight);
             }
+            if (PassRecorder.HasActiveRenderGraph)
+            {
+                BufferDesc meshCardGridDesc = m_MeshCardGrid.desc;
+                m_MeshCardGrid.innerHandle = PassRecorder.CreateBufferForPass(this, in meshCardGridDesc, AccessFlags.ReadWrite);
+            }
             if (farConfigured)
                 PrepareFarCache(camera, cache, settings.farTraceDistance.value);
             bool bentNormal = m_NearOcclusion.w == 1f || m_BentComposite;
@@ -1866,7 +1898,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CurrentRoughSpecular.Resize(m_Width, m_Height);
                 CameraHistoryRenderGraphBridge.PrepareTexturePair(this, camera, RoughSpecularHistoryId,
                     m_PreviousRoughSpecular, m_CurrentRoughSpecular, m_CurrentRoughSpecular.desc, out m_RoughSpecularHistory, AccessFlags.Write);
-                frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>().RoughSpecularHistory = m_RoughSpecularHistory;
+                FrameResourceTable.GetOrCreate(frameData).PublishTexture(
+                    FrameResourceSlots.LumenRoughSpecular,
+                    m_CurrentRoughSpecular.innerHandle);
             }
             if (useSettings && !m_OffscreenOnly)
             {
@@ -1884,7 +1918,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     && motionConnected && m_PixelGeometryHistory != null && m_PixelGeometryHistory.IsValid()
                     && m_State.NearOcclusion.w == m_NearOcclusion.w && m_State.NearOcclusion.y == m_NearOcclusion.y
                     && !temporal.isFirstFrame && !temporal.resetPostProcessingHistory;
-                frameData.GetOrCreate<VividLumenIndirectDiffuseFrameData>().BentNormalHistory = m_BentNormalHistory;
+                FrameResourceTable.GetOrCreate(frameData).PublishTexture(
+                    FrameResourceSlots.LumenBentNormal,
+                    m_CurrentBentNormal.innerHandle);
             }
             int atlasWidth = m_ProbeWidth * (m_DirectionalProbes ? DirectionalProbePlanes : 1);
             m_Probes.Resize(m_RestirPixelIntegration ? 1 : atlasWidth, m_RestirPixelIntegration ? 1 : m_AtlasHeight);
@@ -2384,41 +2420,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     && m_NearOcclusion.z == 0f && m_NearOcclusion.x > 0f)
                     RecordNearOcclusion(cmd);
             }
-            if (m_LumenReflections.Prepared)
-            {
-                bool hasDualSlabSidecar = m_OpenPbrAux0?.innerHandle.IsValid() == true
-                    && m_OpenPbrAux1?.innerHandle.IsValid() == true;
-                bool hasWorldCache = m_FullSphere && IsFarCacheReady();
-                float reflectionMaxTraceDistance = Mathf.Max(m_TraceDistance,
-                    m_FarDistance > 0f ? m_FarDistance : m_SkyTraceDistance);
-                m_LumenReflections.Record(
-                    cmd,
-                    this,
-                    frame,
-                    black,
-                    hasDualSlabSidecar ? m_OpenPbrAux0.innerHandle : black,
-                    hasDualSlabSidecar ? m_OpenPbrAux1.innerHandle : black,
-                    hasDualSlabSidecar,
-                    m_LumenScreenTrace && m_ClosestHzb.innerHandle.IsValid() ? m_ClosestHzb.innerHandle : default,
-                    m_ClosestHzbSize,
-                    m_DepthThicknessScale,
-                    useScreenRays && validScreenRadiance,
-                    m_UseSdf && cache != null,
-                    m_MeshCardGridRecorded && m_MeshCardGrid.IsValid(),
-                    m_MeshCardGrid.innerHandle,
-                    m_MeshCardGridParams,
-                    m_MeshCardGridView,
-                    m_MeshCardGridProjection,
-                    useGlobalClipmap && m_ObjectGrid.IsValid(),
-                    hasWorldCache,
-                    hasWorldCache ? m_FarAtlas : black,
-                    m_FarWindowParameter,
-                    m_FarDistance,
-                    reflectionMaxTraceDistance,
-                    m_MeshDetailDistance,
-                    m_SkyTextureParams.w > 0.5f,
-                    m_LumenDebugView);
-            }
+            m_ReflectionFrame = frame;
+            m_ReflectionUseScreenRays = useScreenRays && validScreenRadiance;
+            m_ReflectionHasMeshSdfScene = m_UseSdf && cache != null;
+            m_ReflectionUseGlobalClipmap = useGlobalClipmap;
+            m_ReflectionDiffuseExecuted = true;
             var diffuse = context.GetOrCreate<VividLumenIndirectDiffuseFrameData>();
             diffuse.Output = m_Output;
             diffuse.BentNormalOutput = m_BentNormalHistory != null && m_PixelGeometryHistory != null
@@ -3960,6 +3966,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 screen.kernel = m_SceneColorKernel;
                 screen.currentColor = CameraHistoryRenderGraphBridge.Import(radiance, 0);
                 screen.currentDepthExposure = CameraHistoryRenderGraphBridge.Import(geometry, 0);
+                FrameResourceTable.GetOrCreate(frameData).RegisterTextureExtractor(
+                    FrameResourceSlots.SceneColorPrePostProcess,
+                    screen);
             }
             else
             {
@@ -4776,13 +4785,8 @@ namespace VividRP.Runtime.RenderPass.Core
             bool hasDualSlabSidecar = m_OpenPbrAux0?.innerHandle.IsValid() == true
                 && m_OpenPbrAux1?.innerHandle.IsValid() == true;
             if (mode is LumenDebugViewMode.ReflectionView or LumenDebugViewMode.DedicatedReflectionRays
-                && m_LumenReflections.RecordDebugView(cmd, this, mode, debug.Output,
-                    m_LumenDebugView.Width, m_LumenDebugView.Height, exposureMultiplier, frame,
-                    hasDualSlabSidecar ? m_OpenPbrAux0.innerHandle : black,
-                    hasDualSlabSidecar ? m_OpenPbrAux1.innerHandle : black,
-                    hasDualSlabSidecar, black))
+                && m_LumenReflections.Prepared)
             {
-                debug.Produced = true;
                 return;
             }
 
@@ -4795,15 +4799,177 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, LumenDebugViewPass.OutputId, debug.Output);
             cmd.DispatchCompute(shader, kernel, CoreUtils.DivRoundUp(m_LumenDebugView.Width, GroupSize),
                 CoreUtils.DivRoundUp(m_LumenDebugView.Height, GroupSize), 1);
-            if (mode == LumenDebugViewMode.Overview)
-            {
-                m_LumenReflections.RecordDebugView(cmd, this, mode, debug.Output,
-                    m_LumenDebugView.Width, m_LumenDebugView.Height, exposureMultiplier, frame,
-                    hasDualSlabSidecar ? m_OpenPbrAux0.innerHandle : black,
-                    hasDualSlabSidecar ? m_OpenPbrAux1.innerHandle : black,
-                    hasDualSlabSidecar, black);
-            }
             debug.Produced = true;
+        }
+
+        public void RecordGraph(RenderGraphRecordingContext context)
+        {
+            context.RecordDefaultComputePass(this);
+            if (m_LumenReflections.Prepared)
+                RecordReflectionSubPass(context);
+        }
+
+        private void RecordReflectionSubPass(RenderGraphRecordingContext context)
+        {
+            var renderGraph = context.RenderGraph;
+            if (renderGraph == null || !m_LumenReflections.Prepared)
+                return;
+
+            using var builder = renderGraph.AddComputePass<ReflectionSubPassData>(
+                "Lumen Specular Reflections",
+                out var passData);
+
+            passData.Owner = this;
+            passData.FrameData = context.FrameData;
+
+            m_LumenReflections.SetupSubPassResources(builder);
+            DeclareReflectionSubPassReadDependencies(builder, context.FrameData);
+            if (m_LumenDebugView.HasSurfaceCacheFeedback)
+                builder.UseBuffer(m_LumenDebugView.FeedbackBuffer, AccessFlags.ReadWrite);
+
+            if (m_LumenDebugView.Mode is LumenDebugViewMode.ReflectionView
+                    or LumenDebugViewMode.DedicatedReflectionRays
+                    or LumenDebugViewMode.Overview
+                && FrameResourceTable.TryGet(context.FrameData, out var frameResources)
+                && frameResources.TryGetTexture(FrameResourceSlots.LumenDebugOutput, out var debugOutput))
+            {
+                builder.UseTexture(debugOutput, AccessFlags.ReadWrite);
+            }
+
+            builder.SetRenderFunc(s_ReflectionSubPassRenderFunc);
+        }
+
+        private void DeclareReflectionSubPassReadDependencies(
+            IComputeRenderGraphBuilder builder,
+            ContextContainer frameData)
+        {
+            UseReadTexture(builder, m_Depth);
+            UseReadTexture(builder, m_GBuffer0);
+            UseReadTexture(builder, m_GBuffer1);
+            UseReadTexture(builder, m_OpenPbrParameters);
+            UseReadTexture(builder, m_OpenPbrAux0);
+            UseReadTexture(builder, m_OpenPbrAux1);
+            UseReadTexture(builder, m_ScreenMotion);
+            UseReadTexture(builder, m_GlobalFallback);
+            UseReadTexture(builder, m_SurfaceCacheArrayFallback);
+            UseReadTexture(builder, m_ClosestHzb);
+
+            UseReadTexture(builder, m_ReceiverVisibility);
+            UseReadTexture(builder, m_PreviousScreenRadiance);
+            UseReadTexture(builder, m_PreviousScreenGeometry);
+            UseReadTexture(builder, m_CardAlbedoDepth);
+            UseReadTexture(builder, m_CardNormalCoverage);
+            UseReadTexture(builder, m_CardFinalAtlas);
+            UseReadTexture(builder, m_SkyTexture);
+            UseReadTexture(builder, m_FarAtlas);
+            UseReadTexture(builder, m_GlobalNear);
+            UseReadTexture(builder, m_GlobalMiddle);
+            UseReadTexture(builder, m_GlobalFar);
+            UseReadTexture(builder, m_GlobalMip);
+            UseReadTexture(builder, m_SubstrateClosureBufferHandle);
+
+            UseReadBuffer(builder, m_MeshCardGrid);
+            UseReadBuffer(builder, m_ObjectGrid);
+            UseReadBuffer(builder, m_GlobalPages);
+            UseReadBuffer(builder, m_GlobalThinBricks);
+        }
+
+        private static void UseReadTexture(IComputeRenderGraphBuilder builder, RenderGraphTexture texture)
+        {
+            if (texture != null && texture.innerHandle.IsValid())
+                builder.UseTexture(texture.innerHandle, AccessFlags.Read);
+        }
+
+        private static void UseReadTexture(IComputeRenderGraphBuilder builder, TextureHandle handle)
+        {
+            if (handle.IsValid())
+                builder.UseTexture(handle, AccessFlags.Read);
+        }
+
+        private static void UseReadBuffer(IComputeRenderGraphBuilder builder, RenderGraphBuffer buffer)
+        {
+            if (buffer != null && buffer.innerHandle.IsValid())
+                builder.UseBuffer(buffer.innerHandle, AccessFlags.Read);
+        }
+
+        private static void UseReadBuffer(IComputeRenderGraphBuilder builder, BufferHandle handle)
+        {
+            if (handle.IsValid())
+                builder.UseBuffer(handle, AccessFlags.Read);
+        }
+
+        private static void ExecuteReflectionSubPass(ReflectionSubPassData data, ComputeGraphContext context)
+        {
+            var owner = data.Owner;
+            if (owner == null || !owner.m_ReflectionDiffuseExecuted || !owner.m_LumenReflections.Prepared)
+                return;
+
+            var cmd = context.cmd;
+            var black = context.defaultResources.blackTexture;
+            bool hasDualSlabSidecar = owner.m_OpenPbrAux0?.innerHandle.IsValid() == true
+                && owner.m_OpenPbrAux1?.innerHandle.IsValid() == true;
+            bool hasWorldCache = owner.m_FullSphere && owner.IsFarCacheReady();
+            float reflectionMaxTraceDistance = Mathf.Max(owner.m_TraceDistance,
+                owner.m_FarDistance > 0f ? owner.m_FarDistance : owner.m_SkyTraceDistance);
+
+            owner.m_LumenReflections.Record(
+                cmd,
+                owner,
+                owner.m_ReflectionFrame,
+                black,
+                hasDualSlabSidecar ? owner.m_OpenPbrAux0.innerHandle : black,
+                hasDualSlabSidecar ? owner.m_OpenPbrAux1.innerHandle : black,
+                hasDualSlabSidecar,
+                owner.m_LumenScreenTrace && owner.m_ClosestHzb.innerHandle.IsValid() ? owner.m_ClosestHzb.innerHandle : default,
+                owner.m_ClosestHzbSize,
+                owner.m_DepthThicknessScale,
+                owner.m_ReflectionUseScreenRays,
+                owner.m_ReflectionHasMeshSdfScene,
+                owner.m_MeshCardGridRecorded && owner.m_MeshCardGrid.IsValid(),
+                owner.m_MeshCardGrid.innerHandle,
+                owner.m_MeshCardGridParams,
+                owner.m_MeshCardGridView,
+                owner.m_MeshCardGridProjection,
+                owner.m_ReflectionUseGlobalClipmap && owner.m_ObjectGrid.IsValid(),
+                hasWorldCache,
+                hasWorldCache ? owner.m_FarAtlas : black,
+                owner.m_FarWindowParameter,
+                owner.m_FarDistance,
+                reflectionMaxTraceDistance,
+                owner.m_MeshDetailDistance,
+                owner.m_SkyTextureParams.w > 0.5f,
+                owner.m_LumenDebugView);
+
+            owner.m_LumenReflections.MarkHistoriesWritten();
+
+            var mode = owner.m_LumenDebugView.Mode;
+            if (mode is LumenDebugViewMode.ReflectionView or LumenDebugViewMode.DedicatedReflectionRays or LumenDebugViewMode.Overview
+                && data.FrameData != null
+                && data.FrameData.Contains<VividLumenDebugFrameData>())
+            {
+                var debug = data.FrameData.Get<VividLumenDebugFrameData>();
+                if (debug.Output.IsValid())
+                {
+                    float exposure = VividRenderingDebugDisplaySettings.Data.lumenDebugExposure;
+                    float exposureMultiplier = Mathf.Pow(2f, Mathf.Clamp(float.IsFinite(exposure) ? exposure : 0f, -16f, 16f));
+                    if (owner.m_LumenReflections.RecordDebugView(
+                            cmd,
+                            owner,
+                            mode,
+                            debug.Output,
+                            owner.m_LumenDebugView.Width,
+                            owner.m_LumenDebugView.Height,
+                            exposureMultiplier,
+                            owner.m_ReflectionFrame,
+                            hasDualSlabSidecar ? owner.m_OpenPbrAux0.innerHandle : black,
+                            hasDualSlabSidecar ? owner.m_OpenPbrAux1.innerHandle : black,
+                            hasDualSlabSidecar,
+                            black))
+                    {
+                        debug.Produced = true;
+                    }
+                }
+            }
         }
 
         internal Vector4 ProbeCameraPosition => m_ProbeCameraPosition;

@@ -5,6 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [FrameResourceSlot(FrameResourceSlots.SubstrateClosureBufferName, AccessFlags.Read, Optional = true)]
     public class MaterialClassificationPass : ComputePass, IAsyncComputeSupportedPass
     {
         private const int DeferredVariantCount = 4;

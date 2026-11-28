@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal sealed class VividSdfScreenTraceData : ContextItem
+    internal sealed class VividSdfScreenTraceData : ContextItem, IFrameTextureExtractor
     {
         internal CameraHistoryTexture radiance;
         internal CameraHistoryTexture geometry;
@@ -16,6 +16,28 @@ namespace VividRP.Runtime
         internal RenderGraphTexture depth;
         internal ComputeShader shader;
         internal int kernel;
+
+        bool IFrameTextureExtractor.TryExtractTexture(
+            RenderGraph renderGraph,
+            FrameResourceSlotId slot,
+            RenderGraphTexture sourceTexture,
+            TextureHandle sourceHandle,
+            in FrameResourceExtractionContext context)
+        {
+            if (!currentColor.IsValid() || !currentDepthExposure.IsValid() || !preExposure.IsValid())
+                return false;
+            if (sourceTexture?.desc == null || depth?.desc == null || !sourceHandle.IsValid())
+                return false;
+            if (sourceTexture.desc.Width != depth.desc.Width || sourceTexture.desc.Height != depth.desc.Height)
+                return false;
+
+            var depthHandle = context.GetOrCreateTextureHandle(depth);
+            if (!depthHandle.IsValid())
+                return false;
+
+            RecordSceneColor(renderGraph, sourceHandle, depthHandle);
+            return true;
+        }
 
         private sealed class CaptureData
         {

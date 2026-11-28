@@ -57,14 +57,24 @@ namespace VividRP.Runtime
 
             public bool IsValid => IsBuffer ? BufferHandle.IsValid() : TextureHandle.IsValid();
 
-            public bool Equals(ImportedPassHandle other)
+            public bool HasSameHandle(ImportedPassHandle other)
             {
-                if (IsBuffer != other.IsBuffer || Access != other.Access)
+                if (IsBuffer != other.IsBuffer)
                     return false;
 
                 return IsBuffer
                     ? AreImportedBufferHandlesEqual(BufferHandle, other.BufferHandle)
                     : TextureHandle.Equals(other.TextureHandle);
+            }
+
+            public ImportedPassHandle WithAccess(AccessFlags access)
+            {
+                return new ImportedPassHandle(TextureHandle, BufferHandle, IsBuffer, access);
+            }
+
+            public bool Equals(ImportedPassHandle other)
+            {
+                return Access == other.Access && HasSameHandle(other);
             }
 
             public override bool Equals(object obj)
@@ -159,6 +169,7 @@ namespace VividRP.Runtime
                 using (markers.RecordGraphConfigureBuilder.Auto())
                 {
                     ConfigureGlobalStateModification(builder, pass);
+                    builder.AllowPassCulling(ShouldAllowPassCulling(pass, resource));
                     if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                         builder.EnableAsyncCompute(true);
                 }
@@ -214,6 +225,7 @@ namespace VividRP.Runtime
                 using (markers.RecordGraphConfigureBuilder.Auto())
                 {
                     ConfigureGlobalStateModification(builder, pass);
+                    builder.AllowPassCulling(ShouldAllowPassCulling(pass, resource));
                 }
 
                 using (markers.RecordGraphSetRenderFunc.Auto())
@@ -269,6 +281,7 @@ namespace VividRP.Runtime
                 using (markers.RecordGraphConfigureBuilder.Auto())
                 {
                     ConfigureGlobalStateModification(builder, pass);
+                    builder.AllowPassCulling(ShouldAllowPassCulling(pass, resource));
                     if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                         builder.EnableAsyncCompute(true);
                 }
@@ -280,16 +293,123 @@ namespace VividRP.Runtime
             }
         }
 
+        private readonly struct WrittenHistoryEntry : IEquatable<WrittenHistoryEntry>
+        {
+            private readonly CameraHistoryTexture m_Texture;
+            private readonly CameraHistoryBuffer m_Buffer;
+
+            public WrittenHistoryEntry(CameraHistoryTexture texture)
+            {
+                m_Texture = texture;
+                m_Buffer = null;
+            }
+
+            public WrittenHistoryEntry(CameraHistoryBuffer buffer)
+            {
+                m_Texture = null;
+                m_Buffer = buffer;
+            }
+
+            public void MarkWritten()
+            {
+                m_Texture?.MarkWritten();
+                m_Buffer?.MarkWritten();
+            }
+
+            public bool Equals(WrittenHistoryEntry other)
+            {
+                return ReferenceEquals(m_Texture, other.m_Texture)
+                    && ReferenceEquals(m_Buffer, other.m_Buffer);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is WrittenHistoryEntry other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                return HashCode.Combine(m_Texture, m_Buffer);
+            }
+        }
+
+        private static readonly Dictionary<IRenderPass, List<WrittenHistoryEntry>> s_PassWrittenHistories = new();
+
+        internal static void RegisterHistoryWriteForPass(IRenderPass pass, CameraHistoryTexture history)
+        {
+            if (pass == null || history == null)
+                return;
+
+            RegisterHistoryWriteEntry(pass, new WrittenHistoryEntry(history));
+        }
+
+        internal static void RegisterHistoryWriteForPass(IRenderPass pass, CameraHistoryBuffer history)
+        {
+            if (pass == null || history == null)
+                return;
+
+            RegisterHistoryWriteEntry(pass, new WrittenHistoryEntry(history));
+        }
+
+        private static void RegisterHistoryWriteEntry(IRenderPass pass, WrittenHistoryEntry entry)
+        {
+            if (!s_PassWrittenHistories.TryGetValue(pass, out var entries))
+            {
+                entries = new List<WrittenHistoryEntry>(8);
+                s_PassWrittenHistories[pass] = entries;
+            }
+
+            for (var i = 0; i < entries.Count; i++)
+            {
+                if (entries[i].Equals(entry))
+                    return;
+            }
+
+            entries.Add(entry);
+        }
+
+        internal static void MarkRegisteredHistoriesWritten(IRenderPass pass)
+        {
+            if (pass == null
+                || !s_PassWrittenHistories.TryGetValue(pass, out var entries)
+                || entries == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < entries.Count; i++)
+                entries[i].MarkWritten();
+        }
+
+        private static void ClearPassWrittenHistories()
+        {
+            foreach (var entries in s_PassWrittenHistories.Values)
+                entries?.Clear();
+        }
+
+        private static void DisposePassWrittenHistories()
+        {
+            s_PassWrittenHistories.Clear();
+        }
+
+        private static void RemovePassWrittenHistories(IRenderPass pass)
+        {
+            if (pass != null)
+                s_PassWrittenHistories.Remove(pass);
+        }
+
         private static void ExecuteComputePass(ComputePassData data, ComputeGraphContext ctx)
         {
             using var recordScope = new ProfilingScope(ctx.cmd, data.Markers.Record);
             data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
+            MarkRegisteredHistoriesWritten(data.Pass);
         }
 
         private static void ExecuteRasterPass(RasterPassData data, RasterGraphContext ctx)
         {
             using var recordScope = new ProfilingScope(ctx.cmd, data.Markers.Record);
             data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
+            MarkRegisteredHistoriesWritten(data.Pass);
         }
 
         private static void ExecuteUnsafePass(UnsafePassData data, UnsafeGraphContext ctx)
@@ -297,6 +417,7 @@ namespace VividRP.Runtime
             var passContext = new UnsafePassContext(ctx, s_FrameData);
             using var recordScope = new ProfilingScope(ctx.cmd, data.Markers.Record);
             data.Pass.Record(passContext);
+            MarkRegisteredHistoriesWritten(data.Pass);
         }
 
         internal static bool ShouldEnableAsyncCompute(
@@ -335,6 +456,86 @@ namespace VividRP.Runtime
                 else
                     builder.UseTexture(importedHandle.TextureHandle, importedHandle.Access);
             }
+        }
+
+        internal static bool ShouldAllowPassCulling(IRenderPass pass, PassResource resource)
+        {
+            if (pass == null)
+                return false;
+
+            if (pass is IRenderGraphSideEffectPass || pass is IAllowGlobalStateModificationPass)
+                return false;
+
+            if (HasRegisteredHistoryWrites(pass) || HasDeclaredCameraHistoryWrite(pass.GetType()))
+                return false;
+
+            return HasWritableGraphOutput(pass, resource);
+        }
+
+        private static bool HasRegisteredHistoryWrites(IRenderPass pass)
+        {
+            return pass != null
+                && s_PassWrittenHistories.TryGetValue(pass, out var entries)
+                && entries != null
+                && entries.Count > 0;
+        }
+
+        private static bool HasDeclaredCameraHistoryWrite(Type passType)
+        {
+            return passType != null && PassTypeMetadataCache.GetOrCreate(passType).HasCameraHistoryWrite;
+        }
+
+        private static bool HasWritableGraphOutput(IRenderPass pass, PassResource resource)
+        {
+            if (resource != null)
+            {
+                var textures = resource.Textures;
+                if (textures != null)
+                {
+                    for (var i = 0; i < textures.Length; i++)
+                    {
+                        var entry = textures[i];
+                        if (entry != null && !entry.IsTransient && entry.Texture != null && (entry.Access & AccessFlags.Write) != 0)
+                            return true;
+                    }
+                }
+
+                var buffers = resource.Buffers;
+                if (buffers != null)
+                {
+                    for (var i = 0; i < buffers.Length; i++)
+                    {
+                        var entry = buffers[i];
+                        if (entry != null && !entry.IsTransient && entry.Buffer != null && (entry.Access & AccessFlags.Write) != 0)
+                            return true;
+                    }
+                }
+
+                var accelerationStructures = resource.AccelerationStructures;
+                if (accelerationStructures != null)
+                {
+                    for (var i = 0; i < accelerationStructures.Length; i++)
+                    {
+                        var entry = accelerationStructures[i];
+                        if (entry != null && !entry.IsTransient && entry.AccelerationStructure != null && (entry.Access & AccessFlags.Write) != 0)
+                            return true;
+                    }
+                }
+            }
+
+            if (pass != null
+                && s_PassImportedHandles.TryGetValue(pass, out var importedHandles)
+                && importedHandles != null)
+            {
+                for (var i = 0; i < importedHandles.Count; i++)
+                {
+                    var handle = importedHandles[i];
+                    if (handle.IsValid && (handle.Access & AccessFlags.Write) != 0)
+                        return true;
+                }
+            }
+
+            return false;
         }
 
         private static void ConfigureGlobalStateModification(IBaseRenderGraphBuilder builder, IRenderPass pass)
@@ -602,8 +803,6 @@ namespace VividRP.Runtime
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
             SetupAccelerationStructures(renderGraph, builder, resource, accelerationStructureCache);
-
-            builder.AllowPassCulling(false);
         }
 
         /// <summary>
@@ -660,8 +859,6 @@ namespace VividRP.Runtime
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
             SetupAccelerationStructures(renderGraph, builder, resource, accelerationStructureCache);
-
-            builder.AllowPassCulling(false);
         }
 
         /// <summary>
@@ -730,8 +927,6 @@ namespace VividRP.Runtime
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
             SetupAccelerationStructures(renderGraph, builder, resource, accelerationStructureCache);
-
-            builder.AllowPassCulling(false);
         }
 
         internal static void UseAccelerationStructure(

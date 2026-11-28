@@ -7,6 +7,7 @@ using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [FrameResourceSlot(FrameResourceSlots.SubstrateClosureBufferName, AccessFlags.ReadWrite, Optional = true)]
     public class GBufferPass : UnsafePass, IAllowGlobalStateModificationPass
     {
         internal const string GBufferShaderTagName = "VividGBuffer";
@@ -259,7 +260,6 @@ namespace VividRP.Runtime.RenderPass.Core
             if (bindSubstrateUav)
             {
                 nativeCmd.ClearRandomWriteTargets();
-                m_SubstrateFrameData.ClosureBufferHistory?.MarkWritten();
             }
         }
 

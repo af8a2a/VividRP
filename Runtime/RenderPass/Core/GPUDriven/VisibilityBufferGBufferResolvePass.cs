@@ -9,6 +9,7 @@ using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [FrameResourceSlot(FrameResourceSlots.SubstrateClosureBufferName, AccessFlags.Write, Optional = true)]
     public sealed class VisibilityBufferGBufferResolvePass : UnsafePass, IAllowGlobalStateModificationPass
     {
         internal const int DualSlabSidecarTileSize = 8;
@@ -720,7 +721,6 @@ namespace VividRP.Runtime.RenderPass.Core
             if (writeSubstrate)
             {
                 m_SubstrateFrameData.HeadersClearedThisFrame = true;
-                m_SubstrateFrameData.ClosureBufferHistory?.MarkWritten();
             }
         }
 

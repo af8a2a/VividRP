@@ -371,6 +371,142 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void CommitFrame_EvictsUntouchedTextureAndBuffer_AfterMaxIdleFrames()
+        {
+            using var cameraScope = new CameraScope("HistoryIdleEvictionCamera");
+            var history = cameraScope.Camera.GetVividCameraHistory();
+            history.MaxIdleFrames = 2;
+
+            var textureId = CameraHistoryId.Create("CameraHistoryTests_IdleTex");
+            var bufferId = CameraHistoryId.Create("CameraHistoryTests_IdleBuf");
+
+            history.BeginFrame(32, 16);
+            var tex = history.GetOrCreateTexture(textureId, 2, CreateDescriptor(32, 16));
+            var buf = history.GetOrCreateBuffer(bufferId, 2, CreateBufferDescriptor(8, sizeof(uint)));
+            tex.MarkWritten();
+            buf.MarkWritten();
+            history.CommitFrame();
+
+            Assert.That(history.TextureCount, Is.EqualTo(1));
+            Assert.That(history.BufferCount, Is.EqualTo(1));
+
+            // Frame 2: untouched (1 idle committed frame < 2 -> still alive)
+            history.BeginFrame(32, 16);
+            history.CommitFrame();
+            Assert.That(history.TryGetTexture(textureId, out _), Is.True);
+            Assert.That(history.TryGetBuffer(bufferId, out _), Is.True);
+
+            // Frame 3: untouched (2 idle committed frames >= 2 -> disposed and removed)
+            history.BeginFrame(32, 16);
+            history.CommitFrame();
+            Assert.That(history.TryGetTexture(textureId, out _), Is.False);
+            Assert.That(history.TryGetBuffer(bufferId, out _), Is.False);
+            Assert.That(history.TextureCount, Is.EqualTo(0));
+            Assert.That(history.BufferCount, Is.EqualTo(0));
+            Assert.Throws<ObjectDisposedException>(() => tex.GetCurrent());
+            Assert.Throws<ObjectDisposedException>(() => buf.GetCurrent());
+        }
+
+        [Test]
+        public void CommitFrame_KeepsTouchedHistoryAlive_AndDoesNotEvictOnAbort()
+        {
+            using var cameraScope = new CameraScope("HistoryTouchCamera");
+            var history = cameraScope.Camera.GetVividCameraHistory();
+            history.MaxIdleFrames = 2;
+
+            var activeId = CameraHistoryId.Create("CameraHistoryTests_Active");
+            var staleId = CameraHistoryId.Create("CameraHistoryTests_Stale");
+            var descriptor = CreateDescriptor(16, 16);
+
+            history.BeginFrame(16, 16);
+            history.GetOrCreateTexture(activeId, 2, descriptor).MarkWritten();
+            history.GetOrCreateTexture(staleId, 2, descriptor).MarkWritten();
+            history.CommitFrame();
+
+            // Aborted frames must not trigger eviction even when idle age exceeds MaxIdleFrames.
+            for (int i = 0; i < 4; i++)
+            {
+                history.BeginFrame(16, 16);
+                history.AbortFrame();
+            }
+
+            Assert.That(history.TryGetTexture(activeId, out _), Is.True);
+            Assert.That(history.TryGetTexture(staleId, out _), Is.True);
+
+            // Touch only activeId across two committed frames; staleId gets evicted.
+            for (int i = 0; i < 2; i++)
+            {
+                history.BeginFrame(16, 16);
+                var active = history.GetOrCreateTexture(activeId, 2, descriptor);
+                active.MarkWritten();
+                history.CommitFrame();
+            }
+
+            Assert.That(history.TryGetTexture(activeId, out _), Is.True);
+            Assert.That(history.TryGetTexture(staleId, out _), Is.False);
+            Assert.That(history.TextureCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void CommitFrame_NonPositiveMaxIdleFrames_DisablesIdleEviction()
+        {
+            using var cameraScope = new CameraScope("HistoryDisableEvictionCamera");
+            var history = cameraScope.Camera.GetVividCameraHistory();
+            history.MaxIdleFrames = 0;
+
+            var textureId = CameraHistoryId.Create("CameraHistoryTests_NoEvict");
+            history.BeginFrame(16, 16);
+            history.GetOrCreateTexture(textureId, 2, CreateDescriptor(16, 16)).MarkWritten();
+            history.CommitFrame();
+
+            for (int i = 0; i < 12; i++)
+            {
+                history.BeginFrame(16, 16);
+                history.CommitFrame();
+            }
+
+            Assert.That(history.TryGetTexture(textureId, out _), Is.True);
+        }
+
+        [Test]
+        public void CommitFrame_SteadyStateIdleEvictionCheck_AllocatesZeroManagedBytes()
+        {
+            using var cameraScope = new CameraScope("HistoryZeroGcCamera");
+            var history = cameraScope.Camera.GetVividCameraHistory();
+            history.MaxIdleFrames = 8;
+
+            var textureId = CameraHistoryId.Create("CameraHistoryTests_ZeroGcTex");
+            var bufferId = CameraHistoryId.Create("CameraHistoryTests_ZeroGcBuf");
+            var texDesc = CreateDescriptor(16, 16);
+            var bufDesc = CreateBufferDescriptor(8, sizeof(uint));
+
+            // Warmup
+            for (int i = 0; i < 4; i++)
+            {
+                history.BeginFrame(16, 16);
+                var tex = history.GetOrCreateTexture(textureId, 2, texDesc);
+                var buf = history.GetOrCreateBuffer(bufferId, 2, bufDesc);
+                tex.MarkWritten();
+                buf.MarkWritten();
+                history.CommitFrame();
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 32; i++)
+            {
+                history.BeginFrame(16, 16);
+                var tex = history.GetOrCreateTexture(textureId, 2, texDesc);
+                var buf = history.GetOrCreateBuffer(bufferId, 2, bufDesc);
+                tex.MarkWritten();
+                buf.MarkWritten();
+                history.CommitFrame();
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero, "Steady-state CameraHistory BeginFrame/GetOrCreate/CommitFrame must allocate zero managed memory.");
+        }
+
         private static CameraHistoryTextureDescriptor CreateDescriptor(int width, int height)
         {
             return new CameraHistoryTextureDescriptor(

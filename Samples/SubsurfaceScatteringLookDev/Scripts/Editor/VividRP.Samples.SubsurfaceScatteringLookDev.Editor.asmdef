@@ -1,0 +1,22 @@
+{
+    "name": "VividRP.Samples.SubsurfaceScatteringLookDev.Editor",
+    "rootNamespace": "VividRP.Samples.SubsurfaceScatteringLookDev.Editor",
+    "references": [
+        "VividRP.Runtime",
+        "VividRP.Editor",
+        "VividRP.Samples.SubsurfaceScatteringLookDev",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

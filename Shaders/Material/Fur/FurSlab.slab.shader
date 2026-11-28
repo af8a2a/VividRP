@@ -29,18 +29,27 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurGeometry)] _GravityStrength("Gravity Bend Strength", Range(0.0, 2.0)) = 0.45
         [Sub(FurGeometry)] _CombDirWS("Comb Flow Direction (WS)", Vector) = (0.0, -1.0, 0.0, 0.0)
         [Sub(FurGeometry)] _CombStrength("Comb Alignment", Range(0.0, 1.0)) = 0.85
+        [SubToggle(FurGeometry, _)] _UseFlowMap("Use DCC Flow Map", Float) = 0.0
+        [Tex(FurGeometry)] [ShowIf(_UseFlowMap, Equal, 1)] _FurFlowMap("Flow Map (RG: CombTS, B: Loft, A: Length)", 2D) = "gray" {}
+        [SubToggle(FurGeometry, _)] [ShowIf(_UseFlowMap, Equal, 1)] _FlowMapFlipY("Flow Map Flip Y (Houdini/Blender)", Float) = 0.0
+        [Sub(FurGeometry)] [ShowIf(_UseFlowMap, Equal, 1)] _FlowMapStrength("Flow Map Strength", Range(0.0, 1.0)) = 1.0
         [Sub(FurGeometry)] _WindDirWS("Wind Direction (WS)", Vector) = (1.0, 0.0, 0.35, 0.0)
         [Sub(FurGeometry)] _WindStrength("Wind Sway Strength", Range(0.0, 1.0)) = 0.0
         [Sub(FurGeometry)] _WindFrequency("Wind Frequency", Range(0.1, 10.0)) = 2.2
 
         [Main(FurStrands, _, on, off)] _FurStrands("Strand Density & Dithering", Float) = 1
+        [SubEnum(FurStrands, Procedural Lattice, 0, 2D Pattern Map, 1, 3D Flipbook Atlas, 2)] _FurPatternMode("Strand Pattern Mode", Float) = 0.0
         [Tex(FurStrands)] _FurMaskMap("Fur Mask (R: Length/Density, G: AO)", 2D) = "white" {}
-        [Sub(FurStrands)] _StrandTiling("Strand UV Aspect Tiling", Vector) = (2.0, 1.0, 0.0, 0.0)
-        [Sub(FurStrands)] _FurDensity("Strand Density", Range(16.0, 320.0)) = 128.0
-        [Sub(FurStrands)] _StrandThickness("Strand Thickness", Range(0.10, 0.65)) = 0.44
-        [Sub(FurStrands)] _StrandTaper("Strand Tip Taper", Range(0.35, 2.5)) = 0.90
-        [Sub(FurStrands)] _LengthVariance("Strand Length Variance", Range(0.0, 0.85)) = 0.45
-        [Sub(FurStrands)] _ClumpStrength("Clump Strength", Range(0.0, 1.0)) = 0.35
+        [Tex(FurStrands)] [ShowIf(_FurPatternMode, GreaterEqual, 1)] _FurPatternMap("Pattern Map (R: Height/Alpha, GB: Offset, A: ID)", 2D) = "white" {}
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, GreaterEqual, 1)] _PatternTiling("Pattern UV Tiling", Vector) = (8.0, 4.0, 0.0, 0.0)
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 2)] _PatternFlipbookGrid("Flipbook Grid (Cols, Rows)", Vector) = (4.0, 4.0, 0.0, 0.0)
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 1)] _PatternHeightContrast("2D Pattern Taper Contrast", Range(0.02, 0.50)) = 0.12
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 0)] _StrandTiling("Strand UV Aspect Tiling", Vector) = (2.0, 1.0, 0.0, 0.0)
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 0)] _FurDensity("Strand Density", Range(16.0, 320.0)) = 128.0
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 0)] _StrandThickness("Strand Thickness", Range(0.10, 0.65)) = 0.44
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 0)] _StrandTaper("Strand Tip Taper", Range(0.35, 2.5)) = 0.90
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 0)] _LengthVariance("Strand Length Variance", Range(0.0, 0.85)) = 0.45
+        [Sub(FurStrands)] [ShowIf(_FurPatternMode, Equal, 0)] _ClumpStrength("Clump Strength", Range(0.0, 1.0)) = 0.35
         [Sub(FurStrands)] _AlphaCutoff("Base Alpha Cutoff", Range(0.01, 0.95)) = 0.35
         [Sub(FurStrands)] _DitherStrength("Tip Dither Blend (TAA)", Range(0.0, 1.0)) = 0.60
         [SubToggle(FurStrands, _)] _TemporalDither("Temporal IGN Jitter (TAA)", Float) = 1.0
@@ -81,6 +90,7 @@ Shader "VividRP/Material/FurSlab"
         [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _HairBacklit("Backlit TT Transmission", Range(0.0, 1.0)) = 0.85
         [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _FurMedullaWeight("Medulla Weight", Range(0.0, 1.0)) = 0.55
         [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _FurMedullaRoughness("Medulla Softness", Range(0.10, 1.0)) = 0.65
+        [Sub(FurShading)] [ShowIf(_FurLightingModel, Equal, 1)] _StrandTangentJitter("Strand Tangent Jitter", Range(0.0, 0.75)) = 0.12
 
         // Per-instance shell height h in [0, 1]; defaults to 0 (skin layer) when rendered non-instanced.
         [HideInInspector] _ShellHeight("Shell Height", Range(0.0, 1.0)) = 0.0
@@ -142,6 +152,14 @@ Shader "VividRP/Material/FurSlab"
     float _HairBacklit;
     float _FurMedullaWeight;
     float _FurMedullaRoughness;
+    float _UseFlowMap;
+    float _FlowMapFlipY;
+    float _FlowMapStrength;
+    float _FurPatternMode;
+    float4 _PatternTiling;
+    float4 _PatternFlipbookGrid;
+    float _PatternHeightContrast;
+    float _StrandTangentJitter;
     // @vivid-cbuffer-end
 
     // @vivid-instancing-begin
@@ -156,6 +174,10 @@ Shader "VividRP/Material/FurSlab"
     SAMPLER(sampler_BaseMap);
     TEXTURE2D(_FurMaskMap);
     SAMPLER(sampler_FurMaskMap);
+    TEXTURE2D(_FurFlowMap);
+    SAMPLER(sampler_FurFlowMap);
+    TEXTURE2D(_FurPatternMap);
+    SAMPLER(sampler_FurPatternMap);
     // @vivid-textures-end
 
     // @vivid-vertex-begin
@@ -251,6 +273,154 @@ Shader "VividRP/Material/FurSlab"
             return VividSlabEvaluateVertexOffset(ctx);
         #endif
     }
+
+    // Shared Phase D1 DCC FlowMap + 2D Pattern + 4x4 Flipbook 3D Pattern helpers
+    // (placed in @vivid-vertex-begin..end so Coverage, GBuffer, VisibilityRaster, and Compute Resolve all share them).
+    VividFurFlowSample VividFurEvaluateFlowSample(const VividSlabEvalContext ctx, float2 baseUv)
+    {
+        float3 fallbackCombWS = VIVID_SLAB_PARAM(ctx, _CombDirWS).xyz;
+        bool useFlowMap = VIVID_SLAB_PARAM(ctx, _UseFlowMap) > 0.5f;
+        if (!useFlowMap)
+        {
+            VividFurFlowSample defaultFlow;
+            defaultFlow.combDirWS = fallbackCombWS;
+            defaultFlow.loftOverride = -1.0f;
+            defaultFlow.lengthScale = 1.0f;
+            return defaultFlow;
+        }
+
+        float4 rawFlow = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurFlowMap, baseUv);
+        return VividDecodeFurFlowMapSample(
+            rawFlow,
+            true,
+            VIVID_SLAB_PARAM(ctx, _FlowMapFlipY) > 0.5f,
+            VIVID_SLAB_PARAM(ctx, _FlowMapStrength),
+            ctx.geometryNormalWS,
+            ctx.geometryTangentWS,
+            fallbackCombWS);
+    }
+
+    VividFurStrandSample VividFurEvaluatePatternStrandAt(
+        const VividSlabEvalContext ctx,
+        float2 uvSample,
+        float hSample,
+        float densityMask,
+        int patternMode)
+    {
+        float2 patternTiling = VIVID_SLAB_PARAM(ctx, _PatternTiling).xy;
+        if (patternMode == 1)
+        {
+            float2 patUv = uvSample * patternTiling;
+            float2 patDdx = ctx.uv0Ddx * patternTiling;
+            float2 patDdy = ctx.uv0Ddy * patternTiling;
+            float4 patSample = VIVID_SLAB_SAMPLE_TEX2D_GRAD(ctx, _FurPatternMap, patUv, patDdx, patDdy);
+            return VividEvaluateFur2DPatternSample(
+                patSample,
+                hSample,
+                densityMask,
+                VIVID_SLAB_PARAM(ctx, _PatternHeightContrast));
+        }
+
+        // Mode 2: 3D Flipbook Atlas (trilinear interpolation across adjacent height slices)
+        float2 gridColsRows = max(floor(VIVID_SLAB_PARAM(ctx, _PatternFlipbookGrid).xy + 0.5f), 1.0f.xx);
+        uint totalSlices = max((uint)(gridColsRows.x * gridColsRows.y), 1u);
+        float maxLen = max(saturate(densityMask), 1e-3f);
+        float hNorm = saturate(hSample / maxLen);
+        float sliceF = hNorm * (float)(totalSlices - 1u);
+        uint slice0 = (uint)floor(sliceF);
+        uint slice1 = min(slice0 + 1u, totalSlices - 1u);
+        float sliceFrac = frac(sliceF);
+
+        float2 uvA0, ddxA0, ddyA0;
+        VividFurComputeFlipbookSliceUV(uvSample, ctx.uv0Ddx, ctx.uv0Ddy, patternTiling, gridColsRows, slice0, uvA0, ddxA0, ddyA0);
+        float4 s0 = VIVID_SLAB_SAMPLE_TEX2D_GRAD(ctx, _FurPatternMap, uvA0, ddxA0, ddyA0);
+
+        float4 s1 = s0;
+        if (slice1 != slice0 && sliceFrac > 1e-4f)
+        {
+            float2 uvA1, ddxA1, ddyA1;
+            VividFurComputeFlipbookSliceUV(uvSample, ctx.uv0Ddx, ctx.uv0Ddy, patternTiling, gridColsRows, slice1, uvA1, ddxA1, ddyA1);
+            s1 = VIVID_SLAB_SAMPLE_TEX2D_GRAD(ctx, _FurPatternMap, uvA1, ddxA1, ddyA1);
+        }
+
+        return VividEvaluateFurFlipbookSample(s0, s1, sliceFrac, hSample, densityMask);
+    }
+
+    VividFurHybridHit VividFurRaymarchPatternHybridSlab(
+        const VividSlabEvalContext ctx,
+        float shellHeightTop,
+        float shellStep,
+        float3 bendDirWS,
+        float bendStrength,
+        float densityMask,
+        float alphaCutoff,
+        float ditherStrength,
+        float ign,
+        int stepCount,
+        float maxParallaxScale,
+        int patternMode)
+    {
+        VividFurHybridHit hitResult;
+        hitResult.hit = false;
+        hitResult.hitShellHeight = saturate(shellHeightTop);
+        hitResult.strand.alpha = 0.0f;
+        hitResult.strand.strandOffsetTS = 0.0f.xx;
+        hitResult.strand.strandVariation = 0.5f;
+        hitResult.strand.tipFactor = 1.0f;
+
+        float hTop = saturate(shellHeightTop);
+        if (hTop <= 1e-4f)
+        {
+            hitResult.hit = true;
+            hitResult.hitShellHeight = 0.0f;
+            hitResult.strand = VividFurEvaluatePatternStrandAt(ctx, ctx.uv0, 0.0f, densityMask, patternMode);
+            return hitResult;
+        }
+
+        float slabDeltaH;
+        float2 uvDeltaPerSlab;
+        VividFurComputeHybridSlabUvDelta(
+            ctx.positionWS,
+            ctx.positionWSDdx,
+            ctx.positionWSDdy,
+            ctx.geometryNormalWS,
+            _WorldSpaceCameraPos,
+            ctx.uv0Ddx,
+            ctx.uv0Ddy,
+            hTop,
+            shellStep,
+            VIVID_SLAB_PARAM(ctx, _FurLength),
+            bendDirWS,
+            bendStrength,
+            maxParallaxScale,
+            slabDeltaH,
+            uvDeltaPerSlab);
+
+        int steps = clamp(stepCount, 1, 8);
+        float invSteps = rcp((float)steps);
+        float ignAlpha = frac(ign + 0.6180339887f);
+        float ditherCutoff = lerp(0.04f, 0.96f, ignAlpha);
+        float threshold = lerp(saturate(alphaCutoff), ditherCutoff, saturate(ditherStrength));
+
+        [loop]
+        for (int k = 0; k < steps; ++k)
+        {
+            float s = ((float)k + ign) * invSteps;
+            float hSample = max(hTop - slabDeltaH * s, 0.0f);
+            float2 uvSample = ctx.uv0 + uvDeltaPerSlab * s;
+
+            VividFurStrandSample sampleVal = VividFurEvaluatePatternStrandAt(ctx, uvSample, hSample, densityMask, patternMode);
+            if (sampleVal.alpha >= threshold)
+            {
+                hitResult.hit = true;
+                hitResult.hitShellHeight = hSample;
+                hitResult.strand = sampleVal;
+                return hitResult;
+            }
+        }
+
+        return hitResult;
+    }
     // @vivid-vertex-end
 
     // @vivid-coverage-begin
@@ -282,7 +452,8 @@ Shader "VividRP/Material/FurSlab"
 
         float4 baseMapST = VIVID_SLAB_PARAM(ctx, _BaseMap_ST);
         float2 baseUv = ctx.uv0 * baseMapST.xy + baseMapST.zw;
-        float densityMask = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurMaskMap, baseUv).r;
+        VividFurFlowSample flowSample = VividFurEvaluateFlowSample(ctx, baseUv);
+        float densityMask = saturate(VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurMaskMap, baseUv).r * flowSample.lengthScale);
         #if defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
             // Keep VSM/CSM shadow pages camera-independent and temporally stable.
             bool useTemporalDither = false;
@@ -294,6 +465,7 @@ Shader "VividRP/Material/FurSlab"
             _JitterParams.xy,
             useTemporalDither);
 
+        int patternMode = (int)round(VIVID_SLAB_PARAM(ctx, _FurPatternMode));
         float2 strandTiling = VIVID_SLAB_PARAM(ctx, _StrandTiling).xy;
         float furDensity = VIVID_SLAB_PARAM(ctx, _FurDensity);
         float strandThickness = VIVID_SLAB_PARAM(ctx, _StrandThickness);
@@ -302,36 +474,59 @@ Shader "VividRP/Material/FurSlab"
         float clumpStrength = VIVID_SLAB_PARAM(ctx, _ClumpStrength);
         float alphaCutoff = VIVID_SLAB_PARAM(ctx, _AlphaCutoff);
         float ditherStrength = VIVID_SLAB_PARAM(ctx, _DitherStrength);
+        float3 gravityWS = VIVID_SLAB_PARAM(ctx, _GravityWS).xyz;
+        float gravityStrength = VIVID_SLAB_PARAM(ctx, _GravityStrength);
+        float3 bendDirWS = flowSample.loftOverride >= 0.0f ? lerp(gravityWS, flowSample.combDirWS, 0.5f) : gravityWS;
 
         #if !defined(VIVIDRP_SHADERPASS_SHADOW_CASTER)
         if (VIVID_SLAB_PARAM(ctx, _HybridRaymarch) > 0.5f)
         {
-            VividFurHybridHit hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
-                ctx.positionWS,
-                ctx.positionWSDdx,
-                ctx.positionWSDdy,
-                ctx.geometryNormalWS,
-                _WorldSpaceCameraPos,
-                ctx.uv0,
-                ctx.uv0Ddx,
-                ctx.uv0Ddy,
-                strandTiling,
-                furDensity,
-                h,
-                shellStep,
-                VIVID_SLAB_PARAM(ctx, _FurLength),
-                VIVID_SLAB_PARAM(ctx, _GravityWS).xyz,
-                VIVID_SLAB_PARAM(ctx, _GravityStrength),
-                strandThickness,
-                strandTaper,
-                lengthVariance,
-                clumpStrength,
-                densityMask,
-                alphaCutoff,
-                ditherStrength,
-                ign,
-                (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
-                VIVID_SLAB_PARAM(ctx, _HybridMaxParallax));
+            VividFurHybridHit hybridHit;
+            if (patternMode >= 1)
+            {
+                hybridHit = VividFurRaymarchPatternHybridSlab(
+                    ctx,
+                    h,
+                    shellStep,
+                    bendDirWS,
+                    gravityStrength,
+                    densityMask,
+                    alphaCutoff,
+                    ditherStrength,
+                    ign,
+                    (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
+                    VIVID_SLAB_PARAM(ctx, _HybridMaxParallax),
+                    patternMode);
+            }
+            else
+            {
+                hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
+                    ctx.positionWS,
+                    ctx.positionWSDdx,
+                    ctx.positionWSDdy,
+                    ctx.geometryNormalWS,
+                    _WorldSpaceCameraPos,
+                    ctx.uv0,
+                    ctx.uv0Ddx,
+                    ctx.uv0Ddy,
+                    strandTiling,
+                    furDensity,
+                    h,
+                    shellStep,
+                    VIVID_SLAB_PARAM(ctx, _FurLength),
+                    bendDirWS,
+                    gravityStrength,
+                    strandThickness,
+                    strandTaper,
+                    lengthVariance,
+                    clumpStrength,
+                    densityMask,
+                    alphaCutoff,
+                    ditherStrength,
+                    ign,
+                    (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
+                    VIVID_SLAB_PARAM(ctx, _HybridMaxParallax));
+            }
 
             alpha = hybridHit.hit ? 1.0f : 0.0f;
             cutoff = 0.5f;
@@ -339,16 +534,24 @@ Shader "VividRP/Material/FurSlab"
         }
         #endif
 
-        VividFurStrandSample strand = VividEvaluateFurProceduralStrands(
-            ctx.uv0,
-            strandTiling,
-            furDensity,
-            h,
-            strandThickness,
-            strandTaper,
-            lengthVariance,
-            clumpStrength,
-            densityMask);
+        VividFurStrandSample strand;
+        if (patternMode >= 1)
+        {
+            strand = VividFurEvaluatePatternStrandAt(ctx, ctx.uv0, h, densityMask, patternMode);
+        }
+        else
+        {
+            strand = VividEvaluateFurProceduralStrands(
+                ctx.uv0,
+                strandTiling,
+                furDensity,
+                h,
+                strandThickness,
+                strandTaper,
+                lengthVariance,
+                clumpStrength,
+                densityMask);
+        }
 
         alpha = strand.alpha;
         // Blend base alpha threshold with spatio-temporal IGN dither for soft TAA-reconstructed tips.
@@ -383,7 +586,10 @@ Shader "VividRP/Material/FurSlab"
         float2 baseUv = ctx.uv0 * baseMapST.xy + baseMapST.zw;
         float3 baseTex = VIVID_SLAB_SAMPLE_TEX2D(ctx, _BaseMap, baseUv).rgb;
         float4 maskSample = VIVID_SLAB_SAMPLE_TEX2D(ctx, _FurMaskMap, baseUv);
+        VividFurFlowSample flowSample = VividFurEvaluateFlowSample(ctx, baseUv);
+        float effectiveDensityMask = saturate(maskSample.r * flowSample.lengthScale);
 
+        int patternMode = (int)round(VIVID_SLAB_PARAM(ctx, _FurPatternMode));
         float2 strandTiling = VIVID_SLAB_PARAM(ctx, _StrandTiling).xy;
         float furDensity = VIVID_SLAB_PARAM(ctx, _FurDensity);
         float strandThickness = VIVID_SLAB_PARAM(ctx, _StrandThickness);
@@ -392,6 +598,7 @@ Shader "VividRP/Material/FurSlab"
         float clumpStrength = VIVID_SLAB_PARAM(ctx, _ClumpStrength);
         float3 gravityWS = VIVID_SLAB_PARAM(ctx, _GravityWS).xyz;
         float gravityStrength = VIVID_SLAB_PARAM(ctx, _GravityStrength);
+        float3 bendDirWS = flowSample.loftOverride >= 0.0f ? lerp(gravityWS, flowSample.combDirWS, 0.5f) : gravityWS;
 
         VividFurStrandSample strand;
         float effectiveShellHeight = h;
@@ -401,37 +608,84 @@ Shader "VividRP/Material/FurSlab"
                 ctx.positionCS.xy,
                 _JitterParams.xy,
                 VIVID_SLAB_PARAM(ctx, _TemporalDither) > 0.5f);
-            VividFurHybridHit hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
-                ctx.positionWS,
-                ctx.positionWSDdx,
-                ctx.positionWSDdy,
-                ctx.geometryNormalWS,
-                _WorldSpaceCameraPos,
-                ctx.uv0,
-                ctx.uv0Ddx,
-                ctx.uv0Ddy,
-                strandTiling,
-                furDensity,
-                h,
-                shellStep,
-                VIVID_SLAB_PARAM(ctx, _FurLength),
-                gravityWS,
-                gravityStrength,
-                strandThickness,
-                strandTaper,
-                lengthVariance,
-                clumpStrength,
-                maskSample.r,
-                VIVID_SLAB_PARAM(ctx, _AlphaCutoff),
-                VIVID_SLAB_PARAM(ctx, _DitherStrength),
-                ign,
-                (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
-                VIVID_SLAB_PARAM(ctx, _HybridMaxParallax));
+            VividFurHybridHit hybridHit;
+            if (patternMode >= 1)
+            {
+                hybridHit = VividFurRaymarchPatternHybridSlab(
+                    ctx,
+                    h,
+                    shellStep,
+                    bendDirWS,
+                    gravityStrength,
+                    effectiveDensityMask,
+                    VIVID_SLAB_PARAM(ctx, _AlphaCutoff),
+                    VIVID_SLAB_PARAM(ctx, _DitherStrength),
+                    ign,
+                    (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
+                    VIVID_SLAB_PARAM(ctx, _HybridMaxParallax),
+                    patternMode);
+            }
+            else
+            {
+                hybridHit = VividEvaluateFurHybridSlabWithDerivatives(
+                    ctx.positionWS,
+                    ctx.positionWSDdx,
+                    ctx.positionWSDdy,
+                    ctx.geometryNormalWS,
+                    _WorldSpaceCameraPos,
+                    ctx.uv0,
+                    ctx.uv0Ddx,
+                    ctx.uv0Ddy,
+                    strandTiling,
+                    furDensity,
+                    h,
+                    shellStep,
+                    VIVID_SLAB_PARAM(ctx, _FurLength),
+                    bendDirWS,
+                    gravityStrength,
+                    strandThickness,
+                    strandTaper,
+                    lengthVariance,
+                    clumpStrength,
+                    effectiveDensityMask,
+                    VIVID_SLAB_PARAM(ctx, _AlphaCutoff),
+                    VIVID_SLAB_PARAM(ctx, _DitherStrength),
+                    ign,
+                    (int)round(VIVID_SLAB_PARAM(ctx, _HybridSteps)),
+                    VIVID_SLAB_PARAM(ctx, _HybridMaxParallax));
+            }
 
             if (hybridHit.hit)
             {
                 strand = hybridHit.strand;
                 effectiveShellHeight = hybridHit.hitShellHeight;
+            }
+            else
+            {
+                if (patternMode >= 1)
+                {
+                    strand = VividFurEvaluatePatternStrandAt(ctx, ctx.uv0, h, effectiveDensityMask, patternMode);
+                }
+                else
+                {
+                    strand = VividEvaluateFurProceduralStrands(
+                        ctx.uv0,
+                        strandTiling,
+                        furDensity,
+                        h,
+                        strandThickness,
+                        strandTaper,
+                        lengthVariance,
+                        clumpStrength,
+                        effectiveDensityMask);
+                }
+            }
+        }
+        else
+        {
+            if (patternMode >= 1)
+            {
+                strand = VividFurEvaluatePatternStrandAt(ctx, ctx.uv0, h, effectiveDensityMask, patternMode);
             }
             else
             {
@@ -444,21 +698,8 @@ Shader "VividRP/Material/FurSlab"
                     strandTaper,
                     lengthVariance,
                     clumpStrength,
-                    maskSample.r);
+                    effectiveDensityMask);
             }
-        }
-        else
-        {
-            strand = VividEvaluateFurProceduralStrands(
-                ctx.uv0,
-                strandTiling,
-                furDensity,
-                h,
-                strandThickness,
-                strandTaper,
-                lengthVariance,
-                clumpStrength,
-                maskSample.r);
         }
 
         fp.shellHeight = effectiveShellHeight;
@@ -481,8 +722,8 @@ Shader "VividRP/Material/FurSlab"
         fp.strandNormalStrength = VIVID_SLAB_PARAM(ctx, _StrandNormalStrength);
         fp.gravityDirWS = gravityWS;
         fp.gravityStrength = gravityStrength;
-        fp.combDirWS = VIVID_SLAB_PARAM(ctx, _CombDirWS).xyz;
-        fp.combStrength = VIVID_SLAB_PARAM(ctx, _CombStrength);
+        fp.combDirWS = flowSample.combDirWS;
+        fp.combStrength = flowSample.loftOverride >= 0.0f ? max(VIVID_SLAB_PARAM(ctx, _CombStrength), VIVID_SLAB_PARAM(ctx, _FlowMapStrength)) : VIVID_SLAB_PARAM(ctx, _CombStrength);
         fp.ambientOcclusion = saturate(baseAmbientOcclusion * maskSample.g);
         fp.hairRadialRoughness = VIVID_SLAB_PARAM(ctx, _HairRadialRoughness);
         fp.hairCuticleAngleDeg = VIVID_SLAB_PARAM(ctx, _HairCuticleAngle);
@@ -490,6 +731,8 @@ Shader "VividRP/Material/FurSlab"
         fp.hairBacklit = VIVID_SLAB_PARAM(ctx, _HairBacklit);
         fp.furMedullaWeight = VIVID_SLAB_PARAM(ctx, _FurMedullaWeight);
         fp.furMedullaRoughness = VIVID_SLAB_PARAM(ctx, _FurMedullaRoughness);
+        fp.flowLoftOverride = flowSample.loftOverride;
+        fp.strandTangentJitter = VIVID_SLAB_PARAM(ctx, _StrandTangentJitter);
         return fp;
     }
 

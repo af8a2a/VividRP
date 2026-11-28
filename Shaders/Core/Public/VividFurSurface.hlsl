@@ -49,6 +49,9 @@ struct VividFurSurfaceParams
     float hairBacklit;
     float furMedullaWeight;
     float furMedullaRoughness;
+    // Phase D1 DCC FlowMap & Per-Strand Tangent Jitter
+    float flowLoftOverride;     // < 0: use default droop-based loft; [0, 1]: explicit DCC FlowMap loft
+    float strandTangentJitter;  // Per-strand tangent scatter in [0, 1] to break up synthetic angel rings
 };
 
 VividFurSurfaceParams VividCreateDefaultFurSurfaceParams()
@@ -86,7 +89,168 @@ VividFurSurfaceParams VividCreateDefaultFurSurfaceParams()
     p.hairBacklit = 0.85f;
     p.furMedullaWeight = 0.55f;
     p.furMedullaRoughness = 0.65f;
+    p.flowLoftOverride = -1.0f;
+    p.strandTangentJitter = 0.0f;
     return p;
+}
+
+// Decoded DCC Groom Flow Map sample (baked from Houdini / Blender / Substance):
+//   R, G : Tangent-space comb direction in [0, 1] -> [-1, 1]
+//   B    : Strand loft / stand-up angle in [0, 1] (0 = flat combed, 1 = upright fluffy)
+//   A    : Local fur length / density multiplier in [0, 1]
+struct VividFurFlowSample
+{
+    float3 combDirWS;
+    float loftOverride; // < 0 when FlowMap disabled
+    float lengthScale;
+};
+
+VividFurFlowSample VividDecodeFurFlowMapSample(
+    float4 rawFlow,
+    bool useFlowMap,
+    bool flipY,
+    float flowStrength,
+    float3 geomNormalWS,
+    float4 geomTangentWS,
+    float3 fallbackCombDirWS)
+{
+    VividFurFlowSample result;
+    result.combDirWS = fallbackCombDirWS;
+    result.loftOverride = -1.0f;
+    result.lengthScale = 1.0f;
+
+    if (!useFlowMap || flowStrength <= 1e-4f)
+        return result;
+
+    float3 nWS = VividSanitizeSurfaceSummaryNormal(geomNormalWS);
+    float3 baseT = geomTangentWS.xyz - nWS * dot(geomTangentWS.xyz, nWS);
+    float baseTLenSq = dot(baseT, baseT);
+    float3 unitT = baseTLenSq > 1e-8f ? baseT * rsqrt(baseTLenSq) : float3(1.0f, 0.0f, 0.0f);
+    float handedness = geomTangentWS.w < 0.0f ? -1.0f : 1.0f;
+    float3 unitB = cross(nWS, unitT) * handedness;
+
+    float2 flowTS = rawFlow.rg * 2.0f - 1.0f;
+    if (flipY)
+        flowTS.y = -flowTS.y;
+
+    float flowTSLenSq = dot(flowTS, flowTS);
+    float3 flowDirWS = flowTSLenSq > 1e-5f
+        ? (unitT * flowTS.x + unitB * flowTS.y) * rsqrt(flowTSLenSq)
+        : fallbackCombDirWS;
+
+    float w = saturate(flowStrength);
+    float3 blended = lerp(fallbackCombDirWS, flowDirWS, w);
+    float blendedLenSq = dot(blended, blended);
+    result.combDirWS = blendedLenSq > 1e-6f ? blended * rsqrt(blendedLenSq) : flowDirWS;
+    result.loftOverride = saturate(rawFlow.b);
+    result.lengthScale = lerp(1.0f, saturate(rawFlow.a), w);
+    return result;
+}
+
+// Evaluates a DCC-baked 2D Pattern Map (Mode 1):
+//   R   : Strand height field in [0, 1]
+//   G,B : Tangent-space micro-normal / strand center offset in [0, 1] -> [-1, 1]
+//   A   : Deterministic per-strand variation ID in [0, 1]
+VividFurStrandSample VividEvaluateFur2DPatternSample(
+    float4 patternSample,
+    float shellHeight,
+    float densityMask,
+    float heightContrast)
+{
+    VividFurStrandSample result;
+    float h = saturate(shellHeight);
+    result.strandOffsetTS = patternSample.gb * 2.0f - 1.0f;
+    result.strandVariation = saturate(patternSample.a);
+
+    if (h <= 1e-4f)
+    {
+        result.alpha = 1.0f;
+        result.tipFactor = 0.0f;
+        return result;
+    }
+
+    float maxHeight = saturate(patternSample.r) * saturate(densityMask);
+    if (maxHeight <= 1e-3f)
+    {
+        result.alpha = 0.0f;
+        result.tipFactor = 1.0f;
+        return result;
+    }
+
+    float halfBand = clamp(heightContrast, 0.02f, 0.50f);
+    result.tipFactor = saturate(h / maxHeight);
+    result.alpha = saturate((maxHeight - h + halfBand) / max(2.0f * halfBand, 1e-4f));
+    return result;
+}
+
+// Computes Atlas UV & unwrapped analytic derivatives for a single slice of a DCC-baked
+// 2D Flipbook 3D Fur Volume (e.g. 4x4 = 16 height slices from Houdini COPs / VDB).
+// Uses explicit cell clamping & analytic derivatives to avoid mipmap seam artifacts at tile wraps.
+void VividFurComputeFlipbookSliceUV(
+    float2 uv0,
+    float2 uv0Ddx,
+    float2 uv0Ddy,
+    float2 patternTiling,
+    float2 gridColsRows,
+    uint sliceIndex,
+    out float2 outAtlasUv,
+    out float2 outAtlasDdx,
+    out float2 outAtlasDdy)
+{
+    float2 safeGrid = max(floor(gridColsRows + 0.5f), 1.0f.xx);
+    uint cols = (uint)safeGrid.x;
+    uint rows = (uint)safeGrid.y;
+    uint maxSlice = max(cols * rows - 1u, 0u);
+    uint clampedSlice = min(sliceIndex, maxSlice);
+
+    uint col = clampedSlice % cols;
+    uint row = clampedSlice / cols;
+
+    float2 tiledUv = frac(uv0 * patternTiling);
+    // Keep 0.5% cell margin to prevent bilinear bleed from neighboring height slices in the atlas.
+    float2 safeLocalUv = lerp(0.004f.xx, 0.996f.xx, tiledUv);
+    float2 invGrid = rcp(safeGrid);
+
+    outAtlasUv = (float2((float)col, (float)row) + safeLocalUv) * invGrid;
+    outAtlasDdx = uv0Ddx * patternTiling * invGrid;
+    outAtlasDdy = uv0Ddy * patternTiling * invGrid;
+}
+
+// Blends two adjacent height slices sampled from a DCC-baked 3D Flipbook Atlas (Mode 2):
+//   R   : 3D slice strand occupancy / alpha in [0, 1]
+//   G,B : Local 2D slice tangent twist / micro-normal offset in [0, 1] -> [-1, 1]
+//   A   : Per-strand variation ID in [0, 1]
+VividFurStrandSample VividEvaluateFurFlipbookSample(
+    float4 sliceSample0,
+    float4 sliceSample1,
+    float sliceLerpWeight,
+    float shellHeight,
+    float densityMask)
+{
+    VividFurStrandSample result;
+    float h = saturate(shellHeight);
+    float4 blended = lerp(sliceSample0, sliceSample1, saturate(sliceLerpWeight));
+    result.strandOffsetTS = blended.gb * 2.0f - 1.0f;
+    result.strandVariation = saturate(blended.a);
+
+    if (h <= 1e-4f)
+    {
+        result.alpha = 1.0f;
+        result.tipFactor = 0.0f;
+        return result;
+    }
+
+    float maxLen = saturate(densityMask);
+    if (maxLen <= 1e-3f || h > maxLen)
+    {
+        result.alpha = 0.0f;
+        result.tipFactor = 1.0f;
+        return result;
+    }
+
+    result.tipFactor = saturate(h / maxLen);
+    result.alpha = saturate(blended.r);
+    return result;
 }
 
 // Fast deterministic 2D->3D hash without trig precision drift across GPUs.
@@ -258,6 +422,54 @@ float2 VividFurProjectWorldDeltaToUV(
     return sx * dUvDx + sy * dUvDy;
 }
 
+// Shared Hybrid Slab UV raymarch delta helper (used by both procedural & DCC pattern raymarchers).
+void VividFurComputeHybridSlabUvDelta(
+    float3 positionWS,
+    float3 positionWSDdx,
+    float3 positionWSDdy,
+    float3 geomNormalWS,
+    float3 cameraPosWS,
+    float2 uv0Ddx,
+    float2 uv0Ddy,
+    float shellHeightTop,
+    float shellStep,
+    float furLength,
+    float3 bendDirWS,
+    float bendStrength,
+    float maxParallaxScale,
+    out float outSlabDeltaH,
+    out float2 outUvDeltaPerSlab)
+{
+    float hTop = saturate(shellHeightTop);
+    outSlabDeltaH = min(hTop, max(shellStep, 1e-4f));
+    float slabThicknessWS = outSlabDeltaH * max(furLength, 1e-4f);
+
+    float3 nWS = SafeNormalize(geomNormalWS);
+    float3 rayDirWS = SafeNormalize(positionWS - cameraPosWS);
+    float cosTheta = max(dot(-nWS, rayDirWS), rcp(max(maxParallaxScale, 1.0f)));
+    float slabRayDist = slabThicknessWS / cosTheta;
+
+    float3 rayDeltaWS = rayDirWS * slabRayDist;
+    float3 tangentRayDeltaWS = rayDeltaWS - nWS * dot(rayDeltaWS, nWS);
+
+    // Unwind quadratic gravity/flow bend across the slab so raymarched strands curve smoothly.
+    float3 bendDeltaWS = bendDirWS * (2.0f * hTop * outSlabDeltaH * max(furLength, 0.0f) * max(bendStrength, 0.0f));
+    float3 tangentBendDeltaWS = bendDeltaWS - nWS * dot(bendDeltaWS, nWS);
+
+    outUvDeltaPerSlab = VividFurProjectWorldDeltaToUV(
+        tangentRayDeltaWS + tangentBendDeltaWS,
+        positionWSDdx,
+        positionWSDdy,
+        uv0Ddx,
+        uv0Ddy);
+
+    // Clamp extreme grazing UV jumps at silhouette discontinuities.
+    float maxUvJump = 0.35f;
+    float uvJumpLenSq = dot(outUvDeltaPerSlab, outUvDeltaPerSlab);
+    if (uvJumpLenSq > maxUvJump * maxUvJump)
+        outUvDeltaPerSlab *= maxUvJump * rsqrt(uvJumpLenSq);
+}
+
 // Hybrid Shells (compute-safe core): marches along the view ray through a sparse volumetric slab
 // [hTop - shellStep, hTop] using explicit screen-space position/UV derivatives so both Raster
 // fragment passes and GPUDriven Compute Resolve execute the exact same algorithm.
@@ -306,33 +518,24 @@ VividFurHybridHit VividEvaluateFurHybridSlabWithDerivatives(
         return hitResult;
     }
 
-    float slabDeltaH = min(hTop, max(shellStep, 1e-4f));
-    float slabThicknessWS = slabDeltaH * max(furLength, 1e-4f);
-
-    float3 nWS = SafeNormalize(geomNormalWS);
-    float3 rayDirWS = SafeNormalize(positionWS - cameraPosWS);
-    float cosTheta = max(dot(-nWS, rayDirWS), rcp(max(maxParallaxScale, 1.0f)));
-    float slabRayDist = slabThicknessWS / cosTheta;
-
-    float3 rayDeltaWS = rayDirWS * slabRayDist;
-    float3 tangentRayDeltaWS = rayDeltaWS - nWS * dot(rayDeltaWS, nWS);
-
-    // Unwind quadratic gravity bend across the slab so raymarched strands curve identically to dense shells.
-    float3 bendDeltaWS = gravityWS * (2.0f * hTop * slabDeltaH * max(furLength, 0.0f) * max(gravityStrength, 0.0f));
-    float3 tangentBendDeltaWS = bendDeltaWS - nWS * dot(bendDeltaWS, nWS);
-
-    float2 uvDeltaPerSlab = VividFurProjectWorldDeltaToUV(
-        tangentRayDeltaWS + tangentBendDeltaWS,
+    float slabDeltaH;
+    float2 uvDeltaPerSlab;
+    VividFurComputeHybridSlabUvDelta(
+        positionWS,
         positionWSDdx,
         positionWSDdy,
+        geomNormalWS,
+        cameraPosWS,
         uv0Ddx,
-        uv0Ddy);
-
-    // Clamp extreme grazing UV jumps at silhouette discontinuities.
-    float maxUvJump = 0.35f;
-    float uvJumpLenSq = dot(uvDeltaPerSlab, uvDeltaPerSlab);
-    if (uvJumpLenSq > maxUvJump * maxUvJump)
-        uvDeltaPerSlab *= maxUvJump * rsqrt(uvJumpLenSq);
+        uv0Ddy,
+        hTop,
+        shellStep,
+        furLength,
+        gravityWS,
+        gravityStrength,
+        maxParallaxScale,
+        slabDeltaH,
+        uvDeltaPerSlab);
 
     int steps = clamp(stepCount, 1, 8);
     float invSteps = rcp((float)steps);
@@ -503,8 +706,8 @@ VividOpenPBRV2Inputs VividFurParamsToOpenPBRV2Inputs(VividFurSurfaceParams p, ou
 
 // Analytic 3D strand growth tangent T(h) pointing root -> tip along combed fur flow:
 // Groomed animal fur lies predominantly along the surface-projected comb/gravity flow
-// with a progressive root-to-tip loft along shadingNormalWS (roots emerge slightly steeper
-// from the skin while outer tips lie smoothly along gravity/combing for natural Marschner bands).
+// with a progressive root-to-tip loft along shadingNormalWS (optionally driven by DCC FlowMap B)
+// plus deterministic per-strand tangent jitter to break up overly uniform specular bands.
 float3 VividComputeFurStrandTangent3D(
     float3 shadingNormalWS,
     float3 gravityDirWS,
@@ -512,7 +715,12 @@ float3 VividComputeFurStrandTangent3D(
     float3 combDirWS,
     float combStrength,
     float shellHeight,
-    float3 fallbackTangentWS)
+    float3 fallbackTangentWS,
+    float flowLoftOverride = -1.0f,
+    float strandTangentJitter = 0.0f,
+    float2 strandOffsetTS = float2(0.0f, 0.0f),
+    float strandVariation = 0.5f,
+    float3 unitBitangentWS = float3(0.0f, 0.0f, 1.0f))
 {
     float3 nWS = VividSanitizeSurfaceSummaryNormal(shadingNormalWS);
     float h = saturate(shellHeight);
@@ -525,10 +733,27 @@ float3 VividComputeFurStrandTangent3D(
         ? hairFlowTangent * rsqrt(flowLenSq)
         : fallbackTangentWS;
 
-    // Combine surface-combed tangent with physical loft away from skin (higher at roots, sleeker at tips).
+    // Combine surface-combed tangent with physical loft away from skin (or explicit DCC FlowMap B loft).
     float droop = saturate(max(gravityStrength, 0.0f) * 0.5f + comb * 0.5f);
-    float loftWeight = lerp(0.50f, 0.14f, h) * lerp(1.0f, 0.35f, droop);
+    float defaultLoft = lerp(0.50f, 0.14f, h) * lerp(1.0f, 0.35f, droop);
+    float loftWeight = flowLoftOverride >= 0.0f
+        ? lerp(0.08f, 1.15f, saturate(flowLoftOverride)) * lerp(1.0f, 0.65f, h)
+        : defaultLoft;
+
     float3 t3D = unitFlowTangent + nWS * loftWeight;
+
+    // Optional deterministic per-strand tangent scatter (breaks synthetic smooth angel rings).
+    float jitter = saturate(strandTangentJitter);
+    if (jitter > 1e-4f)
+    {
+        float3 sideAxis = SafeNormalize(cross(nWS, unitFlowTangent));
+        float signedVar = (strandVariation * 2.0f - 1.0f);
+        float2 clampedOffset = clamp(strandOffsetTS, -1.0f.xx, 1.0f.xx);
+        t3D += sideAxis * (clampedOffset.x * jitter * 0.65f)
+            + nWS * (signedVar * jitter * 0.45f)
+            + unitBitangentWS * (clampedOffset.y * jitter * 0.25f);
+    }
+
     float tLenSq = dot(t3D, t3D);
     return tLenSq > 1e-6f ? t3D * rsqrt(tLenSq) : unitFlowTangent;
 }
@@ -580,7 +805,12 @@ VividSubstrateHairInputs VividFurParamsToSubstrateHairInputs(
         p.combDirWS,
         p.combStrength,
         h,
-        unitTangent);
+        unitTangent,
+        p.flowLoftOverride,
+        p.strandTangentJitter,
+        p.strandOffsetTS,
+        p.strandVariation,
+        unitBitangent);
     hair.roughness = clamp(lerp(p.rootRoughness, p.tipRoughness, h), 0.05f, 1.0f);
     hair.radialRoughness = clamp(p.hairRadialRoughness, 0.05f, 1.0f);
     hair.cuticleAngleRad = clamp(p.hairCuticleAngleDeg, 0.0f, 12.0f) * (3.14159265359f / 180.0f);

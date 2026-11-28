@@ -351,7 +351,7 @@ namespace VividRP.Editor.Tests
             StringAssert.DoesNotContain("switch (", assembled.ComputeResolveSource);
             StringAssert.DoesNotContain("switch(", assembled.ComputeResolveSource);
 
-            // Stage 3.3 Marschner Hair/Fur parameters reflected into GPUDriven parameter lanes.
+            // Stage 3.3 Marschner Hair/Fur + Phase D1 DCC FlowMap/Pattern parameters reflected into GPUDriven lanes.
             string[] expectedHairParams =
             {
                 "_FurLightingModel",
@@ -361,14 +361,32 @@ namespace VividRP.Editor.Tests
                 "_HairBacklit",
                 "_FurMedullaWeight",
                 "_FurMedullaRoughness",
+                "_UseFlowMap",
+                "_FlowMapFlipY",
+                "_FlowMapStrength",
+                "_FurPatternMode",
+                "_PatternTiling",
+                "_PatternFlipbookGrid",
+                "_PatternHeightContrast",
+                "_StrandTangentJitter",
             };
             foreach (string propName in expectedHairParams)
             {
                 Assert.That(
                     Array.Exists(assembled.ParameterSlots, slot => slot.PropertyName == propName),
                     Is.True,
-                    $"Expected Stage 3.3 Hair parameter '{propName}' to be reflected into GPUDriven parameter slots.");
+                    $"Expected Stage 3.3 / Phase D1 Hair parameter '{propName}' to be reflected into GPUDriven parameter slots.");
             }
+
+            // Phase D1 DCC data maps must be reflected with linear Mask sampling (never sRGB).
+            VividSlabResourceSlot flowSlot = Array.Find(assembled.ResourceSlots, r => r.PropertyName == "_FurFlowMap");
+            VividSlabResourceSlot patternSlot = Array.Find(assembled.ResourceSlots, r => r.PropertyName == "_FurPatternMap");
+            Assert.That(flowSlot, Is.Not.Null, "Expected _FurFlowMap to be reflected into GPUDriven resource slots.");
+            Assert.That(patternSlot, Is.Not.Null, "Expected _FurPatternMap to be reflected into GPUDriven resource slots.");
+            Assert.That(flowSlot.SampleKind, Is.EqualTo(VividSlabTextureSampleKind.Mask));
+            Assert.That(patternSlot.SampleKind, Is.EqualTo(VividSlabTextureSampleKind.Mask));
+            StringAssert.Contains("VividDecodeFurFlowMapSample(", assembled.ComputeResolveSource);
+            StringAssert.Contains("VividEvaluateFurFlipbookSample(", assembled.ComputeResolveSource);
         }
 
         [Test]

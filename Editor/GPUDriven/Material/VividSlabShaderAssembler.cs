@@ -995,6 +995,8 @@ namespace VividRP.Editor.GPUDriven
                     sampleKind = VividSlabTextureSampleKind.Normal;
                 }
                 else if (propName.IndexOf("Mask", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Flow", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propName.IndexOf("Pattern", StringComparison.OrdinalIgnoreCase) >= 0
                     || propName.IndexOf("Thread", StringComparison.OrdinalIgnoreCase) >= 0
                     || propName.IndexOf("Fuzz", StringComparison.OrdinalIgnoreCase) >= 0
                     || propName.IndexOf("Rough", StringComparison.OrdinalIgnoreCase) >= 0

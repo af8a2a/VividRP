@@ -142,14 +142,25 @@ namespace VividRP.Editor.Tests
             Assert.That(VividRP.Runtime.RenderPass.Core.StrandHairShadingPass.EnableClusteredLightGrid, Is.True);
             Assert.That(VividLightData.ReflectionProbeData.Stride, Is.GreaterThan(0));
 
-            var pass = new VividRP.Runtime.RenderPass.Core.StrandHairShadingPass();
+            var visPass = new VividRP.Runtime.RenderPass.Core.StrandHairVisibilityPass();
+            var shadePass = new VividRP.Runtime.RenderPass.Core.StrandHairShadingPass();
+            var compPass = new VividRP.Runtime.RenderPass.Core.StrandHairCompositionPass();
+            var emptyFrameData = new UnityEngine.Rendering.ContextContainer();
             try
             {
-                pass.Create();
+                visPass.Create();
+                shadePass.Create();
+                compPass.Create();
+
+                Assert.That(shadePass.IsActive(emptyFrameData), Is.False);
+                Assert.That(compPass.IsActive(emptyFrameData), Is.False);
             }
             finally
             {
-                pass.Dispose();
+                visPass.Dispose();
+                shadePass.Dispose();
+                compPass.Dispose();
+                emptyFrameData.Dispose();
             }
         }
     }

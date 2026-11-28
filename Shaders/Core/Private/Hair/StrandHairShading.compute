@@ -343,7 +343,7 @@ int _CSMCascadeResolution;
 float _CSMNormalBias;
 
 float4 _SkyTextureTint;
-float4 _SkyTextureParams; // x = maxMip, y = intensityMultiplier, z = rotationRad, w = hasActiveSky
+float4 _SkyTextureParams; // x = intensityMultiplier, y = rotationDeg, z = maxMip, w = hasActiveSky
 float3 _HairFallbackAmbientColor;
 
 // Per-model uniforms
@@ -716,9 +716,9 @@ void ShadeHairVertex(uint vIdx)
     float3 specularRadiance = _HairFallbackAmbientColor * 0.65f;
     if (_SkyTextureParams.w > 0.5f)
     {
-        float maxMip = _SkyTextureParams.x;
-        float skyScale = _SkyTextureParams.y;
-        float skyRot = _SkyTextureParams.z;
+        float skyScale = max(_SkyTextureParams.x, 0.0f);
+        float skyRot = radians(_SkyTextureParams.y);
+        float maxMip = max(_SkyTextureParams.z, 0.0f);
         float specMip = saturate(_HairRoughnessParams.x) * maxMip;
 
         float3 skyDiff = _SkyTexture.SampleLevel(sampler_LinearClamp, RotateAroundY(cylNormalWS, skyRot), maxMip).rgb;

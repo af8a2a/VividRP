@@ -12,6 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
     /// interpolating per-vertex Strand-Space shaded radiance along each segment
     /// across the 3 ordered front visibility layers, reconstructing total coverage
     /// quadratically, and extrapolating deep-layer radiance (w_i = C_i * 0.25^(3-i)).
+    /// Standard RenderGraph node with automatic zero-overhead skip when no hair is visible.
     /// </summary>
     public sealed class StrandHairCompositionPass : ComputePass
     {
@@ -40,6 +41,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_ColorTexture;
 
+        [RenderGraphResource(Name = "HairVisAtlas", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_VisAtlasBuffer;
+
+        [RenderGraphResource(Name = "HairShadingSync", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_ShadingSyncBuffer;
+
         private ComputeShader m_Compute;
         private int m_ComposeKernel = -1;
 
@@ -52,6 +59,8 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(nameof(StrandHairCompositionPass));
             m_ColorTexture = RenderGraphTexture.CreateColorTarget("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_ColorTexture.desc.EnableRandomWrite = true;
+            m_VisAtlasBuffer = RenderGraphBuffer.CreateStructured("HairVisAtlas", 1, sizeof(uint));
+            m_ShadingSyncBuffer = RenderGraphBuffer.CreateStructured("HairShadingSync", 1, sizeof(uint));
         }
 
         public override void Create()
@@ -73,64 +82,87 @@ namespace VividRP.Runtime.RenderPass.Core
             return m_ComposeKernel >= 0;
         }
 
-        public override void Prepare(ContextContainer frameData)
+        public override bool IsActive(ContextContainer frameData)
         {
-            PrepareInternal(frameData, null);
+            return frameData != null
+                && frameData.Contains<StrandHairFrameData>()
+                && frameData.Get<StrandHairFrameData>().HasVisibleHair
+                && EnsureShaderLoaded();
         }
 
-        internal bool PrepareInternal(ContextContainer frameData, StrandHairGpuPool gpuPool)
+        public override void Prepare(ContextContainer frameData)
         {
-            m_FrameData = frameData.Contains<StrandHairFrameData>()
+            m_FrameData = frameData != null && frameData.Contains<StrandHairFrameData>()
                 ? frameData.Get<StrandHairFrameData>()
                 : null;
-            m_GpuPool = gpuPool;
+            m_GpuPool = m_FrameData?.GpuPool ?? StrandHairGpuPool.Shared;
 
             if (m_FrameData == null || !m_FrameData.HasVisibleHair || !EnsureShaderLoaded())
-                return false;
+                return;
 
-            var cameraData = frameData.Get<VividCameraData>();
-            if (cameraData == null || cameraData.camera == null)
-                return false;
+            // Ensure the bound SceneColor target supports UAV writes even when produced by a raster/blit pass (e.g. AtmosphericScatteringPass)
+            if (m_ColorTexture?.desc != null)
+                m_ColorTexture.desc.EnableRandomWrite = true;
 
             m_PreExposureBuffer = VividAutoExposureSystem.ResolvePreExposureBuffer(
                 frameData.Get<VividExposureData>());
 
-            return true;
+            if (!PassRecorder.IsPassTextureImportActive)
+                return;
+
+            int allocCount = m_FrameData.Allocations.Count;
+            for (int slotIdx = 0; slotIdx < allocCount; slotIdx++)
+            {
+                StrandHairModelAtlasAllocation alloc = m_FrameData.Allocations[slotIdx];
+                if (!alloc.IsVisible || alloc.TileCount <= 0)
+                    continue;
+
+                HairGroomRenderEntry entry = m_FrameData.ActiveEntries[alloc.EntryIndex];
+                HairGroomGpuResource gpuRes = entry.Asset?.GetOrCreateGpuResource();
+                if (gpuRes == null || !gpuRes.IsValid)
+                    continue;
+
+                StrandHairModelScratchSlot slot = m_GpuPool.GetOrCreateSlot(
+                    slotIdx,
+                    gpuRes.VertexCount,
+                    gpuRes.SegmentCount);
+                if (slot.PostTransformClipBuffer != null && slot.PostTransformClipBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.PostTransformClipBuffer, AccessFlags.Read);
+                if (slot.WorldPosRadiusBuffer != null && slot.WorldPosRadiusBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.WorldPosRadiusBuffer, AccessFlags.Read);
+                if (slot.VertexShadingBuffer != null && slot.VertexShadingBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.VertexShadingBuffer, AccessFlags.Read);
+            }
         }
 
         public override void Record(ComputePassContext context)
-        {
-            if (m_ColorTexture == null || !m_ColorTexture.innerHandle.IsValid())
-                return;
-
-            RecordWithHandle(context.cmd, m_ColorTexture.innerHandle, m_GpuPool);
-        }
-
-        internal void RecordWithHandle(
-            ComputeCommandBuffer cmd,
-            TextureHandle colorHandle,
-            StrandHairGpuPool gpuPool)
         {
             if (m_FrameData == null
                 || !m_FrameData.HasVisibleHair
                 || !m_FrameData.VisibilityRecordedThisFrame
                 || m_FrameData.VisAtlasBuffer == null
                 || !m_FrameData.VisAtlasBuffer.IsValid()
-                || !colorHandle.IsValid()
-                || gpuPool == null
+                || m_ColorTexture == null
+                || !m_ColorTexture.innerHandle.IsValid()
+                || m_GpuPool == null
                 || !EnsureShaderLoaded())
             {
                 return;
             }
 
+            ComputeCommandBuffer cmd = context.cmd;
             int downscale = Mathf.Max(1, m_FrameData.DownscaleFactor);
             float atlasWidth = Mathf.Max(1, (m_FrameData.ScreenWidth + downscale - 1) / downscale);
             float atlasHeight = Mathf.Max(1, (m_FrameData.ScreenHeight + downscale - 1) / downscale);
 
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                cmd.SetComputeTextureParam(m_Compute, m_ComposeKernel, SceneColorId, colorHandle);
-                cmd.SetComputeBufferParam(m_Compute, m_ComposeKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
+                cmd.SetComputeTextureParam(m_Compute, m_ComposeKernel, SceneColorId, m_ColorTexture.innerHandle);
+                if (m_VisAtlasBuffer != null && m_VisAtlasBuffer.innerHandle.IsValid())
+                    cmd.SetComputeBufferParam(m_Compute, m_ComposeKernel, VisAtlasId, m_VisAtlasBuffer.innerHandle);
+                else
+                    cmd.SetComputeBufferParam(m_Compute, m_ComposeKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
+
                 if (m_PreExposureBuffer != null)
                 {
                     cmd.SetComputeBufferParam(
@@ -159,7 +191,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     if (gpuRes == null || !gpuRes.IsValid)
                         continue;
 
-                    StrandHairModelScratchSlot slot = gpuPool.GetOrCreateSlot(slotIdx, gpuRes.VertexCount, gpuRes.SegmentCount);
+                    StrandHairModelScratchSlot slot = m_GpuPool.GetOrCreateSlot(
+                        slotIdx,
+                        gpuRes.VertexCount,
+                        gpuRes.SegmentCount);
 
                     cmd.SetComputeMatrixParam(m_Compute, LocalToWorldId, entry.LocalToWorld);
                     cmd.SetComputeIntParam(m_Compute, FirstAtlasTileId, alloc.FirstAtlasTile);
@@ -180,8 +215,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeBufferParam(m_Compute, m_ComposeKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_ComposeKernel, VertexShadingId, slot.VertexShadingBuffer);
 
-                    int gx = (alloc.ComposeSize.x + 7) / 8;
-                    int gy = (alloc.ComposeSize.y + 7) / 8;
+                    int gx = (alloc.ComposeSize.x + 7) >> 3;
+                    int gy = (alloc.ComposeSize.y + 7) >> 3;
                     cmd.DispatchCompute(m_Compute, m_ComposeKernel, gx, gy, 1);
                 }
             }

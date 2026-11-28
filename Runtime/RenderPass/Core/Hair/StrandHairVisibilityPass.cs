@@ -10,8 +10,8 @@ namespace VividRP.Runtime.RenderPass.Core
     /// Strand-Based Hair Visibility Pass (IJGC SIGGRAPH 2025 architecture):
     /// 1) Allocates 64x64 tiles in the bounded 32-bit 3-Layer + Coverage Visibility Atlas.
     /// 2) Transforms rest vertices to global clip-space + world-space caches.
-    /// 3) Performs frustum + conservative HZB segment culling with wave-aggregated append,
-    ///    tile histogram accumulation, and visible-vertex bitmask marking.
+    /// 3) Performs frustum + conservative farthest-Z occlusion culling with wave-aggregated
+    ///    append, tile histogram accumulation, and visible-vertex bitmask marking.
     /// 4) Phase S3: Runs 1024-bin Global Counting Sort + Natural-Order Vertex Compaction +
     ///    Dual LDS Pixel Request Stack software rasterizer (or S2 direct rasterizer when disabled).
     /// Implements IAsyncComputeSupportedPass for async overlap with opaque lighting/GI.
@@ -78,6 +78,11 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "HZB", Access = AccessFlags.Read)]
         private RenderGraphTexture m_HzbTexture;
 
+        [RenderGraphResource(Name = "HairVisAtlas", Access = AccessFlags.Write)]
+        private RenderGraphBuffer m_VisAtlasBuffer;
+
+        private readonly RenderGraphTexture m_LocalHzbTexture;
+
         private ComputeShader m_Compute;
         private int m_ClearAtlasKernel = -1;
         private int m_BuildFarthestDepth8x8Kernel = -1;
@@ -93,26 +98,28 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_RasterizeSegmentsKernel = -1;
         private int m_RasterizeSegmentsLdsKernel = -1;
 
-        private readonly StrandHairGpuPool m_GpuPool = new StrandHairGpuPool();
         private StrandHairFrameData m_FrameData;
+        private StrandHairGpuPool m_GpuPool;
         private Matrix4x4 m_ViewMatrix;
         private Matrix4x4 m_GpuViewProjMatrix;
         private float m_NearClipPlane = 0.05f;
         private GraphicsBuffer m_FarthestDepth8x8Buffer;
         private GraphicsBuffer m_FarthestDepth32x32Buffer;
-        private readonly int[] m_DepthTileCounts = new int[4];
         private int m_DepthTiles8x8X;
         private int m_DepthTiles8x8Y;
         private int m_DepthTiles32x32X;
         private int m_DepthTiles32x32Y;
-
-        internal StrandHairGpuPool GpuPool => m_GpuPool;
+        private readonly int[] m_DepthTileCounts = new int[4];
 
         public StrandHairVisibilityPass()
         {
             profilingSampler = new ProfilingSampler(nameof(StrandHairVisibilityPass));
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_HzbTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R32_SFloat);
+            m_LocalHzbTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R32_SFloat);
+            m_LocalHzbTexture.desc.Width = 1;
+            m_LocalHzbTexture.desc.Height = 1;
+            m_HzbTexture = m_LocalHzbTexture;
+            m_VisAtlasBuffer = RenderGraphBuffer.CreateStructured("HairVisAtlas", 1, sizeof(uint));
         }
 
         public override void Create()
@@ -122,8 +129,23 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool EnsureShaderLoaded()
         {
-            if (m_Compute != null && m_RasterizeSegmentsLdsKernel >= 0 && m_BuildFarthestDepth32x32Kernel >= 0)
+            if (m_Compute != null
+                && m_ClearAtlasKernel >= 0
+                && m_BuildFarthestDepth8x8Kernel >= 0
+                && m_BuildFarthestDepth32x32Kernel >= 0
+                && m_TransformVerticesKernel >= 0
+                && m_ClearCullArgsKernel >= 0
+                && m_ClearVisibleVertexMaskKernel >= 0
+                && m_ClearSortBinsKernel >= 0
+                && m_CullSegmentsKernel >= 0
+                && m_PrefixSumSortBinsKernel >= 0
+                && m_ScatterSortedSegmentsKernel >= 0
+                && m_CompactVisibleVerticesKernel >= 0
+                && m_RasterizeSegmentsKernel >= 0
+                && m_RasterizeSegmentsLdsKernel >= 0)
+            {
                 return true;
+            }
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_Compute = resources?.StrandHairVisibilityCompute;
@@ -151,41 +173,41 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_CompactVisibleVerticesKernel >= 0;
         }
 
-        public override void Prepare(ContextContainer frameData)
+        public override bool IsActive(ContextContainer frameData)
         {
-            PrepareInternal(frameData, m_HzbTexture?.desc, 0, 0);
+            return HairGroomSystem.ActiveCount > 0 && EnsureShaderLoaded();
         }
 
-        internal bool PrepareInternal(
-            ContextContainer frameData,
-            RenderGraphTextureDesc hzbDesc,
-            int overrideWidth,
-            int overrideHeight)
+        public override void Prepare(ContextContainer frameData)
         {
             m_FrameData = frameData.GetOrCreate<StrandHairFrameData>();
             m_FrameData.Reset();
+            m_GpuPool = StrandHairGpuPool.Shared;
+            m_FrameData.GpuPool = m_GpuPool;
 
             if (HairGroomSystem.ActiveCount == 0 || !EnsureShaderLoaded())
-                return false;
+                return;
 
             var cameraData = frameData.Get<VividCameraData>();
             if (cameraData == null || cameraData.camera == null)
-                return false;
+                return;
 
-            int width = overrideWidth > 0
-                ? overrideWidth
+            int depthWidth = m_DepthTexture?.desc != null && m_DepthTexture.desc.Width > 0 ? m_DepthTexture.desc.Width : 0;
+            int depthHeight = m_DepthTexture?.desc != null && m_DepthTexture.desc.Height > 0 ? m_DepthTexture.desc.Height : 0;
+            int width = depthWidth > 0
+                ? depthWidth
                 : (cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth);
-            int height = overrideHeight > 0
-                ? overrideHeight
+            int height = depthHeight > 0
+                ? depthHeight
                 : (cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight);
             if (width <= 0 || height <= 0)
-                return false;
+                return;
 
             int collected = HairGroomSystem.CollectActiveEntries(
                 m_FrameData.ActiveEntries,
                 cameraData.camera.cullingMask);
             if (collected <= 0)
-                return false;
+                return;
 
             m_ViewMatrix = cameraData.GetViewMatrix();
             Matrix4x4 projMatrix = cameraData.GetProjectionMatrix();
@@ -207,7 +229,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 out int downscale);
 
             if (visibleCount <= 0 || totalTiles <= 0)
-                return false;
+                return;
 
             int atlasHeight = Mathf.Max(1, (height + downscale - 1) / downscale);
             m_FrameData.VisAtlasBuffer = m_GpuPool.EnsureVisAtlasBuffer(StrandHairGpuPool.GlobalMaxAtlasTiles);
@@ -225,36 +247,66 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarthestDepth8x8Buffer = m_GpuPool.EnsureFarthestDepth8x8Buffer(m_DepthTiles8x8X * m_DepthTiles8x8Y);
             m_FarthestDepth32x32Buffer = m_GpuPool.EnsureFarthestDepth32x32Buffer(m_DepthTiles32x32X * m_DepthTiles32x32Y);
 
-            return true;
+            if (!PassRecorder.IsPassTextureImportActive)
+                return;
+
+            if (m_FrameData.VisAtlasBuffer != null && m_FrameData.VisAtlasBuffer.IsValid())
+            {
+                BufferHandle visAtlasHandle = PassRecorder.ImportBufferHandle(m_FrameData.VisAtlasBuffer);
+                PassRecorder.BindImportedBuffer(m_VisAtlasBuffer, visAtlasHandle);
+            }
+
+            if (m_FarthestDepth8x8Buffer != null && m_FarthestDepth8x8Buffer.IsValid())
+                PassRecorder.ImportBufferForPass(this, m_FarthestDepth8x8Buffer, AccessFlags.ReadWrite);
+            if (m_FarthestDepth32x32Buffer != null && m_FarthestDepth32x32Buffer.IsValid())
+                PassRecorder.ImportBufferForPass(this, m_FarthestDepth32x32Buffer, AccessFlags.ReadWrite);
+
+            int allocCount = m_FrameData.Allocations.Count;
+            for (int slotIdx = 0; slotIdx < allocCount; slotIdx++)
+            {
+                StrandHairModelAtlasAllocation alloc = m_FrameData.Allocations[slotIdx];
+                if (!alloc.IsVisible || alloc.TileCount <= 0)
+                    continue;
+
+                HairGroomRenderEntry entry = m_FrameData.ActiveEntries[alloc.EntryIndex];
+                HairGroomGpuResource gpuRes = entry.Asset?.GetOrCreateGpuResource();
+                if (gpuRes == null || !gpuRes.IsValid)
+                    continue;
+
+                StrandHairModelScratchSlot slot = m_GpuPool.GetOrCreateSlot(
+                    slotIdx,
+                    gpuRes.VertexCount,
+                    gpuRes.SegmentCount);
+                if (slot.PostTransformClipBuffer != null && slot.PostTransformClipBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.PostTransformClipBuffer, AccessFlags.Write);
+                if (slot.WorldPosRadiusBuffer != null && slot.WorldPosRadiusBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.WorldPosRadiusBuffer, AccessFlags.Write);
+                if (slot.VisibleVertexMaskBuffer != null && slot.VisibleVertexMaskBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.VisibleVertexMaskBuffer, AccessFlags.Write);
+                if (slot.VisibleVertexListBuffer != null && slot.VisibleVertexListBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.VisibleVertexListBuffer, AccessFlags.Write);
+                if (slot.IndirectShadeArgsBuffer != null && slot.IndirectShadeArgsBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.IndirectShadeArgsBuffer, AccessFlags.Write);
+            }
         }
 
         public override void Record(ComputePassContext context)
-        {
-            if (m_DepthTexture == null || !m_DepthTexture.innerHandle.IsValid())
-                return;
-
-            TextureHandle hzbHandle = m_HzbTexture != null && m_HzbTexture.innerHandle.IsValid()
-                ? m_HzbTexture.innerHandle
-                : default;
-            RecordWithHandles(context.cmd, m_DepthTexture.innerHandle, hzbHandle);
-        }
-
-        internal void RecordWithHandles(
-            ComputeCommandBuffer cmd,
-            TextureHandle depthHandle,
-            TextureHandle hzbHandle)
         {
             if (m_FrameData == null
                 || !m_FrameData.HasVisibleHair
                 || m_FrameData.TotalAllocatedTiles <= 0
                 || m_FrameData.VisAtlasBuffer == null
                 || !m_FrameData.VisAtlasBuffer.IsValid()
-                || !depthHandle.IsValid()
+                || m_DepthTexture == null
+                || !m_DepthTexture.innerHandle.IsValid()
+                || m_GpuPool == null
                 || !EnsureShaderLoaded())
             {
                 return;
             }
 
+            ComputeCommandBuffer cmd = context.cmd;
+            TextureHandle depthHandle = m_DepthTexture.innerHandle;
             int downscale = Mathf.Max(1, m_FrameData.DownscaleFactor);
             float atlasWidth = Mathf.Max(1, (m_FrameData.ScreenWidth + downscale - 1) / downscale);
             float atlasHeight = Mathf.Max(1, (m_FrameData.ScreenHeight + downscale - 1) / downscale);
@@ -273,7 +325,10 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 // 1. Clear only the allocated tiles of the Visibility Atlas
                 cmd.SetComputeIntParam(m_Compute, AllocatedTileCountId, m_FrameData.TotalAllocatedTiles);
-                cmd.SetComputeBufferParam(m_Compute, m_ClearAtlasKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
+                if (m_VisAtlasBuffer != null && m_VisAtlasBuffer.innerHandle.IsValid())
+                    cmd.SetComputeBufferParam(m_Compute, m_ClearAtlasKernel, VisAtlasId, m_VisAtlasBuffer.innerHandle);
+                else
+                    cmd.SetComputeBufferParam(m_Compute, m_ClearAtlasKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
                 int clearGroups = (m_FrameData.TotalAllocatedTiles * StrandHairAtlasContract.TilePixels + 63) / 64;
                 cmd.DispatchCompute(m_Compute, m_ClearAtlasKernel, clearGroups, 1, 1);
 
@@ -365,7 +420,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeBufferParam(m_Compute, m_ClearSortBinsKernel, TileHistogramId, slot.TileHistogramBuffer);
                     cmd.DispatchCompute(m_Compute, m_ClearSortBinsKernel, (StrandHairAtlasContract.TileHistogramBufferUints + 63) / 64, 1, 1);
 
-                    // 2c. Coarse frustum + conservative farthest-Z occlusion segment culling (also fills tile histogram & visible vertex mask)
+                    // 2c. Coarse frustum + conservative farthest-Z occlusion segment culling
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
@@ -404,32 +459,20 @@ namespace VividRP.Runtime.RenderPass.Core
                         cmd.DispatchCompute(m_Compute, m_CompactVisibleVerticesKernel, (maskUints + 63) / 64, 1, 1);
                     }
 
-                    if (useLdsStack)
-                    {
-                        // 2f-S3. Wave32 Dual LDS Pixel Request Stack software rasterizer (byte offset 16 = 32-wide groupX)
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, SortedSegmentListId, slot.SortedSegmentListBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsLdsKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
-                        cmd.SetComputeTextureParam(m_Compute, m_RasterizeSegmentsLdsKernel, SceneDepthId, depthHandle);
-                        cmd.DispatchCompute(m_Compute, m_RasterizeSegmentsLdsKernel, slot.IndirectRasterArgsBuffer, 16u);
-                    }
+                    int rasterKernel = useLdsStack ? m_RasterizeSegmentsLdsKernel : m_RasterizeSegmentsKernel;
+                    uint rasterArgsOffset = useLdsStack ? 16u : 0u;
+                    cmd.SetComputeBufferParam(m_Compute, rasterKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, rasterKernel, PostTransformClipId, slot.PostTransformClipBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, rasterKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, rasterKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, rasterKernel, SortedSegmentListId, slot.SortedSegmentListBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, rasterKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
+                    if (m_VisAtlasBuffer != null && m_VisAtlasBuffer.innerHandle.IsValid())
+                        cmd.SetComputeBufferParam(m_Compute, rasterKernel, VisAtlasId, m_VisAtlasBuffer.innerHandle);
                     else
-                    {
-                        // Direct flattened trapezoid software rasterization (64-wide groupX at byte offset 0)
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, SortedSegmentListId, slot.SortedSegmentListBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
-                        cmd.SetComputeBufferParam(m_Compute, m_RasterizeSegmentsKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
-                        cmd.SetComputeTextureParam(m_Compute, m_RasterizeSegmentsKernel, SceneDepthId, depthHandle);
-                        cmd.DispatchCompute(m_Compute, m_RasterizeSegmentsKernel, slot.IndirectRasterArgsBuffer, 0u);
-                    }
+                        cmd.SetComputeBufferParam(m_Compute, rasterKernel, VisAtlasId, m_FrameData.VisAtlasBuffer);
+                    cmd.SetComputeTextureParam(m_Compute, rasterKernel, SceneDepthId, depthHandle);
+                    cmd.DispatchCompute(m_Compute, rasterKernel, slot.IndirectRasterArgsBuffer, rasterArgsOffset);
                 }
 
                 m_FrameData.VisibilityRecordedThisFrame = true;
@@ -438,7 +481,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
-            m_GpuPool.Dispose();
             m_Compute = null;
             m_ClearAtlasKernel = -1;
             m_BuildFarthestDepth8x8Kernel = -1;
@@ -456,6 +498,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FarthestDepth8x8Buffer = null;
             m_FarthestDepth32x32Buffer = null;
             m_FrameData = null;
+            m_GpuPool = null;
         }
     }
 }

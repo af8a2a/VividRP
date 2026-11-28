@@ -1,17 +1,19 @@
 using System;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
-    /// Phase S2 Strand-Space Per-Vertex Shading Pass (IJGC SIGGRAPH 2025):
+    /// Phase S2/S3 Strand-Space Per-Vertex Shading Pass (IJGC SIGGRAPH 2025):
     /// Shades only visible strand vertices (marked by StrandHairVisibilityPass) using
     /// VividRP's Karis Marschner + Yan Medulla + Zinke Dual Scattering BCSDF
-    /// (VividHairFurBSDF.hlsl), VividRP's Clustered Lighting light buffers,
-    /// world-space CSM shadow atlas, Sky IBL cubemap, and baked Biased L1 SH self-shadowing.
-    /// Implements IAsyncComputeSupportedPass for async compute overlap.
+    /// (VividHairFurBSDF.hlsl), VividRP's Clustered LightGrid (Punctual, Area,
+    /// Reflection Probes), world-space CSM shadow atlas, Sky IBL cubemap, and baked
+    /// Biased L1 SH self-shadowing.
+    /// Standard RenderGraph node decoupled from DeferredLightingPass; supports Async Compute.
     /// </summary>
     public sealed class StrandHairShadingPass : ComputePass, IAsyncComputeSupportedPass
     {
@@ -87,6 +89,48 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RoughnessParamsId = Shader.PropertyToID("_HairRoughnessParams");
         private static readonly int MedullaParamsId = Shader.PropertyToID("_HairMedullaParams");
 
+        [RenderGraphResource(Name = "HairVisAtlas", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_VisAtlasBuffer;
+
+        [RenderGraphResource(Name = "HairShadingSync", Access = AccessFlags.Write)]
+        private RenderGraphBuffer m_ShadingSyncBuffer;
+
+        [RenderGraphResource(Name = "DirectionalLights", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_DirectionalLightBuffer;
+
+        [RenderGraphResource(Name = "PunctualLights", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_PunctualLightBuffer;
+
+        [RenderGraphResource(Name = "AreaLights", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_AreaLightBuffer;
+
+        [RenderGraphResource(Name = "ReflectionProbes", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_ReflectionProbeBuffer;
+
+        [RenderGraphResource(Name = "LayeredOffset", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_LayeredOffsetBuffer;
+
+        [RenderGraphResource(Name = "LayeredLightList", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_LayeredLightListBuffer;
+
+        [RenderGraphResource(Name = "LogBaseBuffer", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_LogBaseBuffer;
+
+        [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_CSMShadowAtlas;
+
+        [RenderGraphResource(Name = "SkyIBLCubemap", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_SkyIBLCubemap;
+
+        private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
+        private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
+        private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
+        private readonly RenderGraphBuffer m_LocalReflectionProbeBuffer;
+        private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
+        private readonly RenderGraphBuffer m_LocalLayeredLightListBuffer;
+        private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
+        private readonly RenderGraphTexture m_LocalCSMShadowAtlas;
+
         private ComputeShader m_Compute;
         private int m_ShadeKernel = -1;
         private int m_ShadeCompactKernel = -1;
@@ -94,13 +138,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private StrandHairFrameData m_FrameData;
         private StrandHairGpuPool m_GpuPool;
         private GraphicsBuffer m_PreExposureBuffer;
-
-        private GraphicsBuffer m_DummyDirectionalLightBuffer;
-        private GraphicsBuffer m_DummyPunctualLightBuffer;
-        private GraphicsBuffer m_DummyAreaLightBuffer;
-        private GraphicsBuffer m_DummyReflectionProbeBuffer;
-        private GraphicsBuffer m_DummyUintBuffer;
-        private GraphicsBuffer m_DummyFloatBuffer;
 
         private Vector3 m_CameraPosWS;
         private Matrix4x4 m_ViewMatrix = Matrix4x4.identity;
@@ -141,12 +178,74 @@ namespace VividRP.Runtime.RenderPass.Core
         public StrandHairShadingPass()
         {
             profilingSampler = new ProfilingSampler(nameof(StrandHairShadingPass));
+
+            m_VisAtlasBuffer = RenderGraphBuffer.CreateStructured("HairVisAtlas", 1, sizeof(uint));
+            m_ShadingSyncBuffer = RenderGraphBuffer.CreateStructured("HairShadingSync", 1, sizeof(uint));
+
+            m_LocalDirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
+            m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
+            m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", 1, VividLightData.AreaLightData.Stride);
+            m_LocalReflectionProbeBuffer = RenderGraphBuffer.CreateStructured("ReflectionProbes", 1, VividLightData.ReflectionProbeData.Stride);
+            m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", 1, sizeof(uint));
+            m_LocalLayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", 1, sizeof(uint));
+            m_LocalLogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", 1, sizeof(float));
+
+            m_DirectionalLightBuffer = m_LocalDirectionalLightBuffer;
+            m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
+            m_AreaLightBuffer = m_LocalAreaLightBuffer;
+            m_ReflectionProbeBuffer = m_LocalReflectionProbeBuffer;
+            m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
+            m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
+            m_LogBaseBuffer = m_LocalLogBaseBuffer;
+
+            m_LocalCSMShadowAtlas = CreateFallbackShadowAtlasTexture("CSMShadowAtlas");
+            m_CSMShadowAtlas = m_LocalCSMShadowAtlas;
+            m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
+        }
+
+        private static RenderGraphTexture CreateFallbackShadowAtlasTexture(string name)
+        {
+            return new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 1,
+                    Height = 1,
+                    Slices = 1,
+                    Dimension = TextureDimension.Tex2DArray,
+                    ColorFormat = GraphicsFormat.None,
+                    DepthBufferBits = DepthBits.Depth16,
+                    FilterMode = FilterMode.Point,
+                    WrapMode = TextureWrapMode.Clamp,
+                    IsShadowMap = true,
+                    Name = name,
+                }
+            };
+        }
+
+        private static RenderGraphTexture CreateSkyIBLCubemapTexture(string name)
+        {
+            return new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 1,
+                    Height = 1,
+                    Dimension = TextureDimension.Cube,
+                    ColorFormat = GraphicsFormat.R8G8B8A8_UNorm,
+                    DepthBufferBits = DepthBits.None,
+                    FilterMode = FilterMode.Trilinear,
+                    WrapMode = TextureWrapMode.Clamp,
+                    UseMipMap = true,
+                    AutoGenerateMips = false,
+                    Name = name,
+                }
+            };
         }
 
         public override void Create()
         {
             EnsureShaderLoaded();
-            EnsureDummyLightBuffers();
         }
 
         private bool EnsureShaderLoaded()
@@ -164,86 +263,27 @@ namespace VividRP.Runtime.RenderPass.Core
             return m_ShadeKernel >= 0 && m_ShadeCompactKernel >= 0;
         }
 
-        private void EnsureDummyLightBuffers()
+        public override bool IsActive(ContextContainer frameData)
         {
-            if (m_DummyDirectionalLightBuffer == null || !m_DummyDirectionalLightBuffer.IsValid())
-            {
-                m_DummyDirectionalLightBuffer?.Dispose();
-                m_DummyDirectionalLightBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    1,
-                    VividLightData.DirectionalLightData.Stride);
-            }
-
-            if (m_DummyPunctualLightBuffer == null || !m_DummyPunctualLightBuffer.IsValid())
-            {
-                m_DummyPunctualLightBuffer?.Dispose();
-                m_DummyPunctualLightBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    1,
-                    VividLightData.PunctualLightData.Stride);
-            }
-
-            if (m_DummyAreaLightBuffer == null || !m_DummyAreaLightBuffer.IsValid())
-            {
-                m_DummyAreaLightBuffer?.Dispose();
-                m_DummyAreaLightBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    1,
-                    VividLightData.AreaLightData.Stride);
-            }
-
-            if (m_DummyReflectionProbeBuffer == null || !m_DummyReflectionProbeBuffer.IsValid())
-            {
-                m_DummyReflectionProbeBuffer?.Dispose();
-                m_DummyReflectionProbeBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    1,
-                    VividLightData.ReflectionProbeData.Stride);
-            }
-
-            if (m_DummyUintBuffer == null || !m_DummyUintBuffer.IsValid())
-            {
-                m_DummyUintBuffer?.Dispose();
-                m_DummyUintBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    1,
-                    sizeof(uint));
-            }
-
-            if (m_DummyFloatBuffer == null || !m_DummyFloatBuffer.IsValid())
-            {
-                m_DummyFloatBuffer?.Dispose();
-                m_DummyFloatBuffer = new GraphicsBuffer(
-                    GraphicsBuffer.Target.Structured,
-                    1,
-                    sizeof(float));
-            }
+            return frameData != null
+                && frameData.Contains<StrandHairFrameData>()
+                && frameData.Get<StrandHairFrameData>().HasVisibleHair
+                && EnsureShaderLoaded();
         }
 
         public override void Prepare(ContextContainer frameData)
         {
-            PrepareInternal(frameData, null, null);
-        }
-
-        internal bool PrepareInternal(
-            ContextContainer frameData,
-            StrandHairGpuPool gpuPool,
-            DeferredLightingPass deferredLightingPass)
-        {
             m_FrameData = frameData != null && frameData.Contains<StrandHairFrameData>()
                 ? frameData.Get<StrandHairFrameData>()
                 : null;
-            m_GpuPool = gpuPool;
+            m_GpuPool = m_FrameData?.GpuPool ?? StrandHairGpuPool.Shared;
 
             if (m_FrameData == null || !m_FrameData.HasVisibleHair || !EnsureShaderLoaded())
-                return false;
+                return;
 
             var cameraData = frameData.Get<VividCameraData>();
             if (cameraData == null || cameraData.camera == null)
-                return false;
-
-            EnsureDummyLightBuffers();
+                return;
 
             m_CameraPosWS = cameraData.camera.transform.position;
             m_ViewMatrix = cameraData.GetViewMatrix();
@@ -257,109 +297,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PreExposureBuffer = VividAutoExposureSystem.ResolvePreExposureBuffer(
                 frameData.Get<VividExposureData>());
 
-            // Read exact scene light counts, Clustered LightGrid state & Sky IBL prepared by DeferredLightingPass / ClusteredLightingData
-            var clustered = frameData.Contains<VividClusteredLightingData>()
-                ? frameData.Get<VividClusteredLightingData>()
-                : null;
-
-            if (deferredLightingPass != null)
-            {
-                m_DirectionalLightCount = Mathf.Max(0, deferredLightingPass.DirectionalLightCount);
-                m_MainDirectionalLightIndex = deferredLightingPass.MainDirectionalLightIndex;
-                m_PunctualLightCount = Mathf.Max(0, deferredLightingPass.PunctualLightCount);
-                m_AreaLightCount = Mathf.Max(0, deferredLightingPass.AreaLightCount);
-                m_ReflectionProbeCount = Mathf.Max(0, deferredLightingPass.ReflectionProbeCount);
-                m_SupportsClusteredPunctualLights = deferredLightingPass.SupportsClusteredPunctualLights;
-                m_SupportsClusteredAreaLights = deferredLightingPass.SupportsClusteredAreaLights;
-                m_SupportsClusteredReflectionProbes = deferredLightingPass.SupportsClusteredReflectionProbes;
-                m_IsLogBaseBufferEnabled = deferredLightingPass.IsLogBaseBufferEnabled;
-                m_ClusterTileSize = Mathf.Max(1, deferredLightingPass.ClusterTileSize);
-                m_ClusterSliceCount = Mathf.Max(1, deferredLightingPass.ClusterSliceCount);
-                m_ClusterTileCountX = Mathf.Max(1, deferredLightingPass.ClusterTileCountX);
-                m_ClusterTileCountY = Mathf.Max(1, deferredLightingPass.ClusterTileCountY);
-                m_ClusterNearClip = Mathf.Max(deferredLightingPass.ClusterNearClip, 0.0001f);
-                m_ClusterFarClip = Mathf.Max(deferredLightingPass.ClusterFarClip, m_ClusterNearClip + 0.01f);
-                m_ClusterIsOrthographic = deferredLightingPass.ClusterIsOrthographic;
-                m_ClusterScale = deferredLightingPass.ClusterScale;
-                m_ClusterBase = deferredLightingPass.ClusterBase > 1.0f ? deferredLightingPass.ClusterBase : LightGridPass.ClusterLogBase;
-                m_ClusterLog2SliceCount = deferredLightingPass.ClusterLog2SliceCount > 0 ? deferredLightingPass.ClusterLog2SliceCount : LightGridPass.ClusterLog2SliceCount;
-                m_SkyTextureTint = deferredLightingPass.SkyTextureTint;
-                m_SkyTextureParams = deferredLightingPass.SkyTextureParams;
-            }
-            else if (clustered != null)
-            {
-                m_DirectionalLightCount = Mathf.Max(0, clustered.directionalLightCount);
-                m_MainDirectionalLightIndex = clustered.mainDirectionalLightIndex;
-                m_PunctualLightCount = Mathf.Max(0, clustered.punctualLightCount);
-                m_AreaLightCount = Mathf.Max(0, clustered.areaLightCount);
-                m_ReflectionProbeCount = Mathf.Max(0, clustered.reflectionProbeCount);
-                m_SupportsClusteredPunctualLights = false;
-                m_SupportsClusteredAreaLights = false;
-                m_SupportsClusteredReflectionProbes = false;
-                m_IsLogBaseBufferEnabled = false;
-                m_ClusterTileSize = clustered.clusterTileSize > 0 ? clustered.clusterTileSize : LightGridPass.ClusterTileSize;
-                m_ClusterSliceCount = clustered.clusterSliceCount > 0 ? clustered.clusterSliceCount : LightGridPass.ClusterSliceCount;
-                m_ClusterTileCountX = clustered.clusterTileCountX > 0
-                    ? clustered.clusterTileCountX
-                    : Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)m_ClusterTileSize));
-                m_ClusterTileCountY = clustered.clusterTileCountY > 0
-                    ? clustered.clusterTileCountY
-                    : Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)m_ClusterTileSize));
-                m_ClusterNearClip = Mathf.Max(clustered.clusterNearClip > 0.0f ? clustered.clusterNearClip : cameraData.camera.nearClipPlane, 0.0001f);
-                m_ClusterFarClip = Mathf.Max(clustered.clusterFarClip > m_ClusterNearClip ? clustered.clusterFarClip : cameraData.camera.farClipPlane, m_ClusterNearClip + 0.01f);
-                m_ClusterIsOrthographic = clustered.clusterIsOrthographic;
-                m_ClusterScale = clustered.clusterScale;
-                m_ClusterBase = clustered.clusterBase > 1.0f ? clustered.clusterBase : LightGridPass.ClusterLogBase;
-                m_ClusterLog2SliceCount = clustered.clusterLog2SliceCount > 0 ? clustered.clusterLog2SliceCount : LightGridPass.ClusterLog2SliceCount;
-                m_SkyTextureTint = Color.white;
-                m_SkyTextureParams = Vector4.zero;
-            }
-            else
-            {
-                m_DirectionalLightCount = 0;
-                m_MainDirectionalLightIndex = -1;
-                m_PunctualLightCount = 0;
-                m_AreaLightCount = 0;
-                m_ReflectionProbeCount = 0;
-                m_SupportsClusteredPunctualLights = false;
-                m_SupportsClusteredAreaLights = false;
-                m_SupportsClusteredReflectionProbes = false;
-                m_IsLogBaseBufferEnabled = false;
-                m_ClusterTileSize = LightGridPass.ClusterTileSize;
-                m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
-                m_ClusterTileCountX = Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)m_ClusterTileSize));
-                m_ClusterTileCountY = Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)m_ClusterTileSize));
-                m_ClusterNearClip = Mathf.Max(cameraData.camera.nearClipPlane, 0.0001f);
-                m_ClusterFarClip = Mathf.Max(cameraData.camera.farClipPlane, m_ClusterNearClip + 0.01f);
-                m_ClusterIsOrthographic = cameraData.camera.orthographic ? 1 : 0;
-                m_ClusterScale = 0.0f;
-                m_ClusterBase = LightGridPass.ClusterLogBase;
-                m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
-                m_SkyTextureTint = Color.white;
-                m_SkyTextureParams = Vector4.zero;
-            }
-
-            // World-space CSM shadow metadata (never uses screen-space opaque shadow mask)
-            m_CSMCascadeCount = 0;
-            m_CSMMaxShadowDistance = 0.0f;
-            m_CSMCascadeResolution = 0;
-            m_CSMNormalBias = 0.0f;
-            if (frameData.Contains<VividShadowData>())
-            {
-                var shadowData = frameData.Get<VividShadowData>();
-                if (shadowData != null && shadowData.cascadeCount > 0 && shadowData.cascadeResolution > 0)
-                {
-                    m_CSMCascadeCount = Mathf.Min(shadowData.cascadeCount, VividShadowData.MaxCascadeCount);
-                    m_CSMMaxShadowDistance = Mathf.Max(shadowData.maxShadowDistance, 0.0f);
-                    m_CSMCascadeResolution = shadowData.cascadeResolution;
-                    m_CSMNormalBias = Mathf.Max(shadowData.normalBias, 0.0f);
-                    for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
-                    {
-                        m_CSMViewProjMatrices[i] = shadowData.viewProjMatrices[i];
-                        m_CSMCascadeSpheres[i] = shadowData.cascadeSpheres[i];
-                    }
-                }
-            }
+            PrepareClusteredLightingParameters(frameData, cameraData.camera, screenWidth, screenHeight);
+            PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
+            PrepareCsmShadowParameters(frameData);
 
             // Subtle neutral studio ambient fallback when no active sky cubemap is present
             Color envAmb = RenderSettings.ambientLight.linear * RenderSettings.ambientIntensity;
@@ -368,39 +308,179 @@ namespace VividRP.Runtime.RenderPass.Core
                 ? new Vector3(envAmb.r, envAmb.g, envAmb.b) * 0.25f
                 : new Vector3(0.055f, 0.060f, 0.068f);
 
-            return true;
+            if (!PassRecorder.IsPassTextureImportActive)
+                return;
+
+            GraphicsBuffer syncBuf = m_GpuPool.EnsureShadingSyncBuffer();
+            if (syncBuf != null && syncBuf.IsValid())
+                PassRecorder.BindImportedBuffer(m_ShadingSyncBuffer, PassRecorder.ImportBufferHandle(syncBuf));
+
+            int allocCount = m_FrameData.Allocations.Count;
+            for (int slotIdx = 0; slotIdx < allocCount; slotIdx++)
+            {
+                StrandHairModelAtlasAllocation alloc = m_FrameData.Allocations[slotIdx];
+                if (!alloc.IsVisible || alloc.TileCount <= 0)
+                    continue;
+
+                HairGroomRenderEntry entry = m_FrameData.ActiveEntries[alloc.EntryIndex];
+                HairGroomGpuResource gpuRes = entry.Asset?.GetOrCreateGpuResource();
+                if (gpuRes == null || !gpuRes.IsValid)
+                    continue;
+
+                StrandHairModelScratchSlot slot = m_GpuPool.GetOrCreateSlot(
+                    slotIdx,
+                    gpuRes.VertexCount,
+                    gpuRes.SegmentCount);
+                if (slot.PostTransformClipBuffer != null && slot.PostTransformClipBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.PostTransformClipBuffer, AccessFlags.Read);
+                if (slot.WorldPosRadiusBuffer != null && slot.WorldPosRadiusBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.WorldPosRadiusBuffer, AccessFlags.Read);
+                if (slot.VisibleVertexMaskBuffer != null && slot.VisibleVertexMaskBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.VisibleVertexMaskBuffer, AccessFlags.Read);
+                if (slot.VisibleVertexListBuffer != null && slot.VisibleVertexListBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.VisibleVertexListBuffer, AccessFlags.Read);
+                if (slot.IndirectShadeArgsBuffer != null && slot.IndirectShadeArgsBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.IndirectShadeArgsBuffer, AccessFlags.Read);
+                if (slot.VertexShadingBuffer != null && slot.VertexShadingBuffer.IsValid())
+                    PassRecorder.ImportBufferForPass(this, slot.VertexShadingBuffer, AccessFlags.Write);
+            }
+        }
+
+        private void PrepareClusteredLightingParameters(
+            ContextContainer frameData,
+            Camera camera,
+            int screenWidth,
+            int screenHeight)
+        {
+            var clustered = frameData.Contains<VividClusteredLightingData>()
+                ? frameData.Get<VividClusteredLightingData>()
+                : null;
+
+            m_DirectionalLightCount = 0;
+            m_MainDirectionalLightIndex = -1;
+            m_PunctualLightCount = 0;
+            m_AreaLightCount = 0;
+            m_ReflectionProbeCount = 0;
+            m_SupportsClusteredPunctualLights = false;
+            m_SupportsClusteredAreaLights = false;
+            m_SupportsClusteredReflectionProbes = false;
+            m_IsLogBaseBufferEnabled = false;
+            m_ClusterTileSize = LightGridPass.ClusterTileSize;
+            m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
+            m_ClusterTileCountX = Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)m_ClusterTileSize));
+            m_ClusterTileCountY = Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)m_ClusterTileSize));
+            m_ClusterNearClip = Mathf.Max(camera != null ? camera.nearClipPlane : 0.1f, 0.0001f);
+            m_ClusterFarClip = Mathf.Max(camera != null ? camera.farClipPlane : 1000.0f, m_ClusterNearClip + 0.01f);
+            m_ClusterIsOrthographic = camera != null && camera.orthographic ? 1 : 0;
+            m_ClusterScale = 0.0f;
+            m_ClusterBase = LightGridPass.ClusterLogBase;
+            m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
+
+            if (clustered == null)
+                return;
+
+            m_ClusterTileSize = clustered.clusterTileSize > 0 ? clustered.clusterTileSize : LightGridPass.ClusterTileSize;
+            m_ClusterSliceCount = clustered.clusterSliceCount > 0 ? clustered.clusterSliceCount : LightGridPass.ClusterSliceCount;
+            m_ClusterTileCountX = clustered.clusterTileCountX > 0
+                ? clustered.clusterTileCountX
+                : Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)m_ClusterTileSize));
+            m_ClusterTileCountY = clustered.clusterTileCountY > 0
+                ? clustered.clusterTileCountY
+                : Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)m_ClusterTileSize));
+            m_ClusterNearClip = clustered.clusterNearClip > 0.0f ? clustered.clusterNearClip : m_ClusterNearClip;
+            m_ClusterFarClip = clustered.clusterFarClip > m_ClusterNearClip
+                ? clustered.clusterFarClip
+                : Mathf.Max(m_ClusterNearClip + 0.01f, m_ClusterFarClip);
+            m_ClusterIsOrthographic = clustered.clusterIsOrthographic;
+            m_ClusterScale = clustered.clusterScale;
+            m_ClusterBase = clustered.clusterBase > 1.0f ? clustered.clusterBase : LightGridPass.ClusterLogBase;
+            m_ClusterLog2SliceCount = clustered.clusterLog2SliceCount > 0
+                ? clustered.clusterLog2SliceCount
+                : LightGridPass.ClusterLog2SliceCount;
+
+            bool hasBoundDir = !ReferenceEquals(m_DirectionalLightBuffer, m_LocalDirectionalLightBuffer);
+            bool hasBoundPunc = !ReferenceEquals(m_PunctualLightBuffer, m_LocalPunctualLightBuffer);
+            bool hasBoundArea = !ReferenceEquals(m_AreaLightBuffer, m_LocalAreaLightBuffer);
+            bool hasBoundProbes = !ReferenceEquals(m_ReflectionProbeBuffer, m_LocalReflectionProbeBuffer);
+            bool hasBoundClusterLists = !ReferenceEquals(m_LayeredOffsetBuffer, m_LocalLayeredOffsetBuffer)
+                && !ReferenceEquals(m_LayeredLightListBuffer, m_LocalLayeredLightListBuffer);
+            bool hasBoundLogBase = !ReferenceEquals(m_LogBaseBuffer, m_LocalLogBaseBuffer);
+
+            if (hasBoundDir)
+            {
+                m_DirectionalLightCount = Mathf.Max(0, clustered.directionalLightCount);
+                m_MainDirectionalLightIndex = clustered.mainDirectionalLightIndex;
+            }
+
+            if (hasBoundPunc)
+                m_PunctualLightCount = Mathf.Max(0, clustered.punctualLightCount);
+            if (hasBoundArea)
+                m_AreaLightCount = Mathf.Max(0, clustered.areaLightCount);
+            if (hasBoundProbes)
+                m_ReflectionProbeCount = Mathf.Max(0, clustered.reflectionProbeCount);
+
+            bool supportsFiniteGrid = clustered.supportsClusteredPunctualLights && hasBoundClusterLists;
+            m_SupportsClusteredPunctualLights = supportsFiniteGrid && m_PunctualLightCount > 0;
+            m_SupportsClusteredAreaLights = supportsFiniteGrid && m_AreaLightCount > 0;
+            m_SupportsClusteredReflectionProbes = supportsFiniteGrid && m_ReflectionProbeCount > 0;
+            m_IsLogBaseBufferEnabled = supportsFiniteGrid && clustered.isLogBaseBufferEnabled && hasBoundLogBase;
+        }
+
+        private void PrepareSkyTextureState(VividSkyData skyData)
+        {
+            bool hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
+            int skyMaxMip = hasActiveSky ? SkyManager.GetSpecularCubemapMaxMip(skyData) : 0;
+
+            SkyManager.ImportSpecularCubemap(m_SkyIBLCubemap, skyData);
+
+            m_SkyTextureTint = hasActiveSky ? skyData.tint : Color.white;
+            float skyIntensityMultiplier = hasActiveSky ? skyData.exposure : 1.0f;
+            float skyRotation = hasActiveSky ? skyData.rotation : 0.0f;
+            m_SkyTextureParams = DeferredLightingPass.BuildSkyTextureParams(
+                skyMaxMip,
+                skyIntensityMultiplier,
+                skyRotation,
+                hasActiveSky);
+        }
+
+        private void PrepareCsmShadowParameters(ContextContainer frameData)
+        {
+            m_CSMCascadeCount = 0;
+            m_CSMMaxShadowDistance = 0.0f;
+            m_CSMCascadeResolution = 0;
+            m_CSMNormalBias = 0.0f;
+
+            bool hasBoundCsmAtlas = !ReferenceEquals(m_CSMShadowAtlas, m_LocalCSMShadowAtlas);
+            if (!hasBoundCsmAtlas || !frameData.Contains<VividShadowData>())
+                return;
+
+            var shadowData = frameData.Get<VividShadowData>();
+            if (shadowData != null && shadowData.cascadeCount > 0 && shadowData.cascadeResolution > 0)
+            {
+                m_CSMCascadeCount = Mathf.Min(shadowData.cascadeCount, VividShadowData.MaxCascadeCount);
+                m_CSMMaxShadowDistance = Mathf.Max(shadowData.maxShadowDistance, 0.0f);
+                m_CSMCascadeResolution = shadowData.cascadeResolution;
+                m_CSMNormalBias = Mathf.Max(shadowData.normalBias, 0.0f);
+                for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
+                {
+                    m_CSMViewProjMatrices[i] = shadowData.viewProjMatrices[i];
+                    m_CSMCascadeSpheres[i] = shadowData.cascadeSpheres[i];
+                }
+            }
         }
 
         public override void Record(ComputePassContext context)
         {
-            // Explicit graph entry point uses default handles if wired standalone
-        }
-
-        internal void RecordWithHandles(
-            ComputeCommandBuffer cmd,
-            RenderGraphDefaultResources defaultResources,
-            StrandHairGpuPool gpuPool,
-            BufferHandle directionalLights,
-            BufferHandle punctualLights,
-            BufferHandle areaLights,
-            BufferHandle reflectionProbes,
-            BufferHandle layeredLightList,
-            BufferHandle layeredOffset,
-            BufferHandle logBaseBuffer,
-            TextureHandle csmShadowAtlas,
-            TextureHandle skyIblCubemap)
-        {
             if (m_FrameData == null
                 || !m_FrameData.HasVisibleHair
                 || !m_FrameData.VisibilityRecordedThisFrame
-                || gpuPool == null
+                || m_GpuPool == null
                 || !EnsureShaderLoaded())
             {
                 return;
             }
 
-            EnsureDummyLightBuffers();
-
+            ComputeCommandBuffer cmd = context.cmd;
             bool useCompact = StrandHairGpuPool.EnablePhaseS3Optimizations && StrandHairGpuPool.EnableCompactShading;
             int activeKernel = useCompact ? m_ShadeCompactKernel : m_ShadeKernel;
 
@@ -415,54 +495,27 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_PreExposureBuffer);
                 }
 
-                // Bind scene light buffers (use dummy buffer when count == 0 or handle invalid)
-                bool hasDir = directionalLights.IsValid() && m_DirectionalLightCount > 0;
-                bool hasPunc = punctualLights.IsValid() && m_PunctualLightCount > 0;
-                bool hasArea = areaLights.IsValid() && m_AreaLightCount > 0;
-                bool hasProbes = reflectionProbes.IsValid() && m_ReflectionProbeCount > 0;
-                bool hasClusterGridBuffers = layeredLightList.IsValid() && layeredOffset.IsValid();
+                bool hasDir = m_DirectionalLightBuffer != null && m_DirectionalLightBuffer.innerHandle.IsValid() && m_DirectionalLightCount > 0;
+                bool hasPunc = m_PunctualLightBuffer != null && m_PunctualLightBuffer.innerHandle.IsValid() && m_PunctualLightCount > 0;
+                bool hasArea = m_AreaLightBuffer != null && m_AreaLightBuffer.innerHandle.IsValid() && m_AreaLightCount > 0;
+                bool hasProbes = m_ReflectionProbeBuffer != null && m_ReflectionProbeBuffer.innerHandle.IsValid() && m_ReflectionProbeCount > 0;
+                bool hasClusterGridBuffers = m_LayeredLightListBuffer != null && m_LayeredLightListBuffer.innerHandle.IsValid()
+                    && m_LayeredOffsetBuffer != null && m_LayeredOffsetBuffer.innerHandle.IsValid();
                 bool allowClustered = EnableClusteredLightGrid && hasClusterGridBuffers;
 
                 bool useClusteredPunctual = allowClustered && hasPunc && m_SupportsClusteredPunctualLights;
                 bool useClusteredArea = allowClustered && hasArea && m_SupportsClusteredAreaLights;
                 bool useClusteredProbes = allowClustered && hasProbes && m_SupportsClusteredReflectionProbes;
-                bool useLogBase = allowClustered && m_IsLogBaseBufferEnabled && logBaseBuffer.IsValid();
+                bool useLogBase = allowClustered && m_IsLogBaseBufferEnabled
+                    && m_LogBaseBuffer != null && m_LogBaseBuffer.innerHandle.IsValid();
 
-                if (hasDir)
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, DirectionalLightsId, directionalLights);
-                else
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, DirectionalLightsId, m_DummyDirectionalLightBuffer);
-
-                if (hasPunc)
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, PunctualLightsId, punctualLights);
-                else
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, PunctualLightsId, m_DummyPunctualLightBuffer);
-
-                if (hasArea)
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, AreaLightsId, areaLights);
-                else
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, AreaLightsId, m_DummyAreaLightBuffer);
-
-                if (hasProbes)
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, ReflectionProbesId, reflectionProbes);
-                else
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, ReflectionProbesId, m_DummyReflectionProbeBuffer);
-
-                if (hasClusterGridBuffers)
-                {
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, LayeredLightListId, layeredLightList);
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, LayeredOffsetId, layeredOffset);
-                }
-                else
-                {
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, LayeredLightListId, m_DummyUintBuffer);
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, LayeredOffsetId, m_DummyUintBuffer);
-                }
-
-                if (useLogBase)
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, LogBaseBufferId, logBaseBuffer);
-                else
-                    cmd.SetComputeBufferParam(m_Compute, activeKernel, LogBaseBufferId, m_DummyFloatBuffer);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, DirectionalLightsId, m_DirectionalLightBuffer.innerHandle);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, PunctualLightsId, m_PunctualLightBuffer.innerHandle);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, AreaLightsId, m_AreaLightBuffer.innerHandle);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, ReflectionProbesId, m_ReflectionProbeBuffer.innerHandle);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, LayeredLightListId, m_LayeredLightListBuffer.innerHandle);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, LayeredOffsetId, m_LayeredOffsetBuffer.innerHandle);
+                cmd.SetComputeBufferParam(m_Compute, activeKernel, LogBaseBufferId, m_LogBaseBuffer.innerHandle);
 
                 cmd.SetComputeIntParam(m_Compute, DirectionalLightCountId, hasDir ? m_DirectionalLightCount : 0);
                 cmd.SetComputeIntParam(m_Compute, MainDirectionalLightIndexId, hasDir ? m_MainDirectionalLightIndex : -1);
@@ -493,25 +546,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeVectorParam(m_Compute, ScreenSizeId, m_ScreenSize);
                 cmd.SetComputeMatrixParam(m_Compute, ViewMatrixId, m_ViewMatrix);
 
-                // World-space CSM shadow atlas (always bound to a RenderGraph-declared TextureHandle)
-                bool hasCsm = csmShadowAtlas.IsValid() && m_CSMCascadeCount > 0 && m_CSMCascadeResolution > 0;
-                if (csmShadowAtlas.IsValid())
-                    cmd.SetComputeTextureParam(m_Compute, activeKernel, CSMShadowAtlasId, csmShadowAtlas);
+                // World-space CSM shadow atlas (m_CSMShadowAtlas is always declared on the pass builder)
+                bool hasBoundCsm = !ReferenceEquals(m_CSMShadowAtlas, m_LocalCSMShadowAtlas)
+                    && m_CSMShadowAtlas != null
+                    && m_CSMShadowAtlas.innerHandle.IsValid()
+                    && m_CSMCascadeCount > 0
+                    && m_CSMCascadeResolution > 0;
+                if (m_CSMShadowAtlas != null && m_CSMShadowAtlas.innerHandle.IsValid())
+                    cmd.SetComputeTextureParam(m_Compute, activeKernel, CSMShadowAtlasId, m_CSMShadowAtlas.innerHandle);
 
-                cmd.SetComputeIntParam(m_Compute, CSMCascadeCountId, hasCsm ? m_CSMCascadeCount : 0);
-                cmd.SetComputeFloatParam(m_Compute, CSMMaxShadowDistanceId, hasCsm ? m_CSMMaxShadowDistance : 0.0f);
-                cmd.SetComputeIntParam(m_Compute, CSMCascadeResolutionId, hasCsm ? m_CSMCascadeResolution : 0);
-                cmd.SetComputeFloatParam(m_Compute, CSMNormalBiasId, hasCsm ? m_CSMNormalBias : 0.0f);
-                if (hasCsm)
+                cmd.SetComputeIntParam(m_Compute, CSMCascadeCountId, hasBoundCsm ? m_CSMCascadeCount : 0);
+                cmd.SetComputeFloatParam(m_Compute, CSMMaxShadowDistanceId, hasBoundCsm ? m_CSMMaxShadowDistance : 0.0f);
+                cmd.SetComputeIntParam(m_Compute, CSMCascadeResolutionId, hasBoundCsm ? m_CSMCascadeResolution : 0);
+                cmd.SetComputeFloatParam(m_Compute, CSMNormalBiasId, hasBoundCsm ? m_CSMNormalBias : 0.0f);
+                if (hasBoundCsm)
                 {
                     cmd.SetComputeMatrixArrayParam(m_Compute, CSMViewProjMatricesId, m_CSMViewProjMatrices);
                     cmd.SetComputeVectorArrayParam(m_Compute, CSMCascadeSpheresId, m_CSMCascadeSpheres);
                 }
 
-                // Sky IBL cubemap (DeferredLightingPass always provides a valid Cube TextureHandle)
-                bool hasSky = skyIblCubemap.IsValid() && m_SkyTextureParams.w > 0.5f;
-                if (skyIblCubemap.IsValid())
-                    cmd.SetComputeTextureParam(m_Compute, activeKernel, SkyTextureId, skyIblCubemap);
+                // Sky IBL cubemap
+                bool hasSky = m_SkyIBLCubemap != null && m_SkyIBLCubemap.innerHandle.IsValid() && m_SkyTextureParams.w > 0.5f;
+                if (m_SkyIBLCubemap != null && m_SkyIBLCubemap.innerHandle.IsValid())
+                    cmd.SetComputeTextureParam(m_Compute, activeKernel, SkyTextureId, m_SkyIBLCubemap.innerHandle);
 
                 cmd.SetComputeVectorParam(m_Compute, SkyTextureTintId, m_SkyTextureTint);
                 cmd.SetComputeVectorParam(
@@ -534,14 +591,13 @@ namespace VividRP.Runtime.RenderPass.Core
                     if (gpuRes == null || !gpuRes.IsValid)
                         continue;
 
-                    StrandHairModelScratchSlot slot = gpuPool.GetOrCreateSlot(
+                    StrandHairModelScratchSlot slot = m_GpuPool.GetOrCreateSlot(
                         slotIdx,
                         gpuRes.VertexCount,
                         gpuRes.SegmentCount);
 
                     Color linearBase = entry.Shading.BaseColor.linear;
                     float ior = Mathf.Clamp(entry.Shading.Ior, 1.2f, 2.0f);
-                    // Convert IOR -> F0 -> VividHairF0FromSpecular inverse (F0 = specular * 0.093)
                     float f0 = ((ior - 1.0f) / (ior + 1.0f));
                     f0 *= f0;
                     float specular = Mathf.Clamp01(f0 / 0.093f);
@@ -605,18 +661,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
-            m_DummyDirectionalLightBuffer?.Dispose();
-            m_DummyDirectionalLightBuffer = null;
-            m_DummyPunctualLightBuffer?.Dispose();
-            m_DummyPunctualLightBuffer = null;
-            m_DummyAreaLightBuffer?.Dispose();
-            m_DummyAreaLightBuffer = null;
-            m_DummyReflectionProbeBuffer?.Dispose();
-            m_DummyReflectionProbeBuffer = null;
-            m_DummyUintBuffer?.Dispose();
-            m_DummyUintBuffer = null;
-            m_DummyFloatBuffer?.Dispose();
-            m_DummyFloatBuffer = null;
             m_Compute = null;
             m_ShadeKernel = -1;
             m_ShadeCompactKernel = -1;

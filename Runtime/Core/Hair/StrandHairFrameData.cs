@@ -524,6 +524,7 @@ namespace VividRP.Runtime
         public readonly List<HairGroomRenderEntry> ActiveEntries = new List<HairGroomRenderEntry>(16);
         public readonly List<StrandHairModelAtlasAllocation> Allocations = new List<StrandHairModelAtlasAllocation>(16);
 
+        public StrandHairGpuPool GpuPool;
         public GraphicsBuffer VisAtlasBuffer;
         public int TotalAllocatedTiles;
         public int DownscaleFactor = 1;
@@ -537,6 +538,7 @@ namespace VividRP.Runtime
         {
             ActiveEntries.Clear();
             Allocations.Clear();
+            GpuPool = null;
             VisAtlasBuffer = null;
             TotalAllocatedTiles = 0;
             DownscaleFactor = 1;
@@ -550,9 +552,36 @@ namespace VividRP.Runtime
 
     /// <summary>
     /// Persistent GPU pool for the global Tiled Visibility Atlas and per-model scratch slots.
+    /// Shared across StrandHairVisibilityPass, StrandHairShadingPass, and StrandHairCompositionPass.
     /// </summary>
     public sealed class StrandHairGpuPool : IDisposable
     {
+        private static StrandHairGpuPool s_Shared;
+        private static bool s_DisposeHooked;
+
+        public static StrandHairGpuPool Shared
+        {
+            get
+            {
+                if (s_Shared == null)
+                    s_Shared = new StrandHairGpuPool();
+
+                if (!s_DisposeHooked)
+                {
+                    FrameContextSystem.SubsystemDispose += DisposeShared;
+                    s_DisposeHooked = true;
+                }
+
+                return s_Shared;
+            }
+        }
+
+        public static void DisposeShared()
+        {
+            s_Shared?.Dispose();
+            s_Shared = null;
+        }
+
         public static StrandHairDebugViewMode GlobalDebugViewMode { get; set; } = StrandHairDebugViewMode.ShadedPreview;
         public static int GlobalMaxAtlasTiles { get; set; } = StrandHairAtlasContract.HighMaxAtlasTiles;
         public static bool EnablePhaseS3Optimizations { get; set; } = true;
@@ -567,7 +596,25 @@ namespace VividRP.Runtime
         private int m_FarthestDepth8x8Capacity;
         private GraphicsBuffer m_FarthestDepth32x32Buffer;
         private int m_FarthestDepth32x32Capacity;
+        private GraphicsBuffer m_ShadingSyncBuffer;
         private readonly List<StrandHairModelScratchSlot> m_Slots = new List<StrandHairModelScratchSlot>(8);
+
+        public GraphicsBuffer EnsureShadingSyncBuffer()
+        {
+            if (m_ShadingSyncBuffer == null || !m_ShadingSyncBuffer.IsValid())
+            {
+                m_ShadingSyncBuffer?.Dispose();
+                m_ShadingSyncBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    1,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_ShadingSync",
+                };
+            }
+
+            return m_ShadingSyncBuffer;
+        }
 
         public GraphicsBuffer EnsureVisAtlasBuffer(int maxTiles)
         {
@@ -653,6 +700,9 @@ namespace VividRP.Runtime
             m_FarthestDepth32x32Buffer?.Dispose();
             m_FarthestDepth32x32Buffer = null;
             m_FarthestDepth32x32Capacity = 0;
+
+            m_ShadingSyncBuffer?.Dispose();
+            m_ShadingSyncBuffer = null;
             for (int i = 0; i < m_Slots.Count; i++)
                 m_Slots[i]?.Dispose();
             m_Slots.Clear();

@@ -20,6 +20,7 @@ namespace VividRP.Samples.GlassLookDev
         ThicknessMeters = 1,
         BackfaceNormal = 2,
         BeerLambertTransmittance = 3,
+        VolumeSingleScatter = 4,
     }
 
     [ExecuteAlways]
@@ -36,6 +37,14 @@ namespace VividRP.Samples.GlassLookDev
         public bool EnableDispersion = true;
         public bool EnableBackfaceRefraction = true;
         public GlassLookDevDebugMode DebugMode = GlassLookDevDebugMode.Composite;
+
+        [Header("Phase 2 Caustics Controls")]
+        public bool EnableCaustics = true;
+        [Range(0.0f, 3.0f)]
+        public float CausticsIntensity = 1.25f;
+        [Range(0.0f, 1.0f)]
+        public float ColoredShadowStrength = 1.0f;
+        public bool ShowCausticsDebugOnly = false;
         public bool ShowStudioLabels = true;
 
         [Header("Camera Presets")]
@@ -89,6 +98,11 @@ namespace VividRP.Samples.GlassLookDev
             ForwardRefractionPass.EnableBackfaceRefraction = EnableBackfaceRefraction;
             ForwardRefractionPass.DebugMode = (int)DebugMode;
 
+            TransmissiveCausticsPass.EnableCaustics = EnableCaustics;
+            TransmissiveCausticsPass.CausticsIntensity = CausticsIntensity;
+            TransmissiveCausticsPass.ColoredShadowStrength = ColoredShadowStrength;
+            TransmissiveCausticsPass.DebugMode = ShowCausticsDebugOnly ? 1 : 0;
+
             if (StudioLabelsRoot != null)
                 StudioLabelsRoot.SetActive(ShowStudioLabels);
 
@@ -101,17 +115,20 @@ namespace VividRP.Samples.GlassLookDev
             if (StatusTelemetryText == null)
                 return;
 
-            string debugLabel = DebugMode switch
-            {
-                GlassLookDevDebugMode.ThicknessMeters => "DEBUG: THICKNESS",
-                GlassLookDevDebugMode.BackfaceNormal => "DEBUG: BACKFACE NORMAL",
-                GlassLookDevDebugMode.BeerLambertTransmittance => "DEBUG: BEER-LAMBERT",
-                _ => "COMPOSITE",
-            };
+            string debugLabel = ShowCausticsDebugOnly
+                ? "DEBUG: CAUSTICS"
+                : DebugMode switch
+                {
+                    GlassLookDevDebugMode.ThicknessMeters => "DEBUG: THICKNESS",
+                    GlassLookDevDebugMode.BackfaceNormal => "DEBUG: BACKFACE NORMAL",
+                    GlassLookDevDebugMode.BeerLambertTransmittance => "DEBUG: BEER-LAMBERT",
+                    GlassLookDevDebugMode.VolumeSingleScatter => "DEBUG: VOLUME SCATTER",
+                    _ => "COMPOSITE",
+                };
 
             StatusTelemetryText.text =
-                $"REFRACTION: {(EnableRefraction ? "ON" : "OFF")}  |  BACKFACE SNELL: {(EnableBackfaceRefraction ? "ON" : "OFF")}  |  ABBE DISPERSION: {(EnableDispersion ? "ON" : "OFF")}  |  {debugLabel}\n" +
-                "HERO: DRAGON ATTENUATION (AMBER IOR 1.50)  |  01 CLEAR  |  02 FROSTED (MIP BLUR)  |  03 EMERALD (BEER-LAMBERT)  |  04 CRYSTAL (IOR 1.85 DISPERSION)";
+                $"REFRACTION: {(EnableRefraction ? "ON" : "OFF")}  |  CAUSTICS: {(EnableCaustics ? "ON" : "OFF")}  |  DISPERSION: {(EnableDispersion ? "ON" : "OFF")}  |  {debugLabel}\n" +
+                "HERO: AMBER DRAGON (BEER-LAMBERT + CAUSTICS + BACKFACE SPEC)  |  01 CLEAR  |  02 FROSTED OPALESCENT (HG SCATTER)  |  03 EMERALD  |  04 CRYSTAL";
         }
     }
 }

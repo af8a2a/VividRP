@@ -77,6 +77,57 @@ Shader "VividRP/Material/Glass/OpticalGlass"
             "RenderPipeline" = "VividRenderPipeline"
         }
 
+        // Shared SRP Batcher UnityPerMaterial extension + layout across all raster & DXR passes.
+        // Kept byte-identical to StandardLitInput.hlsl / IndirectDiffuse.hlsl so Unity SRP Batcher
+        // validates every pass (including ReferencedPathtracingDXR) as 100% compatible.
+        HLSLINCLUDE
+            #define VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION \
+                float _Dispersion; \
+                float _ThicknessScale; \
+                float _UseThicknessMap; \
+                float _RefractionStrength; \
+                float _BackfaceSpecularIntensity;
+
+            #define VIVIDRP_GLASS_DECLARE_UNITY_PER_MATERIAL_CBUFFER \
+                CBUFFER_START(UnityPerMaterial) \
+                    float4 _BaseColor; \
+                    float4 _BaseMap_ST; \
+                    float4 _EmissionColor; \
+                    float4 _TransmissionColor; \
+                    float4 _TransmissionScatter; \
+                    float4 _SubsurfaceColor; \
+                    float4 _SubsurfaceRadiusScale; \
+                    float _Cutoff; \
+                    float _Smoothness; \
+                    float _SmoothnessTextureChannel; \
+                    float _Metallic; \
+                    float _MetallicRemapMin; \
+                    float _MetallicRemapMax; \
+                    float _SmoothnessRemapMin; \
+                    float _SmoothnessRemapMax; \
+                    float _AORemapMin; \
+                    float _AORemapMax; \
+                    float _BumpScale; \
+                    float _OcclusionStrength; \
+                    float _ClearCoatMask; \
+                    float _ClearCoatSmoothness; \
+                    float _AlphaClip; \
+                    float _WorkflowMode; \
+                    float _ReceiveSSR; \
+                    float _ReceiveDecals; \
+                    float _ThinWalledTransmission; \
+                    float _TransmissionWeight; \
+                    float _TransmissionDepth; \
+                    float _TransmissionScatterAnisotropy; \
+                    float _SpecularIOR; \
+                    float _SubsurfaceWeight; \
+                    float _SubsurfaceRadius; \
+                    float _SubsurfaceScatterAnisotropy; \
+                    float _SubsurfaceTransmissionWeight; \
+                    VIVIDRP_STANDARD_LIT_UNITY_PER_MATERIAL_EXTENSION \
+                CBUFFER_END
+        ENDHLSL
+
         // =========================================================================
         // Pass 1: Backface Depth & Octahedral Normal (for exact thickness + exit Snell)
         // =========================================================================
@@ -98,6 +149,8 @@ Shader "VividRP/Material/Glass/OpticalGlass"
             #pragma fragment FragBackface
 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+
+            VIVIDRP_GLASS_DECLARE_UNITY_PER_MATERIAL_CBUFFER
 
             struct Attributes
             {
@@ -176,27 +229,7 @@ Shader "VividRP/Material/Glass/OpticalGlass"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ClusteredLighting.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSkyLighting.hlsl"
 
-            CBUFFER_START(UnityPerMaterial)
-                float4 _BaseColor;
-                float4 _BaseMap_ST;
-                float4 _EmissionColor;
-                float4 _TransmissionColor;
-                float4 _TransmissionScatter;
-                float _Smoothness;
-                float _BumpScale;
-                float _SpecularIOR;
-                float _TransmissionWeight;
-                float _TransmissionDepth;
-                float _TransmissionScatterAnisotropy;
-                float _ThinWalledTransmission;
-                float _Dispersion;
-                float _ThicknessScale;
-                float _UseThicknessMap;
-                float _RefractionStrength;
-                float _BackfaceSpecularIntensity;
-                float _ClearCoatMask;
-                float _ClearCoatSmoothness;
-            CBUFFER_END
+            VIVIDRP_GLASS_DECLARE_UNITY_PER_MATERIAL_CBUFFER
 
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
@@ -291,6 +324,15 @@ Shader "VividRP/Material/Glass/OpticalGlass"
                 return exp(-sigma * max(pathLength, 0.0f));
             }
 
+            // Exact Henyey-Greenstein phase function for internal volume single-scattering
+            float VividGlassHenyeyGreensteinPhase(float cosTheta, float g)
+            {
+                float gClamped = clamp(g, -0.95f, 0.95f);
+                float g2 = gClamped * gClamped;
+                float denom = max(1.0f + g2 - 2.0f * gClamped * cosTheta, 1e-3f);
+                return (1.0f - g2) / (4.0f * PI * denom * sqrt(denom));
+            }
+
             float VividGlassD_GGX(float NdotH, float alpha)
             {
                 float a2 = alpha * alpha;
@@ -335,6 +377,77 @@ Shader "VividRP/Material/Glass/OpticalGlass"
                 float softboxRim = smoothstep(0.72f - perceptualRoughness * 0.35f, 0.95f, dot(dir, SafeNormalize(float3(-0.55f, 0.55f, 0.62f))));
                 float softboxAtten = lerp(1.0f, 0.32f, perceptualRoughness);
                 return baseRoom + (softboxTop * 0.85f + softboxSide * 1.15f + softboxRim * 0.70f) * softboxAtten;
+            }
+
+            float3 EvaluateGlassVolumeSingleScattering(
+                float3 posWS,
+                float3 V,
+                float2 screenUV,
+                uint2 pixelCoord,
+                float linearViewZ,
+                float thickness,
+                float3 volumeTransmittance,
+                out float3 scatterExtinction)
+            {
+                float3 scatterAlbedo = saturate(_TransmissionScatter.rgb);
+                scatterExtinction = 1.0f.xxx;
+                if (max(scatterAlbedo.r, max(scatterAlbedo.g, scatterAlbedo.b)) <= 1e-4f || thickness <= 1e-4f)
+                    return 0.0f.xxx;
+
+                float clampedDepth = max(_TransmissionDepth, 0.02f);
+                float3 sigmaT = -log(max(saturate(_TransmissionColor.rgb), 1e-3f.xxx)) / clampedDepth;
+                // Ensure scattering remains active even on clear/white base transmittance (e.g., opalescent frosted glass)
+                float3 sigmaS = max(sigmaT * scatterAlbedo, scatterAlbedo * (1.4f / clampedDepth));
+                float3 tauS = sigmaS * thickness;
+                scatterExtinction = exp(-tauS);
+                float3 scatterProbability = (1.0f.xxx - scatterExtinction) * scatterAlbedo;
+                // Approximate internal light attenuation (half-path entry + half-path exit)
+                float3 internalTint = sqrt(max(volumeTransmittance, 1e-3f.xxx));
+                float g = _TransmissionScatterAnisotropy;
+
+                float3 inScatter = 0.0f.xxx;
+
+                // 1. Directional lights
+                float mainShadow = _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, screenUV, 0).r;
+                [loop]
+                for (uint di = 0u; di < _DirectionalLightCount; ++di)
+                {
+                    DirectionalLightData dl = _DirectionalLights[di];
+                    float3 L = SafeNormalize(dl.directionWS);
+                    float shadow = ((int)di == _MainDirectionalLightIndex) ? saturate(mainShadow) : 1.0f;
+                    float cosTheta = dot(V, -L);
+                    float phase = VividGlassHenyeyGreensteinPhase(cosTheta, g);
+                    inScatter += max(dl.color, 0.0f.xxx) * (shadow * phase * 2.5f);
+                }
+
+                // 2. Clustered Punctual lights
+                if (_ClusteredPunctualLightGridEnabled != 0u && _PunctualLightCount > 0u)
+                {
+                    VividClusteredLightCell cell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, linearViewZ);
+                    [loop]
+                    for (uint i = 0u; i < cell.count; ++i)
+                    {
+                        uint lightIdx = VividClusteredLighting::LoadLightIndex(cell, i);
+                        if (lightIdx >= _PunctualLightCount)
+                            continue;
+                        PunctualLightData pl = _PunctualLights[lightIdx];
+                        float3 L;
+                        float4 distances;
+                        GetVividPunctualLightVectors(posWS, pl, L, distances);
+                        if (distances.y <= 1e-6f)
+                            continue;
+                        float atten = VividPunctualLightAttenuationWithDistanceModification(pl, posWS - pl.positionWS, distances);
+                        if (atten <= 0.0f)
+                            continue;
+                        float cosTheta = dot(V, -L);
+                        float phase = VividGlassHenyeyGreensteinPhase(cosTheta, g);
+                        inScatter += max(pl.color, 0.0f.xxx) * (atten * phase * 2.5f);
+                    }
+                }
+
+                // 3. Ambient isotropic volume fill from environment
+                float3 ambientEnv = EvaluateGlassEnvironment(-V, 0.85f) * 0.35f;
+                return (inScatter + ambientEnv) * scatterProbability * internalTint;
             }
 
             float3 SampleOpaquePyramidFiltered(float2 uv, float mipLevel)
@@ -668,20 +781,55 @@ Shader "VividRP/Material/Glass/OpticalGlass"
                     envSpec += EvaluateGlassEnvironment(R, coatRough) * Fcoat;
                 }
 
-                // Subtle internal backface reflection cue at grazing angles (attenuated by Beer-Lambert)
+                // Subtle internal backface direct specular + environment reflection cue (attenuated by Beer-Lambert)
                 float3 internalCue = 0.0f.xxx;
-                if (hasBackface && _BackfaceSpecularIntensity > 1e-3f)
+                if (hasBackface && _ThinWalledTransmission < 0.5f && _BackfaceSpecularIntensity > 1e-3f)
                 {
-                    float3 Rback = reflect(-V, -backN);
-                    float Fback = VividGlassFresnelDielectric(saturate(dot(-backN, V)), ior);
-                    internalCue = EvaluateGlassEnvironment(Rback, min(perceptualRoughness + 0.08f, 1.0f))
-                        * (Fback * (1.0f - F) * _BackfaceSpecularIntensity)
+                    float3 T1Main = refract(-V, N, rcp(ior));
+                    T1Main = dot(T1Main, T1Main) > 1e-4f ? normalize(T1Main) : -V;
+                    float3 exitPosWS = input.positionWS + T1Main * thickness;
+                    float4 exitClip = TransformWorldToHClip(exitPosWS);
+                    float2 exitUV = exitClip.xy / max(abs(exitClip.w), 1e-5f) * 0.5f + 0.5f;
+                    #if UNITY_UV_STARTS_AT_TOP
+                        exitUV.y = 1.0f - exitUV.y;
+                    #endif
+                    exitUV = clamp(exitUV, 0.002f.xx, 0.998f.xx);
+                    float4 exitBackData = _RefractionBackfaceData.SampleLevel(sampler_PointClamp, exitUV, 0);
+                    float3 exitBackN = exitBackData.a > 0.5f
+                        ? VividGlassDecodeOctNormal(exitBackData.xy)
+                        : backN;
+                    if (dot(T1Main, exitBackN) < 0.0f)
+                        exitBackN = -exitBackN;
+
+                    float3 internalN = -exitBackN;
+                    float3 internalV = -T1Main;
+                    float3 Rback = reflect(T1Main, internalN);
+                    float Fback = VividGlassFresnelDielectric(saturate(dot(internalN, internalV)), ior);
+                    uint2 exitPixelCoord = (uint2)clamp(exitUV * _RefractionScreenSize.xy, 0.0f.xx, _RefractionScreenSize.xy - 1.0f.xx);
+                    float exitViewZ = max(frontViewZ + thickness, 1e-4f);
+
+                    // Secondary direct specular highlight on internal exit surface
+                    float3 backDirectSpec = EvaluateGlassDirectSpecular(
+                        exitPosWS, internalN, internalV, exitUV, exitPixelCoord, exitViewZ,
+                        max(alpha * 1.15f, 0.004f), ior, 0.0f, 1.0f);
+                    float3 backEnvSpec = EvaluateGlassEnvironment(Rback, min(perceptualRoughness + 0.08f, 1.0f)) * Fback;
+
+                    internalCue = (backDirectSpec * 1.35f + backEnvSpec)
+                        * ((1.0f - F) * _BackfaceSpecularIntensity)
                         * volumeTransmittance;
                 }
 
-                // Combine refracted pre-exposed background with freshly pre-exposed surface reflection & emission
-                float3 surfacePreExposed = VividApplyPreExposure(max(directSpec + envSpec + internalCue + max(_EmissionColor.rgb, 0.0f.xxx), 0.0f.xxx));
-                float3 transmittedPreExposed = refractedPreExposed * ((1.0f - F) * transWeight) * (volumeTransmittance * baseTint);
+                // Internal volume Henyey-Greenstein single-scattering (_TransmissionScatter > 0)
+                float3 scatterExtinction;
+                float3 volumeScatter = EvaluateGlassVolumeSingleScattering(
+                    input.positionWS, V, screenUV, pixelCoord, frontViewZ, thickness, volumeTransmittance, scatterExtinction);
+                if (_RefractionDebugMode == 4u)
+                    return float4(VividApplyPreExposure(volumeScatter), 1.0f);
+
+                // Combine refracted pre-exposed background with freshly pre-exposed surface reflection, volume scatter & emission
+                float3 surfacePreExposed = VividApplyPreExposure(
+                    max(directSpec + envSpec + internalCue + volumeScatter * ((1.0f - F) * transWeight) + max(_EmissionColor.rgb, 0.0f.xxx), 0.0f.xxx));
+                float3 transmittedPreExposed = refractedPreExposed * ((1.0f - F) * transWeight) * (volumeTransmittance * scatterExtinction * baseTint);
 
                 return float4(max(surfacePreExposed + transmittedPreExposed, 0.0f.xxx), 1.0f);
             }
@@ -709,6 +857,8 @@ Shader "VividRP/Material/Glass/OpticalGlass"
             #pragma fragment FragShadow
 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+
+            VIVIDRP_GLASS_DECLARE_UNITY_PER_MATERIAL_CBUFFER
 
             struct Attributes
             {
@@ -754,6 +904,208 @@ Shader "VividRP/Material/Glass/OpticalGlass"
                 #pragma shader_feature_local_raytracing _CLEARCOAT
 
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracing.hlsl"
+            ENDHLSL
+        }
+        // =========================================================================
+        // Pass 5: Light-Space Backface Depth (for TransmissiveCausticsPass)
+        // =========================================================================
+        Pass
+        {
+            Name "VividCausticsBackface"
+            Tags { "LightMode" = "VividCausticsBackface" }
+
+            Cull Front
+            ZWrite On
+            ZTest LEqual
+            Blend One Zero
+
+            HLSLPROGRAM
+            #pragma target 5.0
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma vertex VertCausticsBack
+            #pragma fragment FragCausticsBack
+
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+
+            VIVIDRP_GLASS_DECLARE_UNITY_PER_MATERIAL_CBUFFER
+
+            float4x4 _CausticsLightVP;
+            float4 _CausticsLightPosType;
+            float4 _CausticsLightForwardRange;
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float lightLinearZ : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            Varyings VertCausticsBack(Attributes input)
+            {
+                Varyings o;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_TRANSFER_INSTANCE_ID(input, o);
+                float3 posWS = TransformObjectToWorld(input.positionOS);
+                o.positionCS = mul(_CausticsLightVP, float4(posWS, 1.0f));
+                o.lightLinearZ = max(dot(posWS - _CausticsLightPosType.xyz, _CausticsLightForwardRange.xyz), 1e-4f);
+                return o;
+            }
+
+            float FragCausticsBack(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                return input.lightLinearZ;
+            }
+            ENDHLSL
+        }
+
+        // =========================================================================
+        // Pass 6: Light-Space Frontface MRT (Beer-Lambert Shadow + Jacobian Caustics)
+        // =========================================================================
+        Pass
+        {
+            Name "VividCausticsFrontface"
+            Tags { "LightMode" = "VividCausticsFrontface" }
+
+            Cull Back
+            ZWrite On
+            ZTest LEqual
+            Blend One Zero
+
+            HLSLPROGRAM
+            #pragma target 5.0
+            #pragma use_dxc
+            #pragma multi_compile_instancing
+            #pragma vertex VertCausticsFront
+            #pragma fragment FragCausticsFront
+
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+
+            VIVIDRP_GLASS_DECLARE_UNITY_PER_MATERIAL_CBUFFER
+
+            Texture2D<float> _CausticsLightBackfaceDepth;
+            float4x4 _CausticsLightVP;
+            float4 _CausticsLightPosType;
+            float4 _CausticsLightForwardRange;
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+                float3 normalOS : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS : TEXCOORD1;
+                float lightLinearZ : TEXCOORD2;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct CausticsMrtOut
+            {
+                float4 transmittanceAndZ : SV_Target0;
+                float4 causticFocus : SV_Target1;
+            };
+
+            float CausticsFresnelDielectric(float cosThetaI, float ior)
+            {
+                float c = saturate(cosThetaI);
+                float g2 = ior * ior - 1.0f + c * c;
+                if (g2 <= 0.0f)
+                    return 1.0f;
+                float g = sqrt(g2);
+                float a = (g - c) / max(g + c, 1e-6f);
+                float b = (c * (g + c) - 1.0f) / max(c * (g - c) + 1.0f, 1e-6f);
+                return saturate(0.5f * a * a * (1.0f + b * b));
+            }
+
+            float3 CausticsBeerLambert(float3 transColor, float transDepth, float pathLength)
+            {
+                if (transDepth <= 1e-5f)
+                    return saturate(transColor);
+                float3 clampedColor = max(saturate(transColor), 1e-3f.xxx);
+                float clampedDepth = max(transDepth, 1e-3f);
+                float3 sigma = -log(clampedColor) / clampedDepth;
+                return exp(-sigma * max(pathLength, 0.0f));
+            }
+
+            Varyings VertCausticsFront(Attributes input)
+            {
+                Varyings o;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_TRANSFER_INSTANCE_ID(input, o);
+                float3 posWS = TransformObjectToWorld(input.positionOS);
+                o.positionWS = posWS;
+                o.positionCS = mul(_CausticsLightVP, float4(posWS, 1.0f));
+                o.normalWS = TransformObjectToWorldNormal(input.normalOS);
+                o.lightLinearZ = max(dot(posWS - _CausticsLightPosType.xyz, _CausticsLightForwardRange.xyz), 1e-4f);
+                return o;
+            }
+
+            CausticsMrtOut FragCausticsFront(Varyings input)
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+
+                uint2 pixelCoord = (uint2)input.positionCS.xy;
+                float frontZ = input.lightLinearZ;
+                float backZ = _CausticsLightBackfaceDepth.Load(int3(pixelCoord, 0)).r;
+
+                float dLight = (backZ > frontZ + 1e-4f)
+                    ? clamp((backZ - frontZ) * _ThicknessScale, 0.004f, 4.0f)
+                    : 0.08f;
+                if (_ThinWalledTransmission >= 0.5f)
+                    dLight = 0.004f;
+
+                float ior = max(_SpecularIOR, 1.01f);
+                float transWeight = saturate(_TransmissionWeight);
+                float3 N = SafeNormalize(input.normalWS);
+
+                // Incoming light ray propagation direction (from light toward surface)
+                float3 L_in = (_CausticsLightPosType.w > 0.5f)
+                    ? SafeNormalize(input.positionWS - _CausticsLightPosType.xyz)
+                    : SafeNormalize(_CausticsLightForwardRange.xyz);
+
+                float NdotL = saturate(dot(N, -L_in));
+                float F_entry = CausticsFresnelDielectric(NdotL, ior);
+
+                // Beer-Lambert colored volume attenuation + optional scatter extinction
+                float3 T_vol = CausticsBeerLambert(_TransmissionColor.rgb, _TransmissionDepth, dLight);
+                float3 scatterAlbedo = saturate(_TransmissionScatter.rgb);
+                float scatterStrength = max(scatterAlbedo.r, max(scatterAlbedo.g, scatterAlbedo.b));
+                float scatterDamp = exp(-scatterStrength * dLight * 2.2f);
+                float3 T_shadow = lerp(0.05f.xxx, T_vol * (1.0f - F_entry) * saturate(_BaseColor.rgb) * lerp(1.0f, 0.72f, scatterStrength), transWeight);
+
+                // Jacobian photon-flux conservation: compare incoming differential area vs refracted exit area
+                float3 T_refract = refract(L_in, N, rcp(ior));
+                T_refract = dot(T_refract, T_refract) > 1e-4f ? normalize(T_refract) : L_in;
+                float focusDist = clamp(dLight * 1.15f, 0.04f, 0.45f);
+                float3 p0 = input.positionWS;
+                float3 p1 = input.positionWS + T_refract * focusDist;
+                float areaIn = length(cross(ddx(p0), ddy(p0)));
+                float areaOut = length(cross(ddx(p1), ddy(p1)));
+                float jacobianGain = clamp(areaIn / max(areaOut, areaIn * 0.14f), 0.0f, 4.5f);
+
+                // Smooth optical caustic focusing (high smoothness & high IOR focus sharply; frosted scatters gently)
+                float smoothnessSq = _Smoothness * _Smoothness;
+                float lensCore = pow(NdotL, 3.0f) * saturate((ior - 1.0f) * 1.55f) * 1.15f;
+                float convergence = max(jacobianGain - 0.85f, 0.0f) * 0.85f;
+                float causticGain = clamp((convergence + lensCore) * smoothnessSq * (1.0f - F_entry) * transWeight * scatterDamp, 0.0f, 4.5f);
+
+                CausticsMrtOut o;
+                o.transmittanceAndZ = float4(saturate(T_shadow), frontZ);
+                o.causticFocus = float4(T_vol * causticGain, saturate(_Dispersion));
+                return o;
+            }
             ENDHLSL
         }
     }

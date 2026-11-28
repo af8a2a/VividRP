@@ -40,6 +40,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/SubsurfaceScattering.compute")]
         public ComputeShader SubsurfaceScatteringCompute;
 
+        [VividResourcePath("Shaders/Core/Private/TransmissiveCaustics.compute")]
+        public ComputeShader TransmissiveCausticsCompute;
+
         [VividResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 

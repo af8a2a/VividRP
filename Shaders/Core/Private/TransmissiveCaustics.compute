@@ -1,0 +1,274 @@
+#pragma kernel KApplyTransmissiveCaustics
+#pragma use_dxc
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/SurfaceSummaryGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PunctualLightCommon.hlsl"
+
+// Inputs: opaque scene buffers + per-light transmissive shadow / caustics maps
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _GBuffer0;
+Texture2D<float4> _GBuffer1;
+Texture2D<float4> _CausticsTransmittanceMap;  // rgb = T_vol * (1 - F_entry), a = frontLightLinearZ (0 = empty)
+Texture2D<float4> _CausticsFocusMap;          // rgb = focused caustic tint * gain, a = dispersion amount
+RWTexture2D<float4> _SceneColor;
+
+SamplerState sampler_LinearClamp;
+SamplerState sampler_PointClamp;
+
+uint2 _CausticsResolution;
+float2 _CausticsInvResolution;
+float2 _CausticsMapTexelSize;
+
+float4x4 _CausticsLightVP;
+float4 _CausticsLightPosType;      // xyz = lightPosWS (Spot) or origin (Dir), w = 1 Spot / 0 Dir
+float4 _CausticsLightForwardRange; // xyz = lightForwardWS (normalized), w = range
+float4 _CausticsLightColorShadow;  // rgb = lightColor (linear intensity), a = isShadowedInDeferred (0 or 1)
+float4 _CausticsSpotParams;        // x = angleScale, y = angleOffset, z = rangeAttenScale, w = rangeAttenBias
+float4 _CausticsControlParams;     // x = causticsIntensity, y = coloredShadowStrength, z = debugMode (0=Comp, 1=CausticsOnly), w = lightPassIndex
+
+float3 ReconstructWorldPosFromDepth(float2 uv, float rawDepth)
+{
+    float2 ndcXY = uv * 2.0f - 1.0f;
+    #if UNITY_UV_STARTS_AT_TOP
+        ndcXY.y = -ndcXY.y;
+    #endif
+    float4 clipPos = float4(ndcXY, rawDepth, 1.0f);
+    float4 worldPos = mul(UNITY_MATRIX_I_VP, clipPos);
+    return worldPos.xyz / max(abs(worldPos.w), 1e-6f) * (worldPos.w < 0.0f ? -1.0f : 1.0f);
+}
+
+float EvaluateSpotLightAttenuation(float3 posWS)
+{
+    if (_CausticsLightPosType.w < 0.5f)
+        return 1.0f;
+
+    float3 lightToPos = posWS - _CausticsLightPosType.xyz;
+    float distSq = max(dot(lightToPos, lightToPos), 1e-4f);
+    float dist = sqrt(distSq);
+    float range = max(_CausticsLightForwardRange.w, 1e-3f);
+    if (dist >= range)
+        return 0.0f;
+
+    // Smooth distance window + inverse-square matching VividRP PunctualLightCommon
+    float distFactor = saturate(1.0f - pow(dist / range, 4.0f));
+    float rangeAtten = (distFactor * distFactor) / max(distSq, 0.01f);
+
+    float cosAngle = dot(lightToPos / dist, _CausticsLightForwardRange.xyz);
+    float spotAtten = saturate(cosAngle * _CausticsSpotParams.x + _CausticsSpotParams.y);
+    spotAtten *= spotAtten;
+    return rangeAtten * spotAtten;
+}
+
+void SampleTransmissiveCausticPCF(
+    float2 uv,
+    float receiverLightZ,
+    out float hitWeight,
+    out float3 avgTransmittance,
+    out float3 avgCaustics)
+{
+    // 9-tap smooth disk PCF filter for anti-aliased colored volumetric shadows & silky caustic pools
+    static const float2 kOffsets[9] =
+    {
+        float2( 0.0f,   0.0f),
+        float2( 1.4f,   0.5f),
+        float2(-1.4f,  -0.5f),
+        float2(-0.5f,   1.4f),
+        float2( 0.5f,  -1.4f),
+        float2( 2.4f,  -1.1f),
+        float2(-2.4f,   1.1f),
+        float2( 1.1f,   2.4f),
+        float2(-1.1f,  -2.4f)
+    };
+    static const float kWeights[9] = { 0.24f, 0.12f, 0.12f, 0.12f, 0.12f, 0.07f, 0.07f, 0.07f, 0.07f };
+
+    hitWeight = 0.0f;
+    avgTransmittance = 0.0f.xxx;
+    avgCaustics = 0.0f.xxx;
+
+    // Check center dispersion hint for subtle chromatic caustic fringing on high-dispersion crystals
+    float centerDispersion = _CausticsFocusMap.SampleLevel(sampler_LinearClamp, uv, 0).a;
+
+    [unroll]
+    for (int i = 0; i < 9; ++i)
+    {
+        float2 tapUV = uv + kOffsets[i] * _CausticsMapTexelSize;
+        if (any(tapUV <= 0.002f) || any(tapUV >= 0.998f))
+            continue;
+
+        float4 transSample = _CausticsTransmittanceMap.SampleLevel(sampler_PointClamp, tapUV, 0);
+        float glassFrontZ = transSample.a;
+
+        // Receiver must lie behind the glass frontface along the light ray (small bias prevents self-occlusion)
+        if (glassFrontZ > 1e-4f && receiverLightZ > glassFrontZ + 0.014f)
+        {
+            float w = kWeights[i];
+            hitWeight += w;
+            avgTransmittance += saturate(transSample.rgb) * w;
+
+            float3 focusRGB;
+            if (centerDispersion > 0.08f)
+            {
+                // Chromatic RGB caustic dispersion offset along radial light-UV vector
+                float2 dispDir = normalize((tapUV - 0.5f) + float2(1e-4f, 0.0f));
+                float2 dispShift = dispDir * _CausticsMapTexelSize * (4.0f * saturate(centerDispersion));
+                float r = _CausticsFocusMap.SampleLevel(sampler_LinearClamp, clamp(tapUV + dispShift, 0.002f.xx, 0.998f.xx), 0).r;
+                float g = _CausticsFocusMap.SampleLevel(sampler_LinearClamp, tapUV, 0).g;
+                float b = _CausticsFocusMap.SampleLevel(sampler_LinearClamp, clamp(tapUV - dispShift, 0.002f.xx, 0.998f.xx), 0).b;
+                focusRGB = max(float3(r, g, b), 0.0f.xxx);
+            }
+            else
+            {
+                focusRGB = max(_CausticsFocusMap.SampleLevel(sampler_LinearClamp, tapUV, 0).rgb, 0.0f.xxx);
+            }
+
+            avgCaustics += focusRGB * w;
+        }
+    }
+
+    if (hitWeight > 1e-4f)
+    {
+        float invW = rcp(hitWeight);
+        avgTransmittance *= invW;
+        avgCaustics *= invW;
+    }
+    else
+    {
+        avgTransmittance = 1.0f.xxx;
+        avgCaustics = 0.0f.xxx;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void KApplyTransmissiveCaustics(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (pixelCoord.x >= _CausticsResolution.x || pixelCoord.y >= _CausticsResolution.y)
+        return;
+
+    uint debugMode = (uint)_CausticsControlParams.z;
+    float lightPassIndex = _CausticsControlParams.w;
+
+    float rawDepth = _DepthTexture.Load(int3(pixelCoord, 0)).r;
+    if (rawDepth == UNITY_RAW_FAR_CLIP_VALUE)
+    {
+        if (debugMode == 1u && lightPassIndex < 0.5f)
+            _SceneColor[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return;
+    }
+
+    float2 uv = (float2(pixelCoord) + 0.5f) * _CausticsInvResolution;
+    float3 posWS = ReconstructWorldPosFromDepth(uv, rawDepth);
+
+    // Project opaque receiver into light clip space
+    float4 lightClip = mul(_CausticsLightVP, float4(posWS, 1.0f));
+    if (lightClip.w <= 1e-5f)
+    {
+        if (debugMode == 1u && lightPassIndex < 0.5f)
+            _SceneColor[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return;
+    }
+
+    float2 lightNDC = lightClip.xy / lightClip.w;
+    #if UNITY_UV_STARTS_AT_TOP
+        float2 lightUV = float2(lightNDC.x * 0.5f + 0.5f, 0.5f - lightNDC.y * 0.5f);
+    #else
+        float2 lightUV = lightNDC * 0.5f + 0.5f;
+    #endif
+
+    if (any(lightUV <= 0.004f) || any(lightUV >= 0.996f))
+    {
+        if (debugMode == 1u && lightPassIndex < 0.5f)
+            _SceneColor[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return;
+    }
+
+    // Distance along light forward axis (matches light-space rasterization linearZ)
+    float receiverLightZ = dot(posWS - _CausticsLightPosType.xyz, _CausticsLightForwardRange.xyz);
+    if (receiverLightZ <= 0.05f || receiverLightZ >= _CausticsLightForwardRange.w)
+    {
+        if (debugMode == 1u && lightPassIndex < 0.5f)
+            _SceneColor[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return;
+    }
+
+    // Unpack opaque receiver albedo and normal from Surface Summary GBuffer
+    float4 rt0 = _GBuffer0.Load(int3(pixelCoord, 0));
+    float4 rt1 = _GBuffer1.Load(int3(pixelCoord, 0));
+    float3 receiverAlbedo = max(VividDecodeSurfaceSummaryDiffuseAlbedo(rt0.rgb), 0.04f.xxx);
+    float3 receiverN = VividDecodeSurfaceSummaryNormal(rt1.xy);
+
+    float3 L = (_CausticsLightPosType.w > 0.5f)
+        ? SafeNormalize(_CausticsLightPosType.xyz - posWS)
+        : SafeNormalize(-_CausticsLightForwardRange.xyz);
+    float NdotL = saturate(dot(receiverN, L));
+    if (NdotL <= 1e-4f)
+    {
+        if (debugMode == 1u && lightPassIndex < 0.5f)
+            _SceneColor[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return;
+    }
+
+    float hitWeight;
+    float3 avgTransmittance;
+    float3 avgCaustics;
+    SampleTransmissiveCausticPCF(lightUV, receiverLightZ, hitWeight, avgTransmittance, avgCaustics);
+
+    if (hitWeight <= 1e-4f)
+    {
+        if (debugMode == 1u && lightPassIndex < 0.5f)
+            _SceneColor[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return;
+    }
+
+    // Smooth edge fade near light frustum borders & grazing receiver angles (avoids cylindrical grazing aliasing)
+    float2 edgeDist = min(lightUV, 1.0f - lightUV);
+    float frustumFade = smoothstep(0.005f, 0.05f, min(edgeDist.x, edgeDist.y));
+    float grazingFade = smoothstep(0.06f, 0.28f, NdotL);
+    float effectiveHit = hitWeight * frustumFade * grazingFade;
+
+    float lightAtten = EvaluateSpotLightAttenuation(posWS);
+    float3 directDiffuseIrradiance = _CausticsLightColorShadow.rgb * (lightAtten * NdotL) * (receiverAlbedo * INV_PI);
+    float3 directDiffusePreExposed = VividApplyPreExposure(max(directDiffuseIrradiance, 0.0f.xxx));
+
+    float causticsIntensity = max(_CausticsControlParams.x, 0.0f);
+    float shadowStrength = saturate(_CausticsControlParams.y);
+    bool isShadowedInDeferred = _CausticsLightColorShadow.a > 0.5f;
+
+    float4 sceneColor = _SceneColor[pixelCoord];
+    float3 resultRGB = sceneColor.rgb;
+
+    if (isShadowedInDeferred)
+    {
+        // Light already casts an opaque shadow (e.g. CSM Directional light):
+        // inject colored transmitted light + focused caustic radiance into the shadow region
+        float3 transmittedLight = directDiffusePreExposed * avgTransmittance * shadowStrength;
+        float3 causticLight = directDiffusePreExposed * avgCaustics * causticsIntensity;
+        float3 delta = (transmittedLight + causticLight) * effectiveHit;
+        resultRGB = (debugMode == 1u)
+            ? ((lightPassIndex < 0.5f ? 0.0f.xxx : sceneColor.rgb) + delta)
+            : (sceneColor.rgb + delta);
+    }
+    else
+    {
+        // Light does not cast opaque shadows in DeferredLit (e.g. Spot light):
+        // Replace direct light contribution by (T_vol * directLight) to form a genuine
+        // Beer-Lambert colored glass shadow, then add the focused refractive caustic pool!
+        float3 shadowRemoved = directDiffusePreExposed * (1.0f.xxx - avgTransmittance) * (shadowStrength * effectiveHit);
+        float3 causticAdded = directDiffusePreExposed * avgCaustics * (causticsIntensity * effectiveHit);
+
+        if (debugMode == 1u)
+        {
+            // Debug view: visualize colored shadow tint (dimmed neutral) + bright focused caustic pool
+            float3 debugViz = VividApplyPreExposure(avgTransmittance * 0.25f + avgCaustics * (0.85f * causticsIntensity)) * effectiveHit;
+            resultRGB = (lightPassIndex < 0.5f ? 0.0f.xxx : sceneColor.rgb) + debugViz;
+        }
+        else
+        {
+            resultRGB = max(sceneColor.rgb - shadowRemoved, sceneColor.rgb * 0.12f) + causticAdded;
+        }
+    }
+
+    _SceneColor[pixelCoord] = float4(max(resultRGB, 0.0f.xxx), sceneColor.a);
+}

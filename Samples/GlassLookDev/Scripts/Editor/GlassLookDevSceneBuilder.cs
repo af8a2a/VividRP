@@ -67,9 +67,12 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 new Color(0.72f, 0.74f, 0.78f, 1.0f), metallic: 0.0f, smoothness: 0.25f, baseMap: checkerTex, tiling: new Vector2(12.0f, 10.0f));
             var matPlinth = CreateOrUpdateLitMaterial(
                 MaterialsRoot + "/GlassStudio_Plinth.mat", standardShader,
-                new Color(0.08f, 0.09f, 0.11f, 1.0f), metallic: 0.05f, smoothness: 0.25f, baseMap: null, tiling: Vector2.one);
+                new Color(0.18f, 0.19f, 0.22f, 1.0f), metallic: 0.0f, smoothness: 0.22f, baseMap: null, tiling: Vector2.one);
+            var matHeaderBar = CreateOrUpdateLitMaterial(
+                MaterialsRoot + "/GlassStudio_HeaderBar.mat", standardShader,
+                new Color(0.07f, 0.08f, 0.10f, 1.0f), metallic: 0.0f, smoothness: 0.15f, baseMap: null, tiling: Vector2.one);
 
-            // Hero: Amber DragonAttenuation Glass (Beer-Lambert rich honey-amber volume + crisp specular)
+            // Hero: Amber DragonAttenuation Glass (Beer-Lambert rich honey-amber volume + backface direct specular + caustics)
             var matAmberDragon = CreateOrUpdateGlassMaterial(
                 MaterialsRoot + "/Glass_Hero_AmberDragon.mat",
                 glassShader,
@@ -82,7 +85,8 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 useThicknessMap: 0.0f,
                 thicknessScale: 1.0f,
                 refractionStrength: 1.0f,
-                clearCoatMask: 0.15f);
+                clearCoatMask: 0.15f,
+                backfaceSpecIntensity: 0.48f);
 
             // Station 01: Clear Optical Crown Glass
             var matClearGlass = CreateOrUpdateGlassMaterial(
@@ -97,9 +101,10 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 useThicknessMap: 0.0f,
                 thicknessScale: 1.0f,
                 refractionStrength: 1.0f,
-                clearCoatMask: 0.0f);
+                clearCoatMask: 0.0f,
+                backfaceSpecIntensity: 0.40f);
 
-            // Station 02: Frosted Rough Glass (Same-frame OpaqueColorPyramid Mip blur)
+            // Station 02: Frosted Opalescent Glass (OpaqueColorPyramid Mip blur + HG Internal Volume Single-Scattering)
             var matFrostedGlass = CreateOrUpdateGlassMaterial(
                 MaterialsRoot + "/Glass_02_FrostedRough.mat",
                 glassShader,
@@ -112,9 +117,12 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 useThicknessMap: 0.0f,
                 thicknessScale: 1.0f,
                 refractionStrength: 0.95f,
-                clearCoatMask: 0.0f);
+                clearCoatMask: 0.0f,
+                scatterColor: new Color(0.46f, 0.58f, 0.70f, 1.0f),
+                scatterAnisotropy: 0.55f,
+                backfaceSpecIntensity: 0.20f);
 
-            // Station 03: Emerald Volumetric Absorption Glass (Deep Beer-Lambert)
+            // Station 03: Emerald Volumetric Absorption Glass (Deep Beer-Lambert + Emerald Caustics)
             var matEmeraldGlass = CreateOrUpdateGlassMaterial(
                 MaterialsRoot + "/Glass_03_EmeraldVolume.mat",
                 glassShader,
@@ -127,9 +135,10 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 useThicknessMap: 0.0f,
                 thicknessScale: 1.0f,
                 refractionStrength: 1.0f,
-                clearCoatMask: 0.10f);
+                clearCoatMask: 0.10f,
+                backfaceSpecIntensity: 0.45f);
 
-            // Station 04: High-IOR Dispersive Crystal (Cauchy/Fraunhofer RGB Abbe Dispersion)
+            // Station 04: High-IOR Dispersive Crystal (Cauchy/Fraunhofer RGB Abbe Dispersion + Rainbow Caustics)
             var matDispersiveCrystal = CreateOrUpdateGlassMaterial(
                 MaterialsRoot + "/Glass_04_DispersiveCrystal.mat",
                 glassShader,
@@ -142,7 +151,8 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 useThicknessMap: 0.0f,
                 thicknessScale: 1.0f,
                 refractionStrength: 1.15f,
-                clearCoatMask: 0.0f);
+                clearCoatMask: 0.0f,
+                backfaceSpecIntensity: 0.45f);
 
             var volumeProfile = CreateOrUpdateStudioVolumeProfile();
             AssetDatabase.SaveAssets();
@@ -156,6 +166,7 @@ namespace VividRP.Samples.GlassLookDev.Editor
             matCheckerBackdrop = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/GlassStudio_CheckerBackdrop.mat");
             matCheckerFloor = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/GlassStudio_CheckerFloor.mat");
             matPlinth = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/GlassStudio_Plinth.mat");
+            matHeaderBar = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/GlassStudio_HeaderBar.mat");
             matAmberDragon = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/Glass_Hero_AmberDragon.mat");
             matClearGlass = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/Glass_01_ClearOptical.mat");
             matFrostedGlass = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/Glass_02_FrostedRough.mat");
@@ -192,21 +203,21 @@ namespace VividRP.Samples.GlassLookDev.Editor
                 lightsRoot.transform,
                 "KeyLight_FrontRight",
                 LightType.Spot,
-                new Vector3(1.55f, 2.15f, -1.50f),
-                new Vector3(0.0f, 0.90f, 0.0f),
+                new Vector3(1.25f, 2.55f, -1.15f),
+                new Vector3(0.0f, 0.78f, 0.0f),
                 new Color(1.0f, 0.97f, 0.93f),
-                intensity: 68.0f,
+                intensity: 76.0f,
                 range: 10.0f,
-                spotAngle: 82.0f);
+                spotAngle: 84.0f);
 
             CreateStudioLight(
                 lightsRoot.transform,
                 "RimLight_BackTop",
                 LightType.Spot,
-                new Vector3(-0.60f, 2.20f, 0.95f),
-                new Vector3(0.0f, 0.85f, 0.0f),
+                new Vector3(-0.65f, 2.40f, 0.85f),
+                new Vector3(0.0f, 0.78f, -0.05f),
                 new Color(1.0f, 0.94f, 0.86f),
-                intensity: 54.0f,
+                intensity: 58.0f,
                 range: 9.0f,
                 spotAngle: 86.0f);
 
@@ -236,7 +247,7 @@ namespace VividRP.Samples.GlassLookDev.Editor
             var heroStation = new GameObject("Hero_AmberDragon");
             heroStation.transform.SetParent(studioRoot.transform, false);
             heroStation.transform.localPosition = new Vector3(0.0f, 0.0f, 0.22f);
-            CreateBox(heroStation.transform, "DragonPlinth", new Vector3(0.0f, 0.36f, 0.0f), new Vector3(0.72f, 0.72f, 0.38f), matPlinth);
+            CreateBox(heroStation.transform, "DragonPlinth", new Vector3(0.0f, 0.36f, 0.0f), new Vector3(0.88f, 0.72f, 0.56f), matPlinth);
 
             var dragonGo = new GameObject("DragonAttenuation");
             dragonGo.transform.SetParent(heroStation.transform, false);
@@ -255,16 +266,16 @@ namespace VividRP.Samples.GlassLookDev.Editor
             var labelsRoot = new GameObject("StudioLabels");
             labelsRoot.transform.SetParent(studioRoot.transform, false);
 
-            CreateBox(labelsRoot.transform, "TitleBackdropBar", new Vector3(0.0f, 1.82f, 1.10f), new Vector3(3.4f, 0.42f, 0.02f), matPlinth);
+            CreateBox(labelsRoot.transform, "TitleBackdropBar", new Vector3(0.0f, 1.82f, 1.10f), new Vector3(3.4f, 0.42f, 0.02f), matHeaderBar);
             CreateStudioLabel(labelsRoot.transform, "WallTitle", new Vector3(0.0f, 1.90f, 1.07f),
                 "VIVIDRP SOLID OPTICAL & VOLUMETRIC GLASS LOOKDEV", 0.96f, tmpMat);
             var telemetryText = CreateStudioLabel(labelsRoot.transform, "WallTelemetry", new Vector3(0.0f, 1.72f, 1.07f),
-                "REFRACTION: ON  |  BACKFACE SNELL: ON  |  ABBE DISPERSION: ON", 0.38f, tmpMat);
+                "REFRACTION: ON  |  CAUSTICS: ON  |  DISPERSION: ON", 0.38f, tmpMat);
 
-            CreateStudioLabel(labelsRoot.transform, "Label_01", new Vector3(-0.82f, 0.42f, -0.34f), "01: CLEAR\nIOR 1.52", 0.30f, tmpMat);
-            CreateStudioLabel(labelsRoot.transform, "Label_02", new Vector3(-0.30f, 0.42f, -0.50f), "02: FROSTED\nROUGH 0.38", 0.30f, tmpMat);
-            CreateStudioLabel(labelsRoot.transform, "Label_03", new Vector3(0.30f, 0.42f, -0.50f), "03: EMERALD\nBEER-LAMBERT", 0.30f, tmpMat);
-            CreateStudioLabel(labelsRoot.transform, "Label_04", new Vector3(0.82f, 0.42f, -0.34f), "04: CRYSTAL\nIOR 1.92 DISP", 0.30f, tmpMat);
+            CreateStudioLabel(labelsRoot.transform, "Label_01", new Vector3(-0.82f, 0.40f, -0.38f), "01: CLEAR\nIOR 1.52", 0.30f, tmpMat);
+            CreateStudioLabel(labelsRoot.transform, "Label_02", new Vector3(-0.30f, 0.40f, -0.54f), "02: FROSTED\nOPALESCENT", 0.30f, tmpMat);
+            CreateStudioLabel(labelsRoot.transform, "Label_03", new Vector3(0.30f, 0.40f, -0.54f), "03: EMERALD\nBEER-LAMBERT", 0.30f, tmpMat);
+            CreateStudioLabel(labelsRoot.transform, "Label_04", new Vector3(0.82f, 0.40f, -0.38f), "04: CRYSTAL\nIOR 1.92 DISP", 0.30f, tmpMat);
 
             // 7. Camera Rigs + Main Camera
             var rigsRoot = new GameObject("CameraRigs");
@@ -305,6 +316,10 @@ namespace VividRP.Samples.GlassLookDev.Editor
             controller.EnableRefraction = true;
             controller.EnableDispersion = true;
             controller.EnableBackfaceRefraction = true;
+            controller.EnableCaustics = true;
+            controller.CausticsIntensity = 1.25f;
+            controller.ColoredShadowStrength = 1.0f;
+            controller.ShowCausticsDebugOnly = false;
             controller.DebugMode = GlassLookDevDebugMode.Composite;
             controller.ApplySettings();
 
@@ -351,7 +366,7 @@ namespace VividRP.Samples.GlassLookDev.Editor
             station.transform.localPosition = localPos;
 
             float plinthHeight = 0.52f;
-            CreateCylinder(station.transform, "Plinth", new Vector3(0.0f, plinthHeight * 0.5f, 0.0f), new Vector3(0.24f, plinthHeight * 0.5f, 0.24f), matPlinth);
+            CreateCylinder(station.transform, "Plinth", new Vector3(0.0f, plinthHeight * 0.5f, 0.0f), new Vector3(0.36f, plinthHeight * 0.5f, 0.36f), matPlinth);
 
             var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             sphere.name = "GlassSphere";
@@ -374,7 +389,10 @@ namespace VividRP.Samples.GlassLookDev.Editor
             float useThicknessMap,
             float thicknessScale,
             float refractionStrength,
-            float clearCoatMask)
+            float clearCoatMask,
+            Color? scatterColor = null,
+            float scatterAnisotropy = 0.0f,
+            float backfaceSpecIntensity = 0.35f)
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null)
@@ -393,15 +411,15 @@ namespace VividRP.Samples.GlassLookDev.Editor
             mat.SetFloat("_TransmissionWeight", 1.0f);
             mat.SetColor("_TransmissionColor", transColor);
             mat.SetFloat("_TransmissionDepth", transDepth);
-            mat.SetColor("_TransmissionScatter", Color.black);
-            mat.SetFloat("_TransmissionScatterAnisotropy", 0.0f);
+            mat.SetColor("_TransmissionScatter", scatterColor ?? Color.black);
+            mat.SetFloat("_TransmissionScatterAnisotropy", scatterAnisotropy);
             mat.SetFloat("_ThinWalledTransmission", 0.0f);
             mat.SetFloat("_Dispersion", dispersion);
             mat.SetTexture("_ThicknessMap", thicknessMap);
             mat.SetFloat("_UseThicknessMap", useThicknessMap);
             mat.SetFloat("_ThicknessScale", thicknessScale);
             mat.SetFloat("_RefractionStrength", refractionStrength);
-            mat.SetFloat("_BackfaceSpecularIntensity", 0.25f);
+            mat.SetFloat("_BackfaceSpecularIntensity", backfaceSpecIntensity);
             mat.SetFloat("_ClearCoatMask", clearCoatMask);
             mat.SetFloat("_ClearCoatSmoothness", 0.96f);
             EditorUtility.SetDirty(mat);

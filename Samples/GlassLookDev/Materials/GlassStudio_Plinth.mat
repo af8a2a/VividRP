@@ -78,7 +78,7 @@ Material:
     - _Cutoff: 0.5
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _Metallic: 0.05
+    - _Metallic: 0
     - _MetallicRemap: 1
     - _MetallicRemapMax: 1
     - _MetallicRemapMin: 0
@@ -88,7 +88,7 @@ Material:
     - _ReceiveSSR: 1
     - _ReceiveShadows: 1
     - _ReferencePathTracing: 1
-    - _Smoothness: 0.25
+    - _Smoothness: 0.22
     - _SmoothnessRemap: 1
     - _SmoothnessRemapMax: 1
     - _SmoothnessRemapMin: 0
@@ -110,8 +110,8 @@ Material:
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.08, g: 0.09, b: 0.11, a: 1}
-    - _Color: {r: 0.079999976, g: 0.089999996, b: 0.10999996, a: 1}
+    - _BaseColor: {r: 0.18, g: 0.19, b: 0.22, a: 1}
+    - _Color: {r: 0.23999995, g: 0.24999997, b: 0.27999997, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
     - _SubsurfaceColor: {r: 1, g: 1, b: 1, a: 1}
     - _SubsurfaceRadiusScale: {r: 1, g: 0.5, b: 0.24999997, a: 1}

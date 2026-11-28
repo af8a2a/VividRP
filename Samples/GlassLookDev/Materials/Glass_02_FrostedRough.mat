@@ -68,7 +68,7 @@ Material:
     - _AORemapMax: 1
     - _AORemapMin: 0
     - _AlphaClip: 0
-    - _BackfaceSpecularIntensity: 0.25
+    - _BackfaceSpecularIntensity: 0.2
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0.96
@@ -93,7 +93,7 @@ Material:
     - _ThicknessScale: 1
     - _ThinWalledTransmission: 0
     - _TransmissionDepth: 0.35
-    - _TransmissionScatterAnisotropy: 0
+    - _TransmissionScatterAnisotropy: 0.55
     - _TransmissionWeight: 1
     - _UseThicknessMap: 0
     - _WorkflowMode: 0
@@ -103,6 +103,6 @@ Material:
     - _SubsurfaceColor: {r: 0.8, g: 0.5, b: 0.39999998, a: 1}
     - _SubsurfaceRadiusScale: {r: 1, g: 0.35, b: 0.19, a: 0}
     - _TransmissionColor: {r: 0.93, g: 0.96, b: 0.99, a: 1}
-    - _TransmissionScatter: {r: 0, g: 0, b: 0, a: 1}
+    - _TransmissionScatter: {r: 0.46, g: 0.58, b: 0.7, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

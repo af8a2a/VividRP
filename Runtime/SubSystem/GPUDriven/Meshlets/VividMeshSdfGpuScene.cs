@@ -256,6 +256,10 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             m_NextSurfaceLightingInstances = new List<uint>();
         }
 
+        internal TextureHandle ImportedBrickAtlas => m_ImportedBrickAtlas;
+
+        internal void ClearImportedBrickTexture() => m_ImportedBrickAtlas = default;
+
         internal bool PrepareBrickTexture(IRenderPass pass)
         {
             var handle = m_BrickAtlasHandle ?? (m_EmptyBrickAtlasHandle ??= RTHandles.Alloc(CoreUtils.blackVolumeTexture));

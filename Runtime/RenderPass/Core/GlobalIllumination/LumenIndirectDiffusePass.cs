@@ -1518,6 +1518,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (settings != null && settings.active && !settings.enabled.value)
                 return;
             var cache = m_Scene.RefreshSurfaceCache();
+            m_Scene.ClearImportedBrickTexture();
             m_RealtimeOnly = settings != null && settings.active && settings.realtimeOnly.value;
             m_OffscreenOnly = settings != null && settings.active && settings.offscreenBounceOnly.value;
             m_TraceMode = settings != null && settings.active ? settings.traceMode.value : LumenIndirectDiffuseTraceMode.SdfOnly;
@@ -4850,6 +4851,7 @@ namespace VividRP.Runtime.RenderPass.Core
             UseReadTexture(builder, m_OpenPbrAux0);
             UseReadTexture(builder, m_OpenPbrAux1);
             UseReadTexture(builder, m_ScreenMotion);
+            UseReadTexture(builder, m_ScreenHzb);
             UseReadTexture(builder, m_GlobalFallback);
             UseReadTexture(builder, m_SurfaceCacheArrayFallback);
             UseReadTexture(builder, m_ClosestHzb);
@@ -4857,6 +4859,8 @@ namespace VividRP.Runtime.RenderPass.Core
             UseReadTexture(builder, m_ReceiverVisibility);
             UseReadTexture(builder, m_PreviousScreenRadiance);
             UseReadTexture(builder, m_PreviousScreenGeometry);
+            if (m_UseSdf && m_Scene != null)
+                UseReadTexture(builder, m_Scene.ImportedBrickAtlas);
             UseReadTexture(builder, m_CardAlbedoDepth);
             UseReadTexture(builder, m_CardNormalCoverage);
             UseReadTexture(builder, m_CardFinalAtlas);
@@ -4870,6 +4874,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             UseReadBuffer(builder, m_MeshCardGrid);
             UseReadBuffer(builder, m_ObjectGrid);
+            UseReadBuffer(builder, m_ObjectPageWork);
+            UseReadBuffer(builder, m_ObjectPageTable);
             UseReadBuffer(builder, m_GlobalPages);
             UseReadBuffer(builder, m_GlobalThinBricks);
         }

@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-VividRP 是一个面向新世代 Unity 的实验性可编程渲染管线（Scriptable Render Pipeline, SRP）包。它以**可视化、数据驱动的 RenderGraph 工作流**为核心，并在此基础上探索延迟渲染、Substrate 多 Closure 材质体系（`.slab.shader`）与实时 Hybrid Shell / Marschner 毛发系统、GPU Driven（GPUScene / Visibility Buffer）、Bindless、基于 Mesh/Global SDF 与 Surface Cache 的实时全局光照（Screen Probe Gather GI 与 UE5 Lumen 架构高光反射）、光线追踪（DXR）、参考路径追踪、Meshlet APV 光照烘焙、体积雾、虚拟纹理（VT/SVT）、虚拟阴影图（VSM）和时域超分辨率等高端渲染技术。
+VividRP 是一个面向新世代 Unity 的实验性可编程渲染管线（Scriptable Render Pipeline, SRP）包。它以**可视化、数据驱动的 RenderGraph 工作流**为核心，并在此基础上探索延迟渲染、Substrate 多 Closure 材质体系（`.slab.shader`）与实时 Hybrid Shell / Marschner 毛发系统、实时发丝级毛发（3-Layer Visibility Atlas + Strand-Space 着色与 Biased L1 SH）、GPU Driven（GPUScene / Visibility Buffer）、Bindless、基于 Mesh/Global SDF 与 Surface Cache 的实时全局光照（Screen Probe Gather GI 与 UE5 Lumen 架构高光反射）、光线追踪（DXR）、参考路径追踪、Meshlet APV 光照烘焙、体积雾、虚拟纹理（VT/SVT）、虚拟阴影图（VSM）和时域超分辨率等高端渲染技术。
 
 > [!IMPORTANT]
 > - **Unity 版本基线**：当前开发与验证基线为 Unity `7000.0.0a22`（提交 `dbac4d68c4de`；历史升级记录见 [Unity 7000.0.0a16 兼容性说明](Documentation~/Unity7000a16Upgrade.md)）。
@@ -40,6 +40,26 @@ VividRP 现已构建起**双目标 `.slab.shader` 材质编译器 + Substrate Cl
 | ![FurLookDev 室内摄影棚全景](Documentation~/Image/Fur_LookDev_Studio_Overview.png) | ![Case 01 单纤维测角仪](Documentation~/Image/Fur_LookDev_Bay01_Goniometer.png) |
 | **Case 02：白炉能量守恒（`16×16` 2048 方向积分，0/256 越界）** | **Case 03：髓质四轴扫描与 Yan 2017 实测动物毛发数据集对照** |
 | ![Case 02 白炉能量守恒验证](Documentation~/Image/Fur_LookDev_Bay02_WhiteFurnace.png) | ![Case 03 髓质扫描与 Yan 2017 数据集对照](Documentation~/Image/Fur_LookDev_Bay03_Medulla_Yan2017.png) |
+
+---
+
+## 实时发丝级毛发与 3-Layer Visibility Atlas 展示（Strand Hair & `HairLookDev`）
+
+VividRP 现已实现一套面向高密度发丝的**实时 Compute 软光栅 + 3-Layer Visibility Atlas + Strand-Space 逐顶点着色管线**，并与 DXR 参考路径追踪（RTXCR Chiang BCSDF）共享同一套 Houdini 22 `.vividhair` 资产：
+
+- **64×64 分块 3-Layer Visibility Atlas 与 Compute 软光栅**：基于 32-bit 打包格式（`[31:20]` 12-bit 局部线性深度 + `[19:0]` 20-bit `SegmentId`）构建 **3 层深度排序可见性图集 + 1 层累加覆盖率缓冲**；在固定 `32–64 MB` 预算（`512–1024` Tiles）内支持自动 `×2 / ×4` 降分辨率与 8-tap Poisson 抖动、二次覆盖率重建，以及 3 层深层辐射外推（$w_i = C_i \cdot 0.25^{3-i}$）。
+- **Strand-Space 着色与 Biased L1 SH 自阴影**：逐可见顶点复用 `VividHairFurBSDF.hlsl`（Karis Marschner `R / TT / TRT` + Zinke Dual Scattering + Yan Medulla + Chiang 黑色素模型），原生接入 Clustered Lighting、世界空间 CSM 阴影图集与 Sky IBL；配合 GPU 96³ 体素 + 遮挡网格三角面 **Biased L1 SH 烘焙器**（64 条 Fibonacci 射线 + `-5.0` 未命中负偏置，直接持久化至 `.vividhair` 资产）提供柔和自阴影与发丝内部散射过渡。
+- **Phase S3 GPU 调度优化与实测指标**：引入 **1024-Bin 全局屏幕 Tile 计数排序**、**零 LDS 原子 Wave32 双像素请求栈**（`1.75 KB` LDS）、**自然序可见顶点压缩**（`HairBust_48k` 经 HZB 剔除压缩 `393,216 → 158,130` 可见顶点，约 **-60%**）以及紧接不透明 `HZBGeneratePass` 后的早期 **Async Compute 调度**。在 RTX 5070 Ti 1280×720 `HairLookDev` 场景（`HairSphere_16k` + `HairBust_48k`，共 **65,536 根发丝 / 475,136 线段**）实测中，优化路径与直接路径几乎像素无损（`Overview` `PSNR = 61.85 dB`、`BustFront` `PSNR = 63.32 dB`），间接着色阶段 `StrandHairShadingPass` 降至 **`0.028–0.029 ms`**（较未压缩路径提速约 **2.4×**），合成阶段 `StrandHairCompositionPass` 为 **`0.030–0.031 ms`**。
+
+| 实时 Strand VisBuf（`HairLookDev` 全景，65,536 发丝） | 同相机 Reference PT Ground Truth（DXR Chiang） |
+| :---: | :---: |
+| ![HairLookDev 实时 Strand VisBuf 全景](Documentation~/Image/Hair_VisBuf_Overview.png) | ![HairLookDev Reference PT 全景基线](Documentation~/Image/Hair_PT_Overview.png) |
+| **实时 Strand VisBuf（`HairBust_48k` 49,152 发丝正面特写）** | **同相机 Reference PT Ground Truth（`HairBust_48k`）** |
+| ![HairBust 48k 实时 Strand VisBuf 特写](Documentation~/Image/Hair_VisBuf_Bust_Front.png) | ![HairBust 48k Reference PT 基线](Documentation~/Image/Hair_PT_Bust_Front.png) |
+| **实时 Strand VisBuf（`HairSphere_16k` 发丝球近景细节）** | **同相机 Reference PT Ground Truth（`HairSphere_16k`）** |
+| ![HairSphere 16k 实时 Strand VisBuf 近景](Documentation~/Image/Hair_VisBuf_Sphere_CloseUp.png) | ![HairSphere 16k Reference PT 基线](Documentation~/Image/Hair_PT_Sphere_CloseUp.png) |
+| **Debug：3-Layer Visibility Atlas 层数分布（`LayerCount`）** | **Debug：Biased L1 SH 方向自阴影（`DirectSelfShadow`）** |
+| ![3-Layer Visibility Atlas 层数调试视图](Documentation~/Image/Hair_VisBuf_Debug_Layers.png) | ![Biased L1 SH 自阴影调试视图](Documentation~/Image/Hair_VisBuf_Debug_SelfShadow.png) |
 
 ---
 
@@ -93,7 +113,7 @@ Pass 通过字段上的 `[RenderGraphResource]` 特性自动生成图端口。�
 | **体积效果** | 全局及局部体积雾、VBuffer、体积光照、高度雾合成（Aerial Perspective）与 Max-Z 生成 |
 | **光线追踪与硬件加速** | • **基础光追**：可序列化 RTAS 描述符、`RTASBuildPass`、方向光光追阴影与调试 Pass<br>• **NVIDIA 集成**：NVAPI Shader Execution Reordering（SER）、RTX Texture Filtering（RTXTF） |
 | **参考路径追踪** | • **积分器**：基于 OpenPBR 的多反弹 DXR 原型，支持解析光源与 HDRI 的 MIS / NEE、矩形/圆盘光源 BSDF 段命中评估、着色点感知的混合光源选择与空间索引<br>• **透射与次表面**：随机 RGB 几何透明度、薄壁透射、四层介质栈 + Beer–Lambert 吸收的实体折射、面部次表面散射耳部透射<br>• **降噪与调试**：NRD REBLUR 预览降噪、Unity Open Image Denoise (OIDN) 离线收敛降噪、Rendering Debugger 传输视图、确定性像素捕获 |
-| **实时毛发与路径追踪毛发** | • **实时毛发（`FurSlab`）**：Hybrid Shells（稀疏壳 + 层内视线空间光线步进，保留壳级 Early-Z）、`VividFurShellRenderer` 实例化与距离壳 LOD、GPUDriven 动态壳放大与可编程 VSM/CSM 阴影、OpenPBR V2 / Karis Marschner + Dual Scattering + Yan 2017 Medulla 双光照模型、Houdini 22 FlowMap / 2D Pattern / 4×4 3D Flipbook 烘焙管线与 `Samples/FurLookDev` 室内物理验证摄影棚<br>• **毛发路径追踪**：基于 RTXCR Chiang 近场 BCSDF 的 `VividRP/Material/Hair` DXR 路径，支持 DOTS strand 几何、`HairDotsGpuStream` 持久 GPU 更新、动态运动向量、Reference PT、REBLUR 与 DLSS-RR 引导 |
+| **实时毛发与路径追踪毛发** | • **实时短毛（`FurSlab`）**：Hybrid Shells（稀疏壳 + 层内视线空间光线步进，保留壳级 Early-Z）、`VividFurShellRenderer` 实例化与距离壳 LOD、GPUDriven 动态壳放大与可编程 VSM/CSM 阴影、OpenPBR V2 / Karis Marschner + Dual Scattering + Yan 2017 Medulla 双光照模型、Houdini 22 FlowMap / 2D Pattern / 4×4 3D Flipbook 烘焙管线与 `Samples/FurLookDev` 室内物理验证摄影棚<br>• **实时发丝级毛发（Strand Hair）**：64×64 分块 32-bit 3-Layer Visibility Atlas + Additive Coverage、1024-Bin 全局屏幕 Tile 计数排序与零 LDS 原子 Wave32 双像素请求栈软光栅、HZB 自然序可见顶点压缩 + 早期 Async Compute 调度、Strand-Space `VividHairFurBSDF` 着色（Clustered Lights + 世界空间 CSM + Sky IBL）、GPU 96³ 体素 + 遮挡三角面 Biased L1 SH 烘焙器与 `Samples/HairLookDev` 同源验证摄影棚<br>• **毛发路径追踪**：基于 RTXCR Chiang 近场 BCSDF 的 `VividRP/Material/Hair` DXR 路径，共享 `.vividhair` / DOTS strand 几何、`HairDotsGpuStream` 持久 GPU 更新、动态运动向量、Reference PT、REBLUR 与 DLSS-RR 引导 |
 | **资源与子系统** | • **虚拟纹理（VT）**：通用 VT Core、SVT、GPU Driven 地形表面绑定、自适应 Mip Bias 与驻留过渡，支持 GPU Driven Border Size 依赖追踪<br>• **Per-Object Buffer**：免 `MaterialPropertyBlock` 的逐 Renderer 16B 对齐 SSBO 数据系统、集中生成的 HLSL 布局与 CPU 基准测试（支持 `VividPerObjectColorExample` 等灵活别名扩展）<br>• **其他子系统**：DBuffer Decal、实验性 ECS 页式粒子系统（模拟/裁剪/排序/Billboard/Mesh/Stretch/Trail/碰撞/子发射器） |
 | **编辑器与工具** | • **配置向导**：VividRP Wizard（DX12 / DXC 一键配置）<br>• **内存与安全诊断**：`VIVIDRP_STARTUP_SRP=minimal` 启动内存隔离模式与目录链接安全防护<br>• **性能与分析**：LWGUI + DXC Shader 静态性能分析后端、Roslyn Pass 节点生成器<br>• **诊断工具**：AgenticDebugger（PIX / Frame Debugger / GC Profiler 自动化诊断接口） |
 
@@ -178,12 +198,17 @@ VividRP 通过 `.slab.shader` 将光栅与 GPUDriven 材质统一到同一份源
 - **物理验证摄影棚（`Samples/FurLookDev`）**：
   - 打开 `Samples/FurLookDev/FurLookDev.unity` 即可在固定曝光（`EV100 = 0.0`）环境下实时运行 `VividFurLookDevController` 诊断板，涵盖 **Case 01 单纤维测角仪**、**Case 02 16×16 白炉能量守恒网格**与 **Case 03 髓质四轴扫描 + Yan 2017 实测物种数据（Human / Cat / Rabbit / Raccoon / Deer）对照**。
 
-### 7. 毛发路径追踪
+### 7. 实时发丝级毛发（Strand Hair）与毛发路径追踪
 
-发丝级光追毛发使用专用 `VividRP/Material/Hair` 材质与 Reference Path Tracing 图：
+VividRP 将**实时发丝级渲染**与**DXR 路径追踪基线**统一到同一套 `.vividhair` 资产与 `HairGroomRenderer` 组件上：
 
-- 覆盖 DXR 近场发丝路径，适合验证 DOTS strand 几何、动态变形运动向量以及 REBLUR / DLSS-RR 降噪引导。
-- 可通过菜单 `VividRP > Hair > Create Chiang Validation Assets` 一键生成验证资产（详见 [毛发路径追踪文档](Documentation~/HairPathTracing.md)）。
+- **实时 Strand Hair 工作流（`Samples/HairLookDev`）**：
+  - 使用 Houdini 22 脚本 [Tools~/Houdini/Export-VividHairGroom.py](Tools~/Houdini/Export-VividHairGroom.py) 导出包含发丝拓扑、宽度、Melanin/Redness 与可选遮挡网格的 `.vividhair` 资产，在场景中通过 `HairGroomRenderer` 挂载并由 `StrandHairRenderGraphHook` 自动调度至当前 RenderGraph。
+  - 点击菜单 **VividRP > Hair > Bake Biased L1 SH for Scene Grooms** 可运行 GPU 96³ 体素 + 头部遮挡三角面 Biased L1 SH 烘焙器，并将 L1 SH 系数直接回写至 `.vividhair` 资产。
+  - 打开 `Samples/HairLookDev/HairLookDev.unity` 即可实时检视 `HairSphere_16k`（16,384 发丝）与 `HairBust_48k`（49,152 发丝），并在 `StrandHairVisibilitySettings` 中切换 `LayerCount`、`NormalizedDepth12`、`BakedL1SHAO`、`DirectSelfShadow` 等调试视图。
+- **毛发路径追踪基线**：
+  - 使用专用 `VividRP/Material/Hair` 材质与 Reference Path Tracing 图覆盖 DXR 近场发丝路径，验证 DOTS strand 几何、动态变形运动向量以及 REBLUR / DLSS-RR 降噪引导。
+  - 可通过菜单 `VividRP > Hair > Create Chiang Validation Assets` 一键生成验证资产（详见 [毛发路径追踪文档](Documentation~/HairPathTracing.md)）。
 
 ---
 
@@ -194,8 +219,8 @@ Packages/VividRP/
 ├── Runtime/
 │   ├── RenderPipeline/     # 管线核心、VividRenderPipelineAsset、全局设置与 Volume 集成
 │   ├── RenderGraph/        # 运行时图数据、可序列化描述符、History/Preview、PassRecorder
-│   ├── Core/               # Camera History 持久资源管理、DOTS Hair 几何与 GPU 流式更新等
-│   ├── RenderPass/         # Core、Debug 与 Example 渲染 Pass（含 SDF、APV、VSM 等）
+│   ├── Core/               # Camera History 持久资源管理、HairGroom (.vividhair) / DOTS Hair 几何与 GPU 流式更新等
+│   ├── RenderPass/         # Core、Debug 与 Example 渲染 Pass（含 Strand Hair VisBuf/Shading、SDF、APV、VSM 等）
 │   ├── SubSystem/          # GPUDriven (Meshlet/SDF/LOD)、VirtualShadowMap、VirtualTexture、Volumetric、Sky、Decal、DLSS 等
 │   ├── ComponentData/      # 相机、灯光、反射探针附加数据组件
 │   ├── PerObjectBuffer/    # 免 MPB 的逐 Renderer SSBO 数据系统与基准测试
@@ -203,12 +228,13 @@ Packages/VividRP/
 ├── Editor/
 │   ├── RenderGraph/        # Graph Toolkit 编辑器、Importer、编译器、校验器与节点注册
 │   ├── PipelineResource/   # [PipelineResource] 引擎资源收集与同步工具
+│   ├── Hair/               # .vividhair Importer、GPU Biased L1 SH 烘焙器与 Chiang 验证资产工具
 │   ├── Lighting/           # Meshlet APV 烘焙工具与场景验证辅助
 │   └── AgenticDebugger/    # 面向 CLI/Agent 的 PIX、Frame Debugger 与 GC 诊断集成
-├── Shaders/                # HLSL 着色器库（Core Public/Private、Substrate/Slab 材质、FurSlab、OpenPBR、ThirdParty）
-├── Samples/                # 验证与展示场景（FurLookDev 摄影棚、SurfaceCacheCornellBox、MeshletAPV、DragonAttenuation 等）
+├── Shaders/                # HLSL 着色器库（Core Public/Private、Substrate/Slab 材质、FurSlab、StrandHair、OpenPBR、ThirdParty）
+├── Samples/                # 验证与展示场景（HairLookDev、FurLookDev 摄影棚、SurfaceCacheCornellBox、MeshletAPV、DragonAttenuation 等）
 ├── SourceGenerators~/      # 独立的 Roslyn Pass 节点增量生成器与 .NET 测试
-├── Tools~/                 # Houdini 22 毛发烘焙脚本、DXC / GPU 独立几何与材质校验脚本、PIX 与诊断 CLI 工具
+├── Tools~/                 # Houdini 22 毛发导出/烘焙脚本、DXC / GPU 独立几何与材质校验脚本、PIX 与诊断 CLI 工具
 ├── Documentation~/         # 架构、子系统、合约与工作流文档（含分类索引）
 ├── Roadmap~/               # 各子系统演进路线图与实验设计
 └── Tests/Editor/           # Unity EditMode 自动化测试套件

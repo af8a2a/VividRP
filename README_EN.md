@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-generation Unity. It centers on a **visual, data-driven RenderGraph workflow** and explores high-end rendering systems including deferred rendering, a Substrate multi-closure material architecture (`.slab.shader`) with real-time Hybrid Shell / Marschner fur, GPU Driven rendering (GPUScene / Visibility Buffer), Bindless, Mesh/Global SDF & Surface Cache real-time global illumination (Screen Probe Gather Diffuse GI & UE5-based Lumen Specular Reflections), Ray Tracing (DXR), reference path tracing, Meshlet APV light baking, volumetrics, virtual texturing (VT/SVT), virtual shadow maps (VSM), and temporal upscaling.
+VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-generation Unity. It centers on a **visual, data-driven RenderGraph workflow** and explores high-end rendering systems including deferred rendering, a Substrate multi-closure material architecture (`.slab.shader`) with real-time Hybrid Shell / Marschner fur, real-time strand-based hair (3-Layer Visibility Atlas + strand-space shading & Biased L1 SH), GPU Driven rendering (GPUScene / Visibility Buffer), Bindless, Mesh/Global SDF & Surface Cache real-time global illumination (Screen Probe Gather Diffuse GI & UE5-based Lumen Specular Reflections), Ray Tracing (DXR), reference path tracing, Meshlet APV light baking, volumetrics, virtual texturing (VT/SVT), virtual shadow maps (VSM), and temporal upscaling.
 
 > [!IMPORTANT]
 > - **Unity Baseline**: The current development and verification baseline is Unity `7000.0.0a22` (revision `dbac4d68c4de`; see [Unity 7000.0.0a16 Compatibility](Documentation~/Unity7000a16Upgrade.md) for historical upgrade notes).
@@ -40,6 +40,26 @@ VividRP features a **dual-target `.slab.shader` material compiler + Substrate Cl
 | ![FurLookDev Indoor Studio Overview](Documentation~/Image/Fur_LookDev_Studio_Overview.png) | ![Case 01 Single Strand Goniometer](Documentation~/Image/Fur_LookDev_Bay01_Goniometer.png) |
 | **Case 02: White Furnace Energy Conservation (`16×16` 2048-Dir Integral, 0/256 Violations)** | **Case 03: 4-Axis Medulla Sweep & Yan 2017 Animal Fur Dataset Match** |
 | ![Case 02 White Furnace Energy Conservation](Documentation~/Image/Fur_LookDev_Bay02_WhiteFurnace.png) | ![Case 03 Medulla Sweep and Yan 2017 Dataset](Documentation~/Image/Fur_LookDev_Bay03_Medulla_Yan2017.png) |
+
+---
+
+## Real-Time Strand-Based Hair & 3-Layer Visibility Atlas Showcase (Strand Hair & `HairLookDev`)
+
+VividRP implements a **real-time Compute software rasterizer + 3-Layer Visibility Atlas + strand-space per-vertex shading pipeline** for dense strand hair, sharing the same Houdini 22 `.vividhair` assets directly with the DXR Reference Path Tracer (RTXCR Chiang BCSDF):
+
+- **64×64 Tiled 3-Layer Visibility Atlas & Compute Rasterization**: Packs 3 depth-sorted visibility layers plus 1 additive coverage layer into a compact 32-bit format (`[31:20]` 12-bit local linear depth + `[19:0]` 20-bit `SegmentId`) within a bounded `32–64 MB` budget (`512–1024` tiles), featuring automatic `×2 / ×4` tile downscaling with 8-tap Poisson jitter, quadratic coverage reconstruction, and 3-layer deep-radiance extrapolation ($w_i = C_i \cdot 0.25^{3-i}$).
+- **Strand-Space Shading & Biased L1 SH Self-Shadowing**: Evaluates `VividHairFurBSDF.hlsl` (Karis Marschner `R / TT / TRT` + Zinke Dual Scattering + Yan Medulla + Chiang melanin) per visible vertex with Clustered Lighting, world-space CSM shadow atlas, and Sky IBL. A GPU 96³ voxel + occluder-mesh triangle **Biased L1 SH Baker** (64 Fibonacci rays with `-5.0` negative miss bias, persisted directly into `.vividhair`) provides smooth self-shadowing and internal multiple scattering.
+- **Phase S3 GPU Scheduling & Measured Parity**: Combines a **1024-bin global screen-tile counting sort**, a **zero-LDS-atomic Wave32 dual pixel-request stack** (`1.75 KB` LDS), **natural-order visible vertex compaction** (HZB compacts `HairBust_48k` from `393,216 → 158,130` visible vertices, ~**60%** reduction), and early **Async Compute scheduling** right after the final opaque `HZBGeneratePass`. In `HairLookDev` at 1280×720 on RTX 5070 Ti (`HairSphere_16k` + `HairBust_48k` = **65,536 strands / 475,136 segments**), the optimized path matches the direct path near-losslessly (`Overview` `PSNR = 61.85 dB`, `BustFront` `PSNR = 63.32 dB`), cutting `StrandHairShadingPass` to **`0.028–0.029 ms`** (~**2.4×** faster than uncompacted shading) with `StrandHairCompositionPass` at **`0.030–0.031 ms`**.
+
+| Real-Time Strand VisBuf (`HairLookDev` Overview, 65,536 Strands) | Matched-Camera Reference PT Ground Truth (DXR Chiang) |
+| :---: | :---: |
+| ![HairLookDev Real-Time Strand VisBuf Overview](Documentation~/Image/Hair_VisBuf_Overview.png) | ![HairLookDev Reference PT Overview Baseline](Documentation~/Image/Hair_PT_Overview.png) |
+| **Real-Time Strand VisBuf (`HairBust_48k` 49,152 Strands Close-Up)** | **Matched-Camera Reference PT Ground Truth (`HairBust_48k`)** |
+| ![HairBust 48k Real-Time Strand VisBuf Front](Documentation~/Image/Hair_VisBuf_Bust_Front.png) | ![HairBust 48k Reference PT Front Baseline](Documentation~/Image/Hair_PT_Bust_Front.png) |
+| **Real-Time Strand VisBuf (`HairSphere_16k` Strand Sphere Close-Up)** | **Matched-Camera Reference PT Ground Truth (`HairSphere_16k`)** |
+| ![HairSphere 16k Real-Time Strand VisBuf Close-Up](Documentation~/Image/Hair_VisBuf_Sphere_CloseUp.png) | ![HairSphere 16k Reference PT Close-Up Baseline](Documentation~/Image/Hair_PT_Sphere_CloseUp.png) |
+| **Debug: 3-Layer Visibility Atlas Layer Count (`LayerCount`)** | **Debug: Biased L1 SH Directional Self-Shadow (`DirectSelfShadow`)** |
+| ![3-Layer Visibility Atlas Layer Count Debug](Documentation~/Image/Hair_VisBuf_Debug_Layers.png) | ![Biased L1 SH Directional Self-Shadow Debug](Documentation~/Image/Hair_VisBuf_Debug_SelfShadow.png) |
 
 ---
 
@@ -93,7 +113,7 @@ The modules below are implemented in the current package (availability depends o
 | **Volumetrics** | Global and local volumetric fog, VBuffer, volumetric lighting, aerial perspective compositing, and Max-Z generation |
 | **Ray Tracing & HW Acceleration** | • **Ray Tracing**: Serializable RTAS descriptors, `RTASBuildPass`, directional ray-traced shadows, and debug passes<br>• **NVIDIA Integration**: NVAPI Shader Execution Reordering (SER), RTX Texture Filtering (RTXTF) |
 | **Reference Path Tracing** | • **Integrator**: OpenPBR-based multi-bounce DXR prototype with analytic-light & HDRI MIS / NEE, rectangle/disc BSDF-segment evaluation, shading-point-aware mixed light selection, and spatial indexing<br>• **Transmission & SSS**: Stochastic RGB geometry opacity, thin-walled transmission, solid refraction with a 4-level medium stack and Beer–Lambert absorption, face SSS ear transmission<br>• **Denoising & Debug**: NRD REBLUR preview denoising, Unity Open Image Denoise (OIDN) backend, Rendering Debugger transport views, deterministic pixel capture |
-| **Real-Time Fur & Hair Path Tracing** | • **Real-Time Fur (`FurSlab`)**: Hybrid Shells (sparse shells + in-slab view-space raymarching with shell-level Early-Z), `VividFurShellRenderer` instancing & distance shell LOD, GPU-driven dynamic shell amplification & programmable VSM/CSM shadows, dual OpenPBR V2 / Karis Marschner + Dual Scattering + Yan 2017 Medulla lighting models, Houdini 22 FlowMap / 2D Pattern / 4×4 3D Flipbook pipeline, and the `Samples/FurLookDev` indoor verification studio<br>• **Hair Path Tracing**: `VividRP/Material/Hair` DXR path based on the RTXCR Chiang near-field BCSDF, featuring DOTS strand geometry, persistent GPU strand updates (`HairDotsGpuStream`), dynamic motion vectors, Reference PT, REBLUR, and DLSS-RR guides |
+| **Real-Time Fur & Hair Path Tracing** | • **Real-Time Fur (`FurSlab`)**: Hybrid Shells (sparse shells + in-slab view-space raymarching with shell-level Early-Z), `VividFurShellRenderer` instancing & distance shell LOD, GPU-driven dynamic shell amplification & programmable VSM/CSM shadows, dual OpenPBR V2 / Karis Marschner + Dual Scattering + Yan 2017 Medulla lighting models, Houdini 22 FlowMap / 2D Pattern / 4×4 3D Flipbook pipeline, and the `Samples/FurLookDev` indoor verification studio<br>• **Real-Time Strand Hair**: 64×64 tiled 32-bit 3-Layer Visibility Atlas + additive coverage, 1024-bin global screen-tile counting sort & zero-LDS-atomic Wave32 dual pixel-request stack software rasterizer, HZB natural-order visible vertex compaction + early Async Compute scheduling, strand-space `VividHairFurBSDF` shading (Clustered Lights + world-space CSM + Sky IBL), GPU 96³ voxel + occluder-triangle Biased L1 SH baker, and the `Samples/HairLookDev` verification studio<br>• **Hair Path Tracing**: `VividRP/Material/Hair` DXR path based on the RTXCR Chiang near-field BCSDF, sharing `.vividhair` / DOTS strand geometry, persistent GPU strand updates (`HairDotsGpuStream`), dynamic motion vectors, Reference PT, REBLUR, and DLSS-RR guides |
 | **Resources & Subsystems** | • **Virtual Texturing (VT)**: Generic VT Core, SVT, GPU Driven Terrain surface bindings, adaptive mip bias, residency transitions, and GPU-driven border size dependency tracking<br>• **Per-Object Buffer**: `MaterialPropertyBlock`-free per-renderer 16B-aligned SSBO shader data, centralized generated HLSL layouts, and MPB CPU benchmark (with `VividPerObjectColorExample` layout aliasing support)<br>• **Other Subsystems**: DBuffer Decals, experimental ECS paged-storage particle system (simulation, culling, sorting, Billboard/Mesh/Stretch rendering, trails, collisions, sub-emitters) |
 | **Editor & Tooling** | • **Setup Wizard**: VividRP Wizard (Windows DX12 / DXC setup)<br>• **Memory & Safety Diagnostics**: `VIVIDRP_STARTUP_SRP=minimal` diagnostic mode and recursive directory-link safeguards<br>• **Performance & Analysis**: LWGUI + DXC shader performance monitor, Roslyn pass-node source generator<br>• **Automation**: AgenticDebugger (PIX, Frame Debugger, and GC Profiler CLI automation) |
 
@@ -178,12 +198,17 @@ VividRP unifies Raster and GPUDriven material authoring via `.slab.shader` and t
 - **Physical Verification Studio (`Samples/FurLookDev`)**:
   - Open `Samples/FurLookDev/FurLookDev.unity` to run `VividFurLookDevController` under fixed exposure (`EV100 = 0.0`), inspecting **Case 01 Single Strand Goniometer**, **Case 02 16×16 White Furnace Energy Conservation**, and **Case 03 4-Axis Medulla Sweep + Yan 2017 Measured Animal Fur Dataset (Human / Cat / Rabbit / Raccoon / Deer)**.
 
-### 7. Hair Path Tracing
+### 7. Real-Time Strand-Based Hair & Hair Path Tracing
 
-Strand-level ray-traced hair uses a dedicated `VividRP/Material/Hair` material and Reference Path Tracing graph:
+VividRP unifies **real-time strand-based hair** and the **DXR Reference Path Tracing baseline** on the same `.vividhair` groom assets and `HairGroomRenderer` component:
 
-- Covers the DXR near-field strand path, validating DOTS strand geometry, deforming-strand motion vectors, and REBLUR / DLSS-RR denoising guides.
-- Generate test assets via `VividRP > Hair > Create Chiang Validation Assets` (see [Hair Path Tracing Documentation](Documentation~/HairPathTracing.md)).
+- **Real-Time Strand Hair Workflow (`Samples/HairLookDev`)**:
+  - Export `.vividhair` assets (strand topology, widths, Melanin/Redness, and optional occluder meshes) from Houdini 22 via [Tools~/Houdini/Export-VividHairGroom.py](Tools~/Houdini/Export-VividHairGroom.py), attach them to `HairGroomRenderer`, and let `StrandHairRenderGraphHook` schedule visibility, shading, and composition automatically in the active RenderGraph.
+  - Run **VividRP > Hair > Bake Biased L1 SH for Scene Grooms** to execute the GPU 96³ voxel + head-occluder triangle Biased L1 SH baker and persist the resulting L1 SH coefficients directly into `.vividhair`.
+  - Open `Samples/HairLookDev/HairLookDev.unity` to inspect `HairSphere_16k` (16,384 strands) and `HairBust_48k` (49,152 strands), and switch debug views (`LayerCount`, `NormalizedDepth12`, `BakedL1SHAO`, `DirectSelfShadow`, etc.) via `StrandHairVisibilitySettings`.
+- **Hair Path Tracing Baseline**:
+  - Uses the dedicated `VividRP/Material/Hair` material and Reference Path Tracing graph to validate DXR near-field strand paths, DOTS strand geometry, deforming-strand motion vectors, and REBLUR / DLSS-RR denoising guides.
+  - Generate test assets via `VividRP > Hair > Create Chiang Validation Assets` (see [Hair Path Tracing Documentation](Documentation~/HairPathTracing.md)).
 
 ---
 
@@ -194,8 +219,8 @@ Packages/VividRP/
 ├── Runtime/
 │   ├── RenderPipeline/     # Pipeline core, VividRenderPipelineAsset, global settings & Volume integration
 │   ├── RenderGraph/        # Runtime graph data, serializable descriptors, History/Preview, PassRecorder
-│   ├── Core/               # Camera History persistence, DOTS Hair geometry & GPU stream updates
-│   ├── RenderPass/         # Core, Debug, and Example render passes (SDF, APV, VSM, etc.)
+│   ├── Core/               # Camera History persistence, HairGroom (.vividhair) / DOTS Hair geometry & GPU stream updates
+│   ├── RenderPass/         # Core, Debug, and Example render passes (Strand Hair VisBuf/Shading, SDF, APV, VSM, etc.)
 │   ├── SubSystem/          # GPUDriven (Meshlet/SDF/LOD), VirtualShadowMap, VirtualTexture, Volumetric, Sky, Decal, DLSS, etc.
 │   ├── ComponentData/      # Companion camera, light, and reflection-probe components
 │   ├── PerObjectBuffer/    # MPB-free per-renderer SSBO shader data system & CPU benchmark
@@ -203,12 +228,13 @@ Packages/VividRP/
 ├── Editor/
 │   ├── RenderGraph/        # Graph Toolkit editor, importer, compiler, validator & node registry
 │   ├── PipelineResource/   # [PipelineResource] collection and synchronization tools
+│   ├── Hair/               # .vividhair importer, GPU Biased L1 SH baker, and Chiang validation asset builders
 │   ├── Lighting/           # Meshlet APV baking tools and scene validation helpers
 │   └── AgenticDebugger/    # CLI/Agent-oriented PIX, Frame Debugger, and GC diagnostic bridges
-├── Shaders/                # HLSL shaders (Core Public/Private, Substrate/Slab Materials, FurSlab, OpenPBR, ThirdParty)
-├── Samples/                # Validation & showcase scenes (FurLookDev studio, SurfaceCacheCornellBox, MeshletAPV, DragonAttenuation, etc.)
+├── Shaders/                # HLSL shaders (Core Public/Private, Substrate/Slab Materials, FurSlab, StrandHair, OpenPBR, ThirdParty)
+├── Samples/                # Validation & showcase scenes (HairLookDev, FurLookDev studio, SurfaceCacheCornellBox, MeshletAPV, DragonAttenuation, etc.)
 ├── SourceGenerators~/      # Standalone Roslyn pass-node incremental generator & .NET tests
-├── Tools~/                 # Houdini 22 fur pattern baker, standalone DXC / GPU geometry & material probes, PIX & diagnostic CLI tools
+├── Tools~/                 # Houdini 22 fur/hair export & baking scripts, standalone DXC / GPU geometry & material probes, PIX & diagnostic CLI tools
 ├── Documentation~/         # Architecture, subsystem, contract, and workflow docs (with index)
 ├── Roadmap~/               # Subsystem roadmaps and design notes
 └── Tests/Editor/           # Unity EditMode automated test suite

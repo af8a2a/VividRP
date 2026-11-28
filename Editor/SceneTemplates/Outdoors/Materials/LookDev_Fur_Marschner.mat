@@ -35,11 +35,11 @@ Material:
     m_Ints:
     - _VSMRasterWindowPages: 1
     m_Floats:
-    - _AOPower: 1.35
+    - _AOPower: 0.95
     - _AlphaCutoff: 0.35
     - _Anisotropy: 0.72
     - _ClumpStrength: 0.35
-    - _ColorGradientPower: 1.1
+    - _ColorGradientPower: 0.78
     - _CombStrength: 0.85
     - _Cull: 2
     - _DitherStrength: 0.6
@@ -47,8 +47,8 @@ Material:
     - _FurGeometry: 1
     - _FurLength: 0.055
     - _FurLightingModel: 1
-    - _FurMedullaRoughness: 0.65
-    - _FurMedullaWeight: 0.55
+    - _FurMedullaRoughness: 0.8
+    - _FurMedullaWeight: 0.82
     - _FurShading: 1
     - _FurStrands: 1
     - _FuzzRoughness: 0.46
@@ -61,10 +61,10 @@ Material:
     - _GPUDrivenShadowShellCount: 2
     - _GPUDrivenShellCount: 8
     - _GravityStrength: 0.45
-    - _HairBacklit: 0.85
-    - _HairCuticleAngle: 2.5
-    - _HairRadialRoughness: 0.45
-    - _HairScatter: 0.85
+    - _HairBacklit: 0.95
+    - _HairCuticleAngle: 2
+    - _HairRadialRoughness: 0.78
+    - _HairScatter: 0.95
     - _HybridMaxParallax: 2.46
     - _HybridRaymarch: 1
     - _HybridSteps: 4
@@ -72,19 +72,19 @@ Material:
     - _ReceiveDecals: 0
     - _ReceiveSSR: 0
     - _ReceiveShadows: 1
-    - _RootAO: 0.16
-    - _RootRoughness: 0.5
+    - _RootAO: 0.28
+    - _RootRoughness: 0.74
     - _ShellHeight: 0
     - _ShellHeightPower: 1
     - _ShellStep: 0.0435
-    - _SpecularWeight: 0.65
+    - _SpecularWeight: 0.48
     - _StrandColorVariance: 0.16
     - _StrandNormalStrength: 0.24
     - _StrandTaper: 0.9
     - _StrandThickness: 0.44
     - _SurfaceOptions: 1
     - _TemporalDither: 1
-    - _TipRoughness: 0.34
+    - _TipRoughness: 0.65
     - _WindFrequency: 2.2
     - _WindStrength: 0
     - _ZTest: 4

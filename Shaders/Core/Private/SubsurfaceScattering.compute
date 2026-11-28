@@ -1,0 +1,293 @@
+#pragma kernel KClearSubsurfaceTileArgs
+#pragma kernel KClassifySubsurfaceTiles
+#pragma kernel KSubsurfaceBurleyScatter
+#pragma use_dxc
+
+#if !defined(VIVID_STANDALONE_DXC)
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividSubstrateBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
+#else
+#define PI 3.14159265359f
+#define TWO_PI 6.28318530718f
+#define VIVID_SUBSTRATE_SSS_MFP_MIN_METERS 0.0001f
+#define VIVID_SUBSTRATE_SSS_MFP_MAX_METERS 0.0500f
+#define VIVID_SUBSTRATE_SSS_MFP_LOG_RANGE  8.96578428f
+
+struct VividSubstrateSubsurfaceData
+{
+    float weight;
+    float3 color;
+    float3 mfpMeters;
+    float transmissionScale;
+};
+
+namespace TileClassifaction
+{
+    inline uint PackTileCoord(uint2 coord) { return (coord.x & 0xFFFFu) | (coord.y << 16u); }
+    inline uint2 UnpackTileCoord(uint packedCoord) { return uint2(packedCoord & 0xFFFFu, packedCoord >> 16u); }
+}
+
+bool VividTryLoadSubstrateSubsurfaceData(
+    Texture2DArray<uint> closureBuffer,
+    uint2 pixelCoord,
+    out VividSubstrateSubsurfaceData sssData)
+{
+    uint h = closureBuffer.Load(int4(pixelCoord, 0, 0));
+    sssData.weight = (h != 0u) ? 1.0f : 0.0f;
+    sssData.color = float3(0.8f, 0.55f, 0.45f);
+    sssData.mfpMeters = float3(0.0048f, 0.0017f, 0.0009f);
+    sssData.transmissionScale = 0.0f;
+    return h != 0u;
+}
+#endif
+
+// Inputs / outputs
+Texture2D<float4> _SubsurfaceDiffuse;            // rgb = pre-exposed diffuse / sqrt(sssColor), a = linearViewZ (0 = non-SSS)
+Texture2DArray<uint> _SubstrateClosureBuffer;
+Texture2D<float2> _SubsurfaceBlueNoise;          // 128x8192 STBN Vec2 atlas (64 slices of 128x128)
+RWTexture2D<float4> _SceneColor;
+
+RWStructuredBuffer<uint> _SubsurfaceTileList;
+RWStructuredBuffer<uint> _SubsurfaceIndirectArgs;
+StructuredBuffer<uint> _SubsurfaceTileListSRV;
+
+SamplerState sampler_PointClamp;
+
+uint2 _SubsurfaceResolution;
+float2 _SubsurfaceInvResolution;
+float _SubsurfaceProjScaleY;       // abs(projMatrix.m11)
+float _SubsurfaceMaxScreenRadius;  // max blur disk radius in pixels (e.g. 48)
+float _SubsurfaceWorldScale;       // global MFP scale multiplier (default 1.0)
+uint _SubsurfaceQualityMode;       // 0 = 16-tap Blue-Noise Burley (real-time), 1 = 32-tap Golden-Angle Burley (single-frame noise-free)
+uint _SubsurfaceFrameIndex;
+uint _SubsurfaceHasBlueNoise;
+uint _SubsurfaceBlueNoiseSliceCount;
+uint _SubsurfaceDebugMode;         // 0 = normal composite, 1 = scattered diffuse only, 2 = MFP visualization
+
+// Exact Christensen-Burley 2015 shape scaling factor s(A) mapping surface albedo A and MFP l -> d = l / s(A)
+float3 BurleyScalingFactor(float3 albedo)
+{
+    float3 a = saturate(albedo);
+    float3 d = a - 0.8f;
+    return max(1.9f - a + 3.5f * d * d, 0.1f.xxx);
+}
+
+// Exact closed-form inverse CDF for Burley 2015 normalized diffusion:
+//   CDF(r) = 1 - 0.25 * exp(-r/d) - 0.75 * exp(-r/(3d)) = u
+// Substituting y = exp(-r/(3d)) yields depressed cubic y^3 + 3y = 4(1 - u)
+// with exact Cardano root y = G - 1/G, where G = cbrt(q + sqrt(q^2 + 1)), q = 2(1 - u).
+float BurleySampleRadius(float u, float dMax)
+{
+    float oneMinusU = max(1.0f - saturate(u), 1e-5f);
+    float q = 2.0f * oneMinusU;
+    float disc = sqrt(q * q + 1.0f);
+    float g = pow(q + disc, 1.0f / 3.0f);
+    float y = max(g - rcp(g), 1e-6f);
+    return dMax * (-3.0f * log(y));
+}
+
+// Evaluates Burley radial numerator (exp(-r/d) + exp(-r/(3d))) / d.
+// Note that the 1 / (8 * pi * r) factor cancels identically with the 2D polar PDF at radius r2D.
+float3 BurleyEvalProfileOverR(float r, float3 d)
+{
+    float3 invD = rcp(max(d, 1e-5f.xxx));
+    float3 rd = r * invD;
+    return (exp(-rd) + exp(-rd * (1.0f / 3.0f))) * invD;
+}
+
+float BurleyEvalPdfOverR(float r, float dMax)
+{
+    float invD = rcp(max(dMax, 1e-5f));
+    float rd = r * invD;
+    return (exp(-rd) + exp(-rd * (1.0f / 3.0f))) * invD;
+}
+
+float2 LoadSubsurfaceNoise(uint2 pixelCoord)
+{
+    if (_SubsurfaceHasBlueNoise != 0u && _SubsurfaceBlueNoiseSliceCount > 0u)
+    {
+        uint3 wrapped = uint3(pixelCoord, _SubsurfaceFrameIndex) & uint3(127u, 127u, 63u);
+        uint2 atlasCoord = uint2(wrapped.x, 8191u - (wrapped.z * 128u + wrapped.y));
+        return _SubsurfaceBlueNoise.Load(int3(atlasCoord, 0));
+    }
+
+    // Interleaved Gradient Noise + R2 fallback
+    float2 p = float2(pixelCoord) + float2((_SubsurfaceFrameIndex & 63u) * 5.588238f, (_SubsurfaceFrameIndex & 63u) * 3.171573f);
+    float n0 = frac(52.9829189f * frac(dot(p, float2(0.06711056f, 0.00583715f))));
+    float n1 = frac(52.9829189f * frac(dot(p + 17.0f, float2(0.06711056f, 0.00583715f))));
+    return float2(n0, n1);
+}
+
+[numthreads(1, 1, 1)]
+void KClearSubsurfaceTileArgs(uint3 tid : SV_DispatchThreadID)
+{
+    _SubsurfaceIndirectArgs[0] = 0u;
+    _SubsurfaceIndirectArgs[1] = 1u;
+    _SubsurfaceIndirectArgs[2] = 1u;
+    _SubsurfaceIndirectArgs[3] = 0u;
+}
+
+groupshared uint gs_HasSss;
+
+[numthreads(8, 8, 1)]
+void KClassifySubsurfaceTiles(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    bool isSssPixel = false;
+    if (dispatchThreadId.x < _SubsurfaceResolution.x && dispatchThreadId.y < _SubsurfaceResolution.y)
+    {
+        isSssPixel = _SubsurfaceDiffuse.Load(int3(dispatchThreadId.xy, 0)).a > 1e-5f;
+    }
+
+    bool anyInWave = WaveActiveAnyTrue(isSssPixel);
+    if (groupIndex == 0u)
+        gs_HasSss = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (anyInWave && WaveIsFirstLane())
+        InterlockedOr(gs_HasSss, 1u);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0u && gs_HasSss != 0u)
+    {
+        uint tileSlot;
+        InterlockedAdd(_SubsurfaceIndirectArgs[0], 1u, tileSlot);
+        _SubsurfaceTileList[tileSlot] = TileClassifaction::PackTileCoord(groupId.xy);
+    }
+}
+
+[numthreads(8, 8, 1)]
+void KSubsurfaceBurleyScatter(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 tileCoord = TileClassifaction::UnpackTileCoord(_SubsurfaceTileListSRV[groupId.x]);
+    uint2 pixelCoord = tileCoord * 8u + groupThreadId.xy;
+    if (pixelCoord.x >= _SubsurfaceResolution.x || pixelCoord.y >= _SubsurfaceResolution.y)
+        return;
+
+    float4 centerData = _SubsurfaceDiffuse.Load(int3(pixelCoord, 0));
+    float centerViewZ = centerData.a;
+    if (centerViewZ <= 1e-5f)
+        return;
+
+    VividSubstrateSubsurfaceData sssData;
+    if (!VividTryLoadSubstrateSubsurfaceData(_SubstrateClosureBuffer, pixelCoord, sssData))
+    {
+        // Safety fallback if header was cleared or unavailable: preserve center diffuse energy
+        _SceneColor[pixelCoord].rgb += centerData.rgb;
+        return;
+    }
+
+    if (_SubsurfaceDebugMode == 2u)
+    {
+        _SceneColor[pixelCoord] = float4(saturate(sssData.mfpMeters * 100.0f), 1.0f);
+        return;
+    }
+
+    float3 sqrtAlbedo = sqrt(max(sssData.color, 0.01f.xxx));
+    float3 mfpMeters = max(sssData.mfpMeters * max(_SubsurfaceWorldScale, 0.0f), 1e-5f.xxx);
+    float3 burleyD = max(mfpMeters / BurleyScalingFactor(sssData.color), 1e-5f.xxx);
+    float dMax = max(burleyD.r, max(burleyD.g, burleyD.b));
+
+    // Convert world-space meters at centerViewZ -> screen-space pixels
+    float pixelsPerMeter = (0.5f * _SubsurfaceProjScaleY * (float)_SubsurfaceResolution.y) / max(centerViewZ, 1e-3f);
+    float maxRadiusPx = max(_SubsurfaceMaxScreenRadius, 4.0f);
+    float maxWorldRadius = maxRadiusPx / max(pixelsPerMeter, 1e-4f);
+
+    // If the entire scatter footprint is strictly sub-pixel (< 0.35 px), skip disk taps for zero blur loss
+    float footprintPx = dMax * 3.0f * pixelsPerMeter;
+    if (footprintPx < 0.35f)
+    {
+        float3 directContrib = centerData.rgb * sqrtAlbedo;
+        if (_SubsurfaceDebugMode == 1u)
+            _SceneColor[pixelCoord] = float4(directContrib, 1.0f);
+        else
+            _SceneColor[pixelCoord].rgb += directContrib;
+        return;
+    }
+
+    bool highQualityDeterministic = (_SubsurfaceQualityMode != 0u);
+    uint sampleCount = highQualityDeterministic ? 32u : 16u;
+    float2 noise = highQualityDeterministic ? float2(0.5f, 0.0f) : LoadSubsurfaceNoise(pixelCoord);
+    float angleOffset = highQualityDeterministic ? 0.0f : (noise.x * TWO_PI);
+    float radialJitter = highQualityDeterministic ? 0.5f : noise.y;
+
+    // Golden angle in radians (~2.39996323) gives uniform low-discrepancy angular coverage on the disk
+    const float goldenAngle = 2.39996322973f;
+
+    // Tiny fallback weight guarantees exact energy preservation even if every outer tap is depth-rejected
+    float3 accumRadiance = centerData.rgb * 1e-4f;
+    float3 accumWeight = 1e-4f.xxx;
+
+    float2 centerUV = (float2(pixelCoord) + 0.5f) * _SubsurfaceInvResolution;
+    float depthCutoff = max(dMax * 4.5f, 0.025f);
+    float invSampleCount = rcp((float)sampleCount);
+
+    [loop]
+    for (uint s = 0u; s < sampleCount; ++s)
+    {
+        // Stratified CDF u in (0, 0.992) avoids infinite-tail outliers while covering >99% of Burley energy
+        float u = ((float)s + radialJitter) * invSampleCount * 0.992f;
+        float r2D = max(BurleySampleRadius(u, dMax), 1e-5f);
+        if (r2D > maxWorldRadius)
+            continue;
+
+        float pdfOverR = max(BurleyEvalPdfOverR(r2D, dMax), 1e-6f);
+        float rPx = r2D * pixelsPerMeter;
+        if (rPx < 0.45f)
+        {
+            // Tap lands inside the center pixel footprint: accumulate exact center Burley share
+            float3 wCenter = BurleyEvalProfileOverR(r2D, burleyD) / pdfOverR;
+            accumRadiance += centerData.rgb * wCenter;
+            accumWeight += wCenter;
+            continue;
+        }
+
+        float theta = angleOffset + (float)s * goldenAngle;
+        float sinT, cosT;
+        sincos(theta, sinT, cosT);
+        float2 offsetPx = float2(cosT, sinT) * rPx;
+        float2 tapUV = centerUV + offsetPx * _SubsurfaceInvResolution;
+
+        if (any(tapUV < 0.0f) || any(tapUV > 1.0f))
+            continue;
+
+        // Single 16-bit RGBA fetch retrieves BOTH pre-demodulated diffuse AND linearViewZ
+        float4 tapData = _SubsurfaceDiffuse.SampleLevel(sampler_PointClamp, tapUV, 0);
+        float tapViewZ = tapData.a;
+        if (tapViewZ <= 1e-5f)
+            continue;
+
+        float dz = tapViewZ - centerViewZ;
+        if (abs(dz) > depthCutoff)
+            continue;
+
+        // True 3D chord distance across curved geometry (nose, cheeks, jaw) + smooth bilateral depth guard
+        float r3D = sqrt(r2D * r2D + dz * dz);
+        float depthFade = 1.0f - smoothstep(depthCutoff * 0.5f, depthCutoff, abs(dz));
+
+        // Importance-sampled Burley weight: R_c(r3D) / pdf(r2D) with r cancellation & curvature compensation
+        float3 profileOverR = BurleyEvalProfileOverR(r3D, burleyD);
+        float curvatureFactor = r2D / max(r3D, 1e-5f);
+        float3 w = (profileOverR / pdfOverR) * (curvatureFactor * depthFade);
+
+        accumRadiance += tapData.rgb * w;
+        accumWeight += w;
+    }
+
+    float3 scatteredDiffuse = (accumRadiance / max(accumWeight, 1e-5f.xxx)) * sqrtAlbedo;
+    scatteredDiffuse = max(scatteredDiffuse, 0.0f.xxx);
+
+    if (_SubsurfaceDebugMode == 1u)
+    {
+        _SceneColor[pixelCoord] = float4(scatteredDiffuse, 1.0f);
+    }
+    else
+    {
+        _SceneColor[pixelCoord].rgb += scatteredDiffuse;
+    }
+}

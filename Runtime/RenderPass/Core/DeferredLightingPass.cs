@@ -65,6 +65,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ScreenSpaceReflectionEnabledId = Shader.PropertyToID("_ScreenSpaceReflectionEnabled");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
         private static readonly int LightingDebugTextureId = Shader.PropertyToID("_LightingDebugTexture");
+        private static readonly int SubsurfaceDiffuseId = Shader.PropertyToID("_SubsurfaceDiffuse");
+        private static readonly int SubsurfaceSplitEnabledId = Shader.PropertyToID("_SubsurfaceSplitEnabled");
         private static readonly int MaterialTileFeatureFlagsId = Shader.PropertyToID("_MaterialTileFeatureFlags");
         private static readonly int MaterialFeatureTileListId = Shader.PropertyToID("_MaterialFeatureTileList");
         private static readonly int MaterialTileCountXId = Shader.PropertyToID("_MaterialTileCountX");
@@ -151,6 +153,12 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_DebugTexture;
+
+        [RenderGraphResource(
+            Name = "SubsurfaceDiffuse",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_SubsurfaceDiffuse;
 
         [RenderGraphResource(
             Name = "SkyIBLCubemap",
@@ -334,6 +342,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DebugTexture.desc.ClearColor = Color.clear;
             m_DebugTexture.desc.FilterMode = FilterMode.Point;
             m_DebugTexture.desc.WrapMode = TextureWrapMode.Clamp;
+            m_SubsurfaceDiffuse = RenderGraphTexture.CreateOutput("SubsurfaceDiffuse", GraphicsFormat.R16G16B16A16_SFloat);
+            m_SubsurfaceDiffuse.desc.EnableRandomWrite = true;
+            m_SubsurfaceDiffuse.desc.ClearBuffer = false;
+            m_SubsurfaceDiffuse.desc.FilterMode = FilterMode.Point;
+            m_SubsurfaceDiffuse.desc.WrapMode = TextureWrapMode.Clamp;
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
             m_MaterialTileFeatureFlags = RenderGraphBuffer.CreateStructured("MaterialTileFeatureFlags", sizeof(uint));
             m_MaterialFeatureTileList = RenderGraphBuffer.CreateStructured("MaterialFeatureTileList", sizeof(uint));
@@ -439,6 +452,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ScreenSpaceReflectionTexture.Resize(width, height);
             m_ColorTexture.Resize(width, height);
             m_DebugTexture.Resize(width, height);
+            m_SubsurfaceDiffuse.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PrepareSlabLutResource(frameData);
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
@@ -654,6 +668,11 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingDebugTextureId, m_DebugTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SubsurfaceDiffuseId, m_SubsurfaceDiffuse.innerHandle);
+            cmd.SetComputeIntParam(
+                m_DeferredLitCompute,
+                SubsurfaceSplitEnabledId,
+                SubsurfaceScatteringPass.ShouldSplitDeferredDiffuse ? 1 : 0);
             if (m_SdfScreenSourceRadiance.IsValid() && m_SdfScreenSourceGeometry.IsValid())
             {
                 cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SdfScreenSourceRadianceId, m_SdfScreenSourceRadiance);

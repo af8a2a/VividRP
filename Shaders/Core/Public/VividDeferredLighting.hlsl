@@ -30,6 +30,7 @@ uint _ScreenSpaceReflectionEnabled;
 uint _VividSlabLutReady;
 uint _VividOpenPBRLutsReady;
 uint _SubstrateClosureBufferEnabled;
+uint _SubsurfaceSplitEnabled;
 
 #if defined(VIVID_REALTIME_DIFFUSE_GI)
 #include "VividBentNormalPacking.hlsl"
@@ -1176,11 +1177,15 @@ bool TryEvaluateDeferredHairLighting(
 #endif
 
 // Non-sky pixels only. Returns complete pre-exposed lighting (including emission).
-// Compute tile scheduling and raster geometry remain the caller's responsibility.
+// When _SubsurfaceSplitEnabled != 0 and the pixel has VIVID_SUBSTRATE_FEATURE_SUBSURFACE,
+// splits pre-demodulated diffuse radiance into outSubsurfaceDiffuse (rgb = diff / sqrt(sssColor),
+// a = positive linearViewZ in meters) and keeps crisp specular + remaining diffuse + emission in return value.
 float3 VividEvaluateDeferredSurfacePixel(
-    uint2 pixelCoord, float deviceDepth, out float4 debugLighting, out float3 bounceSource)
+    uint2 pixelCoord, float deviceDepth, out float4 debugLighting, out float3 bounceSource,
+    out float4 outSubsurfaceDiffuse)
 {
     debugLighting = 0.0;
+    outSubsurfaceDiffuse = 0.0;
     VividSurfaceSummaryData summary = LoadVividSurfaceSummary(pixelCoord);
     bounceSource = max(summary.emissive, 0.0);
     float3 emission = VividApplyPreExposure(bounceSource);
@@ -1324,16 +1329,41 @@ float3 VividEvaluateDeferredSurfacePixel(
     specularLighting = max(specularLighting - preExposedReplaceableSpecular * (reflectionWeight * specularVisibility), 0.0)
         + screenSpaceReflection.rgb * lightLoopOutput.screenSpaceReflectionFGD * reflectionWeight;
     float3 lighting = diffuseLighting + specularLighting;
+    #if VIVID_DEFERRED_ENABLE_OPENPBR_V2
+    if (_SubsurfaceSplitEnabled != 0u && _SubstrateClosureBufferEnabled != 0u)
+    {
+        VividSubstrateSubsurfaceData sssData;
+        if (VividTryLoadSubstrateSubsurfaceData(_SubstrateClosureBuffer, pixelCoord, sssData))
+        {
+            float sssWeight = saturate(sssData.weight);
+            float3 sssDiffuse = diffuseLighting * sssWeight;
+            float3 sqrtAlbedo = sqrt(max(sssData.color, 0.01f.xxx));
+            float linearViewZ = max(-TransformWorldToView(positionWS).z, 1e-4f);
+            outSubsurfaceDiffuse = float4(min(sssDiffuse / sqrtAlbedo, 65000.0f.xxx), linearViewZ);
+            lighting = diffuseLighting * (1.0f - sssWeight) + specularLighting;
+        }
+    }
+    #endif
     float3 indirectLighting = VividApplyPreExposure(max(
         lightLoopOutput.indirectDiffuseLighting + lightLoopOutput.indirectSpecularLighting * specularVisibility, 0.0));
     debugLighting = float4(indirectLighting, reflectionWeight);
     return emission + lighting;
 }
 
+float3 VividEvaluateDeferredSurfacePixel(
+    uint2 pixelCoord, float deviceDepth, out float4 debugLighting, out float3 bounceSource)
+{
+    float4 unusedSubsurfaceDiffuse;
+    return VividEvaluateDeferredSurfacePixel(
+        pixelCoord, deviceDepth, debugLighting, bounceSource, unusedSubsurfaceDiffuse);
+}
+
 float3 VividEvaluateDeferredSurfacePixel(uint2 pixelCoord, float deviceDepth, out float4 debugLighting)
 {
     float3 unusedBounceSource;
-    return VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting, unusedBounceSource);
+    float4 unusedSubsurfaceDiffuse;
+    return VividEvaluateDeferredSurfacePixel(
+        pixelCoord, deviceDepth, debugLighting, unusedBounceSource, unusedSubsurfaceDiffuse);
 }
 
 #endif

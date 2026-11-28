@@ -27,7 +27,13 @@
 #define VIVID_SUBSTRATE_COAT_DUAL_NORMAL_EXT_UINTS 3u
 #define VIVID_SUBSTRATE_FUZZ_EXT_UINTS 2u
 #define VIVID_SUBSTRATE_ANISO_EXT_UINTS 2u
-#define VIVID_SUBSTRATE_SINGLE_COMPLEX_MAX_SLICES 13u
+#define VIVID_SUBSTRATE_SSS_EXT_UINTS 2u
+#define VIVID_SUBSTRATE_SINGLE_COMPLEX_MAX_SLICES 15u
+
+// Log2-encoded Mean Free Path bounds in world meters [0.1 mm .. 50 mm]
+#define VIVID_SUBSTRATE_SSS_MFP_MIN_METERS 0.0001f
+#define VIVID_SUBSTRATE_SSS_MFP_MAX_METERS 0.0500f
+#define VIVID_SUBSTRATE_SSS_MFP_LOG_RANGE  8.96578428f // log2(0.05 / 0.0001)
 
 #define VIVID_SUBSTRATE_COAT_FLAG_INDEPENDENT_NORMAL (1u << 0)
 #define VIVID_SUBSTRATE_ANISO_FLAG_NEGATIVE_HANDEDNESS (1u << 0)
@@ -178,6 +184,11 @@ struct VividOpenPBRV2Inputs
     float specularAnisotropyRotation; // radians in [0, TWO_PI)
     float3 tangentWS;
     float tangentHandedness; // +1.0 or -1.0
+    // Subsurface Scattering (OpenPBR / UE5 Substrate inline MFP)
+    float subsurfaceWeight;            // [0, 1] fraction of diffuse routed to Burley SSS
+    float3 subsurfaceColor;            // linear RGB scatter albedo (sqrt pre/post demodulation)
+    float3 subsurfaceMfpMeters;        // RGB Mean Free Path in world meters
+    float subsurfaceTransmissionScale; // [0, 1] thin-feature backlit transmission scale
 };
 
 VividOpenPBRV2Inputs VividCreateDefaultOpenPBRV2Inputs()
@@ -198,8 +209,20 @@ VividOpenPBRV2Inputs VividCreateDefaultOpenPBRV2Inputs()
     inputs.specularAnisotropyRotation = 0.0f;
     inputs.tangentWS = float3(1.0f, 0.0f, 0.0f);
     inputs.tangentHandedness = 1.0f;
+    inputs.subsurfaceWeight = 0.0f;
+    inputs.subsurfaceColor = 1.0f.xxx;
+    inputs.subsurfaceMfpMeters = float3(0.0048f, 0.0017f, 0.0009f);
+    inputs.subsurfaceTransmissionScale = 0.0f;
     return inputs;
 }
+
+struct VividSubstrateSubsurfaceData
+{
+    float weight;
+    float3 color;
+    float3 mfpMeters;
+    float transmissionScale;
+};
 
 uint VividSubstrateGetOpenPBRV2FeatureMask(VividOpenPBRV2Inputs inputs)
 {
@@ -214,6 +237,8 @@ uint VividSubstrateGetOpenPBRV2FeatureMask(VividOpenPBRV2Inputs inputs)
         mask |= VIVID_SUBSTRATE_FEATURE_FUZZ;
     if (inputs.specularAnisotropy > 0.0f)
         mask |= VIVID_SUBSTRATE_FEATURE_ANISOTROPY;
+    if (inputs.subsurfaceWeight > 0.0f)
+        mask |= VIVID_SUBSTRATE_FEATURE_SUBSURFACE;
     return mask;
 }
 
@@ -230,6 +255,8 @@ uint VividSubstrateComputeOpenPBRV2ExtensionUints(uint featureMask)
         ext += VIVID_SUBSTRATE_FUZZ_EXT_UINTS;
     if ((featureMask & VIVID_SUBSTRATE_FEATURE_ANISOTROPY) != 0u)
         ext += VIVID_SUBSTRATE_ANISO_EXT_UINTS;
+    if ((featureMask & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) != 0u)
+        ext += VIVID_SUBSTRATE_SSS_EXT_UINTS;
     return ext;
 }
 
@@ -308,6 +335,49 @@ float VividSubstrateUnpackCoatIor8(uint quantized)
         - VIVID_OPENPBR_OPAQUE_MINIMUM_SPECULAR_IOR;
     return VIVID_OPENPBR_OPAQUE_MINIMUM_SPECULAR_IOR
         + VividSubstrateUnpackUNorm(quantized & 0xFFu, 0xFFu) * iorRange;
+}
+
+float VividSubstrateEncodeLogMfp(float mfpMeters)
+{
+    float clamped = clamp(mfpMeters, VIVID_SUBSTRATE_SSS_MFP_MIN_METERS, VIVID_SUBSTRATE_SSS_MFP_MAX_METERS);
+    return saturate(log2(clamped / VIVID_SUBSTRATE_SSS_MFP_MIN_METERS) / VIVID_SUBSTRATE_SSS_MFP_LOG_RANGE);
+}
+
+float VividSubstrateDecodeLogMfp(float encoded)
+{
+    return VIVID_SUBSTRATE_SSS_MFP_MIN_METERS * exp2(saturate(encoded) * VIVID_SUBSTRATE_SSS_MFP_LOG_RANGE);
+}
+
+void VividSubstratePackSubsurfaceExtWords(
+    float3 subsurfaceColor,
+    float subsurfaceWeight,
+    float3 subsurfaceMfpMeters,
+    float transmissionScale,
+    out uint sss0,
+    out uint sss1)
+{
+    float3 srgbSssColor = LinearToSRGB(saturate(subsurfaceColor));
+    sss0 = VividSubstratePackRGBA8(float4(srgbSssColor, saturate(subsurfaceWeight)));
+    sss1 = VividSubstratePackRGBA8(float4(
+        VividSubstrateEncodeLogMfp(subsurfaceMfpMeters.r),
+        VividSubstrateEncodeLogMfp(subsurfaceMfpMeters.g),
+        VividSubstrateEncodeLogMfp(subsurfaceMfpMeters.b),
+        saturate(transmissionScale)));
+}
+
+VividSubstrateSubsurfaceData VividSubstrateUnpackSubsurfaceExtWords(uint sss0, uint sss1)
+{
+    float4 colAndWeight = VividSubstrateUnpackRGBA8(sss0);
+    float4 mfpAndTrans = VividSubstrateUnpackRGBA8(sss1);
+    VividSubstrateSubsurfaceData data;
+    data.color = saturate(SRGBToLinear(colAndWeight.rgb));
+    data.weight = colAndWeight.a;
+    data.mfpMeters = float3(
+        VividSubstrateDecodeLogMfp(mfpAndTrans.r),
+        VividSubstrateDecodeLogMfp(mfpAndTrans.g),
+        VividSubstrateDecodeLogMfp(mfpAndTrans.b));
+    data.transmissionScale = mfpAndTrans.a;
+    return data;
 }
 
 uint VividPackSubstratePixelHeader(VividSubstratePixelHeader header)
@@ -579,6 +649,19 @@ void VividWriteSubstrateOpenPBRV2Single(
         closureBuffer[uint3(pixelCoord, sliceCursor++)] = aniso0;
         closureBuffer[uint3(pixelCoord, sliceCursor++)] = aniso1;
     }
+    if ((featureMask & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) != 0u)
+    {
+        uint sss0, sss1;
+        VividSubstratePackSubsurfaceExtWords(
+            inputs.subsurfaceColor,
+            inputs.subsurfaceWeight,
+            inputs.subsurfaceMfpMeters,
+            inputs.subsurfaceTransmissionScale,
+            sss0,
+            sss1);
+        closureBuffer[uint3(pixelCoord, sliceCursor++)] = sss0;
+        closureBuffer[uint3(pixelCoord, sliceCursor++)] = sss1;
+    }
 }
 
 bool VividTryLoadSubstrateOpenPBRClosureAt(
@@ -666,6 +749,18 @@ bool VividTryLoadSubstrateOpenPBRClosureAt(
         uint anisoFlags = (aniso0 >> 16u) & 0xFFu;
         inputs.tangentHandedness = (anisoFlags & VIVID_SUBSTRATE_ANISO_FLAG_NEGATIVE_HANDEDNESS) != 0u ? -1.0f : 1.0f;
         inputs.tangentWS = VividSubstrateUnpackNormalOct16x2(aniso1);
+    }
+    if ((featureMask & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) != 0u)
+    {
+        if (sliceCursor + VIVID_SUBSTRATE_SSS_EXT_UINTS > expectedEnd)
+            return false;
+        uint sss0 = closureBuffer.Load(int4(pixelCoord, (int)(sliceCursor++), 0));
+        uint sss1 = closureBuffer.Load(int4(pixelCoord, (int)(sliceCursor++), 0));
+        VividSubstrateSubsurfaceData sssData = VividSubstrateUnpackSubsurfaceExtWords(sss0, sss1);
+        inputs.subsurfaceColor = sssData.color;
+        inputs.subsurfaceWeight = sssData.weight;
+        inputs.subsurfaceMfpMeters = sssData.mfpMeters;
+        inputs.subsurfaceTransmissionScale = sssData.transmissionScale;
     }
 
     nextSlice = expectedEnd;
@@ -807,6 +902,19 @@ void VividWriteSubstrateOpenPBRClosureAt(
         uint aniso1 = VividSubstratePackNormalOct16x2(inputs.tangentWS);
         closureBuffer[uint3(pixelCoord, cursor++)] = aniso0;
         closureBuffer[uint3(pixelCoord, cursor++)] = aniso1;
+    }
+    if ((featureMask & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) != 0u)
+    {
+        uint sss0, sss1;
+        VividSubstratePackSubsurfaceExtWords(
+            inputs.subsurfaceColor,
+            inputs.subsurfaceWeight,
+            inputs.subsurfaceMfpMeters,
+            inputs.subsurfaceTransmissionScale,
+            sss0,
+            sss1);
+        closureBuffer[uint3(pixelCoord, cursor++)] = sss0;
+        closureBuffer[uint3(pixelCoord, cursor++)] = sss1;
     }
 
     nextSlice = cursor;
@@ -1119,6 +1227,109 @@ VividSurfaceSummaryData VividBuildHairSubstrateTopLayerSummary(
         receiveSSR,
         receiveDecals);
     return summary;
+}
+
+// Fast O(1) Subsurface reader for DeferredLighting split and SubsurfaceScatteringPass.
+// Supports SingleComplex direct jump (2 uint loads) and MultiClosure per-pixel SSS fold
+// (UE5 Substrate Single-Effective-SSS-Per-Pixel rule).
+bool VividTryLoadSubstrateSubsurfaceData(
+    Texture2DArray<uint> closureBuffer,
+    uint2 pixelCoord,
+    out VividSubstrateSubsurfaceData sssData)
+{
+    sssData = (VividSubstrateSubsurfaceData)0;
+    uint headerWord = closureBuffer.Load(int4(pixelCoord, 0, 0));
+    if (headerWord == 0u)
+        return false;
+
+    VividSubstratePixelHeader header = VividUnpackSubstratePixelHeader(headerWord);
+    if (!VividIsSubstrateHeaderValid(header)
+        || (header.featureMask & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) == 0u)
+    {
+        return false;
+    }
+
+    uint maxSlices = VIVID_SUBSTRATE_HEADER_SLICE_COUNT + header.payloadUintCount;
+    if (header.mode == VIVID_SUBSTRATE_MODE_SINGLE_COMPLEX)
+    {
+        uint word0 = closureBuffer.Load(int4(pixelCoord, (int)VIVID_SUBSTRATE_HEADER_SLICE_COUNT, 0));
+        uint cFeatures = (word0 >> VIVID_SUBSTRATE_CLOSURE_FEATURES_SHIFT) & VIVID_SUBSTRATE_CLOSURE_FEATURES_MASK;
+        if ((cFeatures & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) == 0u)
+            return false;
+
+        uint sssSlice = VIVID_SUBSTRATE_HEADER_SLICE_COUNT + VIVID_SUBSTRATE_OPENPBR_CORE_UINT_COUNT;
+        if ((cFeatures & VIVID_SUBSTRATE_FEATURE_COAT) != 0u)
+        {
+            sssSlice += (cFeatures & VIVID_SUBSTRATE_FEATURE_DUAL_NORMAL) != 0u
+                ? VIVID_SUBSTRATE_COAT_DUAL_NORMAL_EXT_UINTS
+                : VIVID_SUBSTRATE_COAT_BASE_EXT_UINTS;
+        }
+        if ((cFeatures & VIVID_SUBSTRATE_FEATURE_FUZZ) != 0u)
+            sssSlice += VIVID_SUBSTRATE_FUZZ_EXT_UINTS;
+        if ((cFeatures & VIVID_SUBSTRATE_FEATURE_ANISOTROPY) != 0u)
+            sssSlice += VIVID_SUBSTRATE_ANISO_EXT_UINTS;
+
+        if (sssSlice + VIVID_SUBSTRATE_SSS_EXT_UINTS > maxSlices)
+            return false;
+
+        uint sss0 = closureBuffer.Load(int4(pixelCoord, (int)(sssSlice + 0u), 0));
+        uint sss1 = closureBuffer.Load(int4(pixelCoord, (int)(sssSlice + 1u), 0));
+        sssData = VividSubstrateUnpackSubsurfaceExtWords(sss0, sss1);
+        return sssData.weight > 1e-4f;
+    }
+
+    if (header.mode == VIVID_SUBSTRATE_MODE_MULTI_CLOSURE)
+    {
+        uint opCount = header.closureCount > 0u ? (header.closureCount - 1u) : 0u;
+        uint cursor = VIVID_SUBSTRATE_HEADER_SLICE_COUNT + opCount * VIVID_SUBSTRATE_OP_WORD_UINTS;
+        float totalWeight = 0.0f;
+        float3 accumColor = 0.0f.xxx;
+        float3 accumMfp = 0.0f.xxx;
+        float accumTrans = 0.0f;
+
+        [unroll]
+        for (uint cIdx = 0u; cIdx < VIVID_SUBSTRATE_MAX_CLOSURES_PER_PIXEL; ++cIdx)
+        {
+            if (cIdx >= header.closureCount || cursor + VIVID_SUBSTRATE_OPENPBR_CORE_UINT_COUNT > maxSlices)
+                break;
+
+            uint word0 = closureBuffer.Load(int4(pixelCoord, (int)cursor, 0));
+            uint cFeatures = (word0 >> VIVID_SUBSTRATE_CLOSURE_FEATURES_SHIFT) & VIVID_SUBSTRATE_CLOSURE_FEATURES_MASK;
+            uint extUints = (word0 >> VIVID_SUBSTRATE_CLOSURE_EXT_UINTS_SHIFT) & VIVID_SUBSTRATE_CLOSURE_EXT_UINTS_MASK;
+            uint nextCursor = cursor + VIVID_SUBSTRATE_OPENPBR_CORE_UINT_COUNT + extUints;
+            if (nextCursor > maxSlices)
+                break;
+
+            if ((cFeatures & VIVID_SUBSTRATE_FEATURE_SUBSURFACE) != 0u)
+            {
+                uint sssSlice = nextCursor - VIVID_SUBSTRATE_SSS_EXT_UINTS;
+                uint sss0 = closureBuffer.Load(int4(pixelCoord, (int)(sssSlice + 0u), 0));
+                uint sss1 = closureBuffer.Load(int4(pixelCoord, (int)(sssSlice + 1u), 0));
+                VividSubstrateSubsurfaceData cSss = VividSubstrateUnpackSubsurfaceExtWords(sss0, sss1);
+                if (cSss.weight > 1e-4f)
+                {
+                    accumColor += cSss.color * cSss.weight;
+                    accumMfp += cSss.mfpMeters * cSss.weight;
+                    accumTrans += cSss.transmissionScale * cSss.weight;
+                    totalWeight += cSss.weight;
+                }
+            }
+
+            cursor = nextCursor;
+        }
+
+        if (totalWeight > 1e-4f)
+        {
+            float invW = rcp(totalWeight);
+            sssData.weight = saturate(totalWeight);
+            sssData.color = accumColor * invW;
+            sssData.mfpMeters = accumMfp * invW;
+            sssData.transmissionScale = accumTrans * invW;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // Maps Slice 0 Substrate header directly to the 4-tier deferred tile mask.

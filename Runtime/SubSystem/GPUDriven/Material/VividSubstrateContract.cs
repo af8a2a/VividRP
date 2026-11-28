@@ -99,13 +99,16 @@ namespace VividRP.Runtime.GPUDriven
         internal const uint HairFlagMedulla = 1u << 1;
         internal const float HairMaxCuticleAngleRad = 0.20943951f; // 12 degrees
 
-        // Phase 2.1 optional single-closure extension slice counts (written in canonical bit order: Coat -> Fuzz -> Anisotropy)
+        // Phase 2.1 optional single-closure extension slice counts (written in canonical bit order: Coat -> Fuzz -> Anisotropy -> Subsurface)
         internal const int CoatBaseExtUintCount = 2;      // weight/rough/darkening/ior + coatColor/flags
         internal const int CoatDualNormalExtUintCount = 3; // + independent 16x16 octahedral coat normal
         internal const int FuzzExtUintCount = 2;           // fuzzColor/weight + fuzzRoughness
         internal const int AnisotropyExtUintCount = 2;     // aniso/rotation/handedness + 16x16 octahedral tangent
+        internal const int SubsurfaceExtUintCount = 2;     // sssColor/weight + log2(mfpRGB)/transmissionScale
+        internal const float SubsurfaceMfpMinMeters = 0.0001f;
+        internal const float SubsurfaceMfpMaxMeters = 0.0500f;
         internal const int SingleComplexMaxTotalSlices =
-            HeaderSliceCount + OpenPBRCoreUintCount + CoatDualNormalExtUintCount + FuzzExtUintCount + AnisotropyExtUintCount; // 13 uints = 52 B/px <= 64 B/px
+            HeaderSliceCount + OpenPBRCoreUintCount + CoatDualNormalExtUintCount + FuzzExtUintCount + AnisotropyExtUintCount + SubsurfaceExtUintCount; // 15 uints = 60 B/px <= 64 B/px
 
         internal const uint CoatFlagIndependentNormal = 1u << 0;
         internal const uint AnisoFlagNegativeHandedness = 1u << 0;
@@ -349,6 +352,8 @@ namespace VividRP.Runtime.GPUDriven
                 slices += FuzzExtUintCount;
             if ((features & VividSubstrateFeatureMask.Anisotropy) != 0)
                 slices += AnisotropyExtUintCount;
+            if ((features & VividSubstrateFeatureMask.Subsurface) != 0)
+                slices += SubsurfaceExtUintCount;
             return slices;
         }
 

@@ -23,6 +23,7 @@ StructuredBuffer<uint> _MaterialFeatureTileList;
 
 RWTexture2D<float4> _LightingTexture;
 RWTexture2D<float4> _LightingDebugTexture;
+RWTexture2D<float4> _SubsurfaceDiffuse;
 
 #if defined(VIVID_SSGI_SOURCE)
 RWTexture2D<float4> _SdfScreenSourceRadiance;
@@ -75,6 +76,7 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
         : VividApplyPreExposure(max(_GBuffer3.Load(int3(pixelCoord, 0)).rgb, 0.0));
     _LightingTexture[pixelCoord] = float4(lighting, 1.0);
     _LightingDebugTexture[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
+    _SubsurfaceDiffuse[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
     #if defined(VIVID_SSGI_SOURCE)
         StoreSdfScreenSource(pixelCoord, deviceDepth, _GBuffer3.Load(int3(pixelCoord, 0)).rgb);
     #endif
@@ -114,15 +116,18 @@ void DeferredLitVariant(
         return;
 
     float4 debugLighting;
+    float4 subsurfaceDiffuse;
     #if defined(VIVID_SSGI_SOURCE)
         float3 bounceSource;
-        float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting, bounceSource);
+        float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting, bounceSource, subsurfaceDiffuse);
         StoreSdfScreenSource(pixelCoord, deviceDepth, bounceSource);
     #else
-        float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting);
+        float3 unusedBounceSource;
+        float3 lighting = VividEvaluateDeferredSurfacePixel(pixelCoord, deviceDepth, debugLighting, unusedBounceSource, subsurfaceDiffuse);
     #endif
     _LightingTexture[pixelCoord] = float4(lighting, 1.0);
     _LightingDebugTexture[pixelCoord] = debugLighting;
+    _SubsurfaceDiffuse[pixelCoord] = subsurfaceDiffuse;
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]

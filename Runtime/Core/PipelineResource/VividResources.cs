@@ -37,6 +37,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/Hair/StrandHairSHBaker.compute")]
         public ComputeShader StrandHairSHBakerCompute;
 
+        [VividResourcePath("Shaders/Core/Private/SubsurfaceScattering.compute")]
+        public ComputeShader SubsurfaceScatteringCompute;
+
         [VividResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 

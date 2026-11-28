@@ -11,7 +11,7 @@
 1. **初次接触 VividRP**：先阅读 [VividRP Wizard](VividRPWizard.md) 与 [Bindless 插件设置](Bindless.md) 完成环境配置，再通过 [RenderGraph 编辑器](RenderGraphEditor.md) 了解 `.vrdg` 渲染图的搭建方式。
 2. **编写自定义 RenderPass**：阅读 [RenderGraph 编辑器](RenderGraphEditor.md)、[RenderGraph 可序列化资源描述符](RenderGraphResourceDescriptors.md) 与 [RenderGraph SubSystem](RenderGraphSubSystem.md)。
 3. **深入 GPU Driven 与场景管线**：依次阅读 [PrimitiveScene V1](PrimitiveSceneV1.md) → [保守实例视锥裁剪](GPUDrivenInstanceCulling.md) → [Cluster LOD 生成与选择](GPUDrivenClusterLOD.md) → [保守 Meshlet 裁剪](GPUDrivenMeshletCulling.md)。
-4. **材质与着色开发**：参阅 [SimpleSlab V1 冻结合约](Material/SimpleSlabV1.md) 与 [OpenPBROpaque V1 默认材质合约](Material/OpenPBROpaqueV1.md)。
+4. **材质与着色开发**：参阅 [SimpleSlab V1 冻结合约](Material/SimpleSlabV1.md)、[OpenPBROpaque V1 默认材质合约](Material/OpenPBROpaqueV1.md) 与 [FurSlab DCC 资产制作与 Houdini 烘焙指南](Material/FurDCCAuthoringGuide.md)。
 5. **虚拟阴影图（VSM）与光照烘焙**：阅读 [VirtualShadowMap 代码布局](VirtualShadowMapCodeLayout.md)、[VSM Shader 与 Unreal 参考关系](VirtualShadowMapShaderReference.md) 与 [Meshlet APV 烘焙验证](MeshletAPVBaking.md)。
 
 ---

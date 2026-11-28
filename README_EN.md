@@ -2,11 +2,11 @@
 
 English | [简体中文](README.md)
 
-VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-generation Unity. It centers on a **visual, data-driven RenderGraph workflow** and explores high-end rendering systems including deferred rendering, GPU Driven, Bindless, Mesh/Global SDF & Surface Cache real-time global illumination (Screen Probe Gather Diffuse GI & UE5-based Lumen Specular Reflections), Ray Tracing (DXR), reference path tracing, Meshlet APV light baking, volumetrics, virtual texturing (VT/SVT), virtual shadow maps (VSM), and temporal upscaling.
+VividRP is an experimental Scriptable Render Pipeline (SRP) package for next-generation Unity. It centers on a **visual, data-driven RenderGraph workflow** and explores high-end rendering systems including deferred rendering, a Substrate multi-closure material architecture (`.slab.shader`) with real-time Hybrid Shell / Marschner fur, GPU Driven rendering (GPUScene / Visibility Buffer), Bindless, Mesh/Global SDF & Surface Cache real-time global illumination (Screen Probe Gather Diffuse GI & UE5-based Lumen Specular Reflections), Ray Tracing (DXR), reference path tracing, Meshlet APV light baking, volumetrics, virtual texturing (VT/SVT), virtual shadow maps (VSM), and temporal upscaling.
 
 > [!IMPORTANT]
-> - **Unity Baseline**: The current development and verification baseline is Unity `7000.0.0a16` (revision `0745a91df592`; see [Unity 7000.0.0a16 Compatibility](Documentation~/Unity7000a16Upgrade.md)).
-> - **Core Dependencies**: VividRP depends on customized [CoreRP](https://github.com/af8a2a/CoreRP.git) (`17.7.0`) alongside Unity official `com.unity.collections` (`7.0.0`) and `com.unity.pipeline` (`0.10.0-exp.1`). In Package Manager, use **Add package from git URL** to add `https://github.com/af8a2a/CoreRP.git` (or use the synchronized `Packages/CoreRP` in the containing project).
+> - **Unity Baseline**: The current development and verification baseline is Unity `7000.0.0a22` (revision `dbac4d68c4de`; see [Unity 7000.0.0a16 Compatibility](Documentation~/Unity7000a16Upgrade.md) for historical upgrade notes).
+> - **Core Dependencies**: VividRP depends on customized [CoreRP](https://github.com/af8a2a/CoreRP.git) (`17.7.0`) alongside Unity official `com.unity.collections` (`7.0.0`) and `com.unity.pipeline` (`1.0.1`). In Package Manager, use **Add package from git URL** to add `https://github.com/af8a2a/CoreRP.git` (or use the synchronized `Packages/CoreRP` in the containing project).
 > - **Recommended Platform**: Windows + DirectX 12. Bindless, GPU Driven 16-bit arithmetic, and Ray Tracing workflows require DX12 / DXR and Shader Model 6.2+ capabilities.
 > - **Development Status**: VividRP is under active development. Several subsystems are experimental and are not guaranteed to be cross-platform, production-ready, or backward-compatible.
 > - **Source of Truth**: This repository no longer maps one-to-one to the legacy [VividRP](https://github.com/af8a2a/VividRP) feature list. Treat the current source, this README, and [`Documentation~`](Documentation~/README.md) as the source of truth.
@@ -22,6 +22,24 @@ All frames below are captured live in the Sponza Noon scene at 1920×1080 with G
 | ![Sponza Upper Colonnade Real-Time GI](Documentation~/Image/Sponza_GI_Colonnade.jpg) | ![Sponza Isolated Real-Time Diffuse GI](Documentation~/Image/Sponza_GI_DiffuseOnly.jpg) |
 | **Atrium Indirect Bounce & Gilded Curtain Specular Reflections** | **Vaulted Arches Indirect Ceiling Bounce & Shadow Contrast** |
 | ![Sponza Atrium Real-Time GI and Reflections](Documentation~/Image/Sponza_GI_Atrium.jpg) | ![Sponza Vaulted Arches Indirect Bounce](Documentation~/Image/Sponza_GI_VaultedArches.jpg) |
+
+---
+
+## Substrate Material System & Real-Time Fur Showcase (`FurSlab` & `FurLookDev`)
+
+VividRP features a **dual-target `.slab.shader` material compiler + Substrate Closure Buffer (Tier 1/2/3) + Hybrid Shells real-time fur pipeline**, delivering unified shading across both Raster and GPU Driven (Visibility Buffer + DesktopBCn SVT) paths:
+
+- **Hybrid Shells Sparse Raymarching**: Combines **4–8 physical shells × 4–6 in-slab raymarch steps** while preserving shell-level hardware Early-Z (no `SV_Depth` writes). Relative to a 24-shell pure baseline (`0.826 ms` Hero close-up on RTX 5070 Ti @ 1920×1080), Hybrid Shells achieve **3×–6× geometry compression** and **14%–41% GPU savings** (`8×4`: `0.710 ms` / `-14.0%`, `6×4`: `0.597 ms` / `-27.7%`, `4×6`: `0.486 ms` / `-41.2%`) with matching grazing silhouettes and backlit transmission, fully integrated with GPU-driven dynamic shell amplification, distance shell LOD, and programmable VSM/CSM shadows.
+- **Substrate 6-Slice Hair/Fur Closure**: `FurSlab` supports both **OpenPBR V2 (Fuzz + Anisotropy)** and **Karis Marschner + Dual Scattering + Yan 2017 Medulla** lighting models. The Marschner/Medulla path packs into a 6-slice (24 B/px) `Substrate Hair Closure` evaluated in Tier 3 deferred lighting—outperforming OpenPBR Tier 2 on RTX 5070 Ti @ 1080p Hero (`GBufferPass`: `0.178 ms` vs `0.346 ms`; `DeferredLightingPass`: `0.620 ms` vs `0.825 ms`) with **0/256 energy violations** across the 16×16 white-furnace spherical integral grid.
+- **Houdini 22 DCC Asset Pipeline**: Supports `Procedural Lattice`, `2D Pattern Map`, `4×4 3D Flipbook Atlas`, and tangent-space `FlowMap` layering, backed by the automated [Bake-VividFurPatterns.py](Tools~/Houdini/Bake-VividFurPatterns.py) baker and verified Raster vs. GPUDriven DesktopBCn SVT parity (CurlyWool 4×4 SVT `FullMAE = 0.0187`).
+
+| Outdoors Material LookDev Playground (StandardLit / ClearCoat / Fabric / 4× FurSlab) | Houdini 22 DCC Patterns & Raster vs. GPUDriven SVT Parity |
+| :---: | :---: |
+| ![Outdoors Material LookDev Playground](Documentation~/Image/Fur_LookDev_Outdoors.png) | ![Houdini 22 FurSlab 2D Pattern & 4x4 3D Flipbook Showcase](Documentation~/Image/Fur_Houdini_Patterns.jpg) |
+| **Indoor FurLookDev 3-Bay Studio Overview (Fixed EV100 = 0.0)** | **Case 01: Single Strand Goniometer (`R / TT / TRT / Medulla` Lobes & Cuticle Tilt)** |
+| ![FurLookDev Indoor Studio Overview](Documentation~/Image/Fur_LookDev_Studio_Overview.png) | ![Case 01 Single Strand Goniometer](Documentation~/Image/Fur_LookDev_Bay01_Goniometer.png) |
+| **Case 02: White Furnace Energy Conservation (`16×16` 2048-Dir Integral, 0/256 Violations)** | **Case 03: 4-Axis Medulla Sweep & Yan 2017 Animal Fur Dataset Match** |
+| ![Case 02 White Furnace Energy Conservation](Documentation~/Image/Fur_LookDev_Bay02_WhiteFurnace.png) | ![Case 03 Medulla Sweep and Yan 2017 Dataset](Documentation~/Image/Fur_LookDev_Bay03_Medulla_Yan2017.png) |
 
 ---
 
@@ -65,17 +83,17 @@ The modules below are implemented in the current package (availability depends o
 
 | Area | Key Systems & Features |
 | --- | --- |
-| **Core Rendering** | Pre-depth, GBuffer, deferred lighting (with native SimpleSlab and OpenPBR material paths), motion vectors, HZB, general object drawing, and color pyramids |
+| **Core Rendering** | Pre-depth, Early-Z GBuffer (Surface Summary + Substrate Closure Buffer UAV supporting Tier 1/2 single-closure, Tier 3 multi-closure, and 6-slice `Hair` closure), deferred lighting (SimpleSlab / OpenPBR V2 / Karis Marschner Hair), motion vectors (with dynamic WPO and Visibility shell unpacking), HZB, general object drawing, and color pyramids |
 | **Real-Time GI & Specular Reflections** | • **Surface Cache & Multi-Bounce Radiosity**: Automatic mesh card allocation, dynamic direct/sky relighting, progressive multi-bounce radiosity accumulation, and feedback<br>• **Screen Probe Gather Diffuse GI**: Full-sphere screen probe gathering, hybrid HZB screen trace + Mesh SDF + Global SDF + Far Radiance Cache + Occluded Sky tracing, importance sampling guides, adaptive probes, pixel-level temporal/spatial filtering, and Rough Specular<br>• **Lumen Specular Reflections (UE5 Port)**: Phase-1 Software SDF tracing backend (tile classification, VNDF GGX + STBN ray gen, HZB screen trace, wave/ZOrder2D compaction, Mesh/Global SDF + Surface Cache) + native UE5 Lumen Reflection Denoiser (BRDF spatial reconstruction resolve, virtual hit-point temporal accumulation, variance-guided bilateral spatial filter), with `Overview` / `ReflectionView` / `DedicatedReflectionRays` debug views (see [LumenReflectionMigration.md](Documentation~/LumenReflectionMigration.md) for the upcoming HWRT roadmap) |
-| **Shadows & Lighting** | • **Shadows**: CSM / PCSS, Virtual Shadow Maps (VSM, with dual static/dynamic page pools and SMRT adaptive ray exit), directional DXR shadows with SIGMA denoising<br>• **Meshlet APV**: Native Adaptive Probe Volumes baking with static `MeshletRenderer` geometry (`MeshletAPVBaking`), including proxy geometry lifecycle management and Meta-pass UV-space projection matrix fix<br>• **Lighting & Reflections**: Clustered lighting, LTC area lights, reflection-probe atlas (with proxy box & influence volume gizmo visualization), ReGIR, sky and atmospheric scattering (Physically Based Sky / HDRI Sky) |
-| **Materials & Shading** | • **Built-in Shaders**: `StandardLit` (with Metallic / Smoothness / AO PBR remap ranges), `SimpleLit`, `SimpleForward`, and `StandardLayeredLit`<br>• **Modern HLSL**: Piloted **HLSL 2021** language standards (`#pragma hlsl_version 2021`) in `UberPost.shader` with full DXC variant verification<br>• **BSDF Contracts**: `SimpleSlabV1` (single/dual-layer energy-compensated real-time BSDF) and `OpenPBROpaqueV1` (native OpenPBR 1.1 deferred contract)<br>• **Migration Tools**: URP Lit and HDRP Lit material converters |
-| **GPU Driven** | • **Geometry & Culling**: meshoptimizer-based Cluster LOD generation, 16B shared group table, conservative FP16 instance/meshlet frustum culling, normal-cone culling, two-stage HZB occlusion culling, Visibility Buffer rendering<br>• **Signed Distance Fields (SDF)**:<br>&nbsp;&nbsp;– **Mesh SDF**: Offline mesh SDF baking (`VividMeshSdfBaker`), `.meshsdf` asset and importer, bricked storage management (`VividMeshSdfBricks`), GPU scene management (`VividMeshSdfGpuScene`), and visualization/ray-march tracing passes (`MeshSdfVizDebugPass`, `MeshSdfTraceDebugPass`)<br>&nbsp;&nbsp;– **Global SDF**: Cascaded 3D Clipmaps (`VividGlobalSdfClipmap`), regional update and composition compute shaders (`GlobalSdfClipmapPass`), GPU-driven frame integration (`VividGlobalSdfFrameData`), and ray-march trace debug pass (`GlobalSdfTraceDebugPass`)<br>• **Scene Representation**: `PrimitiveScene` (Author Handle + Camera Burst coarse culling `DrawSet`)<br>• **Terrain**: `VividTerrain` (non-destructive Unity Terrain duplication/conversion, border-locked chunked meshlet baking, multi-level LODs, up to 8 terrain layers with control-map blending) |
+| **Shadows & Lighting** | • **Shadows**: CSM / PCSS, Virtual Shadow Maps (VSM, with dual static/dynamic page pools, SMRT adaptive ray exit, and GPU-driven programmable fur/WPO shadow casting), directional DXR shadows with SIGMA denoising<br>• **Meshlet APV**: Native Adaptive Probe Volumes baking with static `MeshletRenderer` geometry (`MeshletAPVBaking`), including proxy geometry lifecycle management and Meta-pass UV-space projection matrix fix<br>• **Lighting & Reflections**: Clustered lighting, LTC area lights, reflection-probe atlas (with proxy box & influence volume gizmo visualization), ReGIR, sky and atmospheric scattering (Physically Based Sky / HDRI Sky) |
+| **Materials & Shading** | • **Substrate `.slab.shader` System**: Dual-target importer compiling a single source to Raster Shader + standalone zero-switch GPUDriven ComputeShader, supporting `@vivid-vertex` / `@vivid-coverage` / `@vivid-surface` / `@vivid-instancing` hooks, automatic reflection of handwritten parameters & textures into GPU buffers / SVT, Multi-Closure Tier 3, and O(1) directional albedo LUTs<br>• **Built-in Slab Shaders**: `StandardLitSlab`, `FabricSlab` (HDRP-style CottonWool & Silk with double-sided & woven micro-detail), `FurSlab` (Hybrid Shells real-time fur), `ClearCoatDualNormal` (dual-normal carbon fiber), alongside `StandardLit`, `SimpleLit`, `SimpleForward`, and `StandardLayeredLit`<br>• **Modern HLSL & BSDF Contracts**: **HLSL 2021** pilot (`#pragma hlsl_version 2021`) in `UberPost.shader`, `SimpleSlabV1`, `OpenPBROpaqueV1` (OpenPBR 1.1), and 6-slice `Substrate Hair` ABI<br>• **LookDev & Migration Tools**: Outdoors Material LookDev Playground template, URP Lit and HDRP Lit material converters |
+| **GPU Driven** | • **GPUScene & Culling**: Direct `PrimitiveScene` consumption with compute scatter uploads & SoA hot-path reads, meshoptimizer Cluster LOD generation, 16B shared group table, conservative FP16 instance/meshlet frustum culling (with per-material `MaxWPO` bounds padding), normal-cone culling, and two-stage HZB occlusion culling<br>• **Visibility Buffer & Programmable Raster**: Standard meshlet rasterization plus programmable WPO/Coverage raster (including GPU-driven dynamic shell amplification & distance shell LOD) and active-bin bitmask compute resolve (zero wasted empty-bin dispatches)<br>• **Signed Distance Fields (SDF)**:<br>&nbsp;&nbsp;– **Mesh SDF**: Offline mesh SDF baking (`VividMeshSdfBaker`), `.meshsdf` asset and importer, bricked storage management (`VividMeshSdfBricks`), GPU scene management (`VividMeshSdfGpuScene`), and visualization/ray-march tracing passes (`MeshSdfVizDebugPass`, `MeshSdfTraceDebugPass`)<br>&nbsp;&nbsp;– **Global SDF**: Cascaded 3D Clipmaps (`VividGlobalSdfClipmap`), regional update and composition compute shaders (`GlobalSdfClipmapPass`), GPU-driven frame integration (`VividGlobalSdfFrameData`), and ray-march trace debug pass (`GlobalSdfTraceDebugPass`)<br>• **Scene Representation & Terrain**: `PrimitiveScene` (Author Handle + Camera Burst coarse culling `DrawSet`), `VividTerrain` (non-destructive Unity Terrain duplication/conversion, border-locked chunked meshlet baking, multi-level LODs, up to 8 terrain layers with control-map blending) |
 | **Anti-Aliasing & Upscaling** | CMAA2, TAA, TSR, and FSR3; NVIDIA DLSS Super Resolution & Ray Reconstruction (with plugin integration) |
 | **Post-Processing** | • **Exposure & Grading**: Auto exposure (Unity, HDRP, and Unreal preset Inspectors with histogram curve remapping), bilateral-grid Local Exposure, color grading<br>• **Optics & Blur**: Bloom (mip-scattering and FFT-convolution modes), depth of field (DoF), data-driven lens flares<br>• **AO & Reflections**: Ambient occlusion (XeGTAO or FidelityFX CACAO), screen-space reflections (SSR with REBLUR temporal stabilization, checkerboard interleaving, and hit-distance reconstruction) |
 | **Volumetrics** | Global and local volumetric fog, VBuffer, volumetric lighting, aerial perspective compositing, and Max-Z generation |
 | **Ray Tracing & HW Acceleration** | • **Ray Tracing**: Serializable RTAS descriptors, `RTASBuildPass`, directional ray-traced shadows, and debug passes<br>• **NVIDIA Integration**: NVAPI Shader Execution Reordering (SER), RTX Texture Filtering (RTXTF) |
 | **Reference Path Tracing** | • **Integrator**: OpenPBR-based multi-bounce DXR prototype with analytic-light & HDRI MIS / NEE, rectangle/disc BSDF-segment evaluation, shading-point-aware mixed light selection, and spatial indexing<br>• **Transmission & SSS**: Stochastic RGB geometry opacity, thin-walled transmission, solid refraction with a 4-level medium stack and Beer–Lambert absorption, face SSS ear transmission<br>• **Denoising & Debug**: NRD REBLUR preview denoising, Unity Open Image Denoise (OIDN) backend, Rendering Debugger transport views, deterministic pixel capture |
-| **Hair Path Tracing** | `VividRP/Material/Hair` DXR path based on the RTXCR Chiang near-field BCSDF, featuring DOTS strand geometry, persistent GPU strand updates (`HairDotsGpuStream`), dynamic motion vectors, Reference PT, REBLUR, and DLSS-RR guides (raster hair and groom importing are not included) |
+| **Real-Time Fur & Hair Path Tracing** | • **Real-Time Fur (`FurSlab`)**: Hybrid Shells (sparse shells + in-slab view-space raymarching with shell-level Early-Z), `VividFurShellRenderer` instancing & distance shell LOD, GPU-driven dynamic shell amplification & programmable VSM/CSM shadows, dual OpenPBR V2 / Karis Marschner + Dual Scattering + Yan 2017 Medulla lighting models, Houdini 22 FlowMap / 2D Pattern / 4×4 3D Flipbook pipeline, and the `Samples/FurLookDev` indoor verification studio<br>• **Hair Path Tracing**: `VividRP/Material/Hair` DXR path based on the RTXCR Chiang near-field BCSDF, featuring DOTS strand geometry, persistent GPU strand updates (`HairDotsGpuStream`), dynamic motion vectors, Reference PT, REBLUR, and DLSS-RR guides |
 | **Resources & Subsystems** | • **Virtual Texturing (VT)**: Generic VT Core, SVT, GPU Driven Terrain surface bindings, adaptive mip bias, residency transitions, and GPU-driven border size dependency tracking<br>• **Per-Object Buffer**: `MaterialPropertyBlock`-free per-renderer 16B-aligned SSBO shader data, centralized generated HLSL layouts, and MPB CPU benchmark (with `VividPerObjectColorExample` layout aliasing support)<br>• **Other Subsystems**: DBuffer Decals, experimental ECS paged-storage particle system (simulation, culling, sorting, Billboard/Mesh/Stretch rendering, trails, collisions, sub-emitters) |
 | **Editor & Tooling** | • **Setup Wizard**: VividRP Wizard (Windows DX12 / DXC setup)<br>• **Memory & Safety Diagnostics**: `VIVIDRP_STARTUP_SRP=minimal` diagnostic mode and recursive directory-link safeguards<br>• **Performance & Analysis**: LWGUI + DXC shader performance monitor, Roslyn pass-node source generator<br>• **Automation**: AgenticDebugger (PIX, Frame Debugger, and GC Profiler CLI automation) |
 
@@ -86,7 +104,7 @@ The modules below are implemented in the current package (availability depends o
 
 ## Quick Start
 
-1. **Open Project**: Open the containing project with Unity `7000.0.0a16` (or a compatible release).
+1. **Open Project**: Open the containing project with Unity `7000.0.0a22` (or a compatible release).
 2. **Verify Dependencies**: Ensure `Packages/CoreRP` (`com.unity.render-pipelines.core`) and this package are loaded in Package Manager.
 3. **Configure Graphics API & DXC**: Open **Window > Rendering > VividRP Wizard** to place **Direct3D 12** first for Windows Standalone and configure **DXC** for the active Build Profile (restart Unity after changing the graphics API).
 4. **Create Pipeline Asset**: Select `Assets/Create/VividRP/Vivid Render Pipeline` to create a `VividRenderPipelineAsset`, and assign it as the active render pipeline in **Project Settings > Graphics**.
@@ -148,11 +166,23 @@ Reference path tracing uses a dedicated `.vrdg` asset and pipeline asset for con
 - **Convergence & Denoising**: Accumulation progress is displayed at the bottom of the screen and freezes upon reaching **Target Sample Count**. The **OIDN** backend is available in the Editor or 64-bit Standalone builds when `com.unity.rendering.denoising` is installed, submitting denoising once per convergence cycle.
 - **RTX Texture Filtering (RTXTF)**: Can be enabled in the Reference Path Tracing Volume; used by default for opaque `StandardLit` surface texture reads (see [RTXTF Documentation](Documentation~/RTXTextureFiltering.md)).
 
-### 6. Hair Path Tracing
+### 6. Substrate `.slab.shader`, Real-Time Fur (`FurSlab`), and `FurLookDev` Studio
 
-Hair uses a dedicated `VividRP/Material/Hair` material and Reference Path Tracing graph:
+VividRP unifies Raster and GPUDriven material authoring via `.slab.shader` and the Substrate deferred pipeline, validated end-to-end with `FurSlab`:
 
-- Covers the DXR ray-tracing path only (no raster hair preview), validating DOTS strand geometry, deforming-strand motion vectors, and REBLUR / DLSS-RR denoising guides.
+- **Hybrid Shells Real-Time Fur Workflow**:
+  - Attach `VividFurShellRenderer` to a target mesh and assign a `VividRP/Material/FurSlab` material. **Hybrid 8×4** (hero grazing silhouettes) or **6×4** (best quality/cost balance) is recommended, paired with distance shell LOD and sparse VSM shadow casting.
+  - Switch cleanly in `FurShaderGUI` between **OpenPBR V2 (Fuzz + Anisotropy)** and **Marschner Hair/Fur (R/TT/TRT + Dual Scattering + Yan Medulla)**; the Inspector automatically filters shading controls by the active lighting model.
+- **Houdini 22 DCC Baking & SVT Integration**:
+  - Run [Tools~/Houdini/Bake-VividFurPatterns.py](Tools~/Houdini/Bake-VividFurPatterns.py) or open [Tools~/Houdini/VividFur_PatternBaker.hipnc](Tools~/Houdini/VividFur_PatternBaker.hipnc) to bake tangent-space `FlowMap`, `2D Pattern Map`, and `4×4 3D Flipbook Atlas` assets for Raster and GPUDriven DesktopBCn SVT consumption (see [FurSlab DCC Authoring Guide](Documentation~/Material/FurDCCAuthoringGuide.md)).
+- **Physical Verification Studio (`Samples/FurLookDev`)**:
+  - Open `Samples/FurLookDev/FurLookDev.unity` to run `VividFurLookDevController` under fixed exposure (`EV100 = 0.0`), inspecting **Case 01 Single Strand Goniometer**, **Case 02 16×16 White Furnace Energy Conservation**, and **Case 03 4-Axis Medulla Sweep + Yan 2017 Measured Animal Fur Dataset (Human / Cat / Rabbit / Raccoon / Deer)**.
+
+### 7. Hair Path Tracing
+
+Strand-level ray-traced hair uses a dedicated `VividRP/Material/Hair` material and Reference Path Tracing graph:
+
+- Covers the DXR near-field strand path, validating DOTS strand geometry, deforming-strand motion vectors, and REBLUR / DLSS-RR denoising guides.
 - Generate test assets via `VividRP > Hair > Create Chiang Validation Assets` (see [Hair Path Tracing Documentation](Documentation~/HairPathTracing.md)).
 
 ---
@@ -175,9 +205,10 @@ Packages/VividRP/
 │   ├── PipelineResource/   # [PipelineResource] collection and synchronization tools
 │   ├── Lighting/           # Meshlet APV baking tools and scene validation helpers
 │   └── AgenticDebugger/    # CLI/Agent-oriented PIX, Frame Debugger, and GC diagnostic bridges
-├── Shaders/                # HLSL shaders (Core Public/Private, Material, OpenPBR, ThirdParty)
+├── Shaders/                # HLSL shaders (Core Public/Private, Substrate/Slab Materials, FurSlab, OpenPBR, ThirdParty)
+├── Samples/                # Validation & showcase scenes (FurLookDev studio, SurfaceCacheCornellBox, MeshletAPV, DragonAttenuation, etc.)
 ├── SourceGenerators~/      # Standalone Roslyn pass-node incremental generator & .NET tests
-├── Tools~/                 # Standalone DXC / GPU geometry & material probes, PIX & diagnostic CLI tools
+├── Tools~/                 # Houdini 22 fur pattern baker, standalone DXC / GPU geometry & material probes, PIX & diagnostic CLI tools
 ├── Documentation~/         # Architecture, subsystem, contract, and workflow docs (with index)
 ├── Roadmap~/               # Subsystem roadmaps and design notes
 └── Tests/Editor/           # Unity EditMode automated test suite
@@ -211,6 +242,7 @@ See **[Documentation~/README.md](Documentation~/README.md)** for the full catego
 ### Materials & Shading
 - [SimpleSlab V1 Real-Time BSDF Frozen Contract](Documentation~/Material/SimpleSlabV1.md)
 - [OpenPBROpaque V1 Default Material Frozen Contract](Documentation~/Material/OpenPBROpaqueV1.md)
+- [FurSlab DCC Authoring & Houdini 22 Baking Guide](Documentation~/Material/FurDCCAuthoringGuide.md)
 - [LWGUI Integration & DXC Shader Performance Monitor](Documentation~/LWGUI.md)
 - [HLSL 2021 Pilot: UberPost & DXC Validation](Documentation~/Hlsl2021.md)
 

@@ -88,7 +88,7 @@ Material:
     - _ReceiveSSR: 1
     - _ReceiveShadows: 1
     - _ReferencePathTracing: 1
-    - _Smoothness: 0.35
+    - _Smoothness: 0.2
     - _SmoothnessRemap: 1
     - _SmoothnessRemapMax: 1
     - _SmoothnessRemapMin: 0

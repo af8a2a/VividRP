@@ -36,7 +36,7 @@ Material:
     - _HairMelanin: 0.72
     - _HairMelaninRedness: 0.18
     m_Colors:
-    - _HairBaseColor: {r: 0.18, g: 0.11, b: 0.06, a: 1}
+    - _HairBaseColor: {r: 0.17999998, g: 0.10999996, b: 0.059999965, a: 1}
     - _HairEmissionColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -264,12 +264,14 @@ float3 AccumulateHairLight(
                        * lerp(1.0f.xxx, multiScatterTrans, saturate(nScatter * 0.5f));
 
     // Additional physical forward-transmitted multiple scatter glow when nScatter in (0, 3]
-    // and light passes through the hair volume toward the viewer (cosPhi < 0).
+    // and light passes through the hair volume toward the viewer (peaked along -L so front-lit
+    // white/blonde hair keeps crisp 3D form shading while backlit silhouettes glow naturally).
     float sinTL = dot(bsdfIn.tangentWS, lightDirWS);
     float cosTL = sqrt(saturate(1.0f - sinTL * sinTL));
     float forwardView = saturate(dot(viewDirWS, -lightDirWS) * 0.5f + 0.5f);
-    float3 volumeScatter = (0.045f * dualScatterGain * saturate(externalShadow) * cosTL * forwardView)
-                         * multiScatterTrans * bsdfIn.ambientOcclusion;
+    forwardView *= forwardView;
+    float3 volumeScatter = (0.040f * dualScatterGain * saturate(externalShadow) * cosTL * forwardView)
+                         * multiScatterTrans * bsdfIn.ambientOcclusion * lerp(0.25f, 1.0f, outSelfShadow);
 
     return max(unshadowedRadiance, 0.0f.xxx) * (singleScatter + dualScatter + volumeScatter);
 }

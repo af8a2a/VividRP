@@ -12,6 +12,7 @@ namespace VividRP.Samples.HairLookDev
         BustFrontThreeQuarter = 1,
         BustBacklitRim = 2,
         SphereCloseUp = 3,
+        RoughnessComparison = 4,
     }
 
     public enum HairLookDevRenderMode
@@ -28,12 +29,14 @@ namespace VividRP.Samples.HairLookDev
         public Volume StudioVolume;
         public HairGroomRenderer SphereGroom;
         public HairGroomRenderer BustGroom;
+        public HairGroomRenderer BustMatteGroom;
         public Renderer BustShadowProxyRenderer;
+        public Renderer BustMatteShadowProxyRenderer;
         public GameObject StudioLabelsRoot;
         public TMP_Text StatusTelemetryText;
 
         [Header("LookDev Mode")]
-        public HairLookDevRenderMode RenderMode = HairLookDevRenderMode.ReferencePathTracingDots;
+        public HairLookDevRenderMode RenderMode = HairLookDevRenderMode.RealtimeStrandVisibilityBuffer;
         public HairLookDevCameraPreset ActiveCameraPreset = HairLookDevCameraPreset.Overview;
         public bool ShowShadowProxyInRealtime = false;
 
@@ -42,6 +45,7 @@ namespace VividRP.Samples.HairLookDev
         public Transform BustFrontRig;
         public Transform BustBacklitRig;
         public Transform SphereCloseUpRig;
+        public Transform RoughnessCompareRig;
 
         private void OnEnable()
         {
@@ -69,6 +73,7 @@ namespace VividRP.Samples.HairLookDev
                 HairLookDevCameraPreset.BustFrontThreeQuarter => BustFrontRig,
                 HairLookDevCameraPreset.BustBacklitRim => BustBacklitRig,
                 HairLookDevCameraPreset.SphereCloseUp => SphereCloseUpRig,
+                HairLookDevCameraPreset.RoughnessComparison => RoughnessCompareRig,
                 _ => OverviewRig,
             };
 
@@ -97,9 +102,21 @@ namespace VividRP.Samples.HairLookDev
                     BustGroom.RebuildDotsProxyNow();
             }
 
+            if (BustMatteGroom != null)
+            {
+                BustMatteGroom.EnablePathTracingDotsProxy = enablePtProxy;
+                if (enablePtProxy)
+                    BustMatteGroom.RebuildDotsProxyNow();
+            }
+
             if (BustShadowProxyRenderer != null)
             {
                 BustShadowProxyRenderer.enabled = !enablePtProxy && ShowShadowProxyInRealtime;
+            }
+
+            if (BustMatteShadowProxyRenderer != null)
+            {
+                BustMatteShadowProxyRenderer.enabled = !enablePtProxy && ShowShadowProxyInRealtime;
             }
 
             if (StudioLabelsRoot != null)
@@ -129,14 +146,26 @@ namespace VividRP.Samples.HairLookDev
                 ? BustGroom.GroomAsset.SegmentCount
                 : 0;
 
+            int matteStrands = BustMatteGroom != null && BustMatteGroom.GroomAsset != null
+                ? BustMatteGroom.GroomAsset.StrandCount
+                : 0;
+            int matteSegs = BustMatteGroom != null && BustMatteGroom.GroomAsset != null
+                ? BustMatteGroom.GroomAsset.SegmentCount
+                : 0;
+
             string modeLabel = RenderMode == HairLookDevRenderMode.ReferencePathTracingDots
                 ? "REFERENCE PT (DXR DOTS + CHIANG)"
                 : "REALTIME STRAND VISBUF (3-LAYER ATLAS)";
 
+            string matteLine = matteStrands > 0
+                ? $"\nSTATION 03 MATTE:  {matteStrands:N0} STRANDS / {matteSegs:N0} SEGS (R=0.48)"
+                : string.Empty;
+
             StatusTelemetryText.text =
                 $"MODE: {modeLabel}\n"
-                + $"STATION 01 SPHERE: {sphereStrands:N0} STRANDS / {sphereSegs:N0} SEGS\n"
-                + $"STATION 02 BUST:   {bustStrands:N0} STRANDS / {bustSegs:N0} SEGS";
+                + $"STATION 01 SPHERE: {sphereStrands:N0} STRANDS / {sphereSegs:N0} SEGS (R=0.26)\n"
+                + $"STATION 02 GLOSSY: {bustStrands:N0} STRANDS / {bustSegs:N0} SEGS (R=0.28)"
+                + matteLine;
         }
     }
 }

@@ -54,7 +54,7 @@ namespace VividRP.Samples.HairLookDev.Editor
                 new Color(0.14f, 0.15f, 0.17f, 1.0f), metallic: 0.0f, smoothness: 0.22f);
             var matPlinth = CreateOrUpdateLitMaterial(
                 MaterialsRoot + "/HairStudio_Plinth.mat", standardShader,
-                new Color(0.08f, 0.09f, 0.10f, 1.0f), metallic: 0.05f, smoothness: 0.35f);
+                new Color(0.08f, 0.09f, 0.10f, 1.0f), metallic: 0.05f, smoothness: 0.20f);
             var matMannequin = CreateOrUpdateLitMaterial(
                 MaterialsRoot + "/HairStudio_Mannequin.mat", standardShader,
                 new Color(0.56f, 0.44f, 0.38f, 1.0f), metallic: 0.0f, smoothness: 0.26f);
@@ -92,10 +92,28 @@ namespace VividRP.Samples.HairLookDev.Editor
                 DualScatterGain = 1.0f,
             };
 
+            // Higher-roughness dry/matte natural hair variant for direct A/B roughness comparison
+            var bustMatteShading = new HairGroomShadingParameters
+            {
+                AbsorptionMode = HairGroomAbsorptionMode.Melanin,
+                BaseColor = new Color(0.18f, 0.11f, 0.06f, 1.0f),
+                Melanin = 0.78f,
+                MelaninRedness = 0.22f,
+                LongitudinalRoughness = 0.48f,
+                AzimuthalRoughness = 0.58f,
+                Ior = 1.48f,
+                CuticleAngleDegrees = 3.5f,
+                MedullaWeight = 0.0f,
+                MedullaRoughness = 0.65f,
+                DualScatterGain = 1.0f,
+            };
+
             var matHairSphere = CreateOrUpdateHairMaterial(
                 MaterialsRoot + "/HairStudio_Sphere_Chiang.mat", hairShader, in sphereShading);
             var matHairBust = CreateOrUpdateHairMaterial(
                 MaterialsRoot + "/HairStudio_Bust_Chiang.mat", hairShader, in bustShading);
+            var matHairBustMatte = CreateOrUpdateHairMaterial(
+                MaterialsRoot + "/HairStudio_BustMatte_Chiang.mat", hairShader, in bustMatteShading);
             var tmpMat = AssetDatabase.LoadAssetAtPath<Material>(TmpMaterialPath);
 
             var volumeProfile = CreateOrUpdateStudioVolumeProfile();
@@ -117,6 +135,7 @@ namespace VividRP.Samples.HairLookDev.Editor
             matSphereCore = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/HairStudio_SphereCore.mat");
             matHairSphere = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/HairStudio_Sphere_Chiang.mat");
             matHairBust = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/HairStudio_Bust_Chiang.mat");
+            matHairBustMatte = AssetDatabase.LoadAssetAtPath<Material>(MaterialsRoot + "/HairStudio_BustMatte_Chiang.mat");
             tmpMat = AssetDatabase.LoadAssetAtPath<Material>(TmpMaterialPath);
 
             var studioRoot = new GameObject("HairLookDev_Studio");
@@ -147,34 +166,34 @@ namespace VividRP.Samples.HairLookDev.Editor
                 lightsRoot.transform,
                 "KeyLight_FrontRight",
                 LightType.Spot,
-                new Vector3(1.15f, 2.15f, -1.35f),
-                new Vector3(0.05f, 1.05f, 0.0f),
+                new Vector3(1.15f, 2.35f, -1.75f),
+                new Vector3(0.20f, 1.05f, 0.0f),
                 new Color(1.0f, 0.96f, 0.91f),
-                intensity: 95.0f,
-                range: 9.0f,
-                spotAngle: 68.0f);
+                intensity: 105.0f,
+                range: 9.5f,
+                spotAngle: 84.0f);
 
             CreateStudioLight(
                 lightsRoot.transform,
                 "FillLight_FrontLeft",
                 LightType.Point,
-                new Vector3(-1.45f, 1.55f, -1.25f),
+                new Vector3(-1.55f, 1.55f, -1.30f),
                 Vector3.zero,
                 new Color(0.84f, 0.91f, 1.0f),
-                intensity: 42.0f,
-                range: 8.5f,
+                intensity: 44.0f,
+                range: 9.0f,
                 spotAngle: 60.0f);
 
             CreateStudioLight(
                 lightsRoot.transform,
                 "RimLight_BackTop",
                 LightType.Spot,
-                new Vector3(0.0f, 1.85f, 1.25f),
+                new Vector3(0.0f, 1.95f, 1.45f),
                 new Vector3(0.0f, 1.06f, 0.0f),
                 new Color(1.0f, 0.91f, 0.78f),
-                intensity: 120.0f,
-                range: 8.5f,
-                spotAngle: 64.0f);
+                intensity: 135.0f,
+                range: 9.0f,
+                spotAngle: 82.0f);
 
             CreateStudioLight(
                 lightsRoot.transform,
@@ -183,14 +202,14 @@ namespace VividRP.Samples.HairLookDev.Editor
                 new Vector3(0.0f, 2.75f, -0.25f),
                 Vector3.zero,
                 new Color(0.95f, 0.96f, 1.0f),
-                intensity: 32.0f,
-                range: 9.0f,
+                intensity: 34.0f,
+                range: 9.5f,
                 spotAngle: 60.0f);
 
-            // 4. Station 01: HairSphere_16k
+            // 4. Station 01: HairSphere_16k (Left)
             var station01 = new GameObject("Station01_HairSphere_16k");
             station01.transform.SetParent(studioRoot.transform, false);
-            station01.transform.localPosition = new Vector3(-0.46f, 0.0f, 0.0f);
+            station01.transform.localPosition = new Vector3(-0.78f, 0.0f, 0.0f);
 
             CreateCylinder(station01.transform, "Plinth", new Vector3(0.0f, 0.40f, 0.0f), new Vector3(0.36f, 0.40f, 0.36f), matPlinth);
 
@@ -211,75 +230,72 @@ namespace VividRP.Samples.HairLookDev.Editor
             sphereGroom.RadiusScale = 1.0f;
             sphereGroom.Shading = sphereShading;
             sphereGroom.PathTracingMaterial = matHairSphere;
-            sphereGroom.EnablePathTracingDotsProxy = true;
-            sphereGroom.RebuildDotsProxyNow();
+            sphereGroom.EnablePathTracingDotsProxy = false;
 
-            // 5. Station 02: HairBust_48k + Sculpted Head + Shadow Proxy
-            var station02 = new GameObject("Station02_HairBust_48k");
-            station02.transform.SetParent(studioRoot.transform, false);
-            station02.transform.localPosition = new Vector3(0.46f, 0.0f, 0.0f);
+            // 5. Station 02: HairBust_48k Glossy Baseline (Center, R=0.28 / Azim=0.46)
+            var station02 = CreateBustStation(
+                studioRoot.transform,
+                "Station02_HairBust_48k_Glossy",
+                "HairBust_Anchor",
+                new Vector3(0.0f, 0.0f, 0.0f),
+                matPlinth,
+                matMannequin,
+                headMesh,
+                proxyMesh,
+                bustGroomAsset,
+                in bustShading,
+                matHairBust,
+                out var bustGroom,
+                out var shadowProxyRenderer);
 
-            CreateCylinder(station02.transform, "Plinth", new Vector3(0.0f, 0.40f, 0.0f), new Vector3(0.36f, 0.40f, 0.36f), matPlinth);
+            // 6. Station 03: HairBust_48k Higher-Roughness Matte Comparison (Right, R=0.54 / Azim=0.70)
+            var station03 = CreateBustStation(
+                studioRoot.transform,
+                "Station03_HairBust_48k_Matte",
+                "HairBust_Matte_Anchor",
+                new Vector3(0.78f, 0.0f, 0.0f),
+                matPlinth,
+                matMannequin,
+                headMesh,
+                proxyMesh,
+                bustGroomAsset,
+                in bustMatteShading,
+                matHairBustMatte,
+                out var bustMatteGroom,
+                out var matteShadowProxyRenderer);
 
-            var bustAnchor = new GameObject("HairBust_Anchor");
-            bustAnchor.transform.SetParent(station02.transform, false);
-            bustAnchor.transform.localPosition = new Vector3(0.0f, 1.04f, 0.0f);
-            // Face is +Z in Houdini/OBJ -> rotate 180 deg around Y to face camera at -Z
-            bustAnchor.transform.localRotation = Quaternion.Euler(0.0f, 180.0f, 0.0f);
-
-            if (headMesh != null)
-            {
-                var headGo = new GameObject("MannequinHead");
-                headGo.transform.SetParent(bustAnchor.transform, false);
-                headGo.AddComponent<MeshFilter>().sharedMesh = headMesh;
-                var headRenderer = headGo.AddComponent<MeshRenderer>();
-                headRenderer.sharedMaterial = matMannequin;
-            }
-
-            Renderer shadowProxyRenderer = null;
-            if (proxyMesh != null)
-            {
-                var proxyGo = new GameObject("ShadowProxy_Inverted");
-                proxyGo.transform.SetParent(bustAnchor.transform, false);
-                proxyGo.AddComponent<MeshFilter>().sharedMesh = proxyMesh;
-                shadowProxyRenderer = proxyGo.AddComponent<MeshRenderer>();
-                shadowProxyRenderer.sharedMaterial = matMannequin;
-                shadowProxyRenderer.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
-                shadowProxyRenderer.enabled = false;
-            }
-
-            var bustGroom = bustAnchor.AddComponent<HairGroomRenderer>();
-            bustGroom.GroomAsset = bustGroomAsset;
-            bustGroom.RadiusScale = 1.0f;
-            bustGroom.Shading = bustShading;
-            bustGroom.PathTracingMaterial = matHairBust;
-            bustGroom.EnablePathTracingDotsProxy = true;
-            bustGroom.RebuildDotsProxyNow();
-
-            // 6. Wall Title & Live Telemetry Board (grouped under StudioLabelsRoot so PT mode hides them cleanly)
+            // 7. Wall Title & Live Telemetry Board (grouped under StudioLabelsRoot so PT mode hides them cleanly)
             var labelsRoot = new GameObject("StudioLabels");
             labelsRoot.transform.SetParent(studioRoot.transform, false);
 
             CreateStudioLabel(
                 labelsRoot.transform,
                 "Label_Station01",
-                new Vector3(-0.46f, 0.72f, -0.19f),
-                "STATION 01: HAIR SPHERE (16K)",
-                0.36f,
+                new Vector3(-0.78f, 0.72f, -0.19f),
+                "01: SPHERE (16K)\nR=0.26 / N=0.42",
+                0.32f,
                 tmpMat);
 
             CreateStudioLabel(
                 labelsRoot.transform,
                 "Label_Station02",
-                new Vector3(0.46f, 0.72f, -0.19f),
-                "STATION 02: HERO BUST (48K)",
-                0.36f,
+                new Vector3(0.0f, 0.72f, -0.19f),
+                "02: BUST GLOSSY (48K)\nR=0.28 / N=0.46",
+                0.32f,
+                tmpMat);
+
+            CreateStudioLabel(
+                labelsRoot.transform,
+                "Label_Station03",
+                new Vector3(0.78f, 0.72f, -0.19f),
+                "03: BUST MATTE (48K)\nR=0.48 / N=0.58",
+                0.32f,
                 tmpMat);
 
             CreateStudioLabel(
                 labelsRoot.transform,
                 "WallTitle",
-                new Vector3(0.0f, 1.66f, 1.15f),
+                new Vector3(0.0f, 1.72f, 1.15f),
                 "VIVIDRP STRAND HAIR LOOKDEV STUDIO",
                 0.92f,
                 tmpMat);
@@ -287,19 +303,20 @@ namespace VividRP.Samples.HairLookDev.Editor
             var telemetryText = CreateStudioLabel(
                 labelsRoot.transform,
                 "WallTelemetry",
-                new Vector3(0.0f, 1.44f, 1.15f),
+                new Vector3(0.0f, 1.48f, 1.15f),
                 "INITIALIZING...",
-                0.52f,
+                0.48f,
                 tmpMat);
 
-            // 7. Studio Camera & Presets
+            // 8. Studio Camera & Presets
             var rigsRoot = new GameObject("CameraRigs");
             rigsRoot.transform.SetParent(studioRoot.transform, false);
 
-            var rigOverview = CreateCameraRig(rigsRoot.transform, "Rig_Overview", new Vector3(0.0f, 1.14f, -1.55f), new Vector3(0.0f, 1.08f, 0.0f));
-            var rigBustFront = CreateCameraRig(rigsRoot.transform, "Rig_BustFront", new Vector3(0.24f, 1.10f, -0.58f), new Vector3(0.46f, 1.06f, 0.0f));
-            var rigBustBacklit = CreateCameraRig(rigsRoot.transform, "Rig_BustBacklit", new Vector3(0.76f, 1.10f, -0.56f), new Vector3(0.46f, 1.06f, 0.0f));
-            var rigSphereClose = CreateCameraRig(rigsRoot.transform, "Rig_SphereCloseUp", new Vector3(-0.46f, 1.12f, -0.62f), new Vector3(-0.46f, 1.06f, 0.0f));
+            var rigOverview = CreateCameraRig(rigsRoot.transform, "Rig_Overview", new Vector3(0.0f, 1.16f, -2.05f), new Vector3(0.0f, 1.07f, 0.0f));
+            var rigBustFront = CreateCameraRig(rigsRoot.transform, "Rig_BustFront", new Vector3(-0.22f, 1.10f, -0.58f), new Vector3(0.0f, 1.06f, 0.0f));
+            var rigBustBacklit = CreateCameraRig(rigsRoot.transform, "Rig_BustBacklit", new Vector3(0.30f, 1.10f, -0.56f), new Vector3(0.0f, 1.06f, 0.0f));
+            var rigSphereClose = CreateCameraRig(rigsRoot.transform, "Rig_SphereCloseUp", new Vector3(-0.78f, 1.12f, -0.62f), new Vector3(-0.78f, 1.06f, 0.0f));
+            var rigRoughnessCompare = CreateCameraRig(rigsRoot.transform, "Rig_RoughnessCompare", new Vector3(0.39f, 1.13f, -1.24f), new Vector3(0.39f, 1.05f, 0.0f));
 
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
@@ -314,20 +331,23 @@ namespace VividRP.Samples.HairLookDev.Editor
             var camData = camGo.AddComponent<VividAdditionalCameraData>();
             camData.antialiasing = VividAntialiasingMode.None;
 
-            // 8. Controller wiring
+            // 9. Controller wiring
             var controller = studioRoot.AddComponent<VividHairLookDevController>();
             controller.StudioCamera = camera;
             controller.StudioVolume = volume;
             controller.SphereGroom = sphereGroom;
             controller.BustGroom = bustGroom;
+            controller.BustMatteGroom = bustMatteGroom;
             controller.BustShadowProxyRenderer = shadowProxyRenderer;
+            controller.BustMatteShadowProxyRenderer = matteShadowProxyRenderer;
             controller.StudioLabelsRoot = labelsRoot;
             controller.StatusTelemetryText = telemetryText;
             controller.OverviewRig = rigOverview;
             controller.BustFrontRig = rigBustFront;
             controller.BustBacklitRig = rigBustBacklit;
             controller.SphereCloseUpRig = rigSphereClose;
-            controller.RenderMode = HairLookDevRenderMode.ReferencePathTracingDots;
+            controller.RoughnessCompareRig = rigRoughnessCompare;
+            controller.RenderMode = HairLookDevRenderMode.RealtimeStrandVisibilityBuffer;
             controller.ActiveCameraPreset = HairLookDevCameraPreset.Overview;
             controller.ApplyModeAndTelemetry();
 
@@ -335,6 +355,63 @@ namespace VividRP.Samples.HairLookDev.Editor
             EditorSceneManager.SaveScene(scene, ScenePath);
             AssetDatabase.SaveAssets();
             Debug.Log($"[HairLookDev] Built studio scene at {ScenePath}");
+        }
+
+        private static GameObject CreateBustStation(
+            Transform parent,
+            string stationName,
+            string anchorName,
+            Vector3 localPosition,
+            Material matPlinth,
+            Material matMannequin,
+            Mesh headMesh,
+            Mesh proxyMesh,
+            HairGroomAsset bustGroomAsset,
+            in HairGroomShadingParameters shading,
+            Material pathTracingMaterial,
+            out HairGroomRenderer bustGroom,
+            out Renderer shadowProxyRenderer)
+        {
+            var station = new GameObject(stationName);
+            station.transform.SetParent(parent, false);
+            station.transform.localPosition = localPosition;
+
+            CreateCylinder(station.transform, "Plinth", new Vector3(0.0f, 0.40f, 0.0f), new Vector3(0.36f, 0.40f, 0.36f), matPlinth);
+
+            var bustAnchor = new GameObject(anchorName);
+            bustAnchor.transform.SetParent(station.transform, false);
+            bustAnchor.transform.localPosition = new Vector3(0.0f, 1.04f, 0.0f);
+            // Face is +Z in Houdini/OBJ -> rotate 180 deg around Y to face camera at -Z
+            bustAnchor.transform.localRotation = Quaternion.Euler(0.0f, 180.0f, 0.0f);
+
+            if (headMesh != null)
+            {
+                var headGo = new GameObject("MannequinHead");
+                headGo.transform.SetParent(bustAnchor.transform, false);
+                headGo.AddComponent<MeshFilter>().sharedMesh = headMesh;
+                var headRenderer = headGo.AddComponent<MeshRenderer>();
+                headRenderer.sharedMaterial = matMannequin;
+            }
+
+            shadowProxyRenderer = null;
+            if (proxyMesh != null)
+            {
+                var proxyGo = new GameObject("ShadowProxy_Inverted");
+                proxyGo.transform.SetParent(bustAnchor.transform, false);
+                proxyGo.AddComponent<MeshFilter>().sharedMesh = proxyMesh;
+                shadowProxyRenderer = proxyGo.AddComponent<MeshRenderer>();
+                shadowProxyRenderer.sharedMaterial = matMannequin;
+                shadowProxyRenderer.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+                shadowProxyRenderer.enabled = false;
+            }
+
+            bustGroom = bustAnchor.AddComponent<HairGroomRenderer>();
+            bustGroom.GroomAsset = bustGroomAsset;
+            bustGroom.RadiusScale = 1.0f;
+            bustGroom.Shading = shading;
+            bustGroom.PathTracingMaterial = pathTracingMaterial;
+            bustGroom.EnablePathTracingDotsProxy = false;
+            return station;
         }
 
         private static VolumeProfile CreateOrUpdateStudioVolumeProfile()

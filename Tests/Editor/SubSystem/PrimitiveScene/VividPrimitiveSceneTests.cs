@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.PrimitiveScene;
 
@@ -27,10 +30,41 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GPUDataLayouts_HaveExpectedStrides()
         {
-            Assert.That(UnsafeUtility.SizeOf<VividPrimitiveData>(), Is.EqualTo(64));
+            Assert.That(typeof(VividPrimitiveData).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividPrimitiveData>(), Is.EqualTo(80));
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.WorldBoundsMin), 0);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.WorldBoundsMax), 16);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.TransformIndex), 32);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.DrawSectionOffset), 36);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.DrawSectionCount), 40);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.RenderingLayerMask), 44);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.PassMask), 48);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.Flags), 52);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.Generation), 56);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.CustomDataAddress), 60);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.ShaderUserValue), 64);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.PreviousTransformIndex), 68);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.CameraLayerMask), 72);
+            AssertFieldOffset<VividPrimitiveData>(nameof(VividPrimitiveData.Padding0), 76);
+
+            Assert.That(typeof(VividPrimitiveTransformData).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividPrimitiveTransformData>(), Is.EqualTo(128));
+            Assert.That(typeof(VividPrimitivePreviousTransformData).IsLayoutSequential, Is.True);
             Assert.That(UnsafeUtility.SizeOf<VividPrimitivePreviousTransformData>(), Is.EqualTo(64));
-            Assert.That(UnsafeUtility.SizeOf<VividPrimitiveDrawSectionData>(), Is.EqualTo(32));
+
+            Assert.That(typeof(VividPrimitiveDrawSectionData).IsLayoutSequential, Is.True);
+            Assert.That(UnsafeUtility.SizeOf<VividPrimitiveDrawSectionData>(), Is.EqualTo(64));
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.GeometryIndex), 0);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.GeometryGeneration), 4);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.MaterialIndex), 8);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.MaterialGeneration), 12);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.SourceSectionIndex), 16);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.Flags), 20);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.PrimitiveIndex), 24);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.PrimitiveGeneration), 28);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.LocalBoundsMin), 32);
+            AssertFieldOffset<VividPrimitiveDrawSectionData>(nameof(VividPrimitiveDrawSectionData.LocalBoundsMax), 48);
+
             Assert.That(UnsafeUtility.SizeOf<VividPrimitiveGeometryData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividPrimitiveMaterialData>(), Is.EqualTo(16));
             Assert.That(UnsafeUtility.SizeOf<VividLegacyInstanceMappingData>(), Is.EqualTo(16));
@@ -64,14 +98,16 @@ namespace VividRP.Editor.Tests
             AssertHLSLFieldsInOrder(source, "VividPrimitiveData",
                 "WorldBoundsMin", "WorldBoundsMax", "TransformIndex", "DrawSectionOffset",
                 "DrawSectionCount", "RenderingLayerMask", "PassMask", "Flags", "Generation",
-                "CustomDataAddress");
+                "CustomDataAddress", "ShaderUserValue", "PreviousTransformIndex",
+                "CameraLayerMask", "Padding0");
             AssertHLSLFieldsInOrder(source, "VividPrimitiveTransformData",
                 "ObjectToWorldMatrix", "WorldToObjectMatrix");
             AssertHLSLFieldsInOrder(source, "VividPrimitivePreviousTransformData",
                 "PreviousObjectToWorldMatrix");
             AssertHLSLFieldsInOrder(source, "VividPrimitiveDrawSectionData",
                 "GeometryIndex", "GeometryGeneration", "MaterialIndex", "MaterialGeneration",
-                "SourceSectionIndex", "Flags", "Padding0", "Padding1");
+                "SourceSectionIndex", "Flags", "PrimitiveIndex", "PrimitiveGeneration",
+                "LocalBoundsMin", "LocalBoundsMax");
             AssertHLSLFieldsInOrder(source, "VividPrimitiveGeometryData",
                 "Generation", "LegacyTopMeshLODStartIndex", "LegacyTotalMeshLODCount",
                 "LegacyMeshLODLevelCount");
@@ -623,9 +659,32 @@ namespace VividRP.Editor.Tests
             var ranges = new List<VividPrimitiveDirtyRange>();
             table.CollectDirtyRanges(ranges);
             Assert.That(ranges, Has.Count.EqualTo(1));
-            Assert.That(table.DirtyPageCount, Is.EqualTo(157));
-            Assert.That(ranges[0].Count, Is.EqualTo(157 * 64));
+            Assert.That(table.DirtyRecordCount, Is.EqualTo(10_000));
+            Assert.That(table.DirtyPageCount, Is.EqualTo(197));
+            Assert.That(ranges[0].Count, Is.EqualTo(197 * 51));
             Assert.That(ranges[0].Count, Is.LessThan(table.Count));
+        }
+
+        [Test]
+        public void SparseDirtyRecords_TrackExactCountWithoutPageWriteAmplification()
+        {
+            var table = new VividPrimitiveGpuTable<VividPrimitiveData>();
+            table.Resize(100_000);
+            table.ClearDirtyPages();
+
+            for (int index = 0; index < 100_000; index += 10)
+            {
+                table.Set(index, new VividPrimitiveData { Generation = 2u });
+                table.Set(index, new VividPrimitiveData { Generation = 3u }); // Duplicate write deduplicates.
+            }
+
+            Assert.That(table.IsAllDirty, Is.False);
+            Assert.That(table.DirtyRecordCount, Is.EqualTo(10_000));
+            Assert.That(table.DirtyPageCount, Is.EqualTo((100_000 + table.RecordsPerPage - 1) / table.RecordsPerPage));
+
+            table.ClearDirtyPages();
+            Assert.That(table.DirtyRecordCount, Is.Zero);
+            Assert.That(table.DirtyPageCount, Is.Zero);
         }
 
         [Test]
@@ -682,7 +741,7 @@ namespace VividRP.Editor.Tests
             Assert.That(afterSection[0].GeometryIndex, Is.EqualTo(beforeSection[0].GeometryIndex));
             Assert.That(afterSection[0].MaterialIndex, Is.EqualTo(beforeSection[0].MaterialIndex));
             Assert.That(movedStats.LastUploadRangeCount, Is.EqualTo(3));
-            Assert.That(movedStats.LastUploadBytes, Is.EqualTo(256L));
+            Assert.That(movedStats.LastUploadBytes, Is.EqualTo(272L));
 
             scene.BeginFrame(1);
             Assert.That(
@@ -1240,7 +1299,257 @@ namespace VividRP.Editor.Tests
             buffers.Upload(scene);
             Assert.That(scene.GetStats().DirtyPageCount, Is.EqualTo(7));
             Assert.That(scene.GetStats().LastUploadRangeCount, Is.EqualTo(7));
-            Assert.That(scene.GetStats().LastUploadBytes, Is.EqualTo(336L));
+            Assert.That(scene.GetStats().LastUploadBytes, Is.EqualTo(384L));
+        }
+
+        [Test]
+        public void PrimitiveAndSectionABI_PopulatesOwnerLocalBoundsWpoLodAndShaderUserValue()
+        {
+            using var scene = new VividPrimitiveScene();
+            EntityId source = CreateEntity("ABI Extended Primitive");
+            VividPrimitiveResourceKey geometryKey = CreateResourceKey(
+                VividPrimitiveResourceDomain.MeshletGeometry,
+                CreateEntity("ABI Geometry"));
+            VividPrimitiveResourceKey materialKey = CreateResourceKey(
+                VividPrimitiveResourceDomain.MaterialProxy,
+                CreateEntity("ABI Material"));
+            var localBounds = new Bounds(new Vector3(1.0f, 2.0f, 3.0f), new Vector3(4.0f, 6.0f, 8.0f));
+            VividPrimitiveDrawSectionDescriptor[] sections =
+            {
+                new(0, geometryKey, materialKey, VividPrimitiveDrawSectionFlags.Valid, localBounds, 0.75f, 1.5f),
+            };
+
+            VividPrimitiveHandle handle = scene.RegisterOrUpdate(new VividPrimitiveSourceDescriptor(
+                source,
+                Matrix4x4.identity,
+                Matrix4x4.identity,
+                new Bounds(Vector3.zero, Vector3.one * 2.0f),
+                0xAu,
+                1u << 5,
+                VividInstancePassMask.Main | VividInstancePassMask.Shadows,
+                VividPrimitiveFlags.Valid,
+                sections,
+                shaderUserValue: 0x12345678u));
+
+            VividPrimitiveData primitive = scene.PrimitiveTable[handle.Index];
+            VividPrimitiveDrawSectionData section = scene.DrawSectionTable[(int) primitive.DrawSectionOffset];
+            Assert.That(primitive.ShaderUserValue, Is.EqualTo(0x12345678u));
+            Assert.That(primitive.PreviousTransformIndex, Is.EqualTo((uint) handle.Index));
+            Assert.That(primitive.CameraLayerMask, Is.EqualTo(1u << 5));
+            Assert.That(section.PrimitiveIndex, Is.EqualTo((uint) handle.Index));
+            Assert.That(section.PrimitiveGeneration, Is.EqualTo(handle.Generation));
+            Assert.That(section.LocalBoundsMin, Is.EqualTo(new float4(-1.0f, -1.0f, -1.0f, 1.5f)));
+            Assert.That(section.LocalBoundsMax, Is.EqualTo(new float4(3.0f, 5.0f, 7.0f, 0.75f)));
+
+            // Changing section WPO padding or local bounds must update the section in place.
+            var expandedBounds = new Bounds(new Vector3(1.0f, 2.0f, 3.0f), new Vector3(8.0f, 6.0f, 8.0f));
+            scene.RegisterOrUpdate(handle, new VividPrimitiveSourceDescriptor(
+                source,
+                Matrix4x4.identity,
+                Matrix4x4.identity,
+                new Bounds(Vector3.zero, Vector3.one * 2.0f),
+                0xAu,
+                1u << 5,
+                VividInstancePassMask.Main | VividInstancePassMask.Shadows,
+                VividPrimitiveFlags.Valid,
+                new[]
+                {
+                    new VividPrimitiveDrawSectionDescriptor(
+                        0, geometryKey, materialKey, VividPrimitiveDrawSectionFlags.Valid, expandedBounds, 1.25f, 2.0f),
+                },
+                shaderUserValue: 0x12345678u));
+            VividPrimitiveDrawSectionData updatedSection = scene.DrawSectionTable[(int) primitive.DrawSectionOffset];
+            Assert.That(updatedSection.LocalBoundsMin, Is.EqualTo(new float4(-3.0f, -1.0f, -1.0f, 2.0f)));
+            Assert.That(updatedSection.LocalBoundsMax, Is.EqualTo(new float4(5.0f, 5.0f, 7.0f, 1.25f)));
+
+            Assert.That(scene.Remove(source), Is.True);
+            Assert.That(scene.PrimitiveTable[handle.Index].PreviousTransformIndex, Is.EqualTo(VividPrimitiveScene.InvalidIndex));
+            Assert.That(scene.DrawSectionTable[(int) primitive.DrawSectionOffset].PrimitiveIndex, Is.EqualTo(VividPrimitiveScene.InvalidIndex));
+        }
+
+        [Test]
+        public void ScatterUpload_MatchesFallbackAcrossSparseMultiTableUpdatesAndRingRotation()
+        {
+            const int primitiveCount = 256;
+            using var scatterScene = new VividPrimitiveScene();
+            using var fallbackScene = new VividPrimitiveScene();
+            using var scatterBuffers = new VividPrimitiveSceneBufferSet();
+            using var fallbackBuffers = new VividPrimitiveSceneBufferSet { ForceFallbackUploadForTests = true };
+
+            var entityIds = new EntityId[primitiveCount];
+            var geometryKey = CreateResourceKey(VividPrimitiveResourceDomain.MeshletGeometry, CreateEntity("Scatter Shared Geo"));
+            var materialKey = CreateResourceKey(VividPrimitiveResourceDomain.MaterialProxy, CreateEntity("Scatter Shared Mat"));
+            var sections = new[]
+            {
+                new VividPrimitiveDrawSectionDescriptor(
+                    0,
+                    geometryKey,
+                    materialKey,
+                    VividPrimitiveDrawSectionFlags.Valid,
+                    new Bounds(Vector3.zero, Vector3.one * 2.0f),
+                    0.25f,
+                    1.0f),
+            };
+
+            scatterScene.BeginFrame(0);
+            fallbackScene.BeginFrame(0);
+            for (int index = 0; index < primitiveCount; index++)
+            {
+                entityIds[index] = CreateEntity($"Scatter Primitive {index}");
+                var matrix = Matrix4x4.Translate(new Vector3(index * 2.0f, 0.0f, 0.0f));
+                VividPrimitiveSourceDescriptor descriptor = CreateDescriptor(entityIds[index], sections, matrix);
+                scatterScene.RegisterOrUpdate(descriptor);
+                fallbackScene.RegisterOrUpdate(descriptor);
+            }
+
+            scatterScene.ResizeLegacyInstanceMappings(primitiveCount);
+            fallbackScene.ResizeLegacyInstanceMappings(primitiveCount);
+            for (int index = 0; index < primitiveCount; index++)
+            {
+                var mapping = new VividLegacyInstanceMappingData
+                {
+                    PrimitiveIndex = (uint) index,
+                    PrimitiveGeneration = 1u,
+                    DrawSectionIndex = (uint) index,
+                    Flags = 1u,
+                };
+                scatterScene.SetLegacyInstanceMapping(index, mapping);
+                fallbackScene.SetLegacyInstanceMapping(index, mapping);
+            }
+
+            scatterBuffers.Upload(scatterScene);
+            fallbackBuffers.Upload(fallbackScene);
+
+            // Rotate through 5 frames (> 3 staging ring slots) with sparse updates touching 16/64/80/128B strides.
+            for (int frame = 1; frame <= 5; frame++)
+            {
+                scatterScene.BeginFrame(frame);
+                fallbackScene.BeginFrame(frame);
+
+                int updatedCount = 0;
+                for (int index = frame; index < primitiveCount; index += 37)
+                {
+                    var moved = Matrix4x4.Translate(new Vector3(index * 2.0f + frame * 3.0f, frame, -frame));
+                    var updatedSections = new[]
+                    {
+                        new VividPrimitiveDrawSectionDescriptor(
+                            0,
+                            geometryKey,
+                            materialKey,
+                            VividPrimitiveDrawSectionFlags.Valid,
+                            new Bounds(Vector3.up * frame, Vector3.one * 2.0f),
+                            0.25f * frame,
+                            1.0f),
+                    };
+                    VividPrimitiveSourceDescriptor descriptor = CreateDescriptor(entityIds[index], updatedSections, moved);
+                    scatterScene.RegisterOrUpdate(descriptor);
+                    fallbackScene.RegisterOrUpdate(descriptor);
+
+                    var updatedMapping = new VividLegacyInstanceMappingData
+                    {
+                        PrimitiveIndex = (uint) index,
+                        PrimitiveGeneration = 1u,
+                        DrawSectionIndex = (uint) index,
+                        Flags = (uint) frame,
+                    };
+                    scatterScene.SetLegacyInstanceMapping(index, updatedMapping);
+                    fallbackScene.SetLegacyInstanceMapping(index, updatedMapping);
+                    updatedCount++;
+                }
+
+                scatterBuffers.Upload(scatterScene);
+                fallbackBuffers.Upload(fallbackScene);
+
+                if (SystemInfo.supportsComputeShaders)
+                {
+                    Assert.That(scatterBuffers.LastUploadUsedComputeScatter, Is.True);
+                    Assert.That(fallbackBuffers.LastUploadUsedComputeScatter, Is.False);
+                    Assert.That(
+                        scatterScene.GetStats().LastUploadBytes,
+                        Is.LessThan(fallbackScene.GetStats().LastUploadBytes));
+                    Assert.That(updatedCount, Is.GreaterThan(0));
+                }
+
+                var scatterPrimitives = new VividPrimitiveData[primitiveCount];
+                var fallbackPrimitives = new VividPrimitiveData[primitiveCount];
+                scatterBuffers.PrimitiveDataBuffer.GetData(scatterPrimitives, 0, 0, primitiveCount);
+                fallbackBuffers.PrimitiveDataBuffer.GetData(fallbackPrimitives, 0, 0, primitiveCount);
+                Assert.That(scatterPrimitives, Is.EqualTo(fallbackPrimitives));
+
+                var scatterTransforms = new VividPrimitiveTransformData[primitiveCount];
+                var fallbackTransforms = new VividPrimitiveTransformData[primitiveCount];
+                scatterBuffers.TransformDataBuffer.GetData(scatterTransforms, 0, 0, primitiveCount);
+                fallbackBuffers.TransformDataBuffer.GetData(fallbackTransforms, 0, 0, primitiveCount);
+                Assert.That(scatterTransforms, Is.EqualTo(fallbackTransforms));
+
+                var scatterPrevTransforms = new VividPrimitivePreviousTransformData[primitiveCount];
+                var fallbackPrevTransforms = new VividPrimitivePreviousTransformData[primitiveCount];
+                scatterBuffers.PreviousTransformDataBuffer.GetData(scatterPrevTransforms, 0, 0, primitiveCount);
+                fallbackBuffers.PreviousTransformDataBuffer.GetData(fallbackPrevTransforms, 0, 0, primitiveCount);
+                Assert.That(scatterPrevTransforms, Is.EqualTo(fallbackPrevTransforms));
+
+                var scatterSections = new VividPrimitiveDrawSectionData[primitiveCount];
+                var fallbackSections = new VividPrimitiveDrawSectionData[primitiveCount];
+                scatterBuffers.DrawSectionDataBuffer.GetData(scatterSections, 0, 0, primitiveCount);
+                fallbackBuffers.DrawSectionDataBuffer.GetData(fallbackSections, 0, 0, primitiveCount);
+                Assert.That(scatterSections, Is.EqualTo(fallbackSections));
+
+                var scatterMappings = new VividLegacyInstanceMappingData[primitiveCount];
+                var fallbackMappings = new VividLegacyInstanceMappingData[primitiveCount];
+                scatterBuffers.LegacyInstanceMappingBuffer.GetData(scatterMappings, 0, 0, primitiveCount);
+                fallbackBuffers.LegacyInstanceMappingBuffer.GetData(fallbackMappings, 0, 0, primitiveCount);
+                Assert.That(scatterMappings, Is.EqualTo(fallbackMappings));
+            }
+        }
+
+        [Test]
+        public void ScatterUpload_WarmStableAndMovingPathsAllocateZeroBytes()
+        {
+            using var scene = new VividPrimitiveScene();
+            using var buffers = new VividPrimitiveSceneBufferSet();
+            EntityId source = CreateEntity("Scatter Allocation Primitive");
+            VividPrimitiveSourceDescriptor left = CreateDescriptor(source, objectToWorld: Matrix4x4.identity);
+            VividPrimitiveSourceDescriptor right = CreateDescriptor(source, objectToWorld: Matrix4x4.Translate(Vector3.right * 2.0f));
+            var cmd = new CommandBuffer { name = "ScatterAllocTest" };
+            try
+            {
+                // Warm up scene, ring staging buffers, shader resolution, and command buffer.
+                for (int frame = 0; frame < 8; frame++)
+                {
+                    scene.BeginFrame(frame);
+                    scene.RegisterOrUpdate((frame & 1) == 0 ? left : right);
+                    cmd.Clear();
+                    buffers.Upload(scene, cmd);
+                }
+                scene.BeginFrame(8);
+                cmd.Clear();
+                buffers.Upload(scene, cmd);
+
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int frame = 9; frame < 41; frame++)
+                {
+                    scene.BeginFrame(frame);
+                    if ((frame & 1) == 0)
+                        scene.RegisterOrUpdate((frame & 2) == 0 ? left : right);
+                    cmd.Clear();
+                    buffers.Upload(scene, cmd);
+                }
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.That(allocated, Is.Zero);
+            }
+            finally
+            {
+                cmd.Release();
+            }
+        }
+
+        private static void AssertFieldOffset<T>(string fieldName, int expectedOffset)
+            where T : struct
+        {
+            Assert.That(
+                Marshal.OffsetOf<T>(fieldName).ToInt32(),
+                Is.EqualTo(expectedOffset),
+                $"{typeof(T).Name}.{fieldName}");
         }
 
         private EntityId CreateEntity(string name)

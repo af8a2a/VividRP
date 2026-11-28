@@ -51,6 +51,10 @@ struct VividPrimitiveData
     uint Flags;
     uint Generation;
     uint CustomDataAddress;
+    uint ShaderUserValue;
+    uint PreviousTransformIndex;
+    uint CameraLayerMask;
+    uint Padding0;
 };
 
 // Generated from VividRP.Runtime.PrimitiveScene.VividPrimitiveDrawSectionData
@@ -63,8 +67,10 @@ struct VividPrimitiveDrawSectionData
     uint MaterialGeneration;
     uint SourceSectionIndex;
     uint Flags;
-    uint Padding0;
-    uint Padding1;
+    uint PrimitiveIndex;
+    uint PrimitiveGeneration;
+    float4 LocalBoundsMin;
+    float4 LocalBoundsMax;
 };
 
 // Generated from VividRP.Runtime.PrimitiveScene.VividPrimitiveGeometryData

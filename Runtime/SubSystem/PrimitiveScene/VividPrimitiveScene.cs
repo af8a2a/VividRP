@@ -314,6 +314,7 @@ namespace VividRP.Runtime.PrimitiveScene
                 DrawSectionOffset = InvalidIndex,
                 Generation = nextGeneration,
                 CustomDataAddress = InvalidIndex,
+                PreviousTransformIndex = InvalidIndex,
             });
             ShadowInvalidationTable.Set(handle.Index, default);
             TransformTable.Set(handle.Index, default);
@@ -682,7 +683,7 @@ namespace VividRP.Runtime.PrimitiveScene
             EnsureRecordCount(m_PrimitiveRecords, primitiveSlot + 1);
 
             int sectionCount = descriptor.DrawSections.Count;
-            int sectionOffset = AllocateSections(descriptor.DrawSections);
+            int sectionOffset = AllocateSections(handle, descriptor.DrawSections);
             m_ActiveDrawSectionCount += sectionCount;
             m_PrimitiveRecords[primitiveSlot] = new PrimitiveRecord(
                 descriptor.SourceEntityId,
@@ -727,11 +728,11 @@ namespace VividRP.Runtime.PrimitiveScene
                 if (newSectionCount == record.DrawSectionCount)
                 {
                     newSectionOffset = record.DrawSectionOffset;
-                    UpdateSectionsInPlace(newSectionOffset, descriptor.DrawSections);
+                    UpdateSectionsInPlace(handle, newSectionOffset, descriptor.DrawSections);
                 }
                 else
                 {
-                    newSectionOffset = AllocateSections(descriptor.DrawSections);
+                    newSectionOffset = AllocateSections(handle, descriptor.DrawSections);
                     ReleaseSections(record.DrawSectionOffset, record.DrawSectionCount);
                 }
                 m_ActiveDrawSectionCount += newSectionCount - record.DrawSectionCount;
@@ -777,7 +778,9 @@ namespace VividRP.Runtime.PrimitiveScene
             return sectionsChanged || transformChanged || primitiveDataChanged || cullRecordChanged;
         }
 
-        private int AllocateSections(IReadOnlyList<VividPrimitiveDrawSectionDescriptor> descriptors)
+        private int AllocateSections(
+            VividPrimitiveHandle ownerHandle,
+            IReadOnlyList<VividPrimitiveDrawSectionDescriptor> descriptors)
         {
             int count = descriptors.Count;
             if (count == 0)
@@ -789,18 +792,19 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 DrawSectionTable.Set(
                     sectionOffset + sectionIndex,
-                    CreateSectionData(descriptors[sectionIndex]));
+                    CreateSectionData(ownerHandle, descriptors[sectionIndex]));
             }
             return sectionOffset;
         }
 
         private void UpdateSectionsInPlace(
+            VividPrimitiveHandle ownerHandle,
             int sectionOffset,
             IReadOnlyList<VividPrimitiveDrawSectionDescriptor> descriptors)
         {
             m_SectionUpdateScratch.Clear();
             for (int index = 0; index < descriptors.Count; index++)
-                m_SectionUpdateScratch.Add(CreateSectionData(descriptors[index]));
+                m_SectionUpdateScratch.Add(CreateSectionData(ownerHandle, descriptors[index]));
 
             for (int index = 0; index < descriptors.Count; index++)
             {
@@ -812,10 +816,13 @@ namespace VividRP.Runtime.PrimitiveScene
         }
 
         private VividPrimitiveDrawSectionData CreateSectionData(
+            VividPrimitiveHandle ownerHandle,
             in VividPrimitiveDrawSectionDescriptor descriptor)
         {
             VividPrimitiveGeometryHandle geometryHandle = AcquireGeometry(descriptor.GeometryKey);
             VividPrimitiveMaterialHandle materialHandle = AcquireMaterial(descriptor.MaterialKey);
+            Vector3 localMin = descriptor.LocalBounds.min;
+            Vector3 localMax = descriptor.LocalBounds.max;
             return new VividPrimitiveDrawSectionData
             {
                 GeometryIndex = geometryHandle.IsValid ? (uint) geometryHandle.Index : InvalidIndex,
@@ -824,6 +831,10 @@ namespace VividRP.Runtime.PrimitiveScene
                 MaterialGeneration = materialHandle.Generation,
                 SourceSectionIndex = (uint) descriptor.SourceSectionIndex,
                 Flags = descriptor.Flags,
+                PrimitiveIndex = ownerHandle.IsValid ? (uint) ownerHandle.Index : InvalidIndex,
+                PrimitiveGeneration = ownerHandle.Generation,
+                LocalBoundsMin = new float4(localMin.x, localMin.y, localMin.z, descriptor.LODErrorScale),
+                LocalBoundsMax = new float4(localMax.x, localMax.y, localMax.z, descriptor.WorldPositionOffsetPadding),
             };
         }
 
@@ -837,7 +848,12 @@ namespace VividRP.Runtime.PrimitiveScene
                 int absoluteIndex = sectionOffset + index;
                 VividPrimitiveDrawSectionData section = DrawSectionTable[absoluteIndex];
                 ReleaseSectionResources(section);
-                DrawSectionTable.Set(absoluteIndex, default);
+                DrawSectionTable.Set(absoluteIndex, new VividPrimitiveDrawSectionData
+                {
+                    GeometryIndex = InvalidIndex,
+                    MaterialIndex = InvalidIndex,
+                    PrimitiveIndex = InvalidIndex,
+                });
             }
             m_SectionRanges.Free(sectionOffset, sectionCount);
         }
@@ -859,8 +875,20 @@ namespace VividRP.Runtime.PrimitiveScene
             {
                 VividPrimitiveDrawSectionData section = DrawSectionTable[record.DrawSectionOffset + index];
                 VividPrimitiveDrawSectionDescriptor descriptor = descriptors[index];
+                Vector3 localMin = descriptor.LocalBounds.min;
+                Vector3 localMax = descriptor.LocalBounds.max;
                 if (section.SourceSectionIndex != (uint) descriptor.SourceSectionIndex
                     || section.Flags != descriptor.Flags
+                    || section.PrimitiveIndex != (uint) record.Handle.Index
+                    || section.PrimitiveGeneration != record.Handle.Generation
+                    || section.LocalBoundsMin.x != localMin.x
+                    || section.LocalBoundsMin.y != localMin.y
+                    || section.LocalBoundsMin.z != localMin.z
+                    || section.LocalBoundsMin.w != descriptor.LODErrorScale
+                    || section.LocalBoundsMax.x != localMax.x
+                    || section.LocalBoundsMax.y != localMax.y
+                    || section.LocalBoundsMax.z != localMax.z
+                    || section.LocalBoundsMax.w != descriptor.WorldPositionOffsetPadding
                     || !GeometryKeyMatches(section, descriptor.GeometryKey)
                     || !MaterialKeyMatches(section, descriptor.MaterialKey))
                 {
@@ -1117,6 +1145,10 @@ namespace VividRP.Runtime.PrimitiveScene
                 Flags = descriptor.Flags,
                 Generation = handle.Generation,
                 CustomDataAddress = InvalidIndex,
+                ShaderUserValue = descriptor.ShaderUserValue,
+                PreviousTransformIndex = (uint) handle.Index,
+                CameraLayerMask = descriptor.CameraLayerMask,
+                Padding0 = 0u,
             };
         }
 

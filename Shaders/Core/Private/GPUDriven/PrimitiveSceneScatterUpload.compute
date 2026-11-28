@@ -1,0 +1,113 @@
+#pragma kernel Scatter16
+#pragma kernel Scatter64
+#pragma kernel Scatter80
+#pragma kernel Scatter128
+#pragma use_dxc
+
+struct VividPrimitiveScatterBlock64
+{
+    uint4 d0;
+    uint4 d1;
+    uint4 d2;
+    uint4 d3;
+};
+
+struct VividPrimitiveScatterBlock80
+{
+    uint4 d0;
+    uint4 d1;
+    uint4 d2;
+    uint4 d3;
+    uint4 d4;
+};
+
+struct VividPrimitiveScatterBlock128
+{
+    uint4 d0;
+    uint4 d1;
+    uint4 d2;
+    uint4 d3;
+    uint4 d4;
+    uint4 d5;
+    uint4 d6;
+    uint4 d7;
+};
+
+ByteAddressBuffer _VividPrimitiveScatterSource;
+StructuredBuffer<uint> _VividPrimitiveScatterDstIndices;
+uint _VividPrimitiveScatterSourceByteOffset;
+uint _VividPrimitiveScatterIndexBase;
+uint _VividPrimitiveScatterCount;
+
+RWStructuredBuffer<uint4> _VividPrimitiveScatterDst16;
+RWStructuredBuffer<VividPrimitiveScatterBlock64> _VividPrimitiveScatterDst64;
+RWStructuredBuffer<VividPrimitiveScatterBlock80> _VividPrimitiveScatterDst80;
+RWStructuredBuffer<VividPrimitiveScatterBlock128> _VividPrimitiveScatterDst128;
+
+[numthreads(64, 1, 1)]
+void Scatter16(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint localIndex = dispatchThreadId.x;
+    if (localIndex >= _VividPrimitiveScatterCount)
+        return;
+
+    const uint dstSlot = _VividPrimitiveScatterDstIndices[_VividPrimitiveScatterIndexBase + localIndex];
+    const uint srcByte = _VividPrimitiveScatterSourceByteOffset + localIndex * 16u;
+    _VividPrimitiveScatterDst16[dstSlot] = _VividPrimitiveScatterSource.Load4(srcByte);
+}
+
+[numthreads(64, 1, 1)]
+void Scatter64(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint localIndex = dispatchThreadId.x;
+    if (localIndex >= _VividPrimitiveScatterCount)
+        return;
+
+    const uint dstSlot = _VividPrimitiveScatterDstIndices[_VividPrimitiveScatterIndexBase + localIndex];
+    const uint srcByte = _VividPrimitiveScatterSourceByteOffset + localIndex * 64u;
+    VividPrimitiveScatterBlock64 value;
+    value.d0 = _VividPrimitiveScatterSource.Load4(srcByte + 0u);
+    value.d1 = _VividPrimitiveScatterSource.Load4(srcByte + 16u);
+    value.d2 = _VividPrimitiveScatterSource.Load4(srcByte + 32u);
+    value.d3 = _VividPrimitiveScatterSource.Load4(srcByte + 48u);
+    _VividPrimitiveScatterDst64[dstSlot] = value;
+}
+
+[numthreads(64, 1, 1)]
+void Scatter80(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint localIndex = dispatchThreadId.x;
+    if (localIndex >= _VividPrimitiveScatterCount)
+        return;
+
+    const uint dstSlot = _VividPrimitiveScatterDstIndices[_VividPrimitiveScatterIndexBase + localIndex];
+    const uint srcByte = _VividPrimitiveScatterSourceByteOffset + localIndex * 80u;
+    VividPrimitiveScatterBlock80 value;
+    value.d0 = _VividPrimitiveScatterSource.Load4(srcByte + 0u);
+    value.d1 = _VividPrimitiveScatterSource.Load4(srcByte + 16u);
+    value.d2 = _VividPrimitiveScatterSource.Load4(srcByte + 32u);
+    value.d3 = _VividPrimitiveScatterSource.Load4(srcByte + 48u);
+    value.d4 = _VividPrimitiveScatterSource.Load4(srcByte + 64u);
+    _VividPrimitiveScatterDst80[dstSlot] = value;
+}
+
+[numthreads(64, 1, 1)]
+void Scatter128(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint localIndex = dispatchThreadId.x;
+    if (localIndex >= _VividPrimitiveScatterCount)
+        return;
+
+    const uint dstSlot = _VividPrimitiveScatterDstIndices[_VividPrimitiveScatterIndexBase + localIndex];
+    const uint srcByte = _VividPrimitiveScatterSourceByteOffset + localIndex * 128u;
+    VividPrimitiveScatterBlock128 value;
+    value.d0 = _VividPrimitiveScatterSource.Load4(srcByte + 0u);
+    value.d1 = _VividPrimitiveScatterSource.Load4(srcByte + 16u);
+    value.d2 = _VividPrimitiveScatterSource.Load4(srcByte + 32u);
+    value.d3 = _VividPrimitiveScatterSource.Load4(srcByte + 48u);
+    value.d4 = _VividPrimitiveScatterSource.Load4(srcByte + 64u);
+    value.d5 = _VividPrimitiveScatterSource.Load4(srcByte + 80u);
+    value.d6 = _VividPrimitiveScatterSource.Load4(srcByte + 96u);
+    value.d7 = _VividPrimitiveScatterSource.Load4(srcByte + 112u);
+    _VividPrimitiveScatterDst128[dstSlot] = value;
+}

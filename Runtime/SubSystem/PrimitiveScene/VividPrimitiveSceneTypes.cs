@@ -183,6 +183,11 @@ namespace VividRP.Runtime.PrimitiveScene
         public VividPrimitiveFlags Flags;
         public uint Generation;
         public uint CustomDataAddress;
+
+        public uint ShaderUserValue;
+        public uint PreviousTransformIndex;
+        public uint CameraLayerMask;
+        public uint Padding0;
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
@@ -211,8 +216,11 @@ namespace VividRP.Runtime.PrimitiveScene
 
         public uint SourceSectionIndex;
         public VividPrimitiveDrawSectionFlags Flags;
-        public uint Padding0;
-        public uint Padding1;
+        public uint PrimitiveIndex;
+        public uint PrimitiveGeneration;
+
+        public float4 LocalBoundsMin;
+        public float4 LocalBoundsMax;
     }
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
@@ -334,11 +342,37 @@ namespace VividRP.Runtime.PrimitiveScene
             VividPrimitiveResourceKey geometryKey,
             VividPrimitiveResourceKey materialKey,
             VividPrimitiveDrawSectionFlags flags)
+            : this(
+                sourceSectionIndex,
+                geometryKey,
+                materialKey,
+                flags,
+                default,
+                0.0f,
+                1.0f)
+        {
+        }
+
+        internal VividPrimitiveDrawSectionDescriptor(
+            int sourceSectionIndex,
+            VividPrimitiveResourceKey geometryKey,
+            VividPrimitiveResourceKey materialKey,
+            VividPrimitiveDrawSectionFlags flags,
+            Bounds localBounds,
+            float worldPositionOffsetPadding = 0.0f,
+            float lodErrorScale = 1.0f)
         {
             SourceSectionIndex = sourceSectionIndex;
             GeometryKey = geometryKey;
             MaterialKey = materialKey;
             Flags = flags;
+            LocalBounds = localBounds;
+            WorldPositionOffsetPadding = float.IsFinite(worldPositionOffsetPadding)
+                ? Mathf.Max(0.0f, worldPositionOffsetPadding)
+                : 0.0f;
+            LODErrorScale = float.IsFinite(lodErrorScale) && lodErrorScale > 0.0f
+                ? lodErrorScale
+                : 1.0f;
         }
 
         internal int SourceSectionIndex { get; }
@@ -348,6 +382,12 @@ namespace VividRP.Runtime.PrimitiveScene
         internal VividPrimitiveResourceKey MaterialKey { get; }
 
         internal VividPrimitiveDrawSectionFlags Flags { get; }
+
+        internal Bounds LocalBounds { get; }
+
+        internal float WorldPositionOffsetPadding { get; }
+
+        internal float LODErrorScale { get; }
     }
 
     internal readonly struct VividPrimitiveSourceDescriptor
@@ -370,7 +410,8 @@ namespace VividRP.Runtime.PrimitiveScene
                 uint.MaxValue,
                 passMask,
                 flags,
-                drawSections)
+                drawSections,
+                0u)
         {
         }
 
@@ -383,7 +424,8 @@ namespace VividRP.Runtime.PrimitiveScene
             uint cameraLayerMask,
             VividInstancePassMask passMask,
             VividPrimitiveFlags flags,
-            IReadOnlyList<VividPrimitiveDrawSectionDescriptor> drawSections)
+            IReadOnlyList<VividPrimitiveDrawSectionDescriptor> drawSections,
+            uint shaderUserValue = 0u)
         {
             SourceEntityId = sourceEntityId;
             ObjectToWorldMatrix = objectToWorldMatrix;
@@ -394,6 +436,7 @@ namespace VividRP.Runtime.PrimitiveScene
             PassMask = passMask;
             Flags = flags;
             DrawSections = drawSections ?? Array.Empty<VividPrimitiveDrawSectionDescriptor>();
+            ShaderUserValue = shaderUserValue;
         }
 
         internal EntityId SourceEntityId { get; }
@@ -413,6 +456,8 @@ namespace VividRP.Runtime.PrimitiveScene
         internal VividPrimitiveFlags Flags { get; }
 
         internal IReadOnlyList<VividPrimitiveDrawSectionDescriptor> DrawSections { get; }
+
+        internal uint ShaderUserValue { get; }
     }
 
     internal readonly struct VividPrimitiveSceneStats

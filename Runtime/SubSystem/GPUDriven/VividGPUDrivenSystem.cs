@@ -533,7 +533,11 @@ namespace VividRP.Runtime.GPUDriven
                     return false;
 
                 int resolvedFrameIndex = ResolveFrameIndex(frameIndex);
-                PrepareFrameIfNeeded(gpuDrivenSystem, resolvedFrameIndex, reportStats: false);
+                PrepareFrameIfNeeded(
+                    gpuDrivenSystem,
+                    resolvedFrameIndex,
+                    reportStats: false,
+                    deferPrimitiveSceneUpload: true);
                 if (!gpuDrivenSystem.IsAvailable)
                     return false;
 
@@ -559,9 +563,10 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        public void PrepareFrame(bool reportStats = true) => PrepareFrame(Time.frameCount, reportStats);
+        public void PrepareFrame(bool reportStats = true) =>
+            PrepareFrame(Time.frameCount, reportStats, deferPrimitiveSceneUpload: false);
 
-        private void PrepareFrame(int frameIndex, bool reportStats)
+        private void PrepareFrame(int frameIndex, bool reportStats, bool deferPrimitiveSceneUpload)
         {
             ThrowIfDisposed();
             // Scheduled culling jobs read PrimitiveScene NativeArrays directly. They
@@ -620,7 +625,8 @@ namespace VividRP.Runtime.GPUDriven
                     PrimitiveScene,
                     VividMeshletRendererDatabase.instance,
                     m_PrimitiveSceneAdapter);
-                m_PrimitiveSceneBufferSet.Upload(PrimitiveScene);
+                if (!deferPrimitiveSceneUpload)
+                    m_PrimitiveSceneBufferSet.Upload(PrimitiveScene);
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameUploadBuffersMarker.Auto())
                 {
@@ -961,10 +967,17 @@ namespace VividRP.Runtime.GPUDriven
         {
             ThrowIfDisposed();
             m_BufferSet.BindGlobals(cmd);
+            m_PrimitiveSceneBufferSet.UploadIfNeeded(PrimitiveScene, cmd);
             m_PrimitiveSceneBufferSet.BindGlobals(cmd, PrimitiveScene);
             m_CullingDispatcher.BindGlobals(cmd);
             if (m_TextureBackend is IGPUDrivenTerrainRuntimeVirtualTextureBackend terrainRVTBackend)
                 terrainRVTBackend.BindTerrainRuntimeVirtualTextureGlobals(cmd);
+        }
+
+        internal void UploadPrimitiveSceneBuffers(CommandBuffer cmd)
+        {
+            ThrowIfDisposed();
+            m_PrimitiveSceneBufferSet.UploadIfNeeded(PrimitiveScene, cmd);
         }
 
         public static void Shutdown()
@@ -1071,13 +1084,21 @@ namespace VividRP.Runtime.GPUDriven
                 cameraData.frameIndex,
                 out VividPrimitiveDrawSet scheduledDrawSet);
             if (!hasScheduledDrawSet)
-                PrepareFrameIfNeeded(gpuDrivenSystem, cameraData.frameIndex, reportStats: false);
+            {
+                PrepareFrameIfNeeded(
+                    gpuDrivenSystem,
+                    cameraData.frameIndex,
+                    reportStats: false,
+                    deferPrimitiveSceneUpload: true);
+            }
             if (!gpuDrivenSystem.IsAvailable)
             {
                 gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);
                 PassRecorder.SetGPUDrivenFrameData(null, null);
                 return;
             }
+
+            gpuDrivenSystem.UploadPrimitiveSceneBuffers(cmd);
 
             VividShadowData shadowData = frameData.GetOrCreate<VividShadowData>();
             VividPrimitiveDrawSet scheduledShadowDrawSet =
@@ -1205,13 +1226,17 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private static void PrepareFrameIfNeeded(VividGPUDrivenSystem gpuDrivenSystem, int frameIndex, bool reportStats = true)
+        private static void PrepareFrameIfNeeded(
+            VividGPUDrivenSystem gpuDrivenSystem,
+            int frameIndex,
+            bool reportStats = true,
+            bool deferPrimitiveSceneUpload = false)
         {
             int resolvedFrameIndex = ResolveFrameIndex(frameIndex);
             if (!ShouldPrepareFrame(s_PreparedFrameIndex, resolvedFrameIndex, Application.isPlaying))
                 return;
 
-            gpuDrivenSystem.PrepareFrame(resolvedFrameIndex, reportStats);
+            gpuDrivenSystem.PrepareFrame(resolvedFrameIndex, reportStats, deferPrimitiveSceneUpload);
             s_PreparedFrameIndex = resolvedFrameIndex;
         }
 

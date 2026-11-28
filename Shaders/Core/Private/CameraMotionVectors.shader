@@ -99,10 +99,11 @@ Shader "Hidden/VividRP/CameraMotionVectors"
                         {
                             if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_FORCE_NO_MOTION) != 0u)
                                 return 0.0;
-                            if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_OBJECT_MOTION) != 0u)
+                            if ((primitive.Flags & VIVIDPRIMITIVEFLAGS_OBJECT_MOTION) != 0u
+                                && primitive.PreviousTransformIndex != 0xffffffffu)
                             {
                                 float4 local = mul(_VividPrimitiveTransformData[primitive.TransformIndex].WorldToObjectMatrix, float4(positionWS, 1));
-                                float4 previousWS = mul(_VividPrimitivePreviousTransformData[primitive.TransformIndex].PreviousObjectToWorldMatrix, local);
+                                float4 previousWS = mul(_VividPrimitivePreviousTransformData[primitive.PreviousTransformIndex].PreviousObjectToWorldMatrix, local);
                                 if (any(abs(previousWS.xyz - positionWS) > 1e-5))
                                 {
                                     previousPositionCSNoJitter = mul(_PrevViewProjMatrix, previousWS);

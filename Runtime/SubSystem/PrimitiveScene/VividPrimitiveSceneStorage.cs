@@ -26,6 +26,10 @@ namespace VividRP.Runtime.PrimitiveScene
         private readonly List<T> m_Data = new();
         private readonly HashSet<int> m_DirtyPages = new();
         private readonly List<int> m_SortedDirtyPages = new();
+        private readonly List<int> m_DirtyIndices = new();
+        private uint[] m_DirtyMarks = Array.Empty<uint>();
+        private uint m_DirtyEpoch = 1u;
+        private bool m_AllDirty;
         private readonly int m_RecordsPerPage;
 
         internal VividPrimitiveGpuTable()
@@ -36,7 +40,17 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal int Count => m_Data.Count;
 
-        internal int DirtyPageCount => m_DirtyPages.Count;
+        internal int RecordsPerPage => m_RecordsPerPage;
+
+        internal int DirtyPageCount => m_AllDirty
+            ? (m_Data.Count + m_RecordsPerPage - 1) / m_RecordsPerPage
+            : m_DirtyPages.Count;
+
+        internal int DirtyRecordCount => m_AllDirty ? m_Data.Count : m_DirtyIndices.Count;
+
+        internal bool IsAllDirty => m_AllDirty;
+
+        internal bool HasDirtyRecords => m_AllDirty ? m_Data.Count > 0 : m_DirtyIndices.Count > 0;
 
         internal List<T> Data => m_Data;
 
@@ -72,9 +86,17 @@ namespace VividRP.Runtime.PrimitiveScene
             if (count < previousCount)
             {
                 m_Data.RemoveRange(count, previousCount - count);
-                int remainingPageCount = (count + m_RecordsPerPage - 1) / m_RecordsPerPage;
-                m_DirtyPages.RemoveWhere(page => page >= remainingPageCount);
-                m_SortedDirtyPages.Clear();
+                if (count == 0)
+                {
+                    ClearDirtyPages();
+                    return;
+                }
+
+                if (!m_AllDirty)
+                {
+                    PruneDirtyPagesAtOrAbove((count + m_RecordsPerPage - 1) / m_RecordsPerPage);
+                    PruneDirtyIndicesAtOrAbove(count);
+                }
                 return;
             }
 
@@ -83,12 +105,19 @@ namespace VividRP.Runtime.PrimitiveScene
                 m_Data.Capacity = Mathf.NextPowerOfTwo(Mathf.Max(1, count));
             for (int index = 0; index < addedCount; index++)
                 m_Data.Add(default);
+            EnsureDirtyMarkCapacity(m_Data.Capacity);
             MarkDirty(previousCount, addedCount);
         }
 
         internal void MarkAllDirty()
         {
-            MarkDirty(0, m_Data.Count);
+            if (m_Data.Count <= 0)
+                return;
+
+            m_AllDirty = true;
+            m_DirtyPages.Clear();
+            m_SortedDirtyPages.Clear();
+            m_DirtyIndices.Clear();
         }
 
         internal void MarkDirty(int start, int count)
@@ -97,11 +126,61 @@ namespace VividRP.Runtime.PrimitiveScene
                 return;
             if (start < 0 || start > m_Data.Count - count)
                 throw new ArgumentOutOfRangeException(nameof(start));
+            if (m_AllDirty)
+                return;
+            if (start == 0 && count == m_Data.Count)
+            {
+                MarkAllDirty();
+                return;
+            }
 
+            EnsureDirtyMarkCapacity(m_Data.Count);
             int firstPage = start / m_RecordsPerPage;
             int lastPage = (start + count - 1) / m_RecordsPerPage;
             for (int page = firstPage; page <= lastPage; page++)
                 m_DirtyPages.Add(page);
+
+            int end = start + count;
+            uint epoch = m_DirtyEpoch;
+            for (int index = start; index < end; index++)
+            {
+                if (m_DirtyMarks[index] != epoch)
+                {
+                    m_DirtyMarks[index] = epoch;
+                    m_DirtyIndices.Add(index);
+                }
+            }
+        }
+
+        internal unsafe int CopyDirtyRecords(
+            byte* destinationBytes,
+            uint* destinationIndices,
+            int stride)
+        {
+            if (m_Data.Count == 0)
+                return 0;
+
+            if (m_AllDirty)
+            {
+                int count = m_Data.Count;
+                for (int index = 0; index < count; index++)
+                {
+                    T value = m_Data[index];
+                    UnsafeUtility.CopyStructureToPtr(ref value, destinationBytes + (long) index * stride);
+                    destinationIndices[index] = (uint) index;
+                }
+                return count;
+            }
+
+            int dirtyCount = m_DirtyIndices.Count;
+            for (int i = 0; i < dirtyCount; i++)
+            {
+                int index = m_DirtyIndices[i];
+                T value = m_Data[index];
+                UnsafeUtility.CopyStructureToPtr(ref value, destinationBytes + (long) i * stride);
+                destinationIndices[i] = (uint) index;
+            }
+            return dirtyCount;
         }
 
         internal void CollectDirtyRanges(List<VividPrimitiveDirtyRange> destination)
@@ -110,7 +189,16 @@ namespace VividRP.Runtime.PrimitiveScene
                 throw new ArgumentNullException(nameof(destination));
 
             destination.Clear();
-            if (m_DirtyPages.Count == 0 || m_Data.Count == 0)
+            if (m_Data.Count == 0)
+                return;
+
+            if (m_AllDirty)
+            {
+                destination.Add(new VividPrimitiveDirtyRange(0, m_Data.Count));
+                return;
+            }
+
+            if (m_DirtyPages.Count == 0)
                 return;
 
             m_SortedDirtyPages.Clear();
@@ -138,14 +226,71 @@ namespace VividRP.Runtime.PrimitiveScene
 
         internal void ClearDirtyPages()
         {
+            m_AllDirty = false;
             m_DirtyPages.Clear();
             m_SortedDirtyPages.Clear();
+            m_DirtyIndices.Clear();
+            m_DirtyEpoch++;
+            if (m_DirtyEpoch == 0u)
+            {
+                Array.Clear(m_DirtyMarks, 0, m_DirtyMarks.Length);
+                m_DirtyEpoch = 1u;
+            }
         }
 
         private void EnsureCount(int count)
         {
             if (count > m_Data.Count)
                 Resize(count);
+        }
+
+        private void EnsureDirtyMarkCapacity(int requiredCount)
+        {
+            if (m_DirtyMarks.Length >= requiredCount)
+                return;
+
+            int capacity = Mathf.NextPowerOfTwo(Mathf.Max(1, requiredCount));
+            Array.Resize(ref m_DirtyMarks, capacity);
+        }
+
+        private void PruneDirtyPagesAtOrAbove(int remainingPageCount)
+        {
+            if (m_DirtyPages.Count == 0)
+                return;
+
+            m_SortedDirtyPages.Clear();
+            foreach (int page in m_DirtyPages)
+            {
+                if (page >= remainingPageCount)
+                    m_SortedDirtyPages.Add(page);
+            }
+
+            for (int index = 0; index < m_SortedDirtyPages.Count; index++)
+                m_DirtyPages.Remove(m_SortedDirtyPages[index]);
+            m_SortedDirtyPages.Clear();
+        }
+
+        private void PruneDirtyIndicesAtOrAbove(int remainingCount)
+        {
+            if (m_DirtyIndices.Count == 0)
+                return;
+
+            int writeIndex = 0;
+            for (int readIndex = 0; readIndex < m_DirtyIndices.Count; readIndex++)
+            {
+                int recordIndex = m_DirtyIndices[readIndex];
+                if (recordIndex < remainingCount)
+                {
+                    m_DirtyIndices[writeIndex++] = recordIndex;
+                }
+                else if ((uint) recordIndex < (uint) m_DirtyMarks.Length)
+                {
+                    m_DirtyMarks[recordIndex] = 0u;
+                }
+            }
+
+            if (writeIndex < m_DirtyIndices.Count)
+                m_DirtyIndices.RemoveRange(writeIndex, m_DirtyIndices.Count - writeIndex);
         }
 
         private void AddRange(List<VividPrimitiveDirtyRange> destination, int firstPage, int lastPage)

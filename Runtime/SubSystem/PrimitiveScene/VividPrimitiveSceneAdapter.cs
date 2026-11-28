@@ -181,11 +181,21 @@ namespace VividRP.Runtime.PrimitiveScene
                     : VividPrimitiveDrawSectionFlags.None;
                 if (trackedResources.IsTerrain)
                     sectionFlags |= VividPrimitiveDrawSectionFlags.Terrain;
+                Bounds localBounds = trackedResources.LocalBounds != null
+                    && sourceSectionIndex < trackedResources.LocalBounds.Length
+                    ? trackedResources.LocalBounds[sourceSectionIndex]
+                    : trackedData.localBounds;
+                float wpoPaddingWS = Mathf.Max(
+                    trackedData.worldPositionOffsetPadding,
+                    VividSlabProgramDescriptor.ResolveMaterialWorldPositionOffsetPadding(material));
                 m_SectionDescriptors.Add(new VividPrimitiveDrawSectionDescriptor(
                     sourceSectionIndex,
                     geometryKey,
                     materialKey,
-                    sectionFlags));
+                    sectionFlags,
+                    localBounds,
+                    wpoPaddingWS,
+                    1.0f));
             }
 
             VividPrimitiveHandle candidateHandle = trackedResources.MeshletRenderer != null
@@ -204,7 +214,8 @@ namespace VividRP.Runtime.PrimitiveScene
                     trackedData.cameraLayerMask,
                     ExtractPassMask(trackedData.shadowCastingMode),
                     ExtractPrimitiveFlags(trackedData, trackedResources.IsTerrain),
-                    m_SectionDescriptors));
+                    m_SectionDescriptors,
+                    trackedData.shaderUserValue));
             if (trackedResources.MeshletRenderer != null)
                 trackedResources.MeshletRenderer.NotifyPrimitiveHandleAssigned(handle);
             if (trackedResources.Terrain != null)

@@ -28,7 +28,15 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _FurFlowMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _FurMaskMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FurPatternMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -43,12 +51,15 @@ Material:
     - _CombStrength: 0.85
     - _Cull: 2
     - _DitherStrength: 0.6
+    - _FlowMapFlipY: 0
+    - _FlowMapStrength: 1
     - _FurDensity: 102.4
     - _FurGeometry: 1
     - _FurLength: 0.055
     - _FurLightingModel: 1
     - _FurMedullaRoughness: 0.8
     - _FurMedullaWeight: 0.82
+    - _FurPatternMode: 0
     - _FurShading: 1
     - _FurStrands: 1
     - _FuzzRoughness: 0.46
@@ -69,6 +80,7 @@ Material:
     - _HybridRaymarch: 1
     - _HybridSteps: 4
     - _LengthVariance: 0.45
+    - _PatternHeightContrast: 0.12
     - _ReceiveDecals: 0
     - _ReceiveSSR: 0
     - _ReceiveShadows: 1
@@ -80,11 +92,13 @@ Material:
     - _SpecularWeight: 0.48
     - _StrandColorVariance: 0.16
     - _StrandNormalStrength: 0.24
+    - _StrandTangentJitter: 0.12
     - _StrandTaper: 0.9
     - _StrandThickness: 0.44
     - _SurfaceOptions: 1
     - _TemporalDither: 1
     - _TipRoughness: 0.65
+    - _UseFlowMap: 0
     - _WindFrequency: 2.2
     - _WindStrength: 0
     - _ZTest: 4
@@ -94,6 +108,8 @@ Material:
     - _CombDirWS: {r: 0, g: -1, b: 0, a: 0}
     - _FuzzColor: {r: 0.94, g: 0.84, b: 0.72, a: 1}
     - _GravityWS: {r: 0, g: -1, b: 0, a: 0}
+    - _PatternFlipbookGrid: {r: 4, g: 4, b: 0, a: 0}
+    - _PatternTiling: {r: 8, g: 4, b: 0, a: 0}
     - _RootColor: {r: 0.14, g: 0.09, b: 0.06, a: 1}
     - _SpecularTint: {r: 1, g: 0.94, b: 0.86, a: 1}
     - _StrandTiling: {r: 2, g: 1, b: 0, a: 0}

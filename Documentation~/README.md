@@ -34,6 +34,7 @@
 | --- | --- |
 | [Material/SimpleSlabV1.md](Material/SimpleSlabV1.md) | 第一代默认实时 BSDF（`SimpleSlabV1`）冻结合约：版本指纹、单层/双层 Slab 输入、Kulla-Conty 能量补偿、LUT 规范与延迟光照集成 |
 | [Material/OpenPBROpaqueV1.md](Material/OpenPBROpaqueV1.md) | 下一代默认 PBR（`OpenPBROpaqueV1`）冻结合约：OpenPBR 1.1 原生 11 项输入、能力边界、校验规则、Prepare/Eval/Sample 语义与原生延迟光照闭环 |
+| [Material/FurDCCAuthoringGuide.md](Material/FurDCCAuthoringGuide.md) | `FurSlab` DCC 毛发贴图通道契约（FlowMap / 2D Pattern / 3D Flipbook 图集）、Houdini 22 `hython` 烘焙脚本与 GPUDriven DesktopBCn SVT 绑定指南 |
 | [LWGUI.md](LWGUI.md) | 内嵌 LWGUI 版本说明、相对路径图标适配，以及面向 D3D12 Shader Model 6 DXIL 的 DXC 静态性能分析后端 |
 | [Hlsl2021.md](Hlsl2021.md) | UberPost 中的 HLSL 2021 语言标准试点（`#pragma hlsl_version 2021`）与独立 DXC 编译矩阵验证 |
 

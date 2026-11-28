@@ -207,7 +207,7 @@ namespace VividRP.Editor.Tests
             string source = File.ReadAllText(shaderPath);
 
             StringAssert.Contains("VividVisibilityBuffer.hlsl", source);
-            StringAssert.Contains("HasValidVisibilityBufferValue(packedVisibility)", source);
+            StringAssert.Contains("IsPackedVisibilityBufferValueValid(packedVisibility)", source);
             StringAssert.Contains("UnpackVisibilityBufferInstanceID(packedVisibility.x)", source);
             StringAssert.DoesNotContain("_MotionVisibility.Load(int3(pixelCoord, 0)).x - 1u", source);
         }

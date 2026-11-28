@@ -93,7 +93,7 @@ Shader "Hidden/VividRP/CameraMotionVectors"
                 uint2 packedVisibility = _MotionVisibility.Load(int3(pixelCoord, 0));
                 uint primitiveIndex = 0xffffffffu;
                 uint primitiveGeneration = 0u;
-                if (HasValidVisibilityBufferValue(packedVisibility))
+                if (IsPackedVisibilityBufferValueValid(packedVisibility))
                 {
                     uint instanceIndex = UnpackVisibilityBufferInstanceID(packedVisibility.x);
                     if (_VividPrimitiveSceneDirectEnabled != 0u)

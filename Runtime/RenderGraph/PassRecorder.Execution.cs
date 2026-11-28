@@ -1510,6 +1510,7 @@ namespace VividRP.Runtime
                                 s_FrameData,
                                 deferredLightingPass,
                                 s_LastRecordedHzbTexture,
+                                s_LastRecordedCsmShadowAtlas,
                                 deferCompositionUntilAfterSky: hasActiveSkyInjection);
                         }
                     }
@@ -1544,6 +1545,11 @@ namespace VividRP.Runtime
                                 s_FrameData);
                         }
                     }
+
+                    if (pass is RenderPass.Core.CSMShadowPass csmShadowPass)
+                    {
+                        s_LastRecordedCsmShadowAtlas = csmShadowPass.ShadowAtlasTexture;
+                    }
                 }
             }
 
@@ -1554,10 +1560,12 @@ namespace VividRP.Runtime
         }
 
         private static RenderGraphTexture s_LastRecordedHzbTexture;
+        private static RenderGraphTexture s_LastRecordedCsmShadowAtlas;
 
         private static void ClearRecordGraphResourceCaches()
         {
             s_LastRecordedHzbTexture = null;
+            s_LastRecordedCsmShadowAtlas = null;
             RenderPass.Core.StrandHairRenderGraphHook.ClearPerFrameState();
             s_TextureImportCache.Clear();
             s_BufferImportCache.Clear();

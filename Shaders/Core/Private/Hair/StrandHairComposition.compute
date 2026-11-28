@@ -6,8 +6,10 @@
 
 StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
 StructuredBuffer<HairGroomSegmentIndex> _HairSegmentIndices;
+StructuredBuffer<HairGroomVisibilitySH> _HairVisibilitySH;
 StructuredBuffer<float4> _HairPostTransformClip;
 StructuredBuffer<float4> _HairWorldPosRadius;
+StructuredBuffer<float4> _HairVertexShading; // From StrandHairShadingPass: rgb = pre-exposed radiance, a = primary self-shadow
 StructuredBuffer<uint> _HairVisAtlas;
 
 RWTexture2D<float4> _SceneColor;
@@ -18,21 +20,12 @@ float4 _HairAtlasTileRect; // xy = tileOrigin, zw = tileGridSize
 float4 _HairComposeRect;   // xy = composeMinPixel, zw = composeSize
 uint _HairFirstAtlasTile;
 uint _HairDownscaleFactor;
+uint _HairHasBakedSH;
 
 float2 _HairScreenSize;
 float2 _HairAtlasScreenSize;
 float _HairProjScaleY;
-uint _HairDebugViewMode; // 0=ShadedPreview, 1=TotalCoverage, 2=LayerCount, 3=SegmentId, 4=Depth12, 5=Tangent
-
-// Studio / Preview lighting & shading params (Phase S1 preview; Phase S2 swaps to Strand-Space Shading Buffer)
-float3 _HairCameraPosWS;
-float3 _HairKeyLightDirWS;
-float3 _HairKeyLightColor;
-float3 _HairRimLightDirWS;
-float3 _HairRimLightColor;
-float3 _HairAmbientColor;
-float4 _HairBaseColor;      // rgb = linear hair tint, a = melanin
-float4 _HairRoughnessParams; // x = longitudinal, y = azimuthal, z = cuticleSin, w = dualScatterGain
+uint _HairDebugViewMode; // 0=Shaded, 1=TotalCoverage, 2=LayerCount, 3=SegmentId, 4=Depth12, 5=Tangent, 6=BakedL1SHAO, 7=DirectSelfShadow
 
 static const float2 kPoisson8[8] =
 {
@@ -55,66 +48,6 @@ float3 HashColor(uint id)
         float((h) & 255u) / 255.0f,
         float((h >> 8u) & 255u) / 255.0f,
         float((h >> 16u) & 255u) / 255.0f);
-}
-
-// Lightweight Kajiya-Kay / Marschner-inspired Phase S1 preview lobe (replaced by full
-// VividHairFurBSDF + ClusteredLighting + Biased L1 SH in Phase S2 Strand-Space Shading).
-float3 EvaluatePreviewHairLobe(
-    float3 tangentWS,
-    float3 viewDirWS,
-    float3 lightDirWS,
-    float3 lightColor,
-    float3 baseTint,
-    float strandU,
-    float strandSeed)
-{
-    static const float kInvPi = 0.318309886f;
-
-    float sinTL = dot(tangentWS, lightDirWS);
-    float sinTV = dot(tangentWS, viewDirWS);
-    float cosTL = sqrt(saturate(1.0f - sinTL * sinTL));
-    float cosTV = sqrt(saturate(1.0f - sinTV * sinTV));
-
-    // Azimuthal cosine in the plane perpendicular to the strand tangent
-    float3 lPerp = lightDirWS - tangentWS * sinTL;
-    float3 vPerp = viewDirWS - tangentWS * sinTV;
-    float lPerpLen = length(lPerp);
-    float vPerpLen = length(vPerp);
-    float cosPhi = (lPerpLen > 1e-4f && vPerpLen > 1e-4f)
-        ? clamp(dot(lPerp, vPerp) / (lPerpLen * vPerpLen), -1.0f, 1.0f)
-        : 0.0f;
-
-    // Cuticle tilt shifts R toward tip and TRT toward root
-    float shiftR = -_HairRoughnessParams.z;
-    float shiftTRT = 1.5f * _HairRoughnessParams.z;
-
-    float sinTH_R = clamp(sinTL + sinTV + shiftR, -1.0f, 1.0f);
-    float sinTH_TRT = clamp(sinTL + sinTV + shiftTRT, -1.0f, 1.0f);
-
-    float betaR = max(_HairRoughnessParams.x, 0.10f);
-    float betaTRT = max(betaR * 1.75f, 0.16f);
-
-    // Primary specular R (dielectric surface highlight, stronger on front-lit azimuth)
-    float azR = 0.25f + 0.75f * saturate(0.5f + 0.5f * cosPhi);
-    float specR = exp(-(sinTH_R * sinTH_R) / (2.0f * betaR * betaR)) * azR * 0.12f;
-
-    // Secondary specular TRT (pigment-tinted internal reflection)
-    float specTRT = exp(-(sinTH_TRT * sinTH_TRT) / (2.0f * betaTRT * betaTRT)) * 0.28f;
-
-    // Transmission TT (strong forward-scatter rim glow when backlit: cosPhi -> -1)
-    float backAz = pow(saturate(-cosPhi), 3.0f);
-    float specTT = backAz * cosTL * 0.45f;
-
-    // Root-to-tip self-occlusion & per-strand melanin variation for strand-level definition
-    float rootAO = lerp(0.28f, 1.0f, smoothstep(0.0f, 0.55f, strandU));
-    float seedVar = lerp(0.76f, 1.24f, strandSeed);
-    float3 pigment = baseTint * seedVar;
-
-    // Approximate wrap/cylinder diffuse + dual-scatter lift
-    float wrapDiffuse = (0.22f + 0.78f * cosTL * (0.45f + 0.55f * saturate(0.5f + 0.5f * cosPhi))) * rootAO;
-    float3 direct = (pigment * (wrapDiffuse * 0.65f + specTRT * rootAO + specTT * sqrt(max(pigment, 0.01f)))
-                    + float3(specR, specR, specR) * lerp(0.5f, 1.0f, rootAO)) * (lightColor * kInvPi);
-    return direct;
 }
 
 void EvaluateLayer(
@@ -148,10 +81,14 @@ void EvaluateLayer(
     float distPx = length(atlasPxCenter - (p0 + segVec * t));
     layerCoverage = max(VividHairComputeAnalyticCoverage(lerp(r0Px, r1Px, t), distPx), 0.02f);
 
-    HairGroomRestVertex rv0 = _HairRestVertices[v0];
-    HairGroomRestVertex rv1 = _HairRestVertices[v1];
-    float3 tangentOS = normalize(lerp(rv0.tangentOS, rv1.tangentOS, t));
-    float3 tangentWS = normalize(mul((float3x3)_HairLocalToWorld, tangentOS));
+    if (_HairDebugViewMode == 0u)
+    {
+        // IJGC Strand-Space Composition: linearly interpolate pre-shaded vertex radiance along segment
+        float4 s0 = _HairVertexShading[v0];
+        float4 s1 = _HairVertexShading[v1];
+        layerRadiance = lerp(s0.rgb, s1.rgb, t);
+        return;
+    }
 
     float preExposure = VividGetPreExposure();
     if (_HairDebugViewMode == 3u)
@@ -167,22 +104,37 @@ void EvaluateLayer(
     }
     if (_HairDebugViewMode == 5u)
     {
+        HairGroomRestVertex rv0 = _HairRestVertices[v0];
+        HairGroomRestVertex rv1 = _HairRestVertices[v1];
+        float3 tangentOS = normalize(lerp(rv0.tangentOS, rv1.tangentOS, t));
+        float3 tangentWS = normalize(mul((float3x3)_HairLocalToWorld, tangentOS));
         layerRadiance = (tangentWS * 0.5f + 0.5f) * preExposure;
         return;
     }
+    if (_HairDebugViewMode == 6u)
+    {
+        float ao = 1.0f;
+        if (_HairHasBakedSH != 0u)
+        {
+            float ao0 = VividHairEvaluateAmbientVisibilityL1SH(_HairVisibilitySH[v0].coefficients, 0.62f);
+            float ao1 = VividHairEvaluateAmbientVisibilityL1SH(_HairVisibilitySH[v1].coefficients, 0.62f);
+            ao = lerp(ao0, ao1, t);
+        }
+        layerRadiance = float3(ao, ao, ao) * preExposure;
+        return;
+    }
+    if (_HairDebugViewMode == 7u)
+    {
+        float ss0 = _HairVertexShading[v0].a;
+        float ss1 = _HairVertexShading[v1].a;
+        float ss = lerp(ss0, ss1, t);
+        layerRadiance = float3(ss, ss * 0.92f, ss * 0.78f) * preExposure;
+        return;
+    }
 
-    float3 posWS = lerp(wr0.xyz, wr1.xyz, t);
-    float3 viewDirWS = normalize(_HairCameraPosWS - posWS);
-    float strandU = lerp(VividHairUnpackStrandU(rv0.packedAttrs), VividHairUnpackStrandU(rv1.packedAttrs), t);
-    float strandSeed = VividHairUnpackStrandRandom(rv0.packedAttrs);
-
-    // Derive physical-like base tint from melanin/baseColor
-    float3 baseTint = max(_HairBaseColor.rgb, float3(0.015f, 0.010f, 0.008f));
-    float3 rad = EvaluatePreviewHairLobe(tangentWS, viewDirWS, _HairKeyLightDirWS, _HairKeyLightColor, baseTint, strandU, strandSeed);
-    rad += EvaluatePreviewHairLobe(tangentWS, viewDirWS, _HairRimLightDirWS, _HairRimLightColor, baseTint, strandU, strandSeed);
-    rad += baseTint * _HairAmbientColor * lerp(0.35f, 1.0f, strandU);
-
-    layerRadiance = rad * preExposure;
+    float4 fallback0 = _HairVertexShading[v0];
+    float4 fallback1 = _HairVertexShading[v1];
+    layerRadiance = lerp(fallback0.rgb, fallback1.rgb, t);
 }
 
 [numthreads(8, 8, 1)]

@@ -171,6 +171,48 @@ namespace VividRP.Runtime
         }
 
         /// <summary>
+        /// Replaces the embedded Biased L1 SH self-shadowing coefficients inside the canonical
+        /// binary payload and updates the live GPU buffer (returns updated binary bytes for disk save).
+        /// </summary>
+        public byte[] UpdateBakedVisibilitySH(HairGroomVisibilitySH[] visibilitySH)
+        {
+            if (visibilitySH == null || visibilitySH.Length != m_VertexCount)
+            {
+                throw new ArgumentException(
+                    $"Expected {m_VertexCount} Biased L1 SH entries, got {visibilitySH?.Length ?? 0}.",
+                    nameof(visibilitySH));
+            }
+
+            if (!TryParse(out var parsed))
+                throw new InvalidOperationException($"HairGroomAsset '{name}' has no binary data.");
+
+            HairGroomFlags updatedFlags = (HairGroomFlags)parsed.Header.Flags | HairGroomFlags.HasBakedL1SH;
+            byte[] updatedBytes = HairGroomBinaryCodec.WriteToBytes(
+                parsed.Strands,
+                parsed.Vertices,
+                parsed.Segments,
+                parsed.Header.ToUnityBounds(),
+                parsed.Header.DefaultRadius,
+                updatedFlags,
+                visibilitySH);
+
+            m_BinaryData = updatedBytes;
+            m_Flags = updatedFlags;
+            m_ContentVersion++;
+
+            if (m_GpuResource != null && m_GpuResource.IsValid && m_GpuResource.VertexCount == m_VertexCount)
+            {
+                m_GpuResource.UploadVisibilitySH(visibilitySH);
+            }
+            else
+            {
+                ReleaseGpuResource();
+            }
+
+            return updatedBytes;
+        }
+
+        /// <summary>
         /// Converts the groom segments into VividRP's 48-byte HairGpuStrandSegment ABI
         /// so the same asset can drive HairDotsGpuStream / Reference Path Tracing.
         /// </summary>

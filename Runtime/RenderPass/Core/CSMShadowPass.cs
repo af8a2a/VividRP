@@ -13,6 +13,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Write)]
         private RenderGraphTexture m_ShadowAtlas;
 
+        internal RenderGraphTexture ShadowAtlasTexture => m_ShadowAtlas;
+
         private static readonly int ShadowMatricesConstantBufferId =
             Shader.PropertyToID("ShaderVariablesShadowMatrices");
 

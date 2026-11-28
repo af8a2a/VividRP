@@ -19,6 +19,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string ClearAtlasKernelName = "KClearAtlasTiles";
         private const string TransformVerticesKernelName = "KTransformVertices";
         private const string ClearCullArgsKernelName = "KClearCullArgs";
+        private const string ClearVisibleVertexMaskKernelName = "KClearVisibleVertexMask";
         private const string CullSegmentsKernelName = "KCullSegments";
         private const string RasterizeSegmentsKernelName = "KRasterizeSegments";
 
@@ -28,6 +29,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int WorldPosRadiusId = Shader.PropertyToID("_HairWorldPosRadius");
         private static readonly int VisibleSegmentListId = Shader.PropertyToID("_HairVisibleSegmentList");
         private static readonly int IndirectRasterArgsId = Shader.PropertyToID("_HairIndirectRasterArgs");
+        private static readonly int VisibleVertexMaskId = Shader.PropertyToID("_HairVisibleVertexMask");
         private static readonly int VisAtlasId = Shader.PropertyToID("_HairVisAtlas");
         private static readonly int SceneDepthId = Shader.PropertyToID("_HairSceneDepth");
         private static readonly int HzbTextureId = Shader.PropertyToID("_HairHZBTexture");
@@ -61,6 +63,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClearAtlasKernel = -1;
         private int m_TransformVerticesKernel = -1;
         private int m_ClearCullArgsKernel = -1;
+        private int m_ClearVisibleVertexMaskKernel = -1;
         private int m_CullSegmentsKernel = -1;
         private int m_RasterizeSegmentsKernel = -1;
 
@@ -100,9 +103,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearAtlasKernel = m_Compute.FindKernel(ClearAtlasKernelName);
             m_TransformVerticesKernel = m_Compute.FindKernel(TransformVerticesKernelName);
             m_ClearCullArgsKernel = m_Compute.FindKernel(ClearCullArgsKernelName);
+            m_ClearVisibleVertexMaskKernel = m_Compute.FindKernel(ClearVisibleVertexMaskKernelName);
             m_CullSegmentsKernel = m_Compute.FindKernel(CullSegmentsKernelName);
             m_RasterizeSegmentsKernel = m_Compute.FindKernel(RasterizeSegmentsKernelName);
-            return m_RasterizeSegmentsKernel >= 0;
+            return m_RasterizeSegmentsKernel >= 0 && m_ClearVisibleVertexMaskKernel >= 0;
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -280,16 +284,21 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeBufferParam(m_Compute, m_TransformVerticesKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
                     cmd.DispatchCompute(m_Compute, m_TransformVerticesKernel, (vertexCount + 63) / 64, 1, 1);
 
-                    // 2b. Reset indirect raster arguments
+                    // 2b. Reset indirect raster arguments & visible vertex bitmask
                     cmd.SetComputeBufferParam(m_Compute, m_ClearCullArgsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
                     cmd.DispatchCompute(m_Compute, m_ClearCullArgsKernel, 1, 1, 1);
 
-                    // 2c. Coarse frustum + HZB segment culling
+                    int maskUints = (vertexCount + 31) >> 5;
+                    cmd.SetComputeBufferParam(m_Compute, m_ClearVisibleVertexMaskKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
+                    cmd.DispatchCompute(m_Compute, m_ClearVisibleVertexMaskKernel, (maskUints + 63) / 64, 1, 1);
+
+                    // 2c. Coarse frustum + HZB segment culling (also marks visible vertices for Strand-Space Shading)
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, SegmentIndicesId, gpuRes.SegmentIndexBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, PostTransformClipId, slot.PostTransformClipBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, WorldPosRadiusId, slot.WorldPosRadiusBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, VisibleSegmentListId, slot.VisibleSegmentListBuffer);
                     cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, IndirectRasterArgsId, slot.IndirectRasterArgsBuffer);
+                    cmd.SetComputeBufferParam(m_Compute, m_CullSegmentsKernel, VisibleVertexMaskId, slot.VisibleVertexMaskBuffer);
                     if (useHzb)
                         cmd.SetComputeTextureParam(m_Compute, m_CullSegmentsKernel, HzbTextureId, hzbHandle);
                     else
@@ -318,6 +327,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearAtlasKernel = -1;
             m_TransformVerticesKernel = -1;
             m_ClearCullArgsKernel = -1;
+            m_ClearVisibleVertexMaskKernel = -1;
             m_CullSegmentsKernel = -1;
             m_RasterizeSegmentsKernel = -1;
             m_FrameData = null;

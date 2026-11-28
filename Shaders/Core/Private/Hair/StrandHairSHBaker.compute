@@ -1,0 +1,288 @@
+#pragma kernel KClearDensityGrid
+#pragma kernel KVoxelizeHairSegments
+#pragma kernel KVoxelizeOccluderTriangles
+#pragma kernel KBakeVertexL1SH
+#pragma use_dxc
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Hair/VividStrandHairCommon.hlsl"
+
+// Input groom buffers (object space)
+StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
+StructuredBuffer<HairGroomSegmentIndex> _HairSegmentIndices;
+
+// Optional opaque occluder mesh triangles in groom object space (3 float4 vertices per triangle)
+StructuredBuffer<float4> _BakerOccluderTriVerts;
+
+// 3D voxel grids (resolution = _BakerGridRes^3)
+// _BakerDensityGrid stores expected strand-hit optical depth per voxel traversal in 16.16 fixed point.
+RWStructuredBuffer<uint> _BakerDensityGrid;
+RWStructuredBuffer<uint> _BakerOccluderGrid;
+
+// Output per-vertex Biased L1 SH
+RWStructuredBuffer<HairGroomVisibilitySH> _BakerOutputSH;
+
+float3 _BakerBoundsMin;
+float3 _BakerBoundsInvSize;
+float _BakerVoxelSize;
+uint _BakerGridRes;
+uint _BakerVertexCount;
+uint _BakerSegmentCount;
+uint _BakerOccluderTriCount;
+uint _BakerRayCount;
+float _BakerRadiusScale;
+float _BakerDensityScale;
+
+static const float kBakerFixedScale = 65536.0f;
+static const float kBakerInvFixedScale = 1.0f / 65536.0f;
+static const float kBakerTwoPi = 6.28318530718f;
+static const float kBakerFourPi = 12.56637061436f;
+static const float kGoldenAngle = 2.39996322973f; // pi * (3 - sqrt(5))
+
+uint GridFlatIndex(uint3 coord)
+{
+    return (coord.z * _BakerGridRes + coord.y) * _BakerGridRes + coord.x;
+}
+
+float3 WorldToGridCoord(float3 posOS)
+{
+    return (posOS - _BakerBoundsMin) * _BakerBoundsInvSize * (float)_BakerGridRes;
+}
+
+float SampleDensityTrilinear(float3 gridCoord)
+{
+    float3 p = gridCoord - 0.5f;
+    int3 i0 = int3(floor(p));
+    float3 f = p - float3(i0);
+
+    int maxIdx = (int)_BakerGridRes - 1;
+    int3 c0 = clamp(i0, int3(0, 0, 0), int3(maxIdx, maxIdx, maxIdx));
+    int3 c1 = clamp(i0 + 1, int3(0, 0, 0), int3(maxIdx, maxIdx, maxIdx));
+
+    float d000 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c0.x, c0.y, c0.z))];
+    float d100 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c1.x, c0.y, c0.z))];
+    float d010 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c0.x, c1.y, c0.z))];
+    float d110 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c1.x, c1.y, c0.z))];
+    float d001 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c0.x, c0.y, c1.z))];
+    float d101 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c1.x, c0.y, c1.z))];
+    float d011 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c0.x, c1.y, c1.z))];
+    float d111 = (float)_BakerDensityGrid[GridFlatIndex(uint3(c1.x, c1.y, c1.z))];
+
+    float dx00 = lerp(d000, d100, f.x);
+    float dx10 = lerp(d010, d110, f.x);
+    float dx01 = lerp(d001, d101, f.x);
+    float dx11 = lerp(d011, d111, f.x);
+
+    float dxy0 = lerp(dx00, dx10, f.y);
+    float dxy1 = lerp(dx01, dx11, f.y);
+
+    return lerp(dxy0, dxy1, f.z) * kBakerInvFixedScale;
+}
+
+float DistPointToTriangleSq(float3 p, float3 a, float3 b, float3 c)
+{
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = p - a;
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) return dot(ap, ap);
+
+    float3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return dot(bp, bp);
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float v = d1 / max(d1 - d3, 1e-12f);
+        float3 d = p - (a + v * ab);
+        return dot(d, d);
+    }
+
+    float3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return dot(cp, cp);
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float w = d2 / max(d2 - d6, 1e-12f);
+        float3 d = p - (a + w * ac);
+        return dot(d, d);
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
+    {
+        float w = (d4 - d3) / max((d4 - d3) + (d5 - d6), 1e-12f);
+        float3 d = p - (b + w * (c - b));
+        return dot(d, d);
+    }
+
+    float denom = rcp(max(va + vb + vc, 1e-12f));
+    float v2 = vb * denom;
+    float w2 = vc * denom;
+    float3 closest = a + ab * v2 + ac * w2;
+    float3 diff = p - closest;
+    return dot(diff, diff);
+}
+
+[numthreads(64, 1, 1)]
+void KClearDensityGrid(uint3 tid : SV_DispatchThreadID)
+{
+    uint total = _BakerGridRes * _BakerGridRes * _BakerGridRes;
+    if (tid.x >= total)
+        return;
+
+    _BakerDensityGrid[tid.x] = 0u;
+    _BakerOccluderGrid[tid.x] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void KVoxelizeHairSegments(uint3 tid : SV_DispatchThreadID)
+{
+    uint segId = tid.x;
+    if (segId >= _BakerSegmentCount)
+        return;
+
+    HairGroomSegmentIndex seg = _HairSegmentIndices[segId];
+    HairGroomRestVertex v0 = _HairRestVertices[seg.vertexIndex0];
+    HairGroomRestVertex v1 = _HairRestVertices[seg.vertexIndex0 + 1u];
+
+    float3 p0 = v0.positionOS;
+    float3 p1 = v1.positionOS;
+    float segLen = length(p1 - p0);
+    if (segLen <= 1e-6f)
+        return;
+
+    float avgRadius = 0.5f * (v0.radius + v1.radius) * _BakerRadiusScale;
+    uint steps = clamp((uint)ceil(segLen / max(_BakerVoxelSize * 0.5f, 1e-5f)), 1u, 64u);
+    float dsSeg = segLen / (float)steps;
+
+    // Physical expected line-cylinder intersection count per voxel traversal:
+    // E[hits / voxel] = (2 * radius * dsSeg) / (voxelSize^2)
+    float voxelArea = max(_BakerVoxelSize * _BakerVoxelSize, 1e-9f);
+    float hitsPerVoxel = (2.0f * avgRadius * dsSeg / voxelArea) * _BakerDensityScale;
+    uint fixedAdd = (uint)max(1, (int)round(hitsPerVoxel * kBakerFixedScale));
+
+    int maxIdx = (int)_BakerGridRes - 1;
+    for (uint s = 0u; s < steps; s++)
+    {
+        float t = ((float)s + 0.5f) / (float)steps;
+        float3 pos = lerp(p0, p1, t);
+        int3 coord = int3(floor(WorldToGridCoord(pos)));
+        if (coord.x >= 0 && coord.y >= 0 && coord.z >= 0
+            && coord.x <= maxIdx && coord.y <= maxIdx && coord.z <= maxIdx)
+        {
+            InterlockedAdd(_BakerDensityGrid[GridFlatIndex(uint3(coord))], fixedAdd);
+        }
+    }
+}
+
+[numthreads(64, 1, 1)]
+void KVoxelizeOccluderTriangles(uint3 tid : SV_DispatchThreadID)
+{
+    uint triId = tid.x;
+    if (triId >= _BakerOccluderTriCount)
+        return;
+
+    float3 a = _BakerOccluderTriVerts[triId * 3u + 0u].xyz;
+    float3 b = _BakerOccluderTriVerts[triId * 3u + 1u].xyz;
+    float3 c = _BakerOccluderTriVerts[triId * 3u + 2u].xyz;
+
+    float3 triMin = min(a, min(b, c)) - _BakerVoxelSize;
+    float3 triMax = max(a, max(b, c)) + _BakerVoxelSize;
+
+    int maxIdx = (int)_BakerGridRes - 1;
+    int3 minC = clamp(int3(floor(WorldToGridCoord(triMin))), int3(0, 0, 0), int3(maxIdx, maxIdx, maxIdx));
+    int3 maxC = clamp(int3(ceil(WorldToGridCoord(triMax))), int3(0, 0, 0), int3(maxIdx, maxIdx, maxIdx));
+
+    // Conservative surface shell radius ensures watertight ray occlusion for closed head/core meshes.
+    float maxDistSq = (_BakerVoxelSize * 0.95f) * (_BakerVoxelSize * 0.95f);
+    float3 voxelSpan = rcp(max(_BakerBoundsInvSize, 1e-6f.xxx)) / (float)_BakerGridRes;
+
+    for (int z = minC.z; z <= maxC.z; z++)
+    for (int y = minC.y; y <= maxC.y; y++)
+    for (int x = minC.x; x <= maxC.x; x++)
+    {
+        float3 center = _BakerBoundsMin + (float3(x, y, z) + 0.5f) * voxelSpan;
+        if (DistPointToTriangleSq(center, a, b, c) <= maxDistSq)
+        {
+            _BakerOccluderGrid[GridFlatIndex(uint3(x, y, z))] = 1u;
+        }
+    }
+}
+
+[numthreads(64, 1, 1)]
+void KBakeVertexL1SH(uint3 tid : SV_DispatchThreadID)
+{
+    uint vIdx = tid.x;
+    if (vIdx >= _BakerVertexCount)
+        return;
+
+    HairGroomRestVertex v = _HairRestVertices[vIdx];
+    float3 origin = v.positionOS;
+    uint rayCount = max(_BakerRayCount, 16u);
+    float dOmega = kBakerFourPi / (float)rayCount;
+
+    float stepWorld = _BakerVoxelSize * 0.75f;
+    float stepInVoxels = 0.75f;
+    // Skip immediate self-neighborhood (~1.6 voxels) so a strand does not self-shadow at its own vertex
+    float startDist = _BakerVoxelSize * 1.6f;
+    uint maxSteps = _BakerGridRes * 2u;
+
+    float4 sh = 0.0f;
+
+    [loop]
+    for (uint r = 0u; r < rayCount; r++)
+    {
+        // Deterministic Fibonacci sphere sampling (zero RNG noise across bakes)
+        float z = 1.0f - 2.0f * (((float)r + 0.5f) / (float)rayCount);
+        float radial = sqrt(saturate(1.0f - z * z));
+        float phi = kGoldenAngle * (float)r;
+        float3 dir = float3(cos(phi) * radial, z, sin(phi) * radial);
+
+        float scatterEvents = 0.0f;
+        float dist = startDist;
+
+        [loop]
+        for (uint s = 0u; s < maxSteps; s++)
+        {
+            float3 samplePos = origin + dir * dist;
+            float3 gridCoord = WorldToGridCoord(samplePos);
+
+            if (any(gridCoord < 0.0f) || any(gridCoord >= (float)_BakerGridRes))
+                break;
+
+            uint3 uCoord = uint3(floor(gridCoord));
+            if (_BakerOccluderGrid[GridFlatIndex(uCoord)] != 0u)
+            {
+                scatterEvents = VIVID_HAIR_MAX_SCATTER_EVENTS;
+                break;
+            }
+
+            scatterEvents += SampleDensityTrilinear(gridCoord) * stepInVoxels;
+            if (scatterEvents >= VIVID_HAIR_MAX_SCATTER_EVENTS)
+            {
+                scatterEvents = VIVID_HAIR_MAX_SCATTER_EVENTS;
+                break;
+            }
+
+            dist += stepWorld;
+        }
+
+        // IJGC SIGGRAPH 2025 negative miss bias:
+        // Preserves crisp backlit silhouette rim lighting despite low-frequency L1 SH projection.
+        float biasedValue = (scatterEvents < 0.08f)
+            ? -VIVID_HAIR_MAX_SCATTER_EVENTS
+            : min(scatterEvents, VIVID_HAIR_MAX_SCATTER_EVENTS);
+
+        sh += VividHairEvalL1SHBasis(dir) * (biasedValue * dOmega);
+    }
+
+    HairGroomVisibilitySH result;
+    result.coefficients = sh;
+    _BakerOutputSH[vIdx] = result;
+}

@@ -144,6 +144,16 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal RenderGraphTexture DepthTexture => m_DepthTexture;
         internal RenderGraphTexture ColorTexture => m_ColorTexture;
+        internal RenderGraphTexture SkyIBLCubemapTexture => m_SkyIBLCubemap;
+        internal RenderGraphBuffer DirectionalLightBuffer => m_DirectionalLightBuffer;
+        internal RenderGraphBuffer PunctualLightBuffer => m_PunctualLightBuffer;
+        internal RenderGraphBuffer AreaLightBuffer => m_AreaLightBuffer;
+        internal int DirectionalLightCount => m_DirectionalLightCount;
+        internal int PunctualLightCount => m_PunctualLightCount;
+        internal int AreaLightCount => m_AreaLightCount;
+        internal int MainDirectionalLightIndex => m_MainDirectionalLightIndex;
+        internal Color SkyTextureTint => m_SkyTextureTint;
+        internal Vector4 SkyTextureParams => m_SkyTextureParams;
 
         [RenderGraphResource(
             Name = "DeferredLightingDebug",

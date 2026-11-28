@@ -3,6 +3,7 @@
 #pragma kernel KClearCullArgs
 #pragma kernel KCullSegments
 #pragma kernel KRasterizeSegments
+#pragma kernel KClearVisibleVertexMask
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Hair/VividStrandHairCommon.hlsl"
@@ -18,6 +19,7 @@ RWStructuredBuffer<float4> _HairWorldPosRadius;
 // Culling & indirect dispatch buffers
 RWStructuredBuffer<uint> _HairVisibleSegmentList;
 RWStructuredBuffer<uint> _HairIndirectRasterArgs; // [0]=groupX, [1]=1, [2]=1, [3]=visibleCount
+RWStructuredBuffer<uint> _HairVisibleVertexMask;  // 1 bit per vertex marked visible by KCullSegments
 
 // 32-bit Tiled 3-Layer Visibility Atlas + 1 Additive Coverage Layer
 // Layout per 64x64 tile: 4 slices * 4096 uints = 16384 uints/tile
@@ -96,6 +98,14 @@ void KClearCullArgs(uint3 tid : SV_DispatchThreadID)
     _HairIndirectRasterArgs[1] = 1u;
     _HairIndirectRasterArgs[2] = 1u;
     _HairIndirectRasterArgs[3] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void KClearVisibleVertexMask(uint3 tid : SV_DispatchThreadID)
+{
+    uint maskUints = (_HairVertexCount + 31u) >> 5u;
+    if (tid.x < maskUints)
+        _HairVisibleVertexMask[tid.x] = 0u;
 }
 
 bool TestSegmentHZB(float2 minPx, float2 maxPx, float nearestDeviceZ)
@@ -194,6 +204,12 @@ void KCullSegments(uint3 tid : SV_DispatchThreadID)
         {
             uint localRank = WavePrefixCountBits(visible);
             _HairVisibleSegmentList[baseOffset + localRank] = segId;
+
+            HairGroomSegmentIndex visSeg = _HairSegmentIndices[segId];
+            uint mv0 = visSeg.vertexIndex0;
+            uint mv1 = mv0 + 1u;
+            InterlockedOr(_HairVisibleVertexMask[mv0 >> 5u], 1u << (mv0 & 31u));
+            InterlockedOr(_HairVisibleVertexMask[mv1 >> 5u], 1u << (mv1 & 31u));
         }
     }
 }

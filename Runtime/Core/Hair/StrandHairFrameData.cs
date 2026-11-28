@@ -14,6 +14,8 @@ namespace VividRP.Runtime
         SegmentId = 3,
         NormalizedDepth12 = 4,
         Tangent = 5,
+        BakedL1SHAO = 6,
+        DirectSelfShadow = 7,
     }
 
     public static class StrandHairAtlasContract
@@ -319,6 +321,8 @@ namespace VividRP.Runtime
         public GraphicsBuffer WorldPosRadiusBuffer { get; private set; }
         public GraphicsBuffer VisibleSegmentListBuffer { get; private set; }
         public GraphicsBuffer IndirectRasterArgsBuffer { get; private set; }
+        public GraphicsBuffer VisibleVertexMaskBuffer { get; private set; }
+        public GraphicsBuffer VertexShadingBuffer { get; private set; }
 
         public void EnsureCapacity(int vertexCount, int segmentCount)
         {
@@ -378,6 +382,35 @@ namespace VividRP.Runtime
                     name = "StrandHair_IndirectRasterArgs",
                 };
             }
+
+            int maskUintCount = (vertexCount + 31) >> 5;
+            if (VisibleVertexMaskBuffer == null
+                || !VisibleVertexMaskBuffer.IsValid()
+                || VisibleVertexMaskBuffer.count < maskUintCount)
+            {
+                VisibleVertexMaskBuffer?.Dispose();
+                VisibleVertexMaskBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    maskUintCount,
+                    sizeof(uint))
+                {
+                    name = "StrandHair_VisibleVertexMask",
+                };
+            }
+
+            if (VertexShadingBuffer == null
+                || !VertexShadingBuffer.IsValid()
+                || VertexShadingBuffer.count < vertexCount)
+            {
+                VertexShadingBuffer?.Dispose();
+                VertexShadingBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    vertexCount,
+                    sizeof(float) * 4)
+                {
+                    name = "StrandHair_VertexShading",
+                };
+            }
         }
 
         public void Dispose()
@@ -390,6 +423,10 @@ namespace VividRP.Runtime
             VisibleSegmentListBuffer = null;
             IndirectRasterArgsBuffer?.Dispose();
             IndirectRasterArgsBuffer = null;
+            VisibleVertexMaskBuffer?.Dispose();
+            VisibleVertexMaskBuffer = null;
+            VertexShadingBuffer?.Dispose();
+            VertexShadingBuffer = null;
         }
     }
 

@@ -1,0 +1,442 @@
+#pragma kernel KShadeHairVertices
+#pragma use_dxc
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Hair/VividStrandHairCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividHairFurBSDF.hlsl"
+
+#if !defined(VIVID_STANDALONE_DXC)
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PunctualLightCommon.hlsl"
+#else
+// Standalone DXC ABI mirror matching Lighting.hlsl / PunctualLightCommon.hlsl
+#define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
+#define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
+#define VIVID_PUNCTUAL_LIGHT_TYPE_PROJECTOR_BOX 2u
+#define PUNCTUAL_LIGHT_THRESHOLD 0.01f
+
+struct DirectionalLightData
+{
+    float3 directionWS;
+    float shadowStrength;
+    float3 color;
+    uint renderingLayerMask;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
+    float angularDiameter;
+    float3 padding;
+};
+
+struct PunctualLightData
+{
+    float3 positionWS;
+    float range;
+    float3 color;
+    uint lightType;
+    float3 directionWS;
+    float angleScale;
+    float3 rightWS;
+    float angleOffset;
+    float3 upWS;
+    float shapeRadiusSquared;
+    float2 projectorSize;
+    float rangeAttenuationScale;
+    float rangeAttenuationBias;
+    float shadowStrength;
+    uint renderingLayerMask;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
+    float padding0;
+    float padding1;
+};
+
+struct AreaLightData
+{
+    float3 positionWS;
+    float rangeAttenuationScale;
+    float3 color;
+    uint lightType;
+    float3 forwardWS;
+    float rangeAttenuationBias;
+    float3 rightWS;
+    float width;
+    float3 upWS;
+    float height;
+    uint renderingLayerMask;
+    float range;
+    float cosBarnDoorAngle;
+    float barnDoorLength;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
+};
+
+StructuredBuffer<DirectionalLightData> _DirectionalLights;
+StructuredBuffer<PunctualLightData> _PunctualLights;
+StructuredBuffer<AreaLightData> _AreaLights;
+uint _DirectionalLightCount;
+int _MainDirectionalLightIndex;
+
+void GetVividPunctualLightVectors(
+    float3 positionWS,
+    PunctualLightData punctualLight,
+    out float3 lightDirectionWS,
+    out float4 distances)
+{
+    float3 lightToSample = positionWS - punctualLight.positionWS;
+    distances.w = dot(lightToSample, punctualLight.directionWS);
+    float3 unL = -lightToSample;
+    float distSq = dot(unL, unL);
+    float invDist = rsqrt(max(distSq, 1e-12f));
+    lightDirectionWS = unL * invDist;
+    distances.xyz = float3(distSq * invDist, distSq, rsqrt(distSq + max(punctualLight.shapeRadiusSquared, 0.0f)));
+}
+
+float VividPunctualLightAttenuationWithDistanceModification(
+    PunctualLightData punctualLight,
+    float3 lightToSample,
+    float4 distances)
+{
+    float distSq = distances.y;
+    float invDist = distances.z;
+    float spotCos = distances.w * rsqrt(max(distSq, 1e-12f));
+    float atten = min(invDist, 1.0f / PUNCTUAL_LIGHT_THRESHOLD);
+    float factor = distSq * punctualLight.rangeAttenuationScale;
+    float smoothFactor = saturate(1.0f - factor * factor);
+    atten *= smoothFactor * smoothFactor;
+    atten *= saturate(spotCos * punctualLight.angleScale + punctualLight.angleOffset);
+    return atten * atten;
+}
+#endif
+
+// Groom source & per-vertex shading buffers
+StructuredBuffer<HairGroomRestVertex> _HairRestVertices;
+StructuredBuffer<HairGroomVisibilitySH> _HairVisibilitySH;
+StructuredBuffer<float4> _HairWorldPosRadius;
+StructuredBuffer<uint> _HairVisibleVertexMask;
+RWStructuredBuffer<float4> _HairVertexShading; // rgb = pre-exposed radiance, a = primary self-shadow factor
+
+// Scene world-space CSM shadow atlas (never screen-space opaque _DirectionalShadowTexture)
+Texture2DArray<float> _CSMShadowAtlas;
+SamplerComparisonState sampler_CSMShadowAtlas;
+
+// Sky IBL cubemap (shared with DeferredLightingPass / SkyManager)
+TextureCube<float4> _SkyTexture;
+SamplerState sampler_LinearClamp;
+
+// Per-frame lighting uniforms
+uint _HairPunctualLightCount;
+uint _HairAreaLightCount;
+float3 _HairCameraPosWS;
+
+float4x4 _CSMViewProjMatrices[4];
+float4 _CSMCascadeSpheres[4];
+int _CSMCascadeCount;
+float _CSMMaxShadowDistance;
+int _CSMCascadeResolution;
+float _CSMNormalBias;
+
+float4 _SkyTextureTint;
+float4 _SkyTextureParams; // x = maxMip, y = intensityMultiplier, z = rotationRad, w = hasActiveSky
+float3 _HairFallbackAmbientColor;
+
+// Per-model uniforms
+float4x4 _HairLocalToWorld;
+float4x4 _HairWorldToLocal;
+uint _HairVertexCount;
+uint _HairHasBakedSH;
+float3 _HairBoundsCenterWS;
+
+// Unified HairGroomShadingParameters
+uint _HairAbsorptionMode;     // 0=Color, 1=Melanin, 2=NormalizedMelanin
+float4 _HairBaseColor;        // rgb = linear BaseColor, a = melanin
+float4 _HairMelaninParams;    // x = melanin, y = melaninRedness, z = ior, w = dualScatterGain
+float4 _HairRoughnessParams;  // x = longitudinal, y = azimuthal, z = cuticleRad, w = specular
+float4 _HairMedullaParams;    // x = medullaWeight, y = medullaRoughness, z = selfShadowExtinction, w = unused
+
+float3 RotateAroundY(float3 v, float radians)
+{
+    float s, c;
+    sincos(radians, s, c);
+    return float3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+}
+
+// World-space CSM lookup at strand vertex position (never samples opaque screen-space shadow buffer).
+float SampleHairWorldSpaceCSM(float3 positionWS, float3 fallbackNormalWS)
+{
+    if (_CSMCascadeCount <= 0 || _CSMCascadeResolution <= 0)
+        return 1.0f;
+
+    float camDist = length(positionWS - _HairCameraPosWS);
+    if (_CSMMaxShadowDistance > 0.0f && camDist > _CSMMaxShadowDistance)
+        return 1.0f;
+
+    int cascadeIndex = -1;
+    [unroll]
+    for (int c = 0; c < 4; c++)
+    {
+        if (c >= _CSMCascadeCount)
+            break;
+        float4 sphere = _CSMCascadeSpheres[c];
+        float3 d = positionWS - sphere.xyz;
+        if (dot(d, d) < sphere.w * sphere.w)
+        {
+            cascadeIndex = c;
+            break;
+        }
+    }
+
+    if (cascadeIndex < 0)
+        return 1.0f;
+
+    float3 biasedPos = positionWS + fallbackNormalWS * max(_CSMNormalBias, 0.002f);
+    float4 shadowClip = mul(_CSMViewProjMatrices[cascadeIndex], float4(biasedPos, 1.0f));
+    float invW = rcp(max(abs(shadowClip.w), 1e-6f));
+    float3 shadowNdc = shadowClip.xyz * invW;
+    float2 shadowUV = shadowNdc.xy * 0.5f + 0.5f;
+#if UNITY_UV_STARTS_AT_TOP
+    shadowUV.y = 1.0f - shadowUV.y;
+#endif
+
+    if (any(shadowUV < 0.0f) || any(shadowUV > 1.0f) || shadowNdc.z <= 0.0f || shadowNdc.z >= 1.0f)
+        return 1.0f;
+
+    float texel = rcp(max((float)_CSMCascadeResolution, 1.0f));
+    float2 minUV = texel * 0.5f;
+    float2 maxUV = 1.0f - minUV;
+
+#if UNITY_REVERSED_Z
+    float cmpDepth = saturate(shadowNdc.z + 1.5e-4f);
+#else
+    float cmpDepth = saturate(shadowNdc.z - 1.5e-4f);
+#endif
+
+    // 4-tap rotated PCF sufficient for sub-pixel hair strands
+    float2 o = float2(texel * 0.75f, texel * 0.75f);
+    float s0 = _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, float3(clamp(shadowUV + float2(-o.x, -o.y), minUV, maxUV), cascadeIndex), cmpDepth);
+    float s1 = _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, float3(clamp(shadowUV + float2( o.x, -o.y), minUV, maxUV), cascadeIndex), cmpDepth);
+    float s2 = _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, float3(clamp(shadowUV + float2(-o.x,  o.y), minUV, maxUV), cascadeIndex), cmpDepth);
+    float s3 = _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, float3(clamp(shadowUV + float2( o.x,  o.y), minUV, maxUV), cascadeIndex), cmpDepth);
+    return 0.25f * (s0 + s1 + s2 + s3);
+}
+
+// Evaluates direct Marschner R/TT/TRT + Medulla + Biased L1 SH coupled Zinke Dual Scattering
+// for one light source at a hair vertex.
+float3 AccumulateHairLight(
+    VividHairFurBSDFInputs bsdfIn,
+    float3 viewDirWS,
+    float3 lightDirWS,
+    float3 unshadowedRadiance,
+    float externalShadow,
+    float4 shCoeffsOS,
+    float selfShadowExtinction,
+    float dualScatterGain,
+    out float outSelfShadow)
+{
+    outSelfShadow = 1.0f;
+    float nScatter = 0.0f;
+    if (_HairHasBakedSH != 0u)
+    {
+        float3 lightDirOS = VividHairSafeNormalize(mul((float3x3)_HairWorldToLocal, lightDirWS), lightDirWS);
+        nScatter = VividHairEvaluateScatterEventsL1SH(shCoeffsOS, lightDirOS);
+        outSelfShadow = exp(-selfShadowExtinction * nScatter);
+    }
+
+    float directShadow = saturate(externalShadow) * outSelfShadow;
+    VividHairFurBSDFResponse resp = VividEvaluateHairFurDirect(bsdfIn, viewDirWS, lightDirWS, directShadow);
+
+    // Direct single-scattering (R, TT, TRT, Medulla) attenuated by direct visibility (CSM * Biased L1 SH)
+    float3 singleScatter = (resp.lobeR + resp.lobeTT + resp.lobeTRT + resp.lobeMedulla) * directShadow;
+
+    // IJGC + Zinke Dual Scattering coupling:
+    // Transmitted multiple-scattering radiance through nScatter intermediate hair layers shifts
+    // color exponentially toward pigment absorption (pow(baseColor, 0.55 * nScatter)), keeping
+    // backlit silhouettes luminous while darkening deep shadowed roots.
+    float3 multiScatterTrans = pow(max(bsdfIn.baseColor, 0.005f.xxx), (0.55f * nScatter).xxx);
+    float3 dualScatter = resp.lobeDualScatter * dualScatterGain * saturate(externalShadow)
+                       * lerp(1.0f.xxx, multiScatterTrans, saturate(nScatter * 0.5f));
+
+    // Additional physical forward-transmitted multiple scatter glow when nScatter in (0, 3]
+    // and light passes through the hair volume toward the viewer (cosPhi < 0).
+    float sinTL = dot(bsdfIn.tangentWS, lightDirWS);
+    float cosTL = sqrt(saturate(1.0f - sinTL * sinTL));
+    float forwardView = saturate(dot(viewDirWS, -lightDirWS) * 0.5f + 0.5f);
+    float3 volumeScatter = (0.045f * dualScatterGain * saturate(externalShadow) * cosTL * forwardView)
+                         * multiScatterTrans * bsdfIn.ambientOcclusion;
+
+    return max(unshadowedRadiance, 0.0f.xxx) * (singleScatter + dualScatter + volumeScatter);
+}
+
+[numthreads(64, 1, 1)]
+void KShadeHairVertices(uint3 tid : SV_DispatchThreadID)
+{
+    uint vIdx = tid.x;
+    if (vIdx >= _HairVertexCount)
+        return;
+
+    // Skip frustum/HZB-culled vertices (only shade vertices belonging to visible segments)
+    uint maskWord = _HairVisibleVertexMask[vIdx >> 5u];
+    if ((maskWord & (1u << (vIdx & 31u))) == 0u)
+        return;
+
+    HairGroomRestVertex rv = _HairRestVertices[vIdx];
+    float3 posWS = _HairWorldPosRadius[vIdx].xyz;
+    float3 tangentWS = VividHairSafeNormalize(mul((float3x3)_HairLocalToWorld, rv.tangentOS), float3(0.0f, 1.0f, 0.0f));
+    float3 viewDirWS = VividHairSafeNormalize(_HairCameraPosWS - posWS, float3(0.0f, 0.0f, 1.0f));
+    float3 geomNormalWS = VividHairSafeNormalize(posWS - _HairBoundsCenterWS, float3(0.0f, 1.0f, 0.0f));
+
+    float strandU = VividHairUnpackStrandU(rv.packedAttrs);
+    float strandSeed = VividHairUnpackStrandRandom(rv.packedAttrs);
+
+    float4 shCoeffsOS = (_HairHasBakedSH != 0u) ? _HairVisibilitySH[vIdx].coefficients : 0.0f.xxxx;
+    float selfShadowExtinction = max(_HairMedullaParams.z, 0.05f);
+    float dualScatterGain = max(_HairMelaninParams.w, 0.0f);
+
+    // Derive omnidirectional ambient visibility from baked Biased L1 SH L0 term
+    float shAmbientVis = (_HairHasBakedSH != 0u)
+        ? VividHairEvaluateAmbientVisibilityL1SH(shCoeffsOS, selfShadowExtinction * 0.85f)
+        : 1.0f;
+    float rootAO = lerp(0.32f, 1.0f, smoothstep(0.0f, 0.40f, strandU));
+    float combinedAO = saturate(shAmbientVis * lerp(0.65f, 1.0f, rootAO));
+
+    // Resolve linear base color from melanin (Chiang 2016 inverse) or explicit color,
+    // with subtle per-strand melanin variation for natural fiber-to-fiber richness.
+    float3 baseColor;
+    if (_HairAbsorptionMode == 0u)
+    {
+        float seedVar = lerp(0.86f, 1.14f, strandSeed);
+        baseColor = saturate(_HairBaseColor.rgb * seedVar);
+    }
+    else
+    {
+        float melaninVar = saturate(_HairMelaninParams.x + (strandSeed - 0.5f) * 0.08f);
+        baseColor = VividHairColorFromMelanin(melaninVar, _HairMelaninParams.y, _HairRoughnessParams.y);
+    }
+
+    VividHairFurBSDFInputs bsdfIn = VividCreateDefaultHairFurBSDFInputs();
+    bsdfIn.baseColor = baseColor;
+    bsdfIn.tangentWS = tangentWS;
+    bsdfIn.geomNormalWS = geomNormalWS;
+    bsdfIn.roughness = _HairRoughnessParams.x;
+    bsdfIn.radialRoughness = _HairRoughnessParams.y;
+    bsdfIn.cuticleAngleRad = _HairRoughnessParams.z;
+    bsdfIn.specular = _HairRoughnessParams.w;
+    bsdfIn.scatter = saturate(dualScatterGain);
+    bsdfIn.backlit = 1.0f;
+    bsdfIn.medullaWeight = _HairMedullaParams.x;
+    bsdfIn.medullaRoughness = _HairMedullaParams.y;
+    bsdfIn.shellDepth = saturate(lerp(0.20f, 1.0f, strandU) * lerp(0.35f, 1.0f, shAmbientVis));
+    bsdfIn.ambientOcclusion = combinedAO;
+
+    float3 totalRadiance = 0.0f.xxx;
+    float primarySelfShadow = shAmbientVis;
+    float strongestLightLum = -1.0f;
+
+    // 1. Indirect Sky IBL / Studio Ambient (cylinder virtual normal V_perp)
+    float3 diffuseIrradiance = _HairFallbackAmbientColor;
+    float3 specularRadiance = _HairFallbackAmbientColor * 0.65f;
+    if (_SkyTextureParams.w > 0.5f)
+    {
+        float3 cylNormalWS = VividComputeHairCylinderNormal(tangentWS, viewDirWS, geomNormalWS);
+        float3 reflDirWS = reflect(-viewDirWS, cylNormalWS);
+        float maxMip = _SkyTextureParams.x;
+        float skyScale = _SkyTextureParams.y;
+        float skyRot = _SkyTextureParams.z;
+        float specMip = saturate(_HairRoughnessParams.x) * maxMip;
+
+        float3 skyDiff = _SkyTexture.SampleLevel(sampler_LinearClamp, RotateAroundY(cylNormalWS, skyRot), maxMip).rgb;
+        float3 skySpec = _SkyTexture.SampleLevel(sampler_LinearClamp, RotateAroundY(reflDirWS, skyRot), specMip).rgb;
+        diffuseIrradiance = max(skyDiff * _SkyTextureTint.rgb * skyScale, 0.0f.xxx);
+        specularRadiance = max(skySpec * _SkyTextureTint.rgb * skyScale, 0.0f.xxx);
+    }
+    totalRadiance += VividEvaluateHairFurIndirect(bsdfIn, viewDirWS, diffuseIrradiance, specularRadiance);
+
+    // 2. Directional Lights (with world-space CSM shadow + Biased L1 SH self-shadowing)
+    [loop]
+    for (uint di = 0u; di < _DirectionalLightCount; di++)
+    {
+        DirectionalLightData dl = _DirectionalLights[di];
+        float3 lightDirWS = VividHairSafeNormalize(dl.directionWS, float3(0.0f, 1.0f, 0.0f));
+        float extShadow = 1.0f;
+        if ((int)di == _MainDirectionalLightIndex && dl.shadowStrength > 1e-3f)
+        {
+            float csm = SampleHairWorldSpaceCSM(posWS, geomNormalWS);
+            extShadow = lerp(1.0f, csm, saturate(dl.shadowStrength));
+        }
+
+        float lightSelfShadow;
+        float3 lightColor = max(dl.color, 0.0f.xxx);
+        totalRadiance += AccumulateHairLight(
+            bsdfIn, viewDirWS, lightDirWS, lightColor, extShadow,
+            shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
+
+        float lum = dot(lightColor, float3(0.2126f, 0.7152f, 0.0722f));
+        if (lum > strongestLightLum)
+        {
+            strongestLightLum = lum;
+            primarySelfShadow = lightSelfShadow;
+        }
+    }
+
+    // 3. Punctual Lights (Point / Spot / Projector from VividClusteredLightingData)
+    [loop]
+    for (uint pi = 0u; pi < _HairPunctualLightCount; pi++)
+    {
+        PunctualLightData pl = _PunctualLights[pi];
+        float3 lightDirWS;
+        float4 distances;
+        GetVividPunctualLightVectors(posWS, pl, lightDirWS, distances);
+        if (distances.y <= 1e-6f)
+            continue;
+
+        float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+            pl, posWS - pl.positionWS, distances);
+        if (attenuation <= 1e-5f)
+            continue;
+
+        float lightSelfShadow;
+        float3 lightRadiance = max(pl.color, 0.0f.xxx) * attenuation;
+        totalRadiance += AccumulateHairLight(
+            bsdfIn, viewDirWS, lightDirWS, lightRadiance, 1.0f,
+            shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
+
+        float lum = dot(lightRadiance, float3(0.2126f, 0.7152f, 0.0722f));
+        if (lum > strongestLightLum)
+        {
+            strongestLightLum = lum;
+            primarySelfShadow = lightSelfShadow;
+        }
+    }
+
+    // 4. Area Lights (representative solid-angle direction from VividClusteredLightingData)
+    [loop]
+    for (uint ai = 0u; ai < _HairAreaLightCount; ai++)
+    {
+        AreaLightData al = _AreaLights[ai];
+        float3 toLight = al.positionWS - posWS;
+        float distSq = max(dot(toLight, toLight), 1e-4f);
+        if (al.range > 0.0f && distSq > al.range * al.range)
+            continue;
+
+        float invDist = rsqrt(distSq);
+        float3 lightDirWS = toLight * invDist;
+        float area = max(al.width * al.height, 1e-4f);
+        float frontFacing = saturate(dot(al.forwardWS, -lightDirWS));
+        float solidAngle = saturate(area * frontFacing / (distSq + area * VIVID_HAIR_INV_PI));
+        if (solidAngle <= 1e-5f)
+            continue;
+
+        float lightSelfShadow;
+        float3 lightRadiance = max(al.color, 0.0f.xxx) * solidAngle;
+        totalRadiance += AccumulateHairLight(
+            bsdfIn, viewDirWS, lightDirWS, lightRadiance, 1.0f,
+            shCoeffsOS, selfShadowExtinction, dualScatterGain, lightSelfShadow);
+    }
+
+    float preExposure = VividGetPreExposure();
+    _HairVertexShading[vIdx] = float4(max(totalRadiance, 0.0f.xxx) * preExposure, saturate(primarySelfShadow));
+}

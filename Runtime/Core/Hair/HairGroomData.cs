@@ -141,6 +141,35 @@ namespace VividRP.Runtime
     }
 
     /// <summary>
+    /// CPU/GPU-matched IJGC SIGGRAPH 2025 Biased L1 Spherical Harmonics math helpers.
+    /// Orthonormal basis ordered (Y00, Y1x, Y1y, Y1z) matching VividStrandHairCommon.hlsl.
+    /// </summary>
+    public static class HairGroomL1SH
+    {
+        public const float MaxScatterEvents = 5.0f;
+        public const float ShL0 = 0.2820947918f; // 1 / (2 * sqrt(pi))
+        public const float ShL1 = 0.4886025119f; // sqrt(3 / (4 * pi))
+
+        public static Vector4 EvaluateBasis(Vector3 dir)
+        {
+            return new Vector4(ShL0, ShL1 * dir.x, ShL1 * dir.y, ShL1 * dir.z);
+        }
+
+        public static float EvaluateScatterEvents(Vector4 shCoeffsOS, Vector3 lightDirOS)
+        {
+            Vector4 basis = EvaluateBasis(lightDirOS);
+            float n = Vector4.Dot(shCoeffsOS, basis);
+            return Mathf.Clamp(n, 0.0f, MaxScatterEvents);
+        }
+
+        public static float EvaluateTransmittance(Vector4 shCoeffsOS, Vector3 lightDirOS, float extinctionPerEvent = 0.65f)
+        {
+            float n = EvaluateScatterEvents(shCoeffsOS, lightDirOS);
+            return Mathf.Exp(-Mathf.Max(0.0f, extinctionPerEvent) * n);
+        }
+    }
+
+    /// <summary>
     /// Fixed 64-byte header for .vividhair binary files.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
